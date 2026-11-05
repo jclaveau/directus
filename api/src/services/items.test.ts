@@ -7221,6 +7221,29 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 		]);
 	});
 
+	it(oneLine`
+		files the revision of a child under the parent naming it after a list
+		naming it again writes no revision
+	`, async () => {
+		await new ItemsService('test', {
+			knex: database,
+			schema: parentSchema,
+			accountability: { user: 'u1', role: 'r1', admin: true, app: true } as any,
+		}).createMany([
+			{ id: 3, name: 'three', children: [{ id: 10, name: 'ten' }] },
+			{ id: 4, name: 'four', children: [{ id: 10 }, { id: 10 }] },
+			{ id: 11, name: 'eleven', children: [{ id: 10 }] },
+		]);
+
+		// revisions 1 to 3 are the child's, 4 to 6 the parents'; the second
+		// { id: 10 } of 4 changes nothing, so it writes no revision
+		expect(revisionParentWrites).toStrictEqual([
+			{ keys: [1], data: { parent: 4 } },
+			{ keys: [2], data: { parent: 5 } },
+			{ keys: [3], data: { parent: 6 } },
+		]);
+	});
+
 	it('refuses a child key that is not an integer, writing nothing', async () => {
 		await expect(new ItemsService('test', { knex: database, schema: parentSchema })
 			.createMany([

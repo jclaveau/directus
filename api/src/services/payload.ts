@@ -1046,11 +1046,14 @@ export class PayloadService {
 			}
 		}
 
-		const writtenRevisions: { revision: PrimaryKey; item: PrimaryKey }[] = [];
+		const writtenRevisions: {
+			revision: PrimaryKey;
+			recordIndex: number | undefined;
+		}[] = [];
 
 		const upsertedKeys = await service.upsertMany(recordsToUpsert, {
 			...nestedMutationOptions,
-			onRevisionCreate: (revision, item) => {
+			onRevisionCreate: (revision, item, recordIndex) => {
 				// a missing key would hand the revision to the first parent
 				if (isMissingPrimaryKey(item)) {
 					throw new Error(
@@ -1060,32 +1063,19 @@ export class PayloadService {
 					);
 				}
 
-				writtenRevisions.push({ revision, item });
+				writtenRevisions.push({ revision, recordIndex });
 			},
 		});
 
-		// The parents waiting for a revision of each child, in the order of the lists
-		const parentsOfChildren = new Map<string, number[]>();
-
 		for (const [recordIndex, upsertedKey] of upsertedKeys.entries()) {
-			const parentIndex = parentOfRecord[recordIndex]!;
-
-			savedKeysOfParents[parentIndex]!.push(upsertedKey);
-
-			// a slot a filter cancelled
-			if (isMissingPrimaryKey(upsertedKey)) {
-				continue;
-			}
-
-			const childKeyName = childKeyNameOf(upsertedKey);
-			const waitingParents = parentsOfChildren.get(childKeyName) ?? [];
-
-			waitingParents.push(parentIndex);
-			parentsOfChildren.set(childKeyName, waitingParents);
+			savedKeysOfParents[parentOfRecord[recordIndex]!]!.push(upsertedKey);
 		}
 
-		for (const { revision, item } of writtenRevisions) {
-			const parentIndex = parentsOfChildren.get(childKeyNameOf(item))?.shift() ?? 0;
+		// a row a hook added comes from no record
+		for (const { revision, recordIndex } of writtenRevisions) {
+			const parentIndex = recordIndex === undefined
+				? 0
+				: parentOfRecord[recordIndex]!;
 
 			revisionsOfParents[parentIndex]!.push(revision);
 		}

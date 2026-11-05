@@ -96,9 +96,13 @@ export type RepeatedPkAnswer = (typeof RepeatedPkAnswers)[number];
 export type MutationOptions = {
 	/**
 	 * Callback function that's fired whenever a revision is made in the mutation,
-	 * with the key of the revision and the key of the item it revises
+	 * with the key of the revision and the key of the item it revises. `upsertMany`
+	 * also passes the index of the payload the item was written from, none for a
+	 * row a hook added
 	 */
-	onRevisionCreate?: ((pk: PrimaryKey, item: PrimaryKey) => void) | undefined;
+	onRevisionCreate?:
+		| ((pk: PrimaryKey, item: PrimaryKey, payloadIndex?: number) => void)
+		| undefined;
 
 	/**
 	 * Flag to disable the auto purging of the cache. Is ignored when CACHE_AUTO_PURGE isn't enabled.

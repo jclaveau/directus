@@ -3335,7 +3335,23 @@ implements AbstractService<Item> {
 				};
 
 				for (const run of service.upsertRunsOf(payloads)) {
-					for (const primaryKey of await service.upsertRun(run, childOpts)) {
+					const runOffset = primaryKeys.length;
+
+					const runOpts: DeferredPurgeOptions = {
+						...childOpts,
+						onRevisionCreate: opts.onRevisionCreate
+							&& ((revision, item, payloadIndex) => {
+								opts.onRevisionCreate!(
+									revision,
+									item,
+									payloadIndex === undefined
+										? undefined
+										: runOffset + payloadIndex,
+								);
+							}),
+					};
+
+					for (const primaryKey of await service.upsertRun(run, runOpts)) {
 						primaryKeys.push(primaryKey);
 					}
 				}
@@ -3623,9 +3639,22 @@ implements AbstractService<Item> {
 			}
 		}
 
+		// Held until the run returns its keys, the created ones included: a run
+		// holds each key once, so a key tells the payload its revision is of.
+		const runRevisions: { revision: PrimaryKey; item: PrimaryKey }[] = [];
+
+		const writeOpts: DeferredPurgeOptions = opts.onRevisionCreate
+			? {
+				...opts,
+				onRevisionCreate: (revision, item) => {
+					runRevisions.push({ revision, item });
+				},
+			}
+			: opts;
+
 		if (updateGroups.length > 0) {
 			// one key per group, so one answer per group: null where a filter cancelled it
-			const updatedKeys = await this.updateGroups(updateGroups, opts);
+			const updatedKeys = await this.updateGroups(updateGroups, writeOpts);
 
 			for (const [updateIndex, updatedKey] of updatedKeys.entries()) {
 				upsertedKeys[updateIndexes[updateIndex]!] = updatedKey;
@@ -3633,10 +3662,31 @@ implements AbstractService<Item> {
 		}
 
 		if (createPayloads.length > 0) {
-			const createdKeys = await this.createMany(createPayloads, opts);
+			const createdKeys = await this.createMany(createPayloads, writeOpts);
 
 			for (const [createIndex, createdKey] of createdKeys.entries()) {
 				upsertedKeys[createIndexes[createIndex]!] = createdKey;
+			}
+		}
+
+		if (opts.onRevisionCreate) {
+			const payloadIndexOfKeyNames = new Map<string, number>();
+
+			for (const [payloadIndex, upsertedKey] of upsertedKeys.entries()) {
+				if (!isMissingPrimaryKey(upsertedKey)) {
+					payloadIndexOfKeyNames.set(
+						this.primaryKeyNameOf(upsertedKey),
+						payloadIndex,
+					);
+				}
+			}
+
+			for (const { revision, item } of runRevisions) {
+				opts.onRevisionCreate(
+					revision,
+					item,
+					payloadIndexOfKeyNames.get(this.primaryKeyNameOf(item)),
+				);
 			}
 		}
 
