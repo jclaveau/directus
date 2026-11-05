@@ -3,8 +3,9 @@ Feature: A count under an o2m read permission counts each parent once
   - `test_aggregate_perm_article` lists its `test_aggregate_perm_link` rows
     through the o2m field `links`, and points at its `test_aggregate_perm_author`
     through the m2o field `author`.
-  - A grouped count returns `category: null` for a row its reader may not see
-    the category of.
+  - A count grouped by `category` alone reads only the rows granting `category`,
+    since a permission granting no requested field is ignored. Grouped by
+    `id,category` it reads every row, with `category: null` where it is hidden.
   - A request authenticates as the admin, or with the token its `as` cell
     holds. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own. A response cell states the keys it checks.
@@ -150,8 +151,7 @@ Feature: A count under an o2m read permission counts each parent once
       |   aggregate[count]: '*'                  |       count: "2"      |
       |   groupBy: category                      |     - category: sport |
       |   filter[id][_starts_with]: <run>-       |       count: "1"      |
-      |   filter[links][name][_eq]: pm           |     - category: null  |
-      |                                          |       count: "2"      |
+      |   filter[links][name][_eq]: pm           |                       |
       | as: <reader-token>                       | code: 200             |+
       | method: GET                              | body:                 |
       | path: /items/test_aggregate_perm_article |   data:               |
@@ -159,8 +159,6 @@ Feature: A count under an o2m read permission counts each parent once
       |   aggregate[count]: '*'                  |       count: "4"      |
       |   groupBy: category                      |     - category: sport |
       |   filter[id][_starts_with]: <run>-       |       count: "1"      |
-      |                                          |     - category: null  |
-      |                                          |       count: "2"      |
       | as: <reader-token>                       | code: 200             |+
       | method: GET                              | body:                 |
       | path: /items/test_aggregate_perm_article |   data:               |
@@ -169,6 +167,24 @@ Feature: A count under an o2m read permission counts each parent once
       |   groupBy: category                      |                       |
       |   search: <run>-a                        |                       |
       |   filter[links][name][_eq]: pm           |                       |
+      | as: <reader-token>                       | code: 200             |+
+      | method: GET                              | body:                 |
+      | path: /items/test_aggregate_perm_article |   data:               |
+      | query:                                   |     - id: <run>-a     |
+      |   aggregate[count]: '*'                  |       category: news  |
+      |   groupBy: id,category                   |       count: "1"      |
+      |   filter[id][_starts_with]: <run>-       |     - id: <run>-b     |
+      |   filter[links][name][_eq]: pm           |       category: news  |
+      |   sort: id                               |       count: "1"      |
+      |                                          |     - id: <run>-c     |
+      |                                          |       category: sport |
+      |                                          |       count: "1"      |
+      |                                          |     - id: <run>-d     |
+      |                                          |       category: null  |
+      |                                          |       count: "1"      |
+      |                                          |     - id: <run>-g     |
+      |                                          |       category: null  |
+      |                                          |       count: "1"      |
 
   Scenario: a count grouped by a field granted through an o2m, filtered through that o2m
     Given the rows of test_aggregate_perm_article:
@@ -202,8 +218,7 @@ Feature: A count under an o2m read permission counts each parent once
       |   aggregate[count]: '*'                  |       count: "2"      |
       |   groupBy: category                      |     - category: sport |
       |   filter[id][_starts_with]: <run>-       |       count: "1"      |
-      |   filter[links][name][_in]: pm,im        |     - category: null  |
-      |                                          |       count: "1"      |
+      |   filter[links][name][_in]: pm,im        |                       |
       | as: <reader-token>                       | code: 200             |+
       | method: GET                              | body:                 |
       | path: /items/test_aggregate_perm_article |   data:               |
@@ -211,8 +226,6 @@ Feature: A count under an o2m read permission counts each parent once
       |   aggregate[count]: '*'                  |       count: "2"      |
       |   groupBy: category                      |     - category: sport |
       |   filter[id][_starts_with]: <run>-       |       count: "1"      |
-      |                                          |     - category: null  |
-      |                                          |       count: "3"      |
       | as: <reader-token>                       | code: 200             |+
       | method: GET                              | body:                 |
       | path: /items/test_aggregate_perm_article |   data:               |
@@ -220,7 +233,7 @@ Feature: A count under an o2m read permission counts each parent once
       |   aggregate[count]: '*'                  |       category: news  |
       |   groupBy: id,category                   |       count: "1"      |
       |   filter[id][_starts_with]: <run>-       |     - id: <run>-b     |
-      |                                          |       category: news  |
+      |   sort: id                               |       category: news  |
       |                                          |       count: "1"      |
       |                                          |     - id: <run>-c     |
       |                                          |       category: sport |
@@ -269,8 +282,20 @@ Feature: A count under an o2m read permission counts each parent once
       | path: /items/test_aggregate_perm_article |   data:              |
       | query:                                   |     - category: news |
       |   aggregate[count]: '*'                  |       count: "1"     |
-      |   groupBy: category                      |     - category: null |
-      |   filter[id][_starts_with]: <run>-       |       count: "2"     |
+      |   groupBy: category                      |                      |
+      |   filter[id][_starts_with]: <run>-       |                      |
+      | as: <reader-token>                       | code: 200            |+
+      | method: GET                              | body:                |
+      | path: /items/test_aggregate_perm_article |   data:              |
+      | query:                                   |     - id: <run>-a    |
+      |   aggregate[count]: '*'                  |       category: news |
+      |   groupBy: id,category                   |       count: "1"     |
+      |   filter[id][_starts_with]: <run>-       |     - id: <run>-b    |
+      |   sort: id                               |       category: null |
+      |                                          |       count: "1"     |
+      |                                          |     - id: <run>-c    |
+      |                                          |       category: null |
+      |                                          |       count: "1"     |
 
   Scenario: a field granted through an o2m or through an m2o counts a parent once
     Given the rows of test_aggregate_perm_author:
@@ -303,5 +328,23 @@ Feature: A count under an o2m read permission counts each parent once
       | path: /items/test_aggregate_perm_article |   data:              |
       | query:                                   |     - category: news |
       |   aggregate[count]: '*'                  |       count: "3"     |
-      |   groupBy: category                      |     - category: null |
-      |   filter[id][_starts_with]: <run>-       |       count: "2"     |
+      |   groupBy: category                      |                      |
+      |   filter[id][_starts_with]: <run>-       |                      |
+      | as: <reader-token>                       | code: 200            |+
+      | method: GET                              | body:                |
+      | path: /items/test_aggregate_perm_article |   data:              |
+      | query:                                   |     - id: <run>-a    |
+      |   aggregate[count]: '*'                  |       category: news |
+      |   groupBy: id,category                   |       count: "1"     |
+      |   filter[id][_starts_with]: <run>-       |     - id: <run>-b    |
+      |   sort: id                               |       category: news |
+      |                                          |       count: "1"     |
+      |                                          |     - id: <run>-c    |
+      |                                          |       category: news |
+      |                                          |       count: "1"     |
+      |                                          |     - id: <run>-d    |
+      |                                          |       category: null |
+      |                                          |       count: "1"     |
+      |                                          |     - id: <run>-e    |
+      |                                          |       category: null |
+      |                                          |       count: "1"     |
