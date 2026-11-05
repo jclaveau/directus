@@ -60,15 +60,20 @@ export function getDBQuery(
 	if (queryCopy.aggregate || queryCopy.group) {
 		const flatQuery = knex.from(table);
 		const keyColumn = `${table}.${schema.collections[table]!.primary}`;
-		const filterOnly: Query = { filter: queryCopy.filter ?? null };
+
+		const matchingQuery: Query = {
+			filter: queryCopy.filter ?? null,
+			search: queryCopy.search ?? null,
+		};
 
 		// A filter through an o2m joins one row per child: the aggregate reads
-		// the distinct keys it matches instead, so a parent counts once
+		// the distinct keys it matches instead, so a parent counts once. Search
+		// follows, its permission cases reading the joins made in that subquery
 		const { hasMultiRelationalFilter: filtersThroughChildren } = applyQuery(
 			knex,
 			table,
 			knex.from(table),
-			filterOnly,
+			matchingQuery,
 			schema,
 			cases,
 			permissions,
@@ -82,7 +87,7 @@ export function getDBQuery(
 				knex,
 				table,
 				matchedKeys,
-				filterOnly,
+				matchingQuery,
 				schema,
 				cases,
 				permissions,

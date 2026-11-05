@@ -153,7 +153,7 @@ export default function applyQuery(
 		dbQuery.groupBy(columns);
 	}
 
-	if (query.search) {
+	if (query.search && !options?.filteredInSubquery) {
 		applySearch(
 			knex,
 			schema,
