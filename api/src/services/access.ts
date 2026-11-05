@@ -5,6 +5,7 @@ import type {
 	PrimaryKey,
 	UpdateGroup,
 } from '@directus/types';
+import { InvalidPayloadError } from '@directus/errors';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
 import { ItemsService } from './items.js';
@@ -18,10 +19,47 @@ export class AccessService extends ItemsService {
 		await clearCachesAfterCommit(this.knex, this.cache, opts);
 	}
 
+	/**
+	 * An access row with `managed_by` is granted by that extension, whose code
+	 * runs without accountability: a request changing it by hand would be undone
+	 * by the extension, or strand the subscription it tracks.
+	 */
+	private refuseManagedByInRequest(data: Partial<Item>[]) {
+		if (this.accountability && data.some((item) => 'managed_by' in item)) {
+			throw new InvalidPayloadError({
+				reason: '"managed_by" is set by the extension granting the access,'
+					+ ' not by a request',
+			});
+		}
+	}
+
+	private async refuseManagedAccessInRequest(keys: PrimaryKey[]) {
+		if (!this.accountability) {
+			return;
+		}
+
+		const managedAccess = await this.knex
+			.select('id', 'managed_by')
+			.from('directus_access')
+			.whereIn('id', keys)
+			.whereNotNull('managed_by')
+			.first();
+
+		if (managedAccess) {
+			throw new InvalidPayloadError({
+				reason: `Access ${JSON.stringify(managedAccess.id)} is managed by`
+					+ ` ${JSON.stringify(managedAccess.managed_by)}, which alone`
+					+ ' changes it',
+			});
+		}
+	}
+
 	override async createMany(
 		data: Partial<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
+		this.refuseManagedByInRequest(data);
+
 		// Creating a new policy attachments affects the number of admin/app/api users.
 		// But it can only add app or admin users, so no need to check the remaining admin users.
 		opts.userIntegrityCheckFlags =
@@ -41,6 +79,9 @@ export class AccessService extends ItemsService {
 		groups: UpdateGroup<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
+		this.refuseManagedByInRequest(groups.map((group) => group.data));
+		await this.refuseManagedAccessInRequest(groups.flatMap((group) => group.keys));
+
 		// Updating policy attachments might affect the number of admin/app/api users
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
@@ -57,6 +98,8 @@ export class AccessService extends ItemsService {
 	}
 
 	override async deleteMany(keys: PrimaryKey[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
+		await this.refuseManagedAccessInRequest(keys);
+
 		// Changes here can affect the number of admin/app/api users
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);

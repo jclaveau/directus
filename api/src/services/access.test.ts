@@ -170,4 +170,135 @@ describe('Services / Access', () => {
 			expect(clearSystemCache).toHaveBeenCalledTimes(1);
 		});
 	});
+
+	describe('managed_by', () => {
+		it('refuses a request setting managed_by', async () => {
+			await expect(new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: knex.default({ client: MockClient }),
+				schema,
+			}).createOne({
+				managed_by: '@scalabus/subscriptions',
+				policy: 'policy-id-7',
+				user: 'user-id-7',
+			})).rejects.toThrow(
+				'Invalid payload. "managed_by" is set by the extension granting the'
+					+ ' access, not by a request.',
+			);
+		});
+
+		it('lets an extension, without accountability, set managed_by', async () => {
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['access-id-7']);
+
+			await new AccessService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			}).createOne({
+				managed_by: '@scalabus/subscriptions',
+				policy: 'policy-id-7',
+				user: 'user-id-7',
+			});
+
+			expect(createMany).toHaveBeenCalledWith(
+				[
+					{
+						managed_by: '@scalabus/subscriptions',
+						policy: 'policy-id-7',
+						user: 'user-id-7',
+					},
+				],
+				{ userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits },
+			);
+		});
+
+		it('refuses a request updating a managed access', async () => {
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response({
+					id: 'access-id-7',
+					managed_by: '@scalabus/subscriptions',
+				});
+
+			await expect(new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).updateOne('access-id-7', { policy: 'policy-id-1' })).rejects.toThrow(
+				'Invalid payload. Access "access-id-7" is managed by'
+					+ ' "@scalabus/subscriptions", which alone changes it.',
+			);
+		});
+
+		it('refuses a request deleting a managed access', async () => {
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response({
+					id: 'access-id-7',
+					managed_by: '@scalabus/subscriptions',
+				});
+
+			await expect(new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).deleteMany(['access-id-1', 'access-id-7'])).rejects.toThrow(
+				'Invalid payload. Access "access-id-7" is managed by'
+					+ ' "@scalabus/subscriptions", which alone changes it.',
+			);
+		});
+
+		it('lets a request delete an access no extension manages', async () => {
+			const deleteMany = vi.spyOn(ItemsService.prototype, 'deleteMany')
+				.mockResolvedValue(['access-id-1']);
+
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response(undefined);
+
+			await expect(new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).deleteMany(['access-id-1'])).resolves.toStrictEqual(['access-id-1']);
+
+			expect(deleteMany).toHaveBeenCalledWith(['access-id-1'], {
+				userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+			});
+		});
+	});
 });
