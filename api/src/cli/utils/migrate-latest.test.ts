@@ -16,10 +16,20 @@ vi.mock('../../extensions/lib/get-extension-migrations.js', () => {
 
 vi.mock('../../logger/index.js', () => ({ useLogger: () => ({ info: vi.fn() }) }));
 vi.mock('../../utils/apply-snapshot.js', () => ({ applySnapshot: vi.fn() }));
-vi.mock('../../utils/get-snapshot-diff.js', () => ({ getSnapshotDiff: vi.fn() }));
+
+vi.mock('../../utils/get-snapshot-diff.js', () => {
+	return { getSnapshotDiff: vi.fn() };
+});
+
 vi.mock('../../utils/get-snapshot.js', () => ({ getSnapshot: vi.fn() }));
-vi.mock('../commands/schema/load-snapshot.js', () => ({ loadSnapshotFile: vi.fn() }));
-vi.mock('../commands/schema/report-diff.js', () => ({ isEmptySnapshotDiff: vi.fn() }));
+
+vi.mock('../commands/schema/load-snapshot.js', () => {
+	return { loadSnapshotFile: vi.fn() };
+});
+
+vi.mock('../commands/schema/report-diff.js', () => {
+	return { isEmptySnapshotDiff: vi.fn() };
+});
 
 afterEach(() => {
 	vi.resetAllMocks();
@@ -28,12 +38,12 @@ afterEach(() => {
 // A deploy imports the schema between the two phases with its own tool, so it
 // needs a run that stops once the before-schema migrations are done, even with
 // after-schema ones still pending.
-test('--phase before-schema runs the before-schema migrations alone', async () => {
+test('--phase before-schema runs its own migrations alone', async () => {
 	vi.mocked(getExtensionMigrations).mockResolvedValue([
 		{
 			bundle: 'domain',
 			name: '20240101A-fill-columns',
-			config: { phase: 'after-schema', up: vi.fn() },
+			config: { phase: 'after-schema', up: vi.fn(), down: vi.fn() },
 		},
 	]);
 
@@ -52,7 +62,11 @@ test('--phase before-schema runs the before-schema migrations alone', async () =
 				{
 					bundle: 'domain',
 					name: '20240101A-fill-columns',
-					config: { phase: 'after-schema', up: expect.any(Function) },
+					config: {
+						phase: 'after-schema',
+						up: expect.any(Function),
+						down: expect.any(Function),
+					},
 				},
 			],
 			phase: 'before-schema',
@@ -60,7 +74,7 @@ test('--phase before-schema runs the before-schema migrations alone', async () =
 	);
 });
 
-test('--phase after-schema runs the after-schema migrations alone', async () => {
+test('--phase after-schema runs its own migrations alone', async () => {
 	vi.mocked(getExtensionMigrations).mockResolvedValue([]);
 
 	await migrateLatest({} as Knex, undefined, 'after-schema');

@@ -8,7 +8,7 @@ import { migrateLatest } from '../../utils/migrate-latest.js';
 
 export default async function migrate(
 	direction: 'latest' | 'up' | 'down',
-	options: { snapshot?: string } = {},
+	options: { snapshot?: string; phase?: string } = {},
 ): Promise<void> {
 	const database = getDatabase();
 	const logger = useLogger();
@@ -17,7 +17,7 @@ export default async function migrate(
 		logger.info('Running migrations...');
 
 		if (direction === 'latest') {
-			await migrateLatest(database, options.snapshot);
+			await migrateLatest(database, options.snapshot, options.phase);
 		}
 		else {
 			await run(database, direction, true, {

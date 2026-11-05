@@ -17,11 +17,20 @@ import { isEmptySnapshotDiff } from '../commands/schema/report-diff.js';
  * Migrates to the latest version, the installed bundles' migrations included:
  * the core's and the before-schema ones, then the snapshot, then the
  * after-schema ones, which read what the snapshot creates.
+ *
+ * A `phase` runs that phase alone, for a deploy that applies its schema with its
+ * own tool in between.
  */
 export async function migrateLatest(
 	database: Knex,
 	snapshotPath?: string,
+	phase?: string,
 ): Promise<void> {
+	if (phase !== undefined) {
+		await migrateOnePhase(database, snapshotPath, phase);
+		return;
+	}
+
 	const extensionMigrations = await getExtensionMigrations();
 
 	await runMigrations(database, 'latest', true, {
@@ -39,6 +48,31 @@ export async function migrateLatest(
 	await runMigrations(database, 'latest', true, {
 		extensionMigrations,
 		phase: 'after-schema',
+	});
+}
+
+async function migrateOnePhase(
+	database: Knex,
+	snapshotPath: string | undefined,
+	phase: string,
+): Promise<void> {
+	if (phase !== 'before-schema' && phase !== 'after-schema') {
+		throw new Error(
+			`Unknown migration phase ${JSON.stringify(phase)}:`
+				+ ' expected "before-schema" or "after-schema"',
+		);
+	}
+
+	if (snapshotPath !== undefined) {
+		throw new Error(
+			`--snapshot ${JSON.stringify(snapshotPath)} is applied between the two`
+				+ ` phases: it cannot go with --phase ${JSON.stringify(phase)}`,
+		);
+	}
+
+	await runMigrations(database, 'latest', true, {
+		extensionMigrations: await getExtensionMigrations(),
+		phase,
 	});
 }
 
