@@ -666,18 +666,26 @@ export class PayloadService {
 	/**
 	 * Recursively save/update all nested related o2m items of several parent rows.
 	 *
-	 * Per relation, the lists of every parent go through one read of the
-	 * existing children they name and one upsertMany; a deselect runs only for
-	 * the parents still holding a child their list leaves out, once every list
-	 * is saved. A child two lists name ends on the last parent naming it, and a
-	 * child moving from one parent of the call to another is not nullified on
-	 * the way. An alterations object ({ create, update, delete }) is applied per
-	 * parent, after the lists.
+	 * Per relation, the lists of parents next to each other go through one
+	 * read of the existing children they name and one upsertMany; a deselect
+	 * runs only for the parents still holding a child their list leaves out,
+	 * once those lists are saved. A child two lists name ends on the last parent
+	 * naming it, and a child moving from one parent of the call to another is
+	 * not nullified on the way. An alterations object ({ create, update,
+	 * delete }) is applied for its parent in its place between the lists.
 	 */
 	async processO2M(
 		parentRows: { data: Partial<Item>; key: PrimaryKey }[],
 		opts?: MutationOptions,
 	): Promise<PayloadServiceProcessO2MResult> {
+		// a caller of the former processO2M(data, key) would get a TypeError
+		if (!Array.isArray(parentRows)) {
+			throw new Error(
+				'processO2M takes the parent rows as [{ data, key }], got'
+				+ ` ${JSON.stringify(parentRows)}`,
+			);
+		}
+
 		const revisionsByParent: PrimaryKey[][] = parentRows.map(() => []);
 		let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
 
@@ -1033,6 +1041,15 @@ export class PayloadService {
 		const upsertedKeys = await service.upsertMany(recordsToUpsert, {
 			...nestedMutationOptions,
 			onRevisionCreate: (revision, item) => {
+				// a missing key would hand the revision to the first parent
+				if (isMissingPrimaryKey(item)) {
+					throw new Error(
+						`Revision ${JSON.stringify(revision)} of`
+						+ ` ${JSON.stringify(relation.collection)} came without the`
+						+ ` key of its item: ${JSON.stringify(item)}`,
+					);
+				}
+
 				writtenRevisions.push({ revision, item });
 			},
 		});
