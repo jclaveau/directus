@@ -3564,6 +3564,10 @@ implements AbstractService<Item> {
 	 * Keys are matched as the read returns them: under a case-insensitive key
 	 * (MariaDB `_ci`, Postgres `citext`) `'ABC'` misses a stored `'abc'`, and
 	 * its create fails on the duplicate key.
+	 *
+	 * A row an update hook adds is updated only if it existed before the run:
+	 * the hook sees the found keys, never the ones the run creates. An upsert
+	 * hook seeing the whole run could allow it.
 	 */
 	protected async upsertRun(
 		upsertRun: Partial<Item>[],
