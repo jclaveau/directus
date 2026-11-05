@@ -711,9 +711,10 @@ export class PayloadService {
 
 			const oneField = relation.meta.one_field;
 
-			// Only process related records that are actually in the payload
-			const listingParents: number[] = [];
-			const alteringParents: number[] = [];
+			// Only process related records that are actually in the payload. Lists
+			// next to each other save at once; an alteration keeps its place between
+			// them, so a child two parents name ends where the later one puts it
+			const parentRuns: { listsChildren: boolean; parentIndexes: number[] }[] = [];
 
 			for (const [parentIndex, parentRow] of parentRows.entries()) {
 				if (!(oneField in parentRow.data)) {
@@ -721,16 +722,18 @@ export class PayloadService {
 				}
 
 				const field = parentRow.data[oneField];
+				const listsChildren = !field || Array.isArray(field);
+				const lastRun = parentRuns.at(-1);
 
-				if (!field || Array.isArray(field)) {
-					listingParents.push(parentIndex);
+				if (listsChildren && lastRun?.listsChildren) {
+					lastRun.parentIndexes.push(parentIndex);
 				}
 				else {
-					alteringParents.push(parentIndex);
+					parentRuns.push({ listsChildren, parentIndexes: [parentIndex] });
 				}
 			}
 
-			if (listingParents.length === 0 && alteringParents.length === 0) {
+			if (parentRuns.length === 0) {
 				continue;
 			}
 
@@ -745,17 +748,22 @@ export class PayloadService {
 				nested: [...this.nested, oneField],
 			});
 
-			if (listingParents.length > 0) {
-				await this.saveO2MLists(
-					relation,
-					service,
-					listingParents.map((parentIndex) => parentRows[parentIndex]!),
-					listingParents.map((parentIndex) => revisionsByParent[parentIndex]!),
-					nestedMutationOptions,
-				);
-			}
+			for (const parentRun of parentRuns) {
+				if (parentRun.listsChildren) {
+					await this.saveO2MLists(
+						relation,
+						service,
+						parentRun.parentIndexes.map((parentIndex) => parentRows[parentIndex]!),
+						parentRun.parentIndexes.map((parentIndex) => {
+							return revisionsByParent[parentIndex]!;
+						}),
+						nestedMutationOptions,
+					);
 
-			for (const parentIndex of alteringParents) {
+					continue;
+				}
+
+				const parentIndex = parentRun.parentIndexes[0]!;
 				const parent = parentRows[parentIndex]!.key;
 				const field = parentRows[parentIndex]!.data[oneField];
 				const revisions = revisionsByParent[parentIndex]!;

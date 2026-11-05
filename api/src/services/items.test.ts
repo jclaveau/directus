@@ -6945,6 +6945,25 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 	});
 
 	it(oneLine`
+		leaves a child on the later parent when an earlier one updates it
+		and a later one lists it
+	`, async () => {
+		await expect(new ItemsService('test', { knex: database, schema: parentSchema })
+			.createMany([
+				{ id: 3, children: { update: [{ id: 6, name: 'six of three' }] } },
+				{ id: 4, children: [6] },
+			])).resolves.toStrictEqual([3, 4]);
+
+		await expect(database('children').select('id', 'name', 'parent_id')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 5, name: 'five', parent_id: null },
+			{ id: 6, name: 'six of three', parent_id: 4 },
+			{ id: 7, name: 'seven', parent_id: 2 },
+			{ id: 8, name: 'eight', parent_id: 2 },
+		]);
+	});
+
+	it(oneLine`
 		reads the children the lists name once, and the children the parents
 		hold once, for every created parent
 	`, async () => {
