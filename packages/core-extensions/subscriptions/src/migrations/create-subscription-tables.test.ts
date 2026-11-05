@@ -21,6 +21,7 @@ describe('createSubscriptionTables', () => {
 				'sqlite_sequence',
 				'subscriber_customers',
 				'subscribers',
+				'subscription_events',
 				'subscription_plan_references',
 				'subscription_plans',
 				'subscription_sync_queue',
@@ -56,6 +57,7 @@ describe('createSubscriptionTables', () => {
 				'subscriber_customers_provider_provider_customer_id_unique',
 				'subscriber_customers_subscriber_index',
 				'subscribers_user_unique',
+				'subscription_events_subscription_index',
 				'subscription_plan_references_plan_index',
 				'subscription_plan_references_provider_reference_unique',
 				'subscription_plans_code_unique',
@@ -67,6 +69,7 @@ describe('createSubscriptionTables', () => {
 				'subscriptions_plan_index',
 				'subscriptions_provider_provider_subscription_id_unique',
 				'subscriptions_subscriber_index',
+				'subscriptions_user_updated_index',
 			]);
 
 		await database.destroy();

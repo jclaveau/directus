@@ -8,6 +8,7 @@ import {
 import { findProvider } from '../providers/create-providers.js';
 import type { SubscriptionProviders } from '../providers/types.js';
 import { enqueueSync } from '../queue/sync-queue.js';
+import { recordCancelRequest } from './record-cancel-request.js';
 
 export type OwnSubscriptionCancel = {
 	database: Knex;
@@ -32,8 +33,11 @@ export async function cancelOwnSubscription({
 			'subscriptions.customer',
 		)
 		.select(
+			'subscriptions.id',
 			'subscriptions.provider',
 			'subscriptions.provider_subscription_id',
+			'subscriptions.status',
+			'subscriptions.current_period_end',
 			'subscriber_customers.provider_customer_id',
 		)
 		.where('subscribers.user', userId)
@@ -63,8 +67,17 @@ export async function cancelOwnSubscription({
 
 	await subscriptionProvider.cancelAtPeriodEnd(resourceId);
 
-	await enqueueSync(database, {
-		provider: ownSubscription.provider,
-		resourceId,
+	await database.transaction(async (trx) => {
+		await recordCancelRequest(trx, {
+			subscription: ownSubscription,
+			source: 'user',
+			userId,
+			requestedAt: new Date(),
+		});
+
+		await enqueueSync(trx, {
+			provider: ownSubscription.provider,
+			resourceId,
+		});
 	});
 }

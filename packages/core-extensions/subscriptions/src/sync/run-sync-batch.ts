@@ -1,9 +1,14 @@
 import type { AbstractService } from '@directus/types';
 import type { Knex } from 'knex';
+import { MissingProviderSubscriptionError } from '../errors.js';
 import { findProvider } from '../providers/create-providers.js';
 import type { SubscriptionProviders } from '../providers/types.js';
-import { selectDueSync, type SyncQueueRow } from '../queue/sync-queue.js';
-import { syncSubscription } from './sync-subscription.js';
+import {
+	MAX_SYNC_ATTEMPTS,
+	selectDueSync,
+	type SyncQueueRow,
+} from '../queue/sync-queue.js';
+import { closeMissingSubscription, syncSubscription } from './sync-subscription.js';
 
 export const SYNC_BATCH_LIMIT = 50;
 
@@ -15,7 +20,10 @@ export type SyncBatchContext = {
 	database: Knex;
 	enabledProviders: SubscriptionProviders;
 	createAccessService: (trx: Knex) => AbstractService;
-	logger: { warn: (message: string) => void };
+	logger: {
+		warn: (message: string) => void;
+		error: (message: string) => void;
+	};
 };
 
 /** Syncs due queue rows one transaction each; resolves to the rows claimed. */
@@ -52,22 +60,67 @@ async function syncNextRow({
 				return;
 			}
 
-			const providerSubscription = await findProvider(
+			const subscriptionProvider = findProvider(
 				enabledProviders,
 				claimedRow.provider,
-			)
-				.fetchSubscription(claimedRow.resource_id);
+			);
+
+			const fetchedSubscription = await subscriptionProvider
+				.fetchSubscription(claimedRow.resource_id)
+				.catch((fetchError: unknown) => {
+					if (fetchError instanceof MissingProviderSubscriptionError) {
+						return fetchError;
+					}
+
+					throw fetchError;
+				});
+
+			const claimedQueueRow = trx('subscription_sync_queue')
+				.where('id', claimedRow.id);
+
+			if (fetchedSubscription instanceof MissingProviderSubscriptionError) {
+				await closeMissingSubscription({
+					trx,
+					accessService: createAccessService(trx),
+					providerName: claimedRow.provider,
+					subscriptionId: fetchedSubscription.extensions.subscriptionId,
+					closedAt: new Date(),
+				});
+
+				await claimedQueueRow.delete();
+
+				logger.warn(
+					`Subscription sync of ${JSON.stringify(claimedRow.provider)}`
+					+ ` ${JSON.stringify(claimedRow.resource_id)} closed: the`
+					+ ' provider has no such subscription',
+				);
+
+				return;
+			}
 
 			await syncSubscription({
 				trx,
 				accessService: createAccessService(trx),
+				subscriptionProvider,
 				providerName: claimedRow.provider,
-				providerSubscription,
+				providerSubscription: fetchedSubscription,
 				syncedAt: new Date(),
+				logger,
 			});
 
-			await trx('subscription_sync_queue')
-				.where('id', claimedRow.id)
+			const syncedResourceId = subscriptionProvider.composeResourceId({
+				subscriptionId: fetchedSubscription.subscriptionId,
+				customerId: fetchedSubscription.customerId,
+			});
+
+			// A Mollie webhook queues a payment id, which never comes up again.
+			if (syncedResourceId !== claimedRow.resource_id) {
+				await claimedQueueRow.delete();
+
+				return;
+			}
+
+			await claimedQueueRow
 				.update({ pending: false, attempts: 0, last_error: null });
 		});
 	}
@@ -78,14 +131,23 @@ async function syncNextRow({
 			throw error;
 		}
 
-		await recordSyncFailure(database, failedRow, error);
+		const failedAttempts = failedRow.attempts + 1;
+		const isParked = failedAttempts >= MAX_SYNC_ATTEMPTS;
 
-		logger.warn(
-			`Subscription sync of ${JSON.stringify(failedRow.provider)}`
+		await recordSyncFailure(database, failedRow, error, isParked);
+
+		const failureMessage = `Subscription sync of`
+			+ ` ${JSON.stringify(failedRow.provider)}`
 			+ ` ${JSON.stringify(failedRow.resource_id)} failed, attempt`
-			+ ` ${JSON.stringify(failedRow.attempts + 1)}:`
-			+ ` ${JSON.stringify(readErrorMessage(error))}`,
-		);
+			+ ` ${JSON.stringify(failedAttempts)}:`
+			+ ` ${JSON.stringify(readErrorMessage(error))}`;
+
+		if (isParked) {
+			logger.error(`${failureMessage}. No more retries until a webhook`);
+		}
+		else {
+			logger.warn(failureMessage);
+		}
 	}
 
 	return syncClaim.claimedRow === undefined;
@@ -95,16 +157,27 @@ async function recordSyncFailure(
 	database: Knex,
 	failedRow: SyncQueueRow,
 	syncError: unknown,
+	isParked: boolean,
 ): Promise<void> {
+	const retriedAt = new Date(Date.now() + Math.min(
+		FIRST_RETRY_DELAY_MS * 2 ** failedRow.attempts,
+		LONGEST_RETRY_DELAY_MS,
+	));
+
 	await database('subscription_sync_queue')
 		.where('id', failedRow.id)
 		.update({
 			attempts: failedRow.attempts + 1,
-			next_attempt_at: new Date(Date.now() + Math.min(
-				FIRST_RETRY_DELAY_MS * 2 ** failedRow.attempts,
-				LONGEST_RETRY_DELAY_MS,
-			)),
+			// The rollback freed the row: a webhook may have set it due since the
+			// claim, and that retry must not wait out this backoff.
+			next_attempt_at: database.raw(
+				'CASE WHEN next_attempt_at = ? THEN ? ELSE next_attempt_at END',
+				[failedRow.next_attempt_at, retriedAt],
+			),
 			last_error: readErrorMessage(syncError),
+			...isParked
+				? { pending: false }
+				: {},
 		});
 }
 

@@ -20,6 +20,18 @@ export const WebhookRefusedError = createError<{
 	400,
 );
 
+/** `subscriptionId` is null when a Mollie payment led to no subscription. */
+export const MissingProviderSubscriptionError = createError<{
+	resourceId: string;
+	subscriptionId: string | null;
+}>(
+	'MISSING_PROVIDER_SUBSCRIPTION',
+	({ resourceId }) => {
+		return `The provider has no subscription for ${JSON.stringify(resourceId)}`;
+	},
+	404,
+);
+
 export const NoSubscriptionToCancelError = createError(
 	'NO_SUBSCRIPTION_TO_CANCEL',
 	'No ongoing subscription to cancel',

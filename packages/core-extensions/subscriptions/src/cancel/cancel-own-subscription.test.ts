@@ -100,6 +100,26 @@ describe('cancelOwnSubscription', () => {
 				pending: 1,
 				next_attempt_at: 1_793_836_800_000,
 			}]);
+
+		expect(await database('subscriptions')
+			.where('id', 2)
+			.select('cancel_at_period_end', 'user_updated', 'date_updated'))
+			.toEqual([{
+				cancel_at_period_end: 1,
+				user_updated: 'user-1',
+				date_updated: 1_793_836_800_000,
+			}]);
+
+		expect(await database('subscription_events')).toEqual([{
+			id: 1,
+			subscription: 2,
+			status: 'active',
+			current_period_end: null,
+			cancel_at_period_end: 1,
+			source: 'user',
+			user: 'user-1',
+			date_created: 1_793_836_800_000,
+		}]);
 	});
 
 	test('refuses an anonymous request', async () => {

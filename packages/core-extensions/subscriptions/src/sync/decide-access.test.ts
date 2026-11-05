@@ -1,5 +1,5 @@
 import { oneLine } from '@directus/utils';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { decideAccess } from './decide-access.js';
 
 describe('decideAccess', () => {
@@ -7,11 +7,20 @@ describe('decideAccess', () => {
 		expect(decideAccess(
 			{ status, cancelAtPeriodEnd: false, currentPeriodEnd: null },
 			new Date('2026-11-05T00:00:00Z'),
+			{ warn: vi.fn() },
 		))
 			.toBe('keep');
 	});
 
-	test.each(['unpaid', 'suspended', 'expired'])(oneLine`
+	test.each([
+		'unpaid',
+		'suspended',
+		'expired',
+		'paused',
+		'incomplete',
+		'incomplete_expired',
+		'pending',
+	])(oneLine`
 		revokes access when %s
 	`, (status) => {
 		expect(decideAccess(
@@ -21,6 +30,7 @@ describe('decideAccess', () => {
 				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
 			},
 			new Date('2026-11-05T00:00:00Z'),
+			{ warn: vi.fn() },
 		))
 			.toBe('revoke');
 	});
@@ -33,6 +43,7 @@ describe('decideAccess', () => {
 				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
 			},
 			new Date('2026-11-05T00:00:00Z'),
+			{ warn: vi.fn() },
 		))
 			.toBe('keep');
 	});
@@ -45,6 +56,7 @@ describe('decideAccess', () => {
 				currentPeriodEnd: new Date('2026-11-01T00:00:00Z'),
 			},
 			new Date('2026-11-05T00:00:00Z'),
+			{ warn: vi.fn() },
 		))
 			.toBe('revoke');
 	});
@@ -53,6 +65,7 @@ describe('decideAccess', () => {
 		expect(decideAccess(
 			{ status: 'canceled', cancelAtPeriodEnd: true, currentPeriodEnd: null },
 			new Date('2026-11-05T00:00:00Z'),
+			{ warn: vi.fn() },
 		))
 			.toBe('revoke');
 	});
@@ -65,19 +78,23 @@ describe('decideAccess', () => {
 				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
 			},
 			new Date('2026-11-05T00:00:00Z'),
+			{ warn: vi.fn() },
 		))
 			.toBe('revoke');
 	});
 
-	test('refuses a status without an access rule', () => {
-		expect(() => {
-			decideAccess(
-				{ status: 'incomplete', cancelAtPeriodEnd: false, currentPeriodEnd: null },
-				new Date('2026-11-05T00:00:00Z'),
-			);
-		})
-			.toThrow(new Error(
-				'Subscription status "incomplete" has no access rule yet',
-			));
+	test('revokes a status without an access rule and says so', () => {
+		const logger = { warn: vi.fn() };
+
+		expect(decideAccess(
+			{ status: 'on_hold', cancelAtPeriodEnd: false, currentPeriodEnd: null },
+			new Date('2026-11-05T00:00:00Z'),
+			logger,
+		))
+			.toBe('revoke');
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			'Subscription status "on_hold" has no access rule, revoking its access',
+		);
 	});
 });
