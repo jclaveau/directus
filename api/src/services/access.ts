@@ -57,14 +57,14 @@ function lowerCaseKey(relatedKey: unknown): unknown {
 }
 
 function setsManagedBy(item: Partial<Item>): boolean {
-	return 'managed_by' in item && item.managed_by !== null;
+	return 'managed_by' in item && item['managed_by'] !== null;
 }
 
 function changesManagedBy(
 	data: Partial<Item>,
 	managedAccess: ManagedAccessRow,
 ): boolean {
-	return 'managed_by' in data && data.managed_by !== managedAccess.managed_by;
+	return 'managed_by' in data && data['managed_by'] !== managedAccess.managed_by;
 }
 
 /** A relation may come as its key, or as an object holding it: `{ id, ... }`. */
