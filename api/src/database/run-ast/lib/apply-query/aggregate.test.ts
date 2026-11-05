@@ -1,7 +1,9 @@
 import { SchemaBuilder } from '@directus/schema-builder';
+import type { Permission } from '@directus/types';
 import knex from 'knex';
 import { expect, test } from 'vitest';
 import { applyAggregate } from './aggregate.js';
+import { createAliasGenerator } from './create-alias-generator.js';
 import { Client_SQLite3 } from './mock.js';
 
 const schema = new SchemaBuilder()
@@ -10,6 +12,292 @@ const schema = new SchemaBuilder()
 		c.field('author').m2o('users');
 	})
 	.build();
+
+test('a field one rule grants is summed through that rule', () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyAggregate(
+		schema,
+		queryBuilder,
+		{ sum: ['salary'] },
+		'articles',
+		false,
+		{
+			knex: db,
+			cases: [{}, { id: { _gt: 5 } }],
+			permissions: [
+				{
+					collection: 'articles',
+					permissions: {},
+					fields: ['id'],
+				},
+				{
+					collection: 'articles',
+					permissions: { id: { _gt: 5 } },
+					fields: ['salary'],
+				},
+			] as Permission[],
+			generateAlias: createAliasGenerator(),
+		},
+	);
+
+	const rawQuery = queryBuilder.toSQL();
+
+	expect(rawQuery.sql).toEqual(
+		'select sum((CASE WHEN "articles"."id" in'
+		+ ' (select distinct "articles"."id" from "articles"'
+		+ ' where ("articles"."id" > ?))'
+		+ ' THEN "articles"."salary" END)) as "sum->salary"',
+	);
+
+	expect(rawQuery.bindings).toEqual([5]);
+});
+
+test.each([
+	['count', 'count('],
+	['countDistinct', 'count(distinct '],
+	['avg', 'avg('],
+	['avgDistinct', 'avg(distinct '],
+	['sum', 'sum('],
+	['sumDistinct', 'sum(distinct '],
+	['min', 'min('],
+	['max', 'max('],
+])('%s of a field one rule grants goes through that rule', (operation, sqlStart) => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyAggregate(
+		schema,
+		queryBuilder,
+		{ [operation]: ['salary'] },
+		'articles',
+		false,
+		{
+			knex: db,
+			cases: [{}, { id: { _gt: 5 } }],
+			permissions: [
+				{
+					collection: 'articles',
+					permissions: {},
+					fields: ['id'],
+				},
+				{
+					collection: 'articles',
+					permissions: { id: { _gt: 5 } },
+					fields: ['salary'],
+				},
+			] as Permission[],
+			generateAlias: createAliasGenerator(),
+		},
+	);
+
+	expect(queryBuilder.toSQL().sql).toEqual(
+		`select ${sqlStart}(CASE WHEN "articles"."id" in`
+		+ ' (select distinct "articles"."id" from "articles"'
+		+ ' where ("articles"."id" > ?))'
+		+ ` THEN "articles"."salary" END)) as "${operation}->salary"`,
+	);
+});
+
+test('countDistinct of a primary key one rule grants goes through that rule', () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyAggregate(
+		schema,
+		queryBuilder,
+		{ countDistinct: ['id'] },
+		'articles',
+		false,
+		{
+			knex: db,
+			cases: [{}, { id: { _gt: 5 } }],
+			permissions: [
+				{
+					collection: 'articles',
+					permissions: {},
+					fields: ['salary'],
+				},
+				{
+					collection: 'articles',
+					permissions: { id: { _gt: 5 } },
+					fields: ['id'],
+				},
+			] as Permission[],
+			generateAlias: createAliasGenerator(),
+		},
+	);
+
+	expect(queryBuilder.toSQL().sql).toEqual(
+		'select count(distinct (CASE WHEN "articles"."id" in'
+		+ ' (select distinct "articles"."id" from "articles"'
+		+ ' where ("articles"."id" > ?))'
+		+ ' THEN "articles"."id" END)) as "countDistinct->id"',
+	);
+});
+
+test('a field granted on every row reads no case', () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyAggregate(
+		schema,
+		queryBuilder,
+		{ sum: ['salary'] },
+		'articles',
+		false,
+		{
+			knex: db,
+			cases: [{}, { id: { _gt: 5 } }],
+			permissions: [
+				{
+					collection: 'articles',
+					permissions: {},
+					fields: ['salary'],
+				},
+				{
+					collection: 'articles',
+					permissions: { id: { _gt: 5 } },
+					fields: ['id'],
+				},
+			] as Permission[],
+			generateAlias: createAliasGenerator(),
+		},
+	);
+
+	expect(queryBuilder.toSQL().sql).toEqual(
+		'select sum("articles"."salary") as "sum->salary"',
+	);
+});
+
+test('a field granted by every rule the rows go through reads no case', () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyAggregate(
+		schema,
+		queryBuilder,
+		{ sum: ['salary'] },
+		'articles',
+		false,
+		{
+			knex: db,
+			cases: [{ id: { _gt: 5 } }],
+			permissions: [
+				{
+					collection: 'articles',
+					permissions: { id: { _gt: 5 } },
+					fields: ['*'],
+				},
+				{
+					collection: 'articles',
+					permissions: { id: { _lt: 2 } },
+					fields: ['salary'],
+				},
+			] as Permission[],
+			generateAlias: createAliasGenerator(),
+		},
+	);
+
+	expect(queryBuilder.toSQL().sql).toEqual(
+		'select sum("articles"."salary") as "sum->salary"',
+	);
+});
+
+test('a field granted by a rule the rows do not go through reads a case', () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyAggregate(
+		schema,
+		queryBuilder,
+		{ sum: ['salary'] },
+		'articles',
+		false,
+		{
+			knex: db,
+			cases: [{ id: { _lt: 2 } }],
+			permissions: [
+				{
+					collection: 'articles',
+					permissions: { id: { _lt: 2 } },
+					fields: ['category'],
+				},
+				{
+					collection: 'articles',
+					permissions: { id: { _gt: 5 } },
+					fields: ['salary'],
+				},
+			] as Permission[],
+			generateAlias: createAliasGenerator(),
+		},
+	);
+
+	expect(queryBuilder.toSQL().sql).toEqual(
+		'select sum((CASE WHEN "articles"."id" in'
+		+ ' (select distinct "articles"."id" from "articles"'
+		+ ' where ("articles"."id" > ?))'
+		+ ' THEN "articles"."salary" END)) as "sum->salary"',
+	);
+});
+
+test('a count of every row reads no case', () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyAggregate(
+		schema,
+		queryBuilder,
+		{ count: ['*'], countAll: ['*'] },
+		'articles',
+		false,
+		{
+			knex: db,
+			cases: [{}, { id: { _gt: 5 } }],
+			permissions: [
+				{
+					collection: 'articles',
+					permissions: {},
+					fields: ['id'],
+				},
+				{
+					collection: 'articles',
+					permissions: { id: { _gt: 5 } },
+					fields: ['salary'],
+				},
+			] as Permission[],
+			generateAlias: createAliasGenerator(),
+		},
+	);
+
+	expect(queryBuilder.toSQL().sql).toEqual(
+		'select count(*) as "count", count(*) as "countAll"',
+	);
+});
+
+test('an admin has no permission and reads no case', () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyAggregate(
+		schema,
+		queryBuilder,
+		{ sum: ['salary'] },
+		'articles',
+		false,
+		{
+			knex: db,
+			cases: [],
+			permissions: [],
+			generateAlias: createAliasGenerator(),
+		},
+	);
+
+	expect(queryBuilder.toSQL().sql).toEqual(
+		'select sum("articles"."salary") as "sum->salary"',
+	);
+});
 
 test('aggregate empty', async () => {
 	const db = knex.default({ client: Client_SQLite3 });
