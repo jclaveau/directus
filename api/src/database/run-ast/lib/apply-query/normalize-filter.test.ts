@@ -1,3 +1,4 @@
+import type { Filter } from '@directus/types';
 import { describe, expect, test } from 'vitest';
 import { normalizeFilter } from './normalize-filter.js';
 
@@ -211,13 +212,14 @@ describe('normalizeFilter', () => {
 
 	test('keeps an _and inside _some under the _some', () => {
 		expect(
+			// the types allow no _and/_or under a quantifier; REST sends one
 			normalizeFilter({
 				rel: {
 					_some: {
 						_and: [{ name: { _eq: 'a' } }, { status: { _eq: 'b' } }],
 					},
 				},
-			}),
+			} as unknown as Filter),
 		).toEqual({
 			rel: {
 				_some: {
@@ -229,13 +231,14 @@ describe('normalizeFilter', () => {
 
 	test('keeps an _or inside _none under the _none', () => {
 		expect(
+			// the types allow no _and/_or under a quantifier; REST sends one
 			normalizeFilter({
 				rel: {
 					_none: {
 						_or: [{ name: { _eq: 'a' } }, { name: { _eq: 'b' } }],
 					},
 				},
-			}),
+			} as unknown as Filter),
 		).toEqual({
 			rel: {
 				_none: {

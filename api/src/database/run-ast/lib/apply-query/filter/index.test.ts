@@ -2,7 +2,7 @@ import { SchemaBuilder } from '@directus/schema-builder';
 import knex from 'knex';
 import { describe, expect, test, vi } from 'vitest';
 import { Client_SQLite3 } from '../mock.js';
-import type { Permission } from '@directus/types';
+import type { Filter, Permission } from '@directus/types';
 import { DEFUAULT_PERMISSION } from '../../../../../permissions/utils/default-permission.js';
 
 const aliasFn = vi.fn();
@@ -433,13 +433,14 @@ test(`filtering o2m relation with an _or inside _none`, async () => {
 		db,
 		o2m_schema,
 		queryBuilder,
+		// the types allow no _or under a quantifier; REST sends one
 		{
 			links: {
 				_none: {
 					_or: [{ name: { _eq: 'a' } }, { name: { _eq: 'b' } }],
 				},
 			},
-		},
+		} as unknown as Filter,
 		'article',
 		{},
 		[],
