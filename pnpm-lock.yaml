@@ -2105,6 +2105,9 @@ importers:
       '@directus/types':
         specifier: workspace:*
         version: link:../../types
+      '@directus/utils':
+        specifier: workspace:*
+        version: link:../../utils
       '@types/express':
         specifier: 'catalog:'
         version: 4.17.25
