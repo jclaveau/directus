@@ -216,3 +216,6 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 
 ## 2026-11-03 (#673 shard 1): invite statement-count flake
 - `singular-write-users-invite` expected 1 insert each into `directus_activity` / `directus_revisions` on request 3, saw 3. #673 touches neither the users service nor that test; not in the list above. Treated as flake, `gh run rerun --failed` unasked. If the rerun is red the same way (2+ identical), stop rerunning and diagnose (see the twice-red rule above).
+
+## 2026-11-06 (#688 shard 1): query-audit-header rows
+- `database/query-audit-header` "two requests at once each report", step `each reports the same entries both times`: `rows` 8 instead of 7 on the `audit_articles` read; PR touches nothing under `tests/db/database`; one `--failed` rerun cleared it (run 42126620315). Seen once.
