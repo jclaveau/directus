@@ -7,7 +7,7 @@ type MollieSubscription = {
 	id: string;
 	customerId: string;
 	interval: string;
-	nextPaymentDate?: string;
+	nextPaymentDate?: string | null;
 	metadata: unknown;
 };
 
@@ -154,7 +154,7 @@ async function readPeriodEnd(
 	mollieClient: MollieClient,
 	mollieSubscription: MollieSubscription,
 ): Promise<Date | null> {
-	if (mollieSubscription.nextPaymentDate !== undefined) {
+	if (typeof mollieSubscription.nextPaymentDate === 'string') {
 		return new Date(`${mollieSubscription.nextPaymentDate}T00:00:00Z`);
 	}
 

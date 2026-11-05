@@ -237,6 +237,37 @@ describe('fetchSubscription', () => {
 		});
 	});
 
+	test('reads a null next payment date as none', async () => {
+		await expect(createMollieProvider({
+			customerSubscriptions: {
+				get: vi.fn().mockResolvedValue({
+					id: 'sub_1',
+					customerId: 'cst_1',
+					status: 'canceled',
+					interval: '1 month',
+					nextPaymentDate: null,
+					metadata: { plan: 'monthly' },
+				}),
+			},
+			subscriptionPayments: {
+				iterate: vi.fn().mockReturnValue({
+					find: vi.fn().mockResolvedValue({
+						status: 'paid',
+						paidAt: '2026-10-15T10:00:00Z',
+					}),
+				}),
+			},
+		} as unknown as MollieClient)
+			.fetchSubscription('cst_1/sub_1')).resolves.toEqual({
+			subscriptionId: 'sub_1',
+			customerId: 'cst_1',
+			status: 'canceled',
+			currentPeriodEnd: new Date('2026-11-15T10:00:00Z'),
+			cancelAtPeriodEnd: true,
+			planReference: 'monthly',
+		});
+	});
+
 	test('has no period end before any paid payment', async () => {
 		const mollieClient = {
 			customerSubscriptions: {
