@@ -11,6 +11,52 @@ import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
 import { validateKeys } from '../utils/validate-keys.js';
 import { ItemsService } from './items.js';
 
+const MANAGED_ACCESS_GRANT_FIELDS = ['role', 'user', 'policy'] as const;
+
+type ManagedAccessRow = {
+	id: string;
+	managed_by: string;
+	role: string | null;
+	user: string | null;
+	policy: string;
+};
+
+class ManagedAccessChangeError extends InvalidPayloadError {
+	constructor({ id, managed_by }: ManagedAccessRow) {
+		super({
+			reason: `Access ${JSON.stringify(id)} is managed by`
+				+ ` ${JSON.stringify(managed_by)}, which alone changes it`,
+		});
+	}
+}
+
+function includesAccessKey(keys: PrimaryKey[], accessId: string): boolean {
+	// A uuid key matches its row whatever its case.
+	return keys.some((key) => {
+		return String(key).toLowerCase() === accessId.toLowerCase();
+	});
+}
+
+/** A relation may come as its key, or as an object holding it: `{ id, ... }`. */
+function changesGrantField(
+	data: Partial<Item>,
+	managedAccess: ManagedAccessRow,
+): boolean {
+	return MANAGED_ACCESS_GRANT_FIELDS.some((grantField) => {
+		if (!(grantField in data)) {
+			return false;
+		}
+
+		const fieldValue = data[grantField];
+
+		const relatedKey = typeof fieldValue === 'object' && fieldValue !== null
+			? fieldValue.id
+			: fieldValue;
+
+		return relatedKey !== managedAccess[grantField];
+	});
+}
+
 export class AccessService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
 		super('directus_access', options);
@@ -36,9 +82,11 @@ export class AccessService extends ItemsService {
 
 	// Read outside the write's transaction: an extension marking a row between
 	// this read and the write is not seen, and the request's write lands.
-	private async refuseManagedAccessInRequest(keys: PrimaryKey[]) {
+	private async readManagedAccessInRequest(
+		keys: PrimaryKey[],
+	): Promise<ManagedAccessRow[]> {
 		if (!this.accountability) {
-			return;
+			return [];
 		}
 
 		// Before the read, whose uuid cast would fail in the database instead.
@@ -49,19 +97,34 @@ export class AccessService extends ItemsService {
 			keys,
 		);
 
-		const managedAccess = await this.knex
-			.select('id', 'managed_by')
+		return await this.knex
+			.select('id', 'managed_by', ...MANAGED_ACCESS_GRANT_FIELDS)
 			.from('directus_access')
 			.whereIn('id', keys)
-			.whereNotNull('managed_by')
-			.first();
+			.whereNotNull('managed_by');
+	}
+
+	private async refuseManagedAccessDelete(keys: PrimaryKey[]) {
+		const [managedAccess] = await this.readManagedAccessInRequest(keys);
 
 		if (managedAccess) {
-			throw new InvalidPayloadError({
-				reason: `Access ${JSON.stringify(managedAccess.id)} is managed by`
-					+ ` ${JSON.stringify(managedAccess.managed_by)}, which alone`
-					+ ' changes it',
-			});
+			throw new ManagedAccessChangeError(managedAccess);
+		}
+	}
+
+	/** Who gets which policy is the extension's; `sort` and the rest are not. */
+	private async refuseManagedGrantChange(groups: UpdateGroup<Item>[]) {
+		const managedRows = await this.readManagedAccessInRequest(
+			groups.flatMap((group) => group.keys),
+		);
+
+		for (const managedAccess of managedRows) {
+			if (groups.some((group) => {
+				return includesAccessKey(group.keys, managedAccess.id)
+					&& changesGrantField(group.data, managedAccess);
+			})) {
+				throw new ManagedAccessChangeError(managedAccess);
+			}
 		}
 	}
 
@@ -91,7 +154,7 @@ export class AccessService extends ItemsService {
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
 		this.refuseManagedByInRequest(groups.map((group) => group.data));
-		await this.refuseManagedAccessInRequest(groups.flatMap((group) => group.keys));
+		await this.refuseManagedGrantChange(groups);
 
 		// Updating policy attachments might affect the number of admin/app/api users
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
@@ -109,8 +172,32 @@ export class AccessService extends ItemsService {
 	}
 
 	override async deleteMany(keys: PrimaryKey[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
-		await this.refuseManagedAccessInRequest(keys);
+		await this.refuseManagedAccessDelete(keys);
 
+		return await this.deleteAccessRows(keys, opts);
+	}
+
+	/**
+	 * What a role delete takes along, managed rows included: the database's
+	 * cascade does the same for a deleted user or policy.
+	 */
+	async deleteRoleAccess(
+		roleKeys: PrimaryKey[],
+		opts: MutationOptions = {},
+	): Promise<PrimaryKey[]> {
+		const accessKeys = await this.getKeysByQuery({
+			filter: { role: { _in: roleKeys } },
+		});
+
+		return accessKeys.length > 0
+			? await this.deleteAccessRows(accessKeys, { ...opts, keysFromQuery: true })
+			: [];
+	}
+
+	private async deleteAccessRows(
+		keys: PrimaryKey[],
+		opts: MutationOptions,
+	): Promise<PrimaryKey[]> {
 		// Changes here can affect the number of admin/app/api users
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
