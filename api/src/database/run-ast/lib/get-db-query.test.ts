@@ -91,6 +91,52 @@ test('two joins of one statement get distinct aliases', () => {
 	expect(query.bindings).toEqual(['acme', 10]);
 });
 
+test('a join alias never takes the name of a collection', () => {
+	const query = getDBQuery(
+		{
+			table: 'alias_1',
+			fieldNodes: [
+				{
+					type: 'field',
+					name: 'id',
+					fieldKey: 'id',
+					alias: false,
+					whenCase: [],
+				},
+			],
+			o2mNodes: [],
+			query: {
+				filter: { author: { name: { _eq: 'Rijk' } } },
+				limit: 10,
+			},
+			cases: [],
+			permissions: [],
+		},
+		{
+			knex: knex.default({ client: Client_SQLite3 }),
+			schema: new SchemaBuilder()
+				.collection('alias_1', (collection) => {
+					collection.field('id').id();
+					collection.field('author').m2o('users');
+				})
+				.collection('users', (collection) => {
+					collection.field('id').id();
+					collection.field('name').string();
+				})
+				.build(),
+		},
+	).toSQL();
+
+	expect(query.sql).toEqual(
+		'select "alias_1"."id" from "alias_1"'
+		+ ' left join "users" as "__alias_1"'
+		+ ' on "alias_1"."author" = "__alias_1"."id"'
+		+ ' where "__alias_1"."name" = ? limit ?',
+	);
+
+	expect(query.bindings).toEqual(['Rijk', 10]);
+});
+
 test('a join inside a _some subquery continues the numbering', () => {
 	const query = getDBQuery(
 		{
