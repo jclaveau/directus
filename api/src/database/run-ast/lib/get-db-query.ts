@@ -60,7 +60,7 @@ export function getDBQuery(
 	if (queryCopy.aggregate || queryCopy.group) {
 		const flatQuery = knex.from(table);
 		const keyColumn = `${table}.${schema.collections[table]!.primary}`;
-		const filterOnly = { filter: queryCopy.filter };
+		const filterOnly: Query = { filter: queryCopy.filter ?? null };
 
 		// A filter through an o2m joins one row per child: the aggregate reads
 		// the distinct keys it matches instead, so a parent counts once
