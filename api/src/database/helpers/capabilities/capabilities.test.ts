@@ -52,6 +52,10 @@ describe('CapabilitiesHelper (default)', () => {
 		expect(helper.supportsJsonBatchUpdate()).toBe(false);
 		expect(helper.jsonBatchUpdateTypes()).toEqual(new Set());
 	});
+
+	test('locks the rows a FOR UPDATE reads', () => {
+		expect(helper.supportsRowLocks()).toBe(true);
+	});
 });
 
 describe('CapabilitiesHelperPostgres', () => {
@@ -156,6 +160,10 @@ describe('CapabilitiesHelperSqlite', () => {
 		const mockKnex = { raw: vi.fn(), select } as unknown as Knex;
 		return { helper: new CapabilitiesHelperSqlite(mockKnex), select };
 	}
+
+	test('has no row locks', () => {
+		expect(createHelper('3.45.0').helper.supportsRowLocks()).toBe(false);
+	});
 
 	test('preserves insert order on SQLite >= 3.35 (RETURNING support)', async () => {
 		const { helper } = createHelper('3.45.1');
