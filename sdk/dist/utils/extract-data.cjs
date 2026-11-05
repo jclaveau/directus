@@ -1,0 +1,2 @@
+const e=require(`./is-response.cjs`);async function t(t){if(!(typeof t!=`object`||!t)){if(e.isFetchResponse(t)){let e=t.headers.get(`Content-Type`)?.toLowerCase();if(e?.startsWith(`application/json`)||e?.startsWith(`application/health+json`)){let e=await t.json();if(!t.ok||`errors`in e)throw e;return`data`in e?e.data:e}if(e?.startsWith(`text/html`)||e?.startsWith(`text/plain`)){let e=await t.text();if(!t.ok)throw e;return e}return t.status===204?null:t}if(`errors`in t)throw t;return`data`in t?t.data:t}}exports.extractData=t;
+//# sourceMappingURL=extract-data.cjs.map

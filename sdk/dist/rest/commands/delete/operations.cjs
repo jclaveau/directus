@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=t=>()=>(e.throwIfEmpty(t,`Keys cannot be empty`),{path:`/operations`,body:JSON.stringify(t),method:`DELETE`}),n=t=>()=>(e.throwIfEmpty(t,`Key cannot be empty`),{path:`/operations/${t}`,method:`DELETE`});exports.deleteOperation=n,exports.deleteOperations=t;
+//# sourceMappingURL=operations.cjs.map
