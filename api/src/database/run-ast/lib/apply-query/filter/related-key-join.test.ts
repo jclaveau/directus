@@ -117,9 +117,7 @@ describe('a filter terminating on a related primary key', () => {
 	test('reaches the same one row through `_some`', () => {
 		expect(compile({ owned_sub_items: { _some: { id: { _eq: 7 } } } }))
 			.toEqual({
-				sql: 'select * left join "owned_sub_item" as "a1" '
-					+ 'on "owned_item"."id" = "a1"."owned_item" '
-					+ 'where "owned_item"."id" in ('
+				sql: 'select * where "owned_item"."id" in ('
 					+ 'select "owned_sub_item"."owned_item" as "owned_item" '
 					+ 'from "owned_sub_item" '
 					+ 'where "owned_sub_item"."owned_item" is not null '
@@ -131,9 +129,7 @@ describe('a filter terminating on a related primary key', () => {
 	test('negates over the same one row through `_none`', () => {
 		expect(compile({ owned_sub_items: { _none: { id: { _eq: 7 } } } }))
 			.toEqual({
-				sql: 'select * left join "owned_sub_item" as "a1" '
-					+ 'on "owned_item"."id" = "a1"."owned_item" '
-					+ 'where "owned_item"."id" not in ('
+				sql: 'select * where "owned_item"."id" not in ('
 					+ 'select "owned_sub_item"."owned_item" as "owned_item" '
 					+ 'from "owned_sub_item" '
 					+ 'where "owned_sub_item"."owned_item" is not null '

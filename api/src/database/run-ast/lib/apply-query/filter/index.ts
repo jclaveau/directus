@@ -66,6 +66,12 @@ export function applyFilter(
 
 			const filterPath = getFilterPath(key, value);
 
+			// A _some/_none filter reads its relation through a subquery alone: a
+			// root join would repeat each parent once per related row
+			if (filterPath[1] === '_some' || filterPath[1] === '_none') {
+				continue;
+			}
+
 			if (
 				filterPath.length > 1 ||
 				(!(key.includes('(') && key.includes(')')) && schema.collections[collection]?.fields[key]?.type === 'alias')

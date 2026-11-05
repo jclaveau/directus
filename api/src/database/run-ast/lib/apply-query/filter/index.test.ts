@@ -312,7 +312,6 @@ for (const quantifier of ['_some', '_none']) {
 	test(`filtering o2m relation with ${quantifier}`, async () => {
 		const db = knex.default({ client: Client_SQLite3 });
 		const queryBuilder = db.queryBuilder();
-		aliasFn.mockReturnValueOnce('alias');
 
 		applyFilter(
 			db,
@@ -337,7 +336,7 @@ for (const quantifier of ['_some', '_none']) {
 		const rawQuery = queryBuilder.toSQL();
 
 		expect(rawQuery.sql).toEqual(
-			`select * left join "links_list" as "alias" on "article"."id" = "alias"."article_id" where "article"."id"${
+			`select * where "article"."id"${
 				quantifier === '_none' ? ' not' : ''
 			} in (select "links_list"."article_id" as "article_id" from "links_list" where "links_list"."article_id" is not null and "links_list"."name" = ?)`,
 		);

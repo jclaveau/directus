@@ -183,18 +183,14 @@ test('a join inside a _some subquery continues the numbering', () => {
 
 	expect(query.sql).toEqual(
 		'select "articles"."id" from "articles"'
-		+ ' inner join (select distinct "articles"."id" from "articles"'
 		+ ' left join "users" as "__alias_1"'
 		+ ' on "articles"."author" = "__alias_1"."id"'
-		+ ' left join "links_list" as "__alias_2"'
-		+ ' on "articles"."id" = "__alias_2"."article_id"'
 		+ ' where ("__alias_1"."name" = ? and "articles"."id" in'
 		+ ' (select "links_list"."article_id" as "article_id"'
-		+ ' from "links_list" left join "users" as "__alias_4"'
-		+ ' on "links_list"."owner" = "__alias_4"."id"'
+		+ ' from "links_list" left join "users" as "__alias_2"'
+		+ ' on "links_list"."owner" = "__alias_2"."id"'
 		+ ' where "links_list"."article_id" is not null'
-		+ ' and "__alias_4"."name" = ?)) limit ?) as "inner"'
-		+ ' on "articles"."id" = "inner"."id"',
+		+ ' and "__alias_2"."name" = ?)) limit ?',
 	);
 
 	expect(query.bindings).toEqual(['ann', 'bob', 10]);
