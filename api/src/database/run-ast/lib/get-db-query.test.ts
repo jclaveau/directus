@@ -236,3 +236,74 @@ test('a count filtered through an o2m reads each parent key once', () => {
 
 	expect(query.bindings).toEqual(['im', 10]);
 });
+
+test('a grouped case through an o2m reads the keys it matches', () => {
+	const query = getDBQuery(
+		{
+			table: 'articles',
+			fieldNodes: [
+				{
+					type: 'field',
+					name: 'category',
+					fieldKey: 'category',
+					alias: false,
+					whenCase: [0],
+				},
+			],
+			o2mNodes: [],
+			query: {
+				aggregate: { count: ['*'] },
+				group: ['category'],
+				limit: 10,
+			},
+			cases: [{ links: { name: { _eq: 'im' } } }],
+			permissions: [],
+		},
+		{
+			knex: knex.default({ client: Client_SQLite3 }),
+			schema: new SchemaBuilder()
+				.collection('articles', (c) => {
+					c.field('id').id();
+					c.field('category').string();
+					c.field('links').o2m('links_list', 'article_id');
+				})
+				.collection('links_list', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build(),
+		},
+	).toSQL();
+
+	expect(query.sql).toEqual(
+		'select count(*) as "count",'
+		+ ' (CASE WHEN "articles"."id" in'
+		+ ' (select distinct "articles"."id" from "articles"'
+		+ ' left join "links_list" as "__alias_3"'
+		+ ' on "articles"."id" = "__alias_3"."article_id"'
+		+ ' where ("__alias_3"."name" = ?))'
+		+ ' THEN "articles"."category" END) AS "category"'
+		+ ' from "articles"'
+		+ ' where "articles"."id" in'
+		+ ' (select distinct "articles"."id" from "articles"'
+		+ ' left join "links_list" as "__alias_1"'
+		+ ' on "articles"."id" = "__alias_1"."article_id"'
+		+ ' where ("__alias_1"."name" = ?))'
+		+ ' group by (CASE WHEN "articles"."id" in'
+		+ ' (select distinct "articles"."id" from "articles"'
+		+ ' left join "links_list" as "__alias_2"'
+		+ ' on "articles"."id" = "__alias_2"."article_id"'
+		+ ' where ("__alias_2"."name" = ?))'
+		+ ' THEN "articles"."category" END) limit ?',
+	);
+
+	expect(query.bindings).toEqual([
+		'im',
+		'articles.category',
+		'category',
+		'im',
+		'im',
+		'articles.category',
+		10,
+	]);
+});
