@@ -62,6 +62,10 @@ export const createSubscriptionTables = defineMigration(
 				table.enu('interval', ['month', 'year'])
 					.notNullable();
 
+				table.enu('status', ['active', 'subscriptions-locked', 'archived'])
+					.notNullable()
+					.defaultTo('active');
+
 				table.index(['policy']);
 			});
 
@@ -140,11 +144,50 @@ export const createSubscriptionTables = defineMigration(
 				table.timestamp('date_updated', { useTz: true })
 					.notNullable();
 
+				table.uuid('user_updated')
+					.nullable()
+					.references('id')
+					.inTable('directus_users')
+					.onDelete('SET NULL');
+
 				table.unique(['provider', 'provider_subscription_id']);
 				table.index(['subscriber']);
 				table.index(['customer']);
 				table.index(['plan']);
 				table.index(['access']);
+				table.index(['user_updated']);
+			});
+
+			await knex.schema.createTable('subscription_events', (table) => {
+				table.increments('id');
+
+				table.integer('subscription')
+					.unsigned()
+					.notNullable()
+					.references('id')
+					.inTable('subscriptions')
+					.onDelete('RESTRICT');
+
+				table.string('status', 32)
+					.notNullable();
+
+				table.timestamp('current_period_end', { useTz: true })
+					.nullable();
+
+				table.boolean('cancel_at_period_end')
+					.notNullable();
+
+				table.string('source', 32)
+					.notNullable();
+
+				// No foreign key: who asked outlives the deletion of their account.
+				table.uuid('user')
+					.nullable();
+
+				table.timestamp('date_created', { useTz: true })
+					.notNullable();
+
+				table.index(['subscription']);
 			});
 
 			await knex.schema.createTable('subscription_sync_queue', (table) => {
@@ -177,6 +220,7 @@ export const createSubscriptionTables = defineMigration(
 
 		async down(knex) {
 			await knex.schema.dropTable('subscription_sync_queue');
+			await knex.schema.dropTable('subscription_events');
 			await knex.schema.dropTable('subscriptions');
 			await knex.schema.dropTable('subscription_plan_references');
 			await knex.schema.dropTable('subscription_plans');

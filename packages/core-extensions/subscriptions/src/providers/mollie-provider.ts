@@ -1,5 +1,8 @@
 import { MollieApiError, type MollieClient } from '@mollie/api-client';
-import { WebhookRefusedError } from '../errors.js';
+import {
+	MissingProviderSubscriptionError,
+	WebhookRefusedError,
+} from '../errors.js';
 import type { ProviderSubscriptionIds, SubscriptionProvider } from './types.js';
 
 /** The fields read off Mollie's Subscription, which the client does not export. */
@@ -39,45 +42,27 @@ export function createMollieProvider(
 				});
 			}
 
-			const molliePayment = await fetchWebhookPayment(
-				mollieClient,
-				paymentId,
-			);
-
-			if (molliePayment.subscriptionId === undefined
-				|| molliePayment.customerId === undefined) {
-				throw new WebhookRefusedError({
-					provider: 'mollie',
-					reason: `payment ${JSON.stringify(paymentId)}`
-						+ ' belongs to no subscription',
-				});
-			}
-
-			return composeMollieResourceId({
-				subscriptionId: molliePayment.subscriptionId,
-				customerId: molliePayment.customerId,
-			});
+			// Mollie signs nothing, so the id is a hint for the sync worker to
+			// check: calling Mollie here would let a flood spend our API key.
+			return paymentId;
 		},
 
 		async fetchSubscription(resourceId) {
-			const { customerId, subscriptionId } = parseMollieResourceId(resourceId);
+			const { customerId, subscriptionId } = MOLLIE_PAYMENT_ID.test(resourceId)
+				? await readPaymentSubscription(mollieClient, resourceId)
+				: parseMollieResourceId(resourceId);
 
-			const mollieSubscription = await mollieClient.customerSubscriptions
-				.get(subscriptionId, { customerId });
-
-			const normalizedStatus = NORMALIZED_STATUSES[mollieSubscription.status];
-
-			if (normalizedStatus === undefined) {
-				throw new Error(
-					`Mollie subscription ${JSON.stringify(resourceId)} has unknown`
-					+ ` status ${JSON.stringify(mollieSubscription.status)}`,
-				);
-			}
+			const mollieSubscription = await getMollieSubscription(
+				mollieClient,
+				resourceId,
+				{ customerId, subscriptionId },
+			);
 
 			return {
 				subscriptionId,
 				customerId,
-				status: normalizedStatus,
+				status: NORMALIZED_STATUSES[mollieSubscription.status]
+					?? mollieSubscription.status,
 				currentPeriodEnd: await readPeriodEnd(
 					mollieClient,
 					mollieSubscription,
@@ -124,26 +109,53 @@ function parseMollieResourceId(resourceId: string): ProviderSubscriptionIds {
 	return { customerId, subscriptionId };
 }
 
-async function fetchWebhookPayment(
+async function readPaymentSubscription(
 	mollieClient: MollieClient,
 	paymentId: string,
-) {
-	try {
-		return await mollieClient.payments.get(paymentId);
-	}
-	catch (error) {
-		if (error instanceof MollieApiError && error.statusCode === 404) {
-			throw new WebhookRefusedError(
-				{
-					provider: 'mollie',
-					reason: `payment ${JSON.stringify(paymentId)} does not exist`,
-				},
-				{ cause: error },
-			);
-		}
+): Promise<ProviderSubscriptionIds> {
+	const molliePayment = await mollieClient.payments.get(paymentId)
+		.catch((error: unknown) => {
+			throw mapMollieNotFound(error, paymentId, null);
+		});
 
-		throw error;
+	if (molliePayment.subscriptionId === undefined
+		|| molliePayment.customerId === undefined) {
+		throw new MissingProviderSubscriptionError({
+			resourceId: paymentId,
+			subscriptionId: null,
+		});
 	}
+
+	return {
+		customerId: molliePayment.customerId,
+		subscriptionId: molliePayment.subscriptionId,
+	};
+}
+
+async function getMollieSubscription(
+	mollieClient: MollieClient,
+	resourceId: string,
+	{ customerId, subscriptionId }: ProviderSubscriptionIds,
+) {
+	return await mollieClient.customerSubscriptions
+		.get(subscriptionId, { customerId })
+		.catch((error: unknown) => {
+			throw mapMollieNotFound(error, resourceId, subscriptionId);
+		});
+}
+
+function mapMollieNotFound(
+	mollieError: unknown,
+	resourceId: string,
+	subscriptionId: string | null,
+): unknown {
+	return mollieError instanceof MollieApiError
+		&& mollieError.statusCode === 404
+		? new MissingProviderSubscriptionError(
+			{ resourceId, subscriptionId },
+			{ cause: mollieError },
+		)
+		: mollieError;
 }
 
 /**
@@ -190,6 +202,11 @@ function addMollieInterval(startDate: Date, mollieInterval: string): Date {
 
 	if (intervalMatch[2] === 'month') {
 		endDate.setUTCMonth(endDate.getUTCMonth() + intervalCount);
+
+		// Jan 31 rolled over to March: a paid month ends on the last day of Feb.
+		if (endDate.getUTCDate() !== startDate.getUTCDate()) {
+			endDate.setUTCDate(0);
+		}
 	}
 	else if (intervalMatch[2] === 'week') {
 		endDate.setUTCDate(endDate.getUTCDate() + 7 * intervalCount);

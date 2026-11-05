@@ -5,10 +5,15 @@ export type SyncQueueRow = {
 	provider: string;
 	resource_id: string;
 	attempts: number;
+	next_attempt_at: Date | number;
 };
+
+/** About 2 days at the longest retry delay; the row then waits for a webhook. */
+export const MAX_SYNC_ATTEMPTS = 48;
 
 export type SyncTarget = { provider: string; resourceId: string };
 
+/** A new event brings the retry forward; the failure history stays on the row. */
 export async function enqueueSync(
 	database: Knex,
 	syncTarget: SyncTarget,
@@ -23,7 +28,7 @@ export async function enqueueSync(
 			last_error: null,
 		})
 		.onConflict(['provider', 'resource_id'])
-		.merge(['pending', 'attempts', 'next_attempt_at', 'last_error']);
+		.merge(['pending', 'next_attempt_at']);
 }
 
 /** Row locks only exist on PG; elsewhere the transaction serialises. */
@@ -32,7 +37,7 @@ export function selectDueSync(
 	claimedAt: Date,
 ) {
 	const dueQuery = trx<SyncQueueRow>('subscription_sync_queue')
-		.select('id', 'provider', 'resource_id', 'attempts')
+		.select('id', 'provider', 'resource_id', 'attempts', 'next_attempt_at')
 		.where('pending', true)
 		.andWhere('next_attempt_at', '<=', claimedAt)
 		.orderBy('next_attempt_at')

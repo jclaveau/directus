@@ -1,6 +1,9 @@
 import Stripe from 'stripe';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { WebhookRefusedError } from '../errors.js';
+import {
+	MissingProviderSubscriptionError,
+	WebhookRefusedError,
+} from '../errors.js';
 import { createStripeProvider } from './stripe-provider.js';
 
 afterEach(() => {
@@ -308,6 +311,45 @@ describe('fetchSubscription', () => {
 			.fetchSubscription('sub_1')).rejects.toThrow(new Error(
 			'Stripe subscription "sub_1" has 2 items, expected one',
 		));
+	});
+
+	test('reports a subscription Stripe does not have', async () => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		vi.spyOn(stripeClient.subscriptions, 'retrieve').mockRejectedValue(
+			new Stripe.errors.StripeInvalidRequestError({
+				type: 'invalid_request_error',
+				code: 'resource_missing',
+				message: 'No such subscription',
+			}),
+		);
+
+		const fetchFailure = await createStripeProvider(stripeClient, 'whsec_1')
+			.fetchSubscription('sub_1')
+			.catch((fetchError: unknown) => fetchError);
+
+		expect(fetchFailure).toBeInstanceOf(MissingProviderSubscriptionError);
+
+		expect(fetchFailure).toMatchObject({
+			message: 'The provider has no subscription for "sub_1"',
+			extensions: { resourceId: 'sub_1', subscriptionId: 'sub_1' },
+		});
+	});
+
+	test('rethrows any other Stripe failure', async () => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		const invalidRequest = new Stripe.errors.StripeInvalidRequestError({
+			type: 'invalid_request_error',
+			code: 'parameter_invalid_empty',
+			message: 'Bad parameter',
+		});
+
+		vi.spyOn(stripeClient.subscriptions, 'retrieve')
+			.mockRejectedValue(invalidRequest);
+
+		await expect(createStripeProvider(stripeClient, 'whsec_1')
+			.fetchSubscription('sub_1')).rejects.toBe(invalidRequest);
 	});
 });
 
