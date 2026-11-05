@@ -6224,7 +6224,26 @@ describe('Services / Items / a batched upsert', () => {
 			reason: 'Primary key of test must be an integer instead of "abc"',
 		}));
 
-		expect(sqlStatements).toStrictEqual(['BEGIN;', 'ROLLBACK']);
+		expect(sqlStatements).toStrictEqual([]);
+	});
+
+	it('refuses a key of the wrong type before reading its scope', async () => {
+		const scopedSchema = new SchemaBuilder()
+			.collection('test', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.build();
+
+		scopedSchema.collections['test']!.scopedCacheFields = ['name'];
+
+		await expect(new ItemsService('test', { knex: database, schema: scopedSchema })
+			.upsertOne({ id: 'abc', name: 'wrong' }))
+			.rejects.toStrictEqual(new InvalidPayloadError({
+				reason: 'Primary key of test must be an integer instead of "abc"',
+			}));
+
+		expect(sqlStatements).toStrictEqual([]);
 	});
 
 	it('takes back the updates of a run whose create half fails', async () => {

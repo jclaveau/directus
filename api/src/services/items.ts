@@ -3224,6 +3224,19 @@ implements AbstractService<Item> {
 				: [];
 		});
 
+		validateKeys(
+			this.schema,
+			this.collection,
+			primaryKeyField,
+			payloads.flatMap((payload) => {
+				const key = payload[primaryKeyField];
+
+				return isMissingPrimaryKey(key)
+					? []
+					: [key];
+			}),
+		);
+
 		const oldScopedCacheSnapshot = await this.scopedCache.snapshot(inputKeys);
 
 		// Shared hook declarations: child upserts run with autoPurgeCache off, so a
@@ -3543,8 +3556,6 @@ implements AbstractService<Item> {
 				? []
 				: [primaryKey];
 		});
-
-		validateKeys(this.schema, this.collection, primaryKeyField, sentKeys);
 
 		const existingKeyNames = new Set<string>();
 
