@@ -7060,6 +7060,22 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 		]);
 	});
 
+	it(oneLine`
+		matches parents and children named with leading zeros to the rows they
+		name
+	`, async () => {
+		await new ItemsService('test', { knex: database, schema: parentSchema })
+			.updateMany(['001', '002'], { children: ['007', '008'] });
+
+		await expect(database('children').select('id', 'parent_id')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 5, parent_id: null },
+			{ id: 6, parent_id: null },
+			{ id: 7, parent_id: 2 },
+			{ id: 8, parent_id: 2 },
+		]);
+	});
+
 	it('leaves a child two created parents name on the last one', async () => {
 		await expect(new ItemsService('test', { knex: database, schema: parentSchema })
 			.createMany([
@@ -7182,6 +7198,26 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 		expect(revisionParentWrites).toStrictEqual([
 			{ keys: [1, 3], data: { parent: 4 } },
 			{ keys: [2], data: { parent: 5 } },
+		]);
+	});
+
+	it(oneLine`
+		files the revisions of a child two lists name under their parents in
+		list order
+	`, async () => {
+		await new ItemsService('test', {
+			knex: database,
+			schema: parentSchema,
+			accountability: { user: 'u1', role: 'r1', admin: true, app: true } as any,
+		}).createMany([
+			{ id: 3, name: 'three', children: [{ id: 6, name: 'six of three' }] },
+			{ id: 4, name: 'four', children: [{ id: 6, name: 'six of four' }] },
+		]);
+
+		// revision 1 is the child of 3, revision 2 the child of 4
+		expect(revisionParentWrites).toStrictEqual([
+			{ keys: [1], data: { parent: 3 } },
+			{ keys: [2], data: { parent: 4 } },
 		]);
 	});
 

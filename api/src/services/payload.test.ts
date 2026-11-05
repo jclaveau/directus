@@ -935,6 +935,31 @@ describe('Integration Tests', () => {
 				);
 			});
 
+			test(oneLine`
+				reads the children a list names 10 000 keys at a time, since one
+				statement past 65 535 keys would overflow Postgres's bind parameters
+			`, async () => {
+				tracker.on.select('city').response(Array.from(
+					{ length: 10_001 },
+					(_, index) => ({ id: index + 1, country_id: 1 }),
+				));
+
+				vi.spyOn(ItemsService.prototype, 'upsertMany').mockResolvedValue([]);
+				vi.spyOn(ItemsService.prototype, 'updateByQuery').mockResolvedValue([]);
+
+				await service.processO2M([{
+					data: {
+						cities: Array.from({ length: 10_001 }, (_, index) => index + 1),
+					},
+					key: 1,
+				}]);
+
+				expect(tracker.history.select).toMatchObject([
+					{ bindings: Array.from({ length: 10_000 }, (_, index) => index + 1) },
+					{ bindings: [10_001] },
+				]);
+			});
+
 			test('refuses a revision reported without the key of its item', async () => {
 				vi.spyOn(ItemsService.prototype, 'upsertMany')
 					.mockImplementation(async (_payloads, opts) => {
