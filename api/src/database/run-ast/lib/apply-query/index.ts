@@ -18,6 +18,7 @@ type ApplyQueryOptions = {
 	hasMultiRelationalSort?: boolean | undefined;
 	groupWhenCases?: number[][] | undefined;
 	groupColumnPositions?: number[] | undefined;
+	filteredInSubquery?: boolean;
 };
 
 /**
@@ -71,7 +72,9 @@ export default function applyQuery(
 	// is reused in the column selection case/when to dynamically return or nullify the field values
 	// you're actually allowed to read
 
-	const filter: Filter | null = joinFilterWithCases(query.filter, cases);
+	const filter: Filter | null = options?.filteredInSubquery
+		? null
+		: joinFilterWithCases(query.filter, cases);
 
 	if (filter) {
 		const filterResult = applyFilter(

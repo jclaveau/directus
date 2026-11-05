@@ -59,6 +59,38 @@ export function getDBQuery(
 	// Queries with aggregates and groupBy will not have duplicate result
 	if (queryCopy.aggregate || queryCopy.group) {
 		const flatQuery = knex.from(table);
+		const keyColumn = `${table}.${schema.collections[table]!.primary}`;
+		const filterOnly = { filter: queryCopy.filter };
+
+		// A filter through an o2m joins one row per child: the aggregate reads
+		// the distinct keys it matches instead, so a parent counts once
+		const { hasMultiRelationalFilter: filtersThroughChildren } = applyQuery(
+			knex,
+			table,
+			knex.from(table),
+			filterOnly,
+			schema,
+			cases,
+			permissions,
+			createAliasGenerator(),
+		);
+
+		if (filtersThroughChildren) {
+			const matchedKeys = knex.from(table).distinct(keyColumn);
+
+			applyQuery(
+				knex,
+				table,
+				matchedKeys,
+				filterOnly,
+				schema,
+				cases,
+				permissions,
+				generateAlias,
+			);
+
+			flatQuery.whereIn(keyColumn, matchedKeys);
+		}
 
 		const fieldNodeMap = Object.fromEntries(
 			fieldNodes.map((node, index): [string, [FieldNode | FunctionFieldNode, number]] => [
@@ -95,6 +127,7 @@ export function getDBQuery(
 				aliasMap,
 				groupWhenCases,
 				groupColumnPositions,
+				filteredInSubquery: filtersThroughChildren,
 			},
 		).query;
 
