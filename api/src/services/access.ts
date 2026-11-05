@@ -8,6 +8,7 @@ import type {
 import { InvalidPayloadError } from '@directus/errors';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
+import { validateKeys } from '../utils/validate-keys.js';
 import { ItemsService } from './items.js';
 
 export class AccessService extends ItemsService {
@@ -33,10 +34,20 @@ export class AccessService extends ItemsService {
 		}
 	}
 
+	// Read outside the write's transaction: an extension marking a row between
+	// this read and the write is not seen, and the request's write lands.
 	private async refuseManagedAccessInRequest(keys: PrimaryKey[]) {
 		if (!this.accountability) {
 			return;
 		}
+
+		// Before the read, whose uuid cast would fail in the database instead.
+		validateKeys(
+			this.schema,
+			this.collection,
+			this.schema.collections[this.collection]!.primary,
+			keys,
+		);
 
 		const managedAccess = await this.knex
 			.select('id', 'managed_by')
