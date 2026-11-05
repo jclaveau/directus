@@ -323,7 +323,7 @@ test('an aggregate reads a field through the rule granting it', () => {
 					permissions: { id: { _gt: 5 } },
 					fields: ['salary'],
 				},
-			] as Permission[],
+			] as unknown as Permission[],
 		},
 		{
 			knex: knex.default({ client: Client_SQLite3 }),

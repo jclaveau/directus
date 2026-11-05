@@ -39,12 +39,16 @@ export const seedDBStructure = () => {
 							fields: [
 								{ field: 'category', type: 'string', meta: {} },
 								{ field: 'salary', type: 'integer', meta: {} },
+								{ field: 'bonus', type: 'integer', meta: {} },
 							],
 						},
 						{
 							collection: collectionLink,
 							primaryKeyType: 'string',
-							fields: [{ field: 'name', type: 'string', meta: {} }],
+							fields: [
+								{ field: 'name', type: 'string', meta: {} },
+								{ field: 'weight', type: 'integer', meta: {} },
+							],
 						},
 					],
 				});

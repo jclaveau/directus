@@ -98,6 +98,39 @@ test.each([
 		+ ' where ("articles"."id" > ?))'
 		+ ` THEN "articles"."salary" END)) as "${operation}->salary"`,
 	);
+	expect(queryBuilder.toSQL().bindings).toEqual([5]);
+});
+
+test('an operation named after an object key selects nothing', () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyAggregate(
+		schema,
+		queryBuilder,
+		JSON.parse('{"constructor":["salary"]}'),
+		'articles',
+		false,
+		{
+			knex: db,
+			cases: [{}, { id: { _gt: 5 } }],
+			permissions: [
+				{
+					collection: 'articles',
+					permissions: {},
+					fields: ['id'],
+				},
+				{
+					collection: 'articles',
+					permissions: { id: { _gt: 5 } },
+					fields: ['salary'],
+				},
+			] as Permission[],
+			generateAlias: createAliasGenerator(),
+		},
+	);
+
+	expect(queryBuilder.toSQL().sql).toEqual('select *');
 });
 
 test('countDistinct of a primary key one rule grants goes through that rule', () => {
@@ -135,6 +168,7 @@ test('countDistinct of a primary key one rule grants goes through that rule', ()
 		+ ' where ("articles"."id" > ?))'
 		+ ' THEN "articles"."id" END)) as "countDistinct->id"',
 	);
+	expect(queryBuilder.toSQL().bindings).toEqual([5]);
 });
 
 test('a field granted on every row reads no case', () => {
@@ -195,7 +229,7 @@ test('a field granted by every rule the rows go through reads no case', () => {
 					permissions: { id: { _lt: 2 } },
 					fields: ['salary'],
 				},
-			] as Permission[],
+			] as unknown as Permission[],
 			generateAlias: createAliasGenerator(),
 		},
 	);
@@ -229,7 +263,7 @@ test('a field granted by a rule the rows do not go through reads a case', () => 
 					permissions: { id: { _gt: 5 } },
 					fields: ['salary'],
 				},
-			] as Permission[],
+			] as unknown as Permission[],
 			generateAlias: createAliasGenerator(),
 		},
 	);
@@ -240,6 +274,7 @@ test('a field granted by a rule the rows do not go through reads a case', () => 
 		+ ' where ("articles"."id" > ?))'
 		+ ' THEN "articles"."salary" END)) as "sum->salary"',
 	);
+	expect(queryBuilder.toSQL().bindings).toEqual([5]);
 });
 
 test('a count of every row reads no case', () => {
