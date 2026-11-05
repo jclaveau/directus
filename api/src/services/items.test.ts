@@ -6538,7 +6538,7 @@ describe('Services / Items / a batched upsert', () => {
 			.resolves.toStrictEqual([{ id: 90, parent: 10, other_a: 50 }]);
 	});
 
-	it('gives the child two payloads name by key to the last one', async () => {
+	it('gives the child two payloads naming it by key to the last one', async () => {
 		const notesSchema = new SchemaBuilder()
 			.collection('entries', (c) => {
 				c.field('id').id();

@@ -3568,6 +3568,10 @@ implements AbstractService<Item> {
 	 * A row an update hook adds is updated only if it existed before the run:
 	 * the hook sees the found keys, never the ones the run creates. An upsert
 	 * hook seeing the whole run could allow it.
+	 *
+	 * A unique value an update frees can go to a create of the same run:
+	 * `[{ id: 2, code: 'A' }, { id: 1, code: 'B' }]`, row 1 holding `'A'`,
+	 * writes both, where each payload in turn would refuse the create.
 	 */
 	protected async upsertRun(
 		upsertRun: Partial<Item>[],
