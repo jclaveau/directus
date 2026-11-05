@@ -74,6 +74,7 @@ describe('archivePlan', () => {
 				provider: 'stripe',
 				provider_subscription_id: 'sub_ended',
 				status: 'canceled',
+				cancel_at_period_end: false,
 				date_created: new Date('2026-10-01T00:00:00Z'),
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
