@@ -12,6 +12,7 @@ describe.each(vendors)('%s', (vendor) => {
 			'a child updates the row a child before it created as its nested child',
 			'a child links to a child created before it',
 			'a child nests a row pointing back at a child created before it',
+			'the last of two children naming one row by key gets it',
 		]) {
 			scenario(title, (steps) => {
 				defineNestedWriteSteps(steps, vendor, () => getUrl(vendor));

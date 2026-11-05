@@ -3463,18 +3463,20 @@ implements AbstractService<Item> {
 	 * Splits upsert payloads where one repeats a key its run already holds, so
 	 * no run sends `updateGroups` or `createMany` a row twice.
 	 *
-	 * A payload nesting rows, or naming a row through a self relation (its key
-	 * alone included), upserts in a run of its own, in payload order: a run
-	 * writes its updates before its creates, so a row it names, or a row its
-	 * nested rows point back at through any number of collections, may not
-	 * exist yet, and a row a nested write creates would be created again.
+	 * A payload nesting rows, naming a row through a self relation (its key
+	 * alone included), or setting an o2m alias in any form, upserts in a run of
+	 * its own, in payload order: a run writes its updates before its creates,
+	 * so a row it names, or a row its nested rows point back at through any
+	 * number of collections, may not exist yet, a row a nested write creates
+	 * would be created again, and of two payloads naming one child by key the
+	 * first would keep it, where the last does in payload order.
 	 */
 	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const nestingFields = new Set<string>();
 		const selfRelationFields = new Set<string>();
-		// `null` clears every child, deleting them under `one_deselect_action: 'delete'`
-		const selfChildrenFields = new Set<string>();
+		// an o2m alias rewrites its children's foreign key, `null` and `[]` included
+		const childrenFields = new Set<string>();
 
 		for (const relation of this.schema.relations) {
 			if (relation.collection === this.collection) {
@@ -3493,11 +3495,7 @@ implements AbstractService<Item> {
 				&& relation.meta?.one_field
 			) {
 				nestingFields.add(relation.meta.one_field);
-
-				if (relation.collection === this.collection) {
-					selfRelationFields.add(relation.meta.one_field);
-					selfChildrenFields.add(relation.meta.one_field);
-				}
+				childrenFields.add(relation.meta.one_field);
 			}
 		}
 
@@ -3508,9 +3506,11 @@ implements AbstractService<Item> {
 				return isPlainObject(value)
 					|| (Array.isArray(value) && value.some(isPlainObject));
 			})
+				|| [...childrenFields].some((field) => {
+					return payload[field] !== undefined;
+				})
 				|| [...selfRelationFields].some((field) => {
-					return payload[field] !== undefined
-						&& (payload[field] !== null || selfChildrenFields.has(field));
+					return payload[field] !== undefined && payload[field] !== null;
 				});
 		};
 

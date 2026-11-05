@@ -6538,6 +6538,40 @@ describe('Services / Items / a batched upsert', () => {
 			.resolves.toStrictEqual([{ id: 90, parent: 10, other_a: 50 }]);
 	});
 
+	it('gives the child two payloads name by key to the last one', async () => {
+		const notesSchema = new SchemaBuilder()
+			.collection('entries', (c) => {
+				c.field('id').id();
+				c.field('notes').o2m('notes', 'entry');
+			})
+			.collection('notes', (c) => {
+				c.field('id').id();
+				c.field('entry').m2o('entries');
+			})
+			.build();
+
+		await database.schema.createTable('entries', (table) => {
+			table.increments('id');
+		});
+
+		await database.schema.createTable('notes', (table) => {
+			table.increments('id');
+			table.integer('entry');
+		});
+
+		await database('entries').insert({ id: 2 });
+		await database('notes').insert({ id: 9, entry: null });
+
+		await expect(new ItemsService('entries', { knex: database, schema: notesSchema })
+			.upsertMany([
+				{ id: 3, notes: [9] },
+				{ id: 2, notes: [9] },
+			])).resolves.toStrictEqual([3, 2]);
+
+		await expect(database('notes').select('id', 'entry'))
+			.resolves.toStrictEqual([{ id: 9, entry: 2 }]);
+	});
+
 	it('upserts a payload nesting a row in its own run', async () => {
 		const taggedSchema = new SchemaBuilder()
 			.collection('test', (c) => {

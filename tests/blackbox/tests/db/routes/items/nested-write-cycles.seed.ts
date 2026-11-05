@@ -12,6 +12,7 @@ export const collectionNode = 'test_nested_cycle_node';
 export const collectionOwner = 'test_nested_cycle_owner';
 export const collectionEntry = 'test_nested_cycle_entry';
 export const collectionRef = 'test_nested_cycle_ref';
+export const collectionNote = 'test_nested_cycle_note';
 
 export const seedDBStructure = () => {
 	it.each(vendors)(
@@ -32,6 +33,7 @@ export const seedDBStructure = () => {
 				for (const collection of [
 					collectionNode,
 					collectionRef,
+					collectionNote,
 					collectionEntry,
 					collectionOwner,
 				]) {
@@ -53,6 +55,7 @@ export const seedDBStructure = () => {
 							fields: [{ field: 'name', type: 'string', meta: {} }],
 						},
 						{ collection: collectionRef, primaryKeyType: 'string' },
+						{ collection: collectionNote, primaryKeyType: 'string' },
 					],
 				});
 
@@ -77,6 +80,14 @@ export const seedDBStructure = () => {
 					primaryKeyType: 'string',
 					otherCollection: collectionEntry,
 					otherField: 'owner',
+				});
+
+				await CreateFieldO2M(vendor, {
+					collection: collectionEntry,
+					field: 'notes',
+					primaryKeyType: 'string',
+					otherCollection: collectionNote,
+					otherField: 'entry',
 				});
 
 				await CreateFieldM2O(vendor, {
