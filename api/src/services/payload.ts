@@ -1056,7 +1056,9 @@ export class PayloadService {
 		}
 
 		// Nullify all related items that aren't included in the current payload, only
-		// for the parents still holding one: most parents hold none after a create
+		// for the parents still holding one: most parents hold none after a create.
+		// A single parent skips the probe: its deselect query reads as much
+		const probesHeldChildren = listedParents.length > 1;
 		const savedKeyNamesOfParents = new Map<string, Set<string>>();
 
 		for (const [parentIndex, parentRow] of listedParents.entries()) {
@@ -1074,7 +1076,11 @@ export class PayloadService {
 
 		const listedParentKeys = listedParents.map((parentRow) => parentRow.key);
 
-		for (const keyChunk of chunk(listedParentKeys, O2M_READ_CHUNK_SIZE)) {
+		const probedKeyChunks = probesHeldChildren
+			? chunk(listedParentKeys, O2M_READ_CHUNK_SIZE)
+			: [];
+
+		for (const keyChunk of probedKeyChunks) {
 			const heldRecords = await this.knex
 				.select(relatedPrimaryKeyField, relation.field)
 				.from(relation.collection)
@@ -1096,7 +1102,10 @@ export class PayloadService {
 		for (const [parentIndex, parentRow] of listedParents.entries()) {
 			const parentKeyName = parentKeyNameOf(parentRow.key);
 
-			if (!parentKeyNamesLeavingChildren.has(parentKeyName)) {
+			if (
+				probesHeldChildren
+				&& !parentKeyNamesLeavingChildren.has(parentKeyName)
+			) {
 				continue;
 			}
 

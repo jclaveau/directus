@@ -6973,6 +6973,23 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 		]);
 	});
 
+	it(oneLine`
+		goes straight to the deselect of a single parent, its own read telling
+		whether it holds a child left out
+	`, async () => {
+		await new ItemsService('test', { knex: database, schema: parentSchema })
+			.updateOne(2, { children: [7] });
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id`, `parent_id` from `children` where `id` in (?)',
+			'select `children`.`id` from `children` where (`children`.`parent_id` = ?'
+				+ ' and `children`.`id` not in (?)) order by `children`.`id` asc',
+			'update `children` set `parent_id` = ? where `id` in (?)',
+			'COMMIT;',
+		]);
+	});
+
 	it('leaves a child two created parents name on the last one', async () => {
 		await expect(new ItemsService('test', { knex: database, schema: parentSchema })
 			.createMany([
