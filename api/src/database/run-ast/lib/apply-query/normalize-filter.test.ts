@@ -193,6 +193,77 @@ describe('normalizeFilter', () => {
 		});
 	});
 
+	test('keeps sibling keys inside _some under one _some', () => {
+		expect(
+			normalizeFilter({
+				rel: {
+					_some: { name: { _eq: 'a' }, status: { _eq: 'b' } },
+				},
+			}),
+		).toEqual({
+			rel: {
+				_some: {
+					_and: [{ name: { _eq: 'a' } }, { status: { _eq: 'b' } }],
+				},
+			},
+		});
+	});
+
+	test('keeps an _and inside _some under the _some', () => {
+		expect(
+			normalizeFilter({
+				rel: {
+					_some: {
+						_and: [{ name: { _eq: 'a' } }, { status: { _eq: 'b' } }],
+					},
+				},
+			}),
+		).toEqual({
+			rel: {
+				_some: {
+					_and: [{ name: { _eq: 'a' } }, { status: { _eq: 'b' } }],
+				},
+			},
+		});
+	});
+
+	test('keeps an _or inside _none under the _none', () => {
+		expect(
+			normalizeFilter({
+				rel: {
+					_none: {
+						_or: [{ name: { _eq: 'a' } }, { name: { _eq: 'b' } }],
+					},
+				},
+			}),
+		).toEqual({
+			rel: {
+				_none: {
+					_or: [{ name: { _eq: 'a' } }, { name: { _eq: 'b' } }],
+				},
+			},
+		});
+	});
+
+	test('normalizes the content of a _some as a filter of its own', () => {
+		expect(
+			normalizeFilter({
+				rel: {
+					_some: { sub: { name: { _eq: 'a' }, status: { _eq: 'b' } } },
+				},
+			}),
+		).toEqual({
+			rel: {
+				_some: {
+					_and: [
+						{ sub: { name: { _eq: 'a' } } },
+						{ sub: { status: { _eq: 'b' } } },
+					],
+				},
+			},
+		});
+	});
+
 	test('wraps unique top-level keys in _and rather than merging them flat', () => {
 		const filter = {
 			field_a: { _eq: 1 },

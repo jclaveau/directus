@@ -389,6 +389,7 @@ test(`filtering o2m relation with sibling keys inside _some`, async () => {
 
 	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
+	aliasFn.mockReturnValueOnce('alias');
 
 	applyFilter(
 		db,
@@ -410,10 +411,54 @@ test(`filtering o2m relation with sibling keys inside _some`, async () => {
 
 	const rawQuery = queryBuilder.toSQL();
 
-	// the quantifier still produces a subquery, and both siblings survive inside it
-	expect(rawQuery.sql).toContain('select');
-	expect(rawQuery.bindings).toContain('a');
-	expect(rawQuery.bindings).toContain('b');
+	// one subquery holding both siblings: a single link has to match both
+	expect(rawQuery.sql).toEqual(
+		'select * left join "links_list" as "alias"'
+		+ ' on "article"."id" = "alias"."article_id"'
+		+ ' where "article"."id" in (select "links_list"."article_id"'
+		+ ' as "article_id" from "links_list"'
+		+ ' where "links_list"."article_id" is not null'
+		+ ' and ("links_list"."name" = ? and "links_list"."status" = ?))',
+	);
+
+	expect(rawQuery.bindings).toEqual(['a', 'b']);
+});
+
+test(`filtering o2m relation with an _or inside _none`, async () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+	aliasFn.mockReturnValueOnce('alias');
+
+	applyFilter(
+		db,
+		o2m_schema,
+		queryBuilder,
+		{
+			links: {
+				_none: {
+					_or: [{ name: { _eq: 'a' } }, { name: { _eq: 'b' } }],
+				},
+			},
+		},
+		'article',
+		{},
+		[],
+		[],
+	);
+
+	const rawQuery = queryBuilder.toSQL();
+
+	// one subquery holding the _or: no link may match either
+	expect(rawQuery.sql).toEqual(
+		'select * left join "links_list" as "alias"'
+		+ ' on "article"."id" = "alias"."article_id"'
+		+ ' where "article"."id" not in (select "links_list"."article_id"'
+		+ ' as "article_id" from "links_list"'
+		+ ' where "links_list"."article_id" is not null'
+		+ ' and ("links_list"."name" = ? or "links_list"."name" = ?))',
+	);
+
+	expect(rawQuery.bindings).toEqual(['a', 'b']);
 });
 
 test(`filtering a2o relation`, async () => {
