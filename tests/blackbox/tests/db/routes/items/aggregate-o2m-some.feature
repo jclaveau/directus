@@ -7,6 +7,8 @@ Feature: An aggregate over an o2m quantifier counts each parent once
     checks; every key is a string the scenario chooses, all of one
     scenario's keys sharing a prefix of its own.
 
+  # TODO(#610): `count: "1"` is the string pg returns; sqlite returns the
+  # number 1, so both scenarios fail on sqlite until the count is normalised
   Scenario: a count filtered by _some counts a parent with two links once
     Given the rows of test_aggregate_some_article:
       | id   |
