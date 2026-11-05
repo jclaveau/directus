@@ -6219,6 +6219,40 @@ describe('Services / Items / a batched upsert', () => {
 		]);
 	});
 
+	it('answers null at the payload an update filter cancels', async () => {
+		const cancelRowOne = (groups: UpdateGroup[]) => {
+			return mapUpdateRows(groups, (data, key) => {
+				return key === 1
+					? null
+					: data;
+			});
+		};
+
+		emitter.onFilter('test.items.update', cancelRowOne);
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema })
+				.upsertMany(
+					[
+						{ id: 1, name: 'refused' },
+						{ id: 2, name: 'dos' },
+						{ id: 4, name: 'four' },
+					],
+					{ allowFilterCancel: true },
+				)).resolves.toStrictEqual([null, 2, 4]);
+		}
+		finally {
+			emitter.offFilter('test.items.update', cancelRowOne);
+		}
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'dos' },
+			{ id: 4, name: 'four' },
+		]);
+	});
+
 	it('refuses a key of the wrong type before reading or writing', async () => {
 		const service = new ItemsService('test', { knex: database, schema });
 

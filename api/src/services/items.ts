@@ -3577,6 +3577,7 @@ implements AbstractService<Item> {
 		const updateGroups: UpdateGroup<Item>[] = [];
 		const createPayloads: Partial<Item>[] = [];
 		const upsertedKeys: PrimaryKey[] = [];
+		const updateIndexes: number[] = [];
 		const createIndexes: number[] = [];
 
 		for (const [index, payload] of upsertRun.entries()) {
@@ -3591,7 +3592,7 @@ implements AbstractService<Item> {
 					keys: [primaryKey],
 				});
 
-				upsertedKeys[index] = primaryKey;
+				updateIndexes.push(index);
 			}
 			else {
 				createPayloads.push(payload);
@@ -3600,7 +3601,12 @@ implements AbstractService<Item> {
 		}
 
 		if (updateGroups.length > 0) {
-			await this.updateGroups(updateGroups, opts);
+			// one key per group, so one answer per group: null where a filter cancelled it
+			const updatedKeys = await this.updateGroups(updateGroups, opts);
+
+			for (const [updateIndex, updatedKey] of updatedKeys.entries()) {
+				upsertedKeys[updateIndexes[updateIndex]!] = updatedKey;
+			}
 		}
 
 		if (createPayloads.length > 0) {
