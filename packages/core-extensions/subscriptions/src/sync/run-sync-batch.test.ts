@@ -221,6 +221,47 @@ describe('runSyncBatch', () => {
 			}]);
 	});
 
+	test('records a thrown value JSON cannot hold', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'mollie',
+			resource_id: 'cst_1/sub_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const circularRejection: Record<string, unknown> = {};
+		circularRejection['self'] = circularRejection;
+		const logger = { warn: vi.fn() };
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'mollie',
+				{
+					fetchSubscription: vi.fn()
+						.mockRejectedValue(circularRejection),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			logger,
+		});
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			'Subscription sync of "mollie" "cst_1/sub_1" failed, attempt 1:'
+			+ ' "[object Object]"',
+		);
+
+		expect(await database('subscription_sync_queue')
+			.select('attempts', 'next_attempt_at', 'last_error'))
+			.toEqual([{
+				attempts: 1,
+				next_attempt_at: 1_793_836_860_000,
+				last_error: '[object Object]',
+			}]);
+	});
+
 	test('rethrows an error raised before any row was claimed', async () => {
 		vi.spyOn(database, 'transaction')
 			.mockRejectedValue(new Error('connection lost'));
