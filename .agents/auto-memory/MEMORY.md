@@ -62,7 +62,7 @@ line appended below.
 - [knex-mock matches raw SQL](reference_directus_knex_mock_sql_matching.md) — register the narrower handler first
 - [useEnv mock needs vi.hoisted](reference_directus_useenv_mock_hoisted.md) — automock evals the real module first
 
-## api (33) — Directus core internals, env, errors, migrations, DB
+## api (34) — Directus core internals, env, errors, migrations, DB
 `.agents/auto-memory/index/api.md`
 
 - [A bad env var fails the boot](feedback_directus_bad_env_var_fails_boot.md) — exit before listen naming the var; never fall back

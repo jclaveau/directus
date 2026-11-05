@@ -2,6 +2,7 @@
 
 Full hooks for this area. The routing keys live in `../MEMORY.md`.
 
+- [#679 managed_by on directus_access](../project_directus_pr679_managed_by.md) — guard refuses request grant changes on a managed row; bb select counts +1; rulings; #680 bundle rulings (subscription_events, archive sentence, 404 closes)
 - [get-schema raw-knex reads JSON meta dialect-native](../project_directus_get_schema_raw_knex_json.md) — get-schema bypasses the cast-json pipeline → JSON meta cols come back parsed on PG, string on mysql/sqlite; normalize with @directus/utils parseJSON + array passthrough
 - [Directus DB clients & batch-insert RETURNING support](../project_directus_db_clients.md) — canonical list in `api/src/types/database.ts`; MariaDB rides under `mysql`; mysql/mariadb/sqlite hit the fallback loop
 - [knex >=3.2 breaks Directus deep sort](../project_directus_knex_deepsort_regression.md) — knex 3.2.10 #6392 wraps window aliases; Directus pre-wraps directus_row_number → double-escape → 500 on every o2m/m2m/m2a sort; pin knex 3.1.0

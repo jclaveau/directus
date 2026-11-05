@@ -60,3 +60,4 @@ Survey verdict (8 npm packages, code read by 4 subagents, none run): none safe t
 - managed_by core PR opened: #679 (2026-11-05), the subscriptions bundle stacks on it.
 - Round 5 RULED (2026-11-05): own invoices in BOTH HTML and PDF; VAT location evidence (which country a buyer is in) deferred — listed as an open question in the bundle PR description; decisions posted to #652 (body ready, post was blocked by the permission check). #673 merged; the bundle branches off #679's head (stacked) until #679 merges.
 - Bundle PR #680 opened 2026-11-05 (base = #679 branch, retarget to hhh-dev once #679 merges); the 19 design questions + deferred VAT location evidence live in its description, not in the package.
+- #679 + #680 review rounds ruled and coded (2026-11-05): see [[project_directus_pr679_managed_by]]. Revisions UI for the subscription tables offered, no answer yet.
