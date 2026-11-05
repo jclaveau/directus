@@ -52,7 +52,7 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | 1       | directus_revisions         | 0      | 2      | 0      | 0      |
       | 1       | directus_users             | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list       | 3      | 0      | 0      | 0      |
-      | 1       | test_nested_o2m_list_entry | 9      | 0      | 2      | 0      |
+      | 1       | test_nested_o2m_list_entry | 7      | 0      | 2      | 0      |
 
   Scenario: a child named by a key no row has is refused, writing nothing
     Given the rows of test_nested_o2m_list:
@@ -113,7 +113,7 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | 1       | directus_revisions         | 0      | 3      | 0      | 0      |
       | 1       | directus_users             | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list       | 3      | 0      | 0      | 0      |
-      | 1       | test_nested_o2m_list_entry | 9      | 1      | 2      | 0      |
+      | 1       | test_nested_o2m_list_entry | 7      | 1      | 2      | 0      |
 
   Scenario: a batch deletes the children each parent leaves out when the relation deletes
     Given the rows of test_nested_o2m_bin:
@@ -200,11 +200,11 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | mc-o1 | mc-a |
     And on postgres the requests ran these statements:
       | request | table                      | select | insert | update | delete |
-      | 1       | directus_activity          | 0      | 4      | 0      | 0      |
-      | 1       | directus_revisions         | 0      | 4      | 2      | 0      |
+      | 1       | directus_activity          | 0      | 3      | 0      | 0      |
+      | 1       | directus_revisions         | 0      | 3      | 2      | 0      |
       | 1       | directus_users             | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list       | 1      | 1      | 0      | 0      |
-      | 1       | test_nested_o2m_list_entry | 9      | 2      | 1      | 0      |
+      | 1       | test_nested_o2m_list_entry | 5      | 1      | 1      | 0      |
 
   Scenario: a batch swaps children between its parents, nullifying each one's others
     Given the rows of test_nested_o2m_list:
@@ -332,9 +332,9 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | 1       | directus_revisions       | 0      | 2      | 1      | 0      |
       | 1       | directus_users           | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_post     | 1      | 1      | 0      | 0      |
-      | 1       | test_nested_o2m_post_tag | 5      | 1      | 0      | 0      |
+      | 1       | test_nested_o2m_post_tag | 4      | 1      | 0      | 0      |
       | 2       | directus_activity        | 0      | 3      | 0      | 0      |
       | 2       | directus_revisions       | 0      | 2      | 0      | 0      |
       | 2       | directus_users           | 1      | 0      | 0      | 0      |
       | 2       | test_nested_o2m_post     | 3      | 0      | 0      | 0      |
-      | 2       | test_nested_o2m_post_tag | 7      | 1      | 1      | 0      |
+      | 2       | test_nested_o2m_post_tag | 6      | 1      | 1      | 0      |

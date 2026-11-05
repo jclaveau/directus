@@ -156,7 +156,7 @@ Feature: An import writes the nested changes of every row it reads
       | 1       | directus_revisions        | 0      | 3      | 1      | 0      |
       | 1       | directus_users            | 1      | 0      | 0      | 0      |
       | 1       | test_write_import_deleted | 4      | 1      | 0      | 0      |
-      | 1       | test_write_import_nulled  | 5      | 1      | 0      | 0      |
+      | 1       | test_write_import_nulled  | 4      | 1      | 0      | 0      |
       | 1       | test_write_import_parent  | 1      | 1      | 0      | 0      |
       | 2       | directus_activity         | 0      | 4      | 0      | 0      |
       | 2       | directus_revisions        | 0      | 2      | 0      | 0      |
