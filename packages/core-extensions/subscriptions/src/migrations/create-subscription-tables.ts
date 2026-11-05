@@ -32,6 +32,7 @@ export const createSubscriptionTables = defineMigration(
 					.notNullable();
 
 				table.unique(['provider', 'provider_customer_id']);
+				table.index(['subscriber']);
 			});
 
 			await knex.schema.createTable('subscription_plans', (table) => {
@@ -58,6 +59,8 @@ export const createSubscriptionTables = defineMigration(
 
 				table.enu('interval', ['month', 'year'])
 					.notNullable();
+
+				table.index(['policy']);
 			});
 
 			await knex.schema.createTable(
@@ -79,6 +82,7 @@ export const createSubscriptionTables = defineMigration(
 						.notNullable();
 
 					table.unique(['provider', 'reference']);
+					table.index(['plan']);
 				},
 			);
 
@@ -135,6 +139,10 @@ export const createSubscriptionTables = defineMigration(
 					.notNullable();
 
 				table.unique(['provider', 'provider_subscription_id']);
+				table.index(['subscriber']);
+				table.index(['customer']);
+				table.index(['plan']);
+				table.index(['access']);
 			});
 
 			await knex.schema.createTable('subscription_sync_queue', (table) => {
