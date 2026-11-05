@@ -109,7 +109,15 @@ async function recordSyncFailure(
 }
 
 function readErrorMessage(syncError: unknown): string {
-	return syncError instanceof Error
-		? syncError.message
-		: JSON.stringify(syncError);
+	if (syncError instanceof Error) {
+		return syncError.message;
+	}
+
+	// A throw here would skip the backoff: the row would starve the queue.
+	try {
+		return JSON.stringify(syncError) ?? String(syncError);
+	}
+	catch {
+		return String(syncError);
+	}
 }
