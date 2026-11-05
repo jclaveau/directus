@@ -69,7 +69,9 @@ describe('verifyWebhook', () => {
 
 		await expect(createMollieProvider(mollieClient as unknown as MollieClient)
 			.verifyWebhook(Buffer.from('id=tr_1'), {}))
-			.rejects.toThrow(new MollieApiError('Unavailable'));
+			.rejects.toThrow(
+				new MollieApiError('Unavailable', { statusCode: 503 }),
+			);
 	});
 
 	test('refuses a payment outside any subscription', async () => {
