@@ -47,7 +47,7 @@ Feature: An aggregate over an o2m quantifier counts each parent once
       |   filter[id][_starts_with]: nn-          |                  |
       |   filter[links][_none][name][_eq]: nn    |                  |
 
-  Scenario: a count filtered through an o2m field without a quantifier counts a parent with two links once
+  Scenario: a count through an o2m filter with no quantifier counts a parent once
     Given the rows of test_aggregate_some_article:
       | id   |
       | im-a |
