@@ -6461,6 +6461,49 @@ describe('Services / Items / a batched upsert', () => {
 		]);
 	});
 
+	it(oneLine`
+		creates a row before the payload after it nests children pointing at it
+	`, async () => {
+		const cycleSchema = new SchemaBuilder()
+			.collection('a', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('bs').o2m('b', 'parent');
+			})
+			.collection('b', (c) => {
+				c.field('id').id();
+				c.field('parent').m2o('a');
+				c.field('other_a').m2o('a');
+			})
+			.build();
+
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('a', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		await database.schema.createTable('b', (table) => {
+			table.increments('id');
+			table.integer('parent');
+
+			table.integer('other_a').references('id')
+				.inTable('a');
+		});
+
+		await database('a').insert({ id: 10, name: 'ten' });
+
+		await expect(new ItemsService('a', { knex: database, schema: cycleSchema })
+			.upsertMany([
+				{ id: 50, name: 'new' },
+				{ id: 10, bs: [{ id: 90, other_a: 50 }] },
+			])).resolves.toStrictEqual([50, 10]);
+
+		await expect(database('b').select('id', 'parent', 'other_a'))
+			.resolves.toStrictEqual([{ id: 90, parent: 10, other_a: 50 }]);
+	});
+
 	it('upserts a payload nesting a row in its own run', async () => {
 		const taggedSchema = new SchemaBuilder()
 			.collection('test', (c) => {
