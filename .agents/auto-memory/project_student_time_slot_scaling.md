@@ -41,3 +41,11 @@ be made usage-elastic (OS page cache is the elastic layer; no live-resize extens
 Inspect PROD DB: from `planner/` repo root, `pnpm exec railway environment production` then
 `pnpm exec railway run --service Postgres-HipHipHip-test bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d railway -tAc "<SQL>"'`
 (see [[reference_pn_db_query_local]] for the LOCAL equivalent). Related: [[project_directus_db_clients]].
+
+**Self-relation `student_time_slot.bloc` (DROPPED 2026-02-12).** Nullable int M2O onto
+`student_time_slot.id`, FK `student_time_slot_bloc_foreign` ON DELETE NO ACTION, indexed, no O2M
+alias; added 2023-08-01 (planner 5ad9e511, onboarding), never used. Dropped in planner c928762c
+("perf: remove unused student_review_round.bloc" — title wrong, diff drops student_time_slot.bloc)
+during perf issue the-HipHipHip/Planner#597; jean's #597 comment 2026-02-11 shows response times
+dropping visibly "after dropping student_time_slot.blocs". Cost was the unused index + FK check on a
+13.9M-row hot-write table, not self-reference per se.

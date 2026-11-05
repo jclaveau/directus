@@ -87,3 +87,6 @@ and asserts the create event; `batch-insert.test.ts` imports `collectionArtists`
 flake** — reruns will not clear it. Fixed by putting the WRITER in the `after` chain.
 When a WS assertion sees a plausible row that is not its own, look for a sibling file
 importing the same seed, not at the transport.
+
+## cache-purge-fingerprint-index-race: `expected 856 to be greater than 900`
+Setup precondition, not a cache bug: the purge over `decoyMemberCount` fake members must outlast `readLeadsMs+readHoldMs` (900ms) so the held read lands mid-purge. Fast runner = 120k decoys in 856ms -> red; rerun cleared it twice. Fixed 262db303e5 with 180k decoys (CI measured 2.4-2.6s). Raising the constant is the (test-documented) remedy; the same constant also feeds the "never holds Redis 10ms" test.

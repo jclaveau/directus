@@ -43,3 +43,5 @@ run at all, then read a crashed app run as a failure. Both are silent.
 **How to apply:** api + app explicitly, app sharded; any 5s-timeout failure gets
 re-run isolated before it goes in a report. See [[project_directus_blackbox_sharding]]
 for the CI-side equivalent.
+
+- CI `Unit Tests (api)` typechecks every test file (vitest typecheck, fails the job on TypeCheckError even with all tests green); a local targeted run prints "Type Errors no errors" without checking them. Before pushing new api tests: `cd api && npx tsc --noEmit -p tsconfig.json | grep <your test files>` (unfiltered output is pre-existing debt). Typical misses: `mockReturnValue()` with no arg (emitAction resolves → `mockResolvedValue(undefined)`), readByQuery rows need `as any` (getMeta rider). Hit 2026-10-16 on #614.
