@@ -5,6 +5,7 @@ import { getCases } from '../../../../../permissions/modules/process-ast/lib/get
 import type { AliasMap } from '../../../../../utils/get-column-path.js';
 import { getColumnPath } from '../../../../../utils/get-column-path.js';
 import { getRelationInfo } from '../../../../../utils/get-relation-info.js';
+import { isEqual } from '../../../../../utils/lodash-es-used.js';
 import { getHelpers } from '../../../../helpers/index.js';
 import { addJoin } from '../add-join.js';
 import { getFilterPath } from '../get-filter-path.js';
@@ -33,6 +34,12 @@ export function applyFilter(
 
 	const normalizedFilter = normalizeFilter(rootFilter);
 
+	// normalizeFilter copies every _or array, so the permission cases are told
+	// apart from a user filter by their content, not by identity
+	const normalizedCases = cases.map((caseFilter) => {
+		return normalizeFilter(caseFilter);
+	});
+
 	addJoins(rootQuery, normalizedFilter, collection);
 	addWhereClauses(knex, rootQuery, normalizedFilter, collection);
 
@@ -49,7 +56,7 @@ export function applyFilter(
 					// or the length of value is 1, ie. only the empty filter.
 					// If the length is more than one it means that some items (and fields) might now be available, so
 					// the joins are required for the case/when construction.
-					if (value !== cases || value.length === 1) {
+					if (!isEqual(value, normalizedCases) || value.length === 1) {
 						continue;
 					} else {
 						// Otherwise we can at least filter out all empty filters that would not add joins anyway
