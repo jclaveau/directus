@@ -58,7 +58,7 @@ export function applyAggregate(
 
 			const aggregateSql = aggregateSqlByOperation[operation];
 
-			if (caseOptions && aggregateSql && fieldCases.length > 0 && operation === 'constructor') {
+			if (caseOptions && aggregateSql && fieldCases.length > 0) {
 				const { knex, cases, permissions, generateAlias } = caseOptions;
 
 				// By key: the rule may read an o2m, or a join the rows do not go through
