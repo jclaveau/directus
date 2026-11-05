@@ -30,6 +30,7 @@ import { getFileExt } from '../utils/file.js';
 import { clear, log } from '../utils/logger.js';
 import tryParseJson from '../utils/try-parse-json.js';
 import generateBundleEntrypoint from './helpers/generate-bundle-entrypoint.js';
+import { resolveBundleSources } from './helpers/resolve-bundle-sources.js';
 import {
 	loadCoverageInstrumentation,
 	type CoverageInstrumentation,
@@ -127,9 +128,42 @@ export default async function build(options: BuildOptions): Promise<void> {
 
 		const format = extensionManifest.type === 'module' ? 'esm' : 'cjs';
 
-		if (extensionOptions.type === 'bundle') {
+		if (
+			extensionOptions.type === 'bundle'
+			&& (
+				extensionOptions.entries === undefined
+				|| extensionOptions.source !== undefined
+			)
+		) {
+			let bundleSources: Awaited<ReturnType<typeof resolveBundleSources>>;
+
+			try {
+				bundleSources = await resolveBundleSources(
+					extensionManifest.name,
+					extensionOptions,
+				);
+			}
+			catch (error) {
+				log((error as Error).message, 'error');
+				process.exit(1);
+			}
+
+			await buildCodeBundleExtension({
+				inputApp: bundleSources.app,
+				inputApi: bundleSources.api,
+				outputApp: extensionOptions.path.app,
+				outputApi: extensionOptions.path.api,
+				format,
+				external,
+				preserveModules,
+				watch,
+				sourcemap,
+				minify,
+			});
+		}
+		else if (extensionOptions.type === 'bundle') {
 			await buildBundleExtension({
-				entries: extensionOptions.entries,
+				entries: extensionOptions.entries ?? [],
 				outputApp: extensionOptions.path.app,
 				outputApi: extensionOptions.path.api,
 				format,
@@ -448,6 +482,82 @@ async function buildHybridExtension({
 		{ inputOptions: rollupOptionsApp, outputOptions: outputOptionsApp },
 		{ inputOptions: rollupOptionsApi, outputOptions: outputOptionsApi },
 	];
+
+	if (watch) {
+		await watchExtension(rollupOptionsAll);
+	}
+	else {
+		await buildExtension(rollupOptionsAll);
+	}
+}
+
+async function buildCodeBundleExtension({
+	inputApp,
+	inputApi,
+	outputApp,
+	outputApi,
+	format,
+	external,
+	preserveModules,
+	watch,
+	sourcemap,
+	minify,
+}: {
+	inputApp: string | null;
+	inputApi: string | null;
+	outputApp: string;
+	outputApi: string;
+	format: Format;
+	external: string[];
+	preserveModules: boolean;
+	watch: boolean;
+	sourcemap: boolean;
+	minify: boolean;
+}) {
+	const config = await loadConfig();
+	const coverageInstrumentation = await loadCoverageOrExit(config, 'bundle');
+
+	const rollupOptionsAll: RolldownConfig[] = [];
+
+	if (inputApp !== null) {
+		rollupOptionsAll.push({
+			inputOptions: getRollupOptions({
+				mode: 'browser',
+				input: inputApp,
+				minify,
+				external,
+				config,
+			}),
+			outputOptions: getRollupOutputOptions({
+				mode: 'browser',
+				output: outputApp,
+				format,
+				sourcemap,
+				preserveModules,
+			}),
+		});
+	}
+
+	if (inputApi !== null) {
+		rollupOptionsAll.push({
+			inputOptions: getRollupOptions({
+				mode: 'node',
+				input: inputApi,
+				minify,
+				external,
+				config,
+				coverageInstrumentation,
+			}),
+			outputOptions: getRollupOutputOptions({
+				mode: 'node',
+				output: outputApi,
+				format,
+				sourcemap,
+				preserveModules,
+				coverageInstrumentation,
+			}),
+		});
+	}
 
 	if (watch) {
 		await watchExtension(rollupOptionsAll);

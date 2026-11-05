@@ -150,16 +150,24 @@ export async function createCli(
 		});
 
 	/** One module for the three directions, reached once whichever was asked for. */
-	const migrate = async (direction: 'latest' | 'up' | 'down') => {
+	const migrate = async (
+		direction: 'latest' | 'up' | 'down',
+		options: { snapshot?: string } = {},
+	) => {
 		const { default: dbMigrate } = await import('./commands/database/migrate.js');
 
-		await dbMigrate(direction);
+		await dbMigrate(direction, options);
 	};
 
 	dbCommand
 		.command('migrate:latest')
 		.description('Upgrade the database')
-		.action(() => migrate('latest'));
+		.option(
+			'--snapshot <path>',
+			'Schema snapshot applied between the before-schema and after-schema '
+			+ 'migrations',
+		)
+		.action((options: { snapshot?: string }) => migrate('latest', options));
 
 	dbCommand
 		.command('migrate:up')
@@ -264,7 +272,12 @@ export async function createCli(
 		.command('bootstrap')
 		.description('Initialize or update the database')
 		.option('--skipAdminInit', 'Skips the creation of the default Admin Role and User')
-		.action(async (options: { skipAdminInit?: boolean }) => {
+		.option(
+			'--snapshot <path>',
+			'Schema snapshot applied between the before-schema and after-schema '
+			+ 'migrations',
+		)
+		.action(async (options: { skipAdminInit?: boolean; snapshot?: string }) => {
 			const { default: bootstrap } = await import(
 				'./commands/bootstrap/index.js'
 			);

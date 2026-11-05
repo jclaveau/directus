@@ -306,6 +306,57 @@ router.delete(
 	respond,
 );
 
+router.patch(
+	`/:pk(${UUID_REGEX})/entries/:name`,
+	refuseExtensionChangeInProduction,
+	asyncHandler(async (req, res, next) => {
+		if (req.accountability && req.accountability.admin !== true) {
+			throw new ForbiddenError({
+				reason: `${JSON.stringify(req.accountability.user)}`
+					+ ' cannot update extension',
+			});
+		}
+
+		const service = new ExtensionsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		try {
+			res.locals['payload'] = {
+				data: await service.updateEntry(
+					req.params['pk']!,
+					req.params['name']!,
+					req.body,
+				),
+			};
+		}
+		catch (error) {
+			throw error instanceof ExtensionReadError
+				? error.originalError
+				: error;
+		}
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
+	'/app-chunk',
+	asyncHandler(async (_req, res, next) => {
+		// A chunk rebuild writes no row, so no purge would drop a cached hash.
+		res.locals['cache'] = false;
+
+		res.locals['payload'] = {
+			data: { chunk: getExtensionManager().getAppChunkHash() },
+		};
+
+		return next();
+	}),
+	respond,
+);
+
 router.get(
 	'/sources/:chunk',
 	asyncHandler(async (req, res) => {

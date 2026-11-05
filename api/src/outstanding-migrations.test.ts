@@ -5,7 +5,23 @@ const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 const env: Record<string, string> = {};
 
 vi.mock('./database/index.js', () => {
-	return { outstandingMigrations: () => outstandingMigrations() };
+	return {
+		outstandingMigrations: (...args: unknown[]) => outstandingMigrations(...args),
+	};
+});
+
+vi.mock('./extensions/index.js', () => {
+	return {
+		getExtensionManager: () => {
+			return {
+				migrationEntries: () => {
+					return [
+						{ bundle: '@consumer/domain', name: '20990101A-add-orders', config: {} },
+					];
+				},
+			};
+		},
+	};
 });
 
 vi.mock('./logger/index.js', () => {
@@ -58,6 +74,18 @@ describe('outstanding migrations', () => {
 
 		expect(module.outstandingMigrationsHoldingHealth()).toEqual([]);
 		expect(logger.info).toHaveBeenCalledWith('Database migrations are up to date');
+	});
+
+	it('counts the migrations of the installed bundles', async () => {
+		outstandingMigrations.mockResolvedValue([]);
+
+		const module = await loadWatch();
+		module.watchOutstandingMigrations();
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(outstandingMigrations).toHaveBeenCalledWith([
+			{ bundle: '@consumer/domain', name: '20990101A-add-orders', config: {} },
+		]);
 	});
 
 	it('keeps holding health while a migration is outstanding', async () => {

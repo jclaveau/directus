@@ -13,7 +13,7 @@ import {
 	it,
 	vi,
 } from 'vitest';
-import run from './run.js';
+import run, { type RunOptions } from './run.js';
 
 describe('run', () => {
 	let db: Knex;
@@ -29,13 +29,11 @@ describe('run', () => {
 	});
 
 	describe('when passed the argument up', () => {
-		it('returns "Nothing To Upgrade" if no directus_migrations', async () => {
-			tracker.on.select('directus_migrations').response(['Empty']);
+		it('refuses an up with no pending migration of its phase', async () => {
+			tracker.on.select('directus_migrations').response([]);
 
-			await run(db, 'up').catch((e: Error) => {
-				expect(e).toBeInstanceOf(Error);
-				expect(e.message).toBe('Nothing to upgrade');
-			});
+			await expect(run(db, 'up', true, { phase: 'after-schema' }))
+				.rejects.toThrow(new Error('Nothing to upgrade'));
 		});
 
 		it('returns "Method implemented in the dialect driver" if no directus_migrations', async () => {
@@ -60,6 +58,31 @@ describe('run', () => {
 			tracker.on.insert('directus_migrations').response(['Remove System Relations', '20201029A']);
 
 			expect(await run(db, 'up')).toBe(undefined);
+		});
+
+		it('refuses an up whose next migration runs after the schema', async () => {
+			tracker.on.select('directus_migrations').response([]);
+
+			await expect(
+				run(db, 'up', true, {
+					extensionMigrations: [
+						{
+							bundle: '@consumer/domain',
+							name: '19000101A-fill-orders',
+							config: {
+								phase: 'after-schema',
+								up: async () => {},
+								down: async () => {},
+							},
+						},
+					],
+				}),
+			).rejects.toThrow(
+				new Error(
+					'Migration "@consumer/domain:19000101A" runs after the schema:'
+						+ ' run "migrate:latest --snapshot <path>" instead',
+				),
+			);
 		});
 	});
 
@@ -259,7 +282,11 @@ describe('run', () => {
 		 */
 		async function runFixtures(
 			files: Record<string, string>,
-			options: { direction?: 'up' | 'down' | 'latest'; completed?: string[] } = {},
+			options: {
+				direction?: 'up' | 'down' | 'latest';
+				completed?: string[];
+				runOptions?: RunOptions;
+			} = {},
 		) {
 			for (const [name, source] of Object.entries(files)) {
 				await writeFile(join(directory, name), source);
@@ -320,8 +347,9 @@ describe('run', () => {
 			});
 
 			for (const version of options.completed ?? []) {
+				// One shared time, as a Postgres batch stamps every row it applies.
 				await database
-					.insert({ version, name: version })
+					.insert({ version, name: version, timestamp: '2026-01-01 00:00:00' })
 					.into('directus_migrations');
 			}
 
@@ -331,6 +359,7 @@ describe('run', () => {
 				database,
 				options.direction ?? 'latest',
 				false,
+				options.runOptions,
 			).catch((e: Error) => e);
 
 			const applied = await database
@@ -376,6 +405,221 @@ describe('run', () => {
 		const throws = `export async function up() {
 			throw new Error('migration failed');
 		}`;
+
+		describe('with the migrations of the installed bundles', () => {
+			it('runs them in date order with the core ones', async () => {
+				const { error, applied, tables } = await runFixtures(
+					{
+						'20990102A-second.js': `export async function up(knex) {
+							await knex.schema.alterTable('probe_first', (t) => t.integer('extra'));
+						}`,
+					},
+					{
+						runOptions: {
+							extensionMigrations: [
+								{
+									bundle: '@consumer/domain',
+									name: '20990101A-create-first',
+									config: {
+										up: async (knex) => {
+											await knex.schema.createTable(
+												'probe_first',
+												(t) => t.integer('id'),
+											);
+										},
+										down: async () => {},
+									},
+								},
+							],
+						},
+					},
+				);
+
+				expect(error).toBeUndefined();
+				expect(applied).toEqual(['20990102A', '@consumer/domain:20990101A']);
+				expect(tables.first).toBe(true);
+			});
+
+			it('runs the core ones first on the same date', async () => {
+				const { error, applied } = await runFixtures(
+					{ '20990101A-first.js': createsFirst },
+					{
+						runOptions: {
+							extensionMigrations: [
+								{
+									bundle: '@consumer/domain',
+									name: '20990101A-extend-first',
+									config: {
+										up: async (knex) => {
+											await knex.schema.alterTable(
+												'probe_first',
+												(t) => t.integer('extra'),
+											);
+										},
+										down: async () => {},
+									},
+								},
+							],
+						},
+					},
+				);
+
+				expect(error).toBeUndefined();
+				expect(applied).toEqual(['20990101A', '@consumer/domain:20990101A']);
+			});
+
+			it('leaves the after-schema ones to a run of their phase', async () => {
+				const { error, applied, tables } = await runFixtures(
+					{ '20990101A-first.js': createsFirst },
+					{
+						runOptions: {
+							phase: 'before-schema',
+							extensionMigrations: [
+								{
+									bundle: '@consumer/domain',
+									name: '20990102A-create-second',
+									config: {
+										phase: 'after-schema',
+										up: async (knex) => {
+											await knex.schema.createTable(
+												'probe_second',
+												(t) => t.integer('id'),
+											);
+										},
+										down: async () => {},
+									},
+								},
+							],
+						},
+					},
+				);
+
+				expect(error).toBeUndefined();
+				expect(applied).toEqual(['20990101A']);
+				expect(tables.second).toBe(false);
+			});
+
+			it('refuses two migrations of a bundle on the same date, '
+				+ 'naming both', async () => {
+				const { error, applied } = await runFixtures(
+					{},
+					{
+						runOptions: {
+							extensionMigrations: [
+								{
+									bundle: '@consumer/domain',
+									name: '20990101A-add-orders',
+									config: { up: async () => {}, down: async () => {} },
+								},
+								{
+									bundle: '@consumer/domain',
+									name: '20990101A-add-invoices',
+									config: { up: async () => {}, down: async () => {} },
+								},
+							],
+						},
+					},
+				);
+
+				expect(error).toEqual(
+					new Error(
+						'Migration keys collide! Please ensure that every migration uses a '
+							+ 'unique key:\n'
+							+ '\t- "@consumer/domain:20990101A": '
+							+ '@consumer/domain entry "20990101A-add-orders",'
+							+ ' @consumer/domain entry "20990101A-add-invoices"',
+					),
+				);
+
+				expect(applied).toEqual([]);
+			});
+
+			it('undoes the last one with its own down', async () => {
+				const { error, applied, tables } = await runFixtures(
+					{},
+					{
+						direction: 'down',
+						completed: ['@consumer/domain:20990101A'],
+						runOptions: {
+							extensionMigrations: [
+								{
+									bundle: '@consumer/domain',
+									name: '20990101A-add-orders',
+									config: {
+										up: async () => {},
+										down: async (knex) => {
+											await knex.schema.createTable(
+												'probe_second',
+												(t) => t.integer('id'),
+											);
+										},
+									},
+								},
+							],
+						},
+					},
+				);
+
+				expect(error).toBeUndefined();
+				expect(applied).toEqual([]);
+				expect(tables.second).toBe(true);
+			});
+
+			it('undoes the latest-dated one of a batch, not the last version '
+				+ 'string', async () => {
+				const { error, applied, tables } = await runFixtures(
+					{
+						'20990102A-add-probe.js': `export async function up() {}
+						export async function down(knex) {
+							await knex.schema.createTable('probe_first', (t) => t.integer('id'));
+						}`,
+					},
+					{
+						direction: 'down',
+						completed: ['@consumer/domain:20990101A', '20990102A'],
+						runOptions: {
+							extensionMigrations: [
+								{
+									bundle: '@consumer/domain',
+									name: '20990101A-add-orders',
+									config: {
+										up: async () => {},
+										down: async (knex) => {
+											await knex.schema.createTable(
+												'probe_second',
+												(t) => t.integer('id'),
+											);
+										},
+									},
+								},
+							],
+						},
+					},
+				);
+
+				expect(error).toBeUndefined();
+				expect(applied).toEqual(['@consumer/domain:20990101A']);
+				expect(tables.first).toBe(true);
+				expect(tables.second).toBe(false);
+			});
+
+			it('refuses to undo one whose bundle is not installed, '
+				+ 'naming it', async () => {
+				const { error, applied } = await runFixtures(
+					{},
+					{ direction: 'down', completed: ['@consumer/domain:20990101A'] },
+				);
+
+				expect(error).toEqual(
+					new Error(
+						'Migration "@consumer/domain:20990101A" was applied by '
+							+ '"@consumer/domain", which is not installed',
+					),
+				);
+
+				expect(applied).toEqual(['@consumer/domain:20990101A']);
+			});
+		});
 
 		it('applies every pending migration and records each version', async () => {
 			const { error, applied, tables } = await runFixtures({
@@ -647,7 +891,11 @@ describe('run', () => {
 
 		async function runOnMock(
 			files: Record<string, string>,
-			options: { direction?: 'up' | 'down' | 'latest'; completed?: string[] } = {},
+			options: {
+				direction?: 'up' | 'down' | 'latest';
+				completed?: string[];
+				runOptions?: RunOptions;
+			} = {},
 		) {
 			for (const [name, source] of Object.entries(files)) {
 				await writeFile(join(directory, name), source);
@@ -707,6 +955,7 @@ describe('run', () => {
 				database,
 				options.direction ?? 'latest',
 				false,
+				options.runOptions,
 			).catch((e: Error) => e);
 
 			// `all` holds every query once, in the order it was issued; the
