@@ -11,6 +11,7 @@
 	},
 	"dependencies": {
 		"blackbox-extensions": "link:./extensions",
+		"code-entries-probe": "link:./extensions/code-entries-probe",
 		"extension-settings-probe": "link:./extensions/extension-settings-probe"
 	},
 	"devDependencies": {

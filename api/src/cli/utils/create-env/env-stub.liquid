@@ -597,6 +597,10 @@ AUTH_PROVIDERS=""
 # Automatically reload extensions when they have changed [false]
 EXTENSIONS_AUTO_RELOAD=false
 
+# Run the before-schema migrations of the bundles on the reload a change
+# triggers; needs EXTENSIONS_AUTO_RELOAD and a NODE_ENV other than production [false]
+EXTENSIONS_AUTO_MIGRATE=false
+
 ####################################################################################################
 ### Email
 

@@ -171,11 +171,16 @@ export class ExtensionsService {
 
 			if (!parentBundle) continue;
 
-			const schema = (parentBundle.schema as BundleExtension | null)?.entries.find(
-				(entry) => entry.name === meta.folder,
-			);
+			const parentSchema = parentBundle.schema as BundleExtension | null;
 
-			if (!schema) continue;
+			const schema = parentSchema?.entries.find(
+				(entry) => entry.name === meta.folder,
+			) ?? null;
+
+			// The app reads the app entries of a code bundle from its chunk.
+			if (!schema && parentSchema?.entriesFrom !== 'code') {
+				continue;
+			}
 
 			output.push({
 				id: meta.id,
@@ -269,6 +274,44 @@ export class ExtensionsService {
 		return result;
 	}
 
+	/**
+	 * Updates the row of an entry of a bundle declaring its entries in code,
+	 * creating it first: an app entry has no row until an admin toggles it.
+	 */
+	async updateEntry(
+		bundleId: string,
+		entryName: string,
+		data: DeepPartial<ApiOutput>,
+	) {
+		const bundle = await this.readOne(bundleId);
+
+		if ((bundle.schema as BundleExtension | null)?.entriesFrom !== 'code') {
+			throw new InvalidPayloadError({
+				reason: `Extension ${JSON.stringify(bundleId)}`
+					+ ' is not a bundle declaring its entries in code',
+			});
+		}
+
+		if (!isObject(data.meta)) {
+			throw new InvalidPayloadError({ reason: `"meta" is required` });
+		}
+
+		const [entryRow] = await this.extensionsItemService.readByQuery({
+			filter: { bundle: { _eq: bundleId }, folder: { _eq: entryName } },
+			limit: 1,
+		});
+
+		const entryId = entryRow?.id
+			?? (await this.extensionsItemService.createOne({
+				enabled: bundle.meta.enabled,
+				source: bundle.meta.source,
+				bundle: bundleId,
+				folder: entryName,
+			})) as string;
+
+		return this.updateOne(entryId, data);
+	}
+
 	async deleteOne(id: string) {
 		await this.extensionsItemService.deleteOne(id);
 		await this.extensionsItemService.deleteByQuery({ filter: { bundle: { _eq: id } } });
@@ -308,6 +351,11 @@ export class ExtensionsService {
 			throw new UnprocessableContentError({
 				reason: 'Unable to toggle status of an entry for a bundle marked as non partial',
 			});
+		}
+
+		// The server cannot count the app entries of a code bundle without a row.
+		if (parent.schema.entriesFrom === 'code') {
+			return;
 		}
 
 		const hasEnabledChildren = !!(await trx('directus_extensions')

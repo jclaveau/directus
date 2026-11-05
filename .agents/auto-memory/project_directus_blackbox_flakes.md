@@ -212,6 +212,14 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 - **`cache-purge-fingerprint-index-race` `expected 742 to be greater than 900`** = the pass costs 6-26 µs/decoy across runners; 120k decoys gave 742-3095 ms. Raised to 360k (≥2.2 s at the fastest rate). Guard unchanged. First green (run 41246413805): purge 5221-8374 ms, file 45.6 s (hint 19_000 → 46_000).
 - **Red proof, PR #656:** scratch commit spawning a foreign instance (envelope-like env) on fk-no-key's port reproduced all 3 failures exactly (run 41245632960, job 124668408758); force-pushed away. The decoy count has no deterministic red: runner speed cannot be forced.
 
+## 2026-10-31 (#655 shard 3): two flakes, dedicated fix PR asked by jean
+- `cache-purge-fingerprint-index-race` `expected 742 to be greater than 900` recurred AFTER be95ff8418 (purge shorter than the 900 ms floor; the test's own comment says raise `decoyMemberCount`).
+- `cache-m2o-through-fk-no-key.test.ts:206` `expected 'HIT' to be 'MISS'` after a write (shard-3 rerun; the first run passed). Root cause undecided: test race vs real stale cache (HIGH if product). #655 touches no cache code.
+- The rerun relocated the failure to the second test; a push replaces a second rerun. jean: "fix both flakes in a dedicated pr".
+
+## 2026-11-03 (#673 shard 1): invite statement-count flake
+- `singular-write-users-invite` expected 1 insert each into `directus_activity` / `directus_revisions` on request 3, saw 3. #673 touches neither the users service nor that test; not in the list above. Treated as flake, `gh run rerun --failed` unasked. If the rerun is red the same way (2+ identical), stop rerunning and diagnose (see the twice-red rule above).
+
 ## fingerprint-index-race HIT×5→MISS×5 = the hourly reap tick (2026-11-04, PR #674)
 
 - **`cache-purge-fingerprint-index-race` `expected [MISS×5] to deeply equal [HIT×5]` (the `filled` check) = TEST race, not stale cache.** Its instances ran the default `CACHE_SCOPED_INDEX_REAP_SCHEDULE` `0 * * * *`. A tick inside the purge walks the 360k bare-set decoys (none names an entry) and `scopedCacheIndexReapScript` bumps `scoped-cache-epoch:<collection>` for every chunk → each held read's fill guard sees the counter moved → declines to cache → MISS. Nothing stale served. Tell: purge started at 12:59:59.99, and `counter moved after` was 67 ms instead of ~200 ms (the reap moved it, not the write).

@@ -45,6 +45,12 @@ export const getExtensionsSettings = async ({
 
 			if (entryInBundle) continue;
 
+			// The server cannot list the app entries of a code bundle, so it keeps
+			// every row an admin's toggle gave one.
+			if (bundle.entriesFrom === 'code') {
+				continue;
+			}
+
 			removedSettingIds.push(entry.id);
 		}
 

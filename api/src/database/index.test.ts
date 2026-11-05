@@ -149,12 +149,44 @@ describe('outstandingMigrations', () => {
 		expect(await outstandingMigrations()).toEqual(['20990103A']);
 	});
 
-	it('ignores the runner and its type declarations', async () => {
-		state.coreFiles = ['run.js', 'run.d.ts', '20990101A-first.js'];
+	it('ignores the runner, the list and their type declarations', async () => {
+		state.coreFiles = [
+			'run.js',
+			'run.d.ts',
+			'list.js',
+			'list.d.ts',
+			'20990101A-first.js',
+			'20990101A-first.d.ts',
+		];
 
 		const { outstandingMigrations } = await loadDatabase();
 
 		expect(await outstandingMigrations()).toEqual(['20990101A']);
+	});
+
+	it('counts the migrations of the installed bundles', async () => {
+		state.completed = [
+			{ version: '20990101A' },
+			{ version: '20990102A' },
+			{ version: '@consumer/domain:20990101A' },
+		];
+
+		const { outstandingMigrations } = await loadDatabase();
+
+		expect(
+			await outstandingMigrations([
+				{
+					bundle: '@consumer/domain',
+					name: '20990101A-add-orders',
+					config: { up: async () => {}, down: async () => {} },
+				},
+				{
+					bundle: '@consumer/domain',
+					name: '20990104A-add-invoices',
+					config: { up: async () => {}, down: async () => {} },
+				},
+			]),
+		).toEqual(['@consumer/domain:20990104A']);
 	});
 
 	it('exits when the migrations directory cannot be read', async () => {

@@ -244,6 +244,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 
 	EXTENSIONS_MUST_LOAD: 'boolean',
 	EXTENSIONS_AUTO_RELOAD: 'boolean',
+	EXTENSIONS_AUTO_MIGRATE: 'boolean',
 	EXTENSIONS_SANDBOX_MEMORY: 'number',
 	EXTENSIONS_SANDBOX_TIMEOUT: 'number',
 

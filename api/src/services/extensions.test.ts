@@ -497,6 +497,69 @@ describe('Services / Extensions / readAll', () => {
 			},
 		]);
 	});
+
+	it(oneLine`
+		lists every entry row of a code bundle, without a schema past its api ones
+	`, async () => {
+		vi.mocked(getExtensionManager).mockReturnValue({
+			getExtension: vi.fn().mockReturnValue({
+				type: 'bundle',
+				entriesFrom: 'code',
+				entries: [{ type: 'hook', name: 'audit' }],
+			}),
+		} as any);
+
+		vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([
+			{ id: 'bundle-id', bundle: null, source: 'module', folder: 'orders' },
+			{ id: 'audit-id', bundle: 'bundle-id', source: 'module', folder: 'audit' },
+			{ id: 'picker-id', bundle: 'bundle-id', source: 'module', folder: 'picker' },
+		] as any);
+
+		const service = new ExtensionsService({
+			knex: knex.default({ client: MockClient }),
+			schema,
+		});
+
+		expect(await service.readAll()).toEqual([
+			{
+				id: 'bundle-id',
+				bundle: null,
+				meta: {
+					id: 'bundle-id',
+					bundle: null,
+					source: 'module',
+					folder: 'orders',
+				},
+				schema: {
+					type: 'bundle',
+					entriesFrom: 'code',
+					entries: [{ type: 'hook', name: 'audit' }],
+				},
+			},
+			{
+				id: 'audit-id',
+				bundle: 'bundle-id',
+				meta: {
+					id: 'audit-id',
+					bundle: 'bundle-id',
+					source: 'module',
+					folder: 'audit',
+				},
+				schema: { type: 'hook', name: 'audit' },
+			},
+			{
+				id: 'picker-id',
+				bundle: 'bundle-id',
+				meta: {
+					id: 'picker-id',
+					bundle: 'bundle-id',
+					source: 'module',
+					folder: 'picker',
+				},
+				schema: null,
+			},
+		]);
+	});
 });
 
 describe('Services / Extensions / readOne', () => {
@@ -963,5 +1026,179 @@ describe('Services / Extensions / updateOne', () => {
 				bindings: [enabled, 'parent-id'],
 			},
 		]);
+	});
+
+	it('leaves a code bundle alone when one of its entries is toggled', async () => {
+		vi.mocked(getExtensionManager).mockReturnValue({
+			reload: vi.fn().mockResolvedValue(undefined),
+			broadcastReloadNotification: vi.fn(),
+		} as any);
+
+		vi.spyOn(ItemsService.prototype, 'updateOne').mockResolvedValue('entry-id');
+
+		vi.spyOn(ExtensionsService.prototype, 'readOne')
+			.mockResolvedValueOnce({
+				id: 'entry-id',
+				bundle: 'parent-id',
+				schema: null,
+				meta: { enabled: false },
+			} as any)
+			.mockResolvedValueOnce({
+				id: 'parent-id',
+				bundle: null,
+				schema: { type: 'bundle', partial: true, entriesFrom: 'code' },
+				meta: { enabled: true },
+			} as any);
+
+		const pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+		const pgTracker = createTracker(pgDatabase);
+		const service = new ExtensionsService({ knex: pgDatabase, schema });
+
+		await service.updateOne('entry-id', { meta: { enabled: false } });
+
+		expect(pgTracker.history.all).toEqual([]);
+	});
+});
+
+describe('Services / Extensions / updateEntry', () => {
+	it('creates the row of an entry that has none, then updates it', async () => {
+		vi.mocked(getExtensionManager).mockReturnValue({} as any);
+
+		vi.spyOn(ExtensionsService.prototype, 'readOne').mockResolvedValue({
+			id: 'bundle-id',
+			bundle: null,
+			schema: { type: 'bundle', entriesFrom: 'code', entries: [] },
+			meta: { source: 'module', enabled: true },
+		} as any);
+
+		const readByQuerySpy = vi.spyOn(ItemsService.prototype, 'readByQuery')
+			.mockResolvedValue([] as any);
+
+		const createOneSpy = vi.spyOn(ItemsService.prototype, 'createOne')
+			.mockResolvedValue('entry-id');
+
+		const updateOneSpy = vi.spyOn(ExtensionsService.prototype, 'updateOne')
+			.mockResolvedValue({ id: 'entry-id' } as any);
+
+		const service = new ExtensionsService({
+			knex: knex.default({ client: MockClient }),
+			schema,
+		});
+
+		expect(
+			await service.updateEntry('bundle-id', 'picker', {
+				meta: { enabled: false },
+			}),
+		).toEqual({ id: 'entry-id' });
+
+		expect(readByQuerySpy).toHaveBeenCalledWith({
+			filter: { bundle: { _eq: 'bundle-id' }, folder: { _eq: 'picker' } },
+			limit: 1,
+		});
+
+		expect(createOneSpy).toHaveBeenCalledWith({
+			enabled: true,
+			source: 'module',
+			bundle: 'bundle-id',
+			folder: 'picker',
+		});
+
+		expect(updateOneSpy).toHaveBeenCalledWith('entry-id', {
+			meta: { enabled: false },
+		});
+	});
+
+	it('updates the row an entry already has', async () => {
+		vi.mocked(getExtensionManager).mockReturnValue({} as any);
+
+		vi.spyOn(ExtensionsService.prototype, 'readOne').mockResolvedValue({
+			id: 'bundle-id',
+			bundle: null,
+			schema: { type: 'bundle', entriesFrom: 'code', entries: [] },
+			meta: { source: 'module', enabled: true },
+		} as any);
+
+		vi.spyOn(ItemsService.prototype, 'readByQuery')
+			.mockResolvedValue([{ id: 'entry-id' }] as any);
+
+		const createOneSpy = vi.spyOn(ItemsService.prototype, 'createOne');
+
+		const updateOneSpy = vi.spyOn(ExtensionsService.prototype, 'updateOne')
+			.mockResolvedValue({ id: 'entry-id' } as any);
+
+		const service = new ExtensionsService({
+			knex: knex.default({ client: MockClient }),
+			schema,
+		});
+
+		await service.updateEntry('bundle-id', 'picker', {
+			meta: { enabled: true },
+		});
+
+		expect(createOneSpy).not.toHaveBeenCalled();
+
+		expect(updateOneSpy).toHaveBeenCalledWith('entry-id', {
+			meta: { enabled: true },
+		});
+	});
+
+	it('creates no row for a payload without meta', async () => {
+		vi.mocked(getExtensionManager).mockReturnValue({} as any);
+
+		vi.spyOn(ExtensionsService.prototype, 'readOne').mockResolvedValue({
+			id: 'bundle-id',
+			bundle: null,
+			schema: { type: 'bundle', entriesFrom: 'code', entries: [] },
+			meta: { source: 'module', enabled: true },
+		} as any);
+
+		vi.spyOn(ItemsService.prototype, 'readByQuery')
+			.mockResolvedValue([] as any);
+
+		const createOneSpy = vi.spyOn(ItemsService.prototype, 'createOne')
+			.mockResolvedValue('entry-id');
+
+		const service = new ExtensionsService({
+			knex: knex.default({ client: MockClient }),
+			schema,
+		});
+
+		await expect(service.updateEntry('bundle-id', 'picker', {}))
+			.rejects.toHaveProperty(
+				'message',
+				'Invalid payload. "meta" is required.',
+			);
+
+		expect(createOneSpy).not.toHaveBeenCalled();
+	});
+
+	it('refuses an entry of a bundle not declaring its entries in code', async () => {
+		vi.mocked(getExtensionManager).mockReturnValue({} as any);
+
+		vi.spyOn(ExtensionsService.prototype, 'readOne').mockResolvedValue({
+			id: 'bundle-id',
+			bundle: null,
+			schema: { type: 'bundle', entries: [] },
+			meta: { source: 'module', enabled: true },
+		} as any);
+
+		const service = new ExtensionsService({
+			knex: knex.default({ client: MockClient }),
+			schema,
+		});
+
+		const update = service.updateEntry('bundle-id', 'picker', {
+			meta: { enabled: false },
+		});
+
+		await expect(update).rejects.toThrowError(InvalidPayloadError);
+
+		await expect(update).rejects.toHaveProperty(
+			'message',
+			oneLine`
+				Invalid payload. Extension "bundle-id" is not a bundle
+				declaring its entries in code.
+			`,
+		);
 	});
 });

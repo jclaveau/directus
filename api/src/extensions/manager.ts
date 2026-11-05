@@ -17,7 +17,6 @@ import type {
 	HookConfig,
 	HybridExtension,
 	OperationApiConfig,
-	BundleConfig,
 	ExtensionManagerOptions,
 } from '@directus/types';
 import { isTypeIn, toBoolean } from '@directus/utils';
@@ -27,7 +26,8 @@ import nodeResolve from '@rollup/plugin-node-resolve';
 import virtual from '@rollup/plugin-virtual';
 import chokidar, { FSWatcher } from 'chokidar';
 import express, { Router } from 'express';
-import { readFile, readdir } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { pathExists } from 'fs-extra';
 import os from 'node:os';
 import path, { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,7 +35,11 @@ import type { ReadStream } from 'node:fs';
 import { rolldown } from 'rolldown';
 import { rollup } from 'rollup';
 import { useBus } from '../bus/index.js';
-import getDatabase from '../database/index.js';
+import getDatabase, { outstandingMigrations } from '../database/index.js';
+import runMigrations from '../database/migrations/run.js';
+import type { ExtensionMigration } from '../database/migrations/list.js';
+import { readBundleEntries } from '@directus/extensions/scalabus';
+import { createHash } from 'node:crypto';
 import emitter, { Emitter } from '../emitter.js';
 import { getFlowManager } from '../flows.js';
 import { useLogger } from '../logger/index.js';
@@ -51,6 +55,11 @@ import { clone, debounce, isPlainObject } from '../utils/lodash-es-used.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
 import { getRegistryRootPath } from './lib/get-registry-root-path.js';
 import { getExtensionsSettings } from './lib/get-extensions-settings.js';
+import {
+	importCodeBundles,
+	listMigrationEntries,
+	type CodeBundle,
+} from './lib/import-code-bundles.js';
 import { getExtensions } from './lib/get-extensions.js';
 import { getSharedDepsMapping } from './lib/get-shared-deps-mapping.js';
 import { getInstallationManager } from './lib/installation/index.js';
@@ -65,6 +74,8 @@ import DriverLocal from '@directus/storage-driver-local';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const env = useEnv();
+
+type ReloadOptions = { forceSync?: boolean; migrate?: boolean };
 
 const defaultOptions: ExtensionManagerOptions = {
 	schedule: true,
@@ -113,6 +124,18 @@ export class ExtensionManager {
 	private appExtensionChunks: string[] = [];
 
 	/**
+	 * The hash of the app chunks the last bundling wrote, which the app compares
+	 * against the one it runs to tell it was rebuilt.
+	 */
+	private appChunkHash: string | null = null;
+
+	/**
+	 * The bundles declaring their entries in code, with their imported api
+	 * entries.
+	 */
+	private codeBundles: CodeBundle[] = [];
+
+	/**
 	 * Callbacks to be able to unregister extensions
 	 */
 	private unregisterFunctionMap: Map<string, PromiseCallback> = new Map();
@@ -150,7 +173,7 @@ export class ExtensionManager {
 	private queuedReload: Promise<unknown> | null = null;
 
 	/** What the queued reload loads with, forced if any caller sharing it asked. */
-	private queuedReloadOptions: { forceSync: boolean } | undefined = undefined;
+	private queuedReloadOptions: ReloadOptions | undefined = undefined;
 
 	/**
 	 * Optional file system watcher to auto-reload extensions when the local file system changes
@@ -174,6 +197,18 @@ export class ExtensionManager {
 
 	public get extensions() {
 		return [...this.registryExtensions.values(), ...this.moduleExtensions.values()];
+	}
+
+	/**
+	 * The `defineMigration`s of the installed bundles, as the last load
+	 * read them.
+	 */
+	public migrationEntries(): ExtensionMigration[] {
+		return listMigrationEntries(this.codeBundles);
+	}
+
+	public getAppChunkHash(): string | null {
+		return this.appChunkHash;
 	}
 
 	public getExtension(source: string, folder: string) {
@@ -271,7 +306,7 @@ export class ExtensionManager {
 	/**
 	 * Load all extensions from disk and register them in their respective places
 	 */
-	private async load(options?: { forceSync: boolean }): Promise<void> {
+	private async load(options?: ReloadOptions): Promise<void> {
 		const logger = useLogger();
 
 		if (env['EXTENSIONS_LOCATION']) {
@@ -290,9 +325,17 @@ export class ExtensionManager {
 			this.registryExtensions = registry;
 			this.moduleExtensions = module;
 
+			await this.importCodeBundles();
+
 			this.extensionsSettings = await getExtensionsSettings({ registry, module });
 		} catch (error) {
 			this.handleExtensionError({ error, reason: `Couldn't load extensions` });
+		}
+
+		// Outside the guard above: a failing migration fails the reload, whatever
+		// EXTENSIONS_MUST_LOAD says, rather than registering over a stale schema.
+		if (options?.migrate) {
+			await this.migrateBeforeSchema();
 		}
 
 		await Promise.all([this.registerInternalOperations(), this.registerApiExtensions()]);
@@ -311,6 +354,71 @@ export class ExtensionManager {
 		});
 
 		logger.info('Extensions loaded');
+	}
+
+	/**
+	 * Imports the api side of the bundles declaring their entries in code, and
+	 * lists their api entries — migrations aside, which get no settings row —
+	 * so the settings sync sees them.
+	 */
+	private async importCodeBundles(): Promise<void> {
+		const { codeBundles, failures } = await importCodeBundles(
+			{ module: this.moduleExtensions, registry: this.registryExtensions },
+			{ fresh: this.hasLoadedBefore },
+		);
+
+		this.codeBundles = codeBundles;
+
+		for (const { name, error } of failures) {
+			this.handleExtensionError({
+				error,
+				reason: `Couldn't import bundle "${name}"`,
+			});
+		}
+
+		for (const codeBundle of codeBundles) {
+			const extension = this.getExtension(codeBundle.source, codeBundle.folder);
+
+			if (extension?.type !== 'bundle') {
+				continue;
+			}
+
+			extension.entries = codeBundle.entries.flatMap((entry) => {
+				return entry.type === 'migration'
+					? []
+					: [{ type: entry.type, name: entry.name }];
+			});
+		}
+	}
+
+	/**
+	 * Runs the before-schema migrations a changed bundle brings, for
+	 * `EXTENSIONS_AUTO_MIGRATE`. The after-schema ones wait on a snapshot, which
+	 * only `migrate:latest --snapshot` applies, so they are only named.
+	 */
+	private async migrateBeforeSchema(): Promise<void> {
+		const logger = useLogger();
+		const extensionMigrations = this.migrationEntries();
+
+		await runMigrations(getDatabase(), 'latest', true, {
+			extensionMigrations,
+			phase: 'before-schema',
+		});
+
+		const afterSchemaVersions = await outstandingMigrations(
+			extensionMigrations.filter(({ config }) => config.phase === 'after-schema'),
+		);
+
+		const pendingAfterSchema = afterSchemaVersions.filter(
+			(version) => version.includes(':'),
+		);
+
+		if (pendingAfterSchema.length > 0) {
+			logger.warn(
+				`Migrations waiting on a schema snapshot: ${pendingAfterSchema.join(', ')};`
+					+ ' run "directus database migrate:latest --snapshot <path>"',
+			);
+		}
 	}
 
 	/**
@@ -335,12 +443,15 @@ export class ExtensionManager {
 	/**
 	 * Reload all the extensions. Will unload if extensions have already been loaded
 	 */
-	public reload(options?: { forceSync: boolean }): Promise<unknown> {
+	public reload(options?: ReloadOptions): Promise<unknown> {
 		if (this.queuedReload !== null) {
 			// The queued job will already handle the additional changes
-			if (options?.forceSync) {
-				this.queuedReloadOptions = options;
-			}
+			this.queuedReloadOptions = {
+				forceSync: Boolean(
+					this.queuedReloadOptions?.forceSync || options?.forceSync,
+				),
+				migrate: Boolean(this.queuedReloadOptions?.migrate || options?.migrate),
+			};
 
 			return this.queuedReload;
 		}
@@ -355,7 +466,7 @@ export class ExtensionManager {
 			reject = rej;
 		});
 
-		const reloadExtensions = async (reloadOptions?: { forceSync: boolean }) => {
+		const reloadExtensions = async (reloadOptions?: ReloadOptions) => {
 			// A failed load leaves isLoaded false; keeping the last loaded set
 			// instead of retrying it is tracked in #627.
 			if (this.hasLoadedBefore) {
@@ -477,6 +588,19 @@ export class ExtensionManager {
 
 		const changeTrigger = 'a change in the extension packages';
 
+		// A reload another process asks for never migrates: the process that saw
+		// the change already has.
+		const reloadOnChange = () => {
+			this.reload({
+				migrate: env['EXTENSIONS_AUTO_MIGRATE'] === true,
+			}).catch((error) => {
+				useLogger().error(
+					error,
+					`Failed to reload the extensions on ${changeTrigger}`,
+				);
+			});
+		};
+
 		this.watcher = chokidar.watch(
 			[path.resolve('package.json')],
 			{
@@ -489,15 +613,15 @@ export class ExtensionManager {
 		this.watcher
 			.on(
 				'add',
-				debounce(() => this.reloadLoggingFailure(changeTrigger), 500),
+				debounce(reloadOnChange, 500),
 			)
 			.on(
 				'change',
-				debounce(() => this.reloadLoggingFailure(changeTrigger), 650),
+				debounce(reloadOnChange, 650),
 			)
 			.on(
 				'unlink',
-				debounce(() => this.reloadLoggingFailure(changeTrigger), 2000),
+				debounce(reloadOnChange, 2000),
 			);
 	}
 
@@ -556,9 +680,13 @@ export class ExtensionManager {
 		}));
 
 		const entrypoint = generateExtensionsEntrypoint(
-			{ module: this.moduleExtensions, registry: this.registryExtensions },
+			{
+				module: await withoutAppLessCodeBundles(this.moduleExtensions),
+				registry: await withoutAppLessCodeBundles(this.registryExtensions),
+			},
 			this.extensionsSettings,
-		);
+		) + '\nexport const chunkHash = '
+			+ `${JSON.stringify(APP_CHUNK_HASH_PLACEHOLDER)};\n`;
 
 		try {
 			/** Opt In for now. Should be @deprecated later to always use rolldown! */
@@ -573,16 +701,15 @@ export class ExtensionManager {
 
 			const tempDir = join(env['TEMP_PATH'] as string, 'app-extensions');
 
-			const { output } = await bundle.write({
-				format: 'es',
-				dir: tempDir,
-			});
+			const { output } = await bundle.generate({ format: 'es' });
 
 			this.appExtensionChunks = output.reduce<string[]>((acc, chunk) => {
 				if (chunk.type === 'chunk') acc.push(chunk.fileName);
 
 				return acc;
 			}, []);
+
+			this.appChunkHash = await writeStampedAppChunks(tempDir, output);
 
 			await bundle.close();
 		} catch (error) {
@@ -821,40 +948,42 @@ export class ExtensionManager {
 		try {
 			const bundlePath = path.resolve(bundle.path, bundle.entrypoint.api);
 
-			const bundleInstances: BundleConfig | { default: BundleConfig } = await importFileUrl(
-				bundlePath,
-				import.meta.url,
-				{
-					fresh: this.hasLoadedBefore,
+			const codeBundle = this.codeBundles.find(
+				(candidate) => {
+					return candidate.source === source
+						&& candidate.apiPath === bundlePath;
 				},
 			);
 
-			const configs = getModuleDefault(bundleInstances);
+			// A code bundle without an api.js has nothing to register.
+			if (bundle.entriesFrom === 'code' && !codeBundle) {
+				return;
+			}
+
+			const bundleEntries = codeBundle?.entries ?? readBundleEntries(
+				getModuleDefault(
+					await importFileUrl(bundlePath, import.meta.url, {
+						fresh: this.hasLoadedBefore,
+					}),
+				),
+			);
 
 			const unregisterFunctions: PromiseCallback[] = [];
 
-			for (const { config, name } of configs.hooks) {
-				if (!extensionEnabled(name)) continue;
+			for (const entry of bundleEntries) {
+				if (entry.type === 'migration' || !extensionEnabled(entry.name)) {
+					continue;
+				}
 
-				const unregisters = this.registerHook(config, name);
-
-				unregisterFunctions.push(...unregisters);
-			}
-
-			for (const { config, name } of configs.endpoints) {
-				if (!extensionEnabled(name)) continue;
-
-				const unregister = this.registerEndpoint(config, name);
-
-				unregisterFunctions.push(unregister);
-			}
-
-			for (const { config, name } of configs.operations) {
-				if (!extensionEnabled(name)) continue;
-
-				const unregister = this.registerOperation(config);
-
-				unregisterFunctions.push(unregister);
+				if (entry.type === 'hook') {
+					unregisterFunctions.push(...this.registerHook(entry.config, entry.name));
+				}
+				else if (entry.type === 'endpoint') {
+					unregisterFunctions.push(this.registerEndpoint(entry.config, entry.name));
+				}
+				else {
+					unregisterFunctions.push(this.registerOperation(entry.config));
+				}
 			}
 
 			this.unregisterFunctionMap.set(bundle.name, async () => {
@@ -1055,4 +1184,74 @@ export class ExtensionManager {
 			if (error) logger.warn(error);
 		}
 	}
+}
+
+const APP_CHUNK_HASH_PLACEHOLDER = '__DIRECTUS_APP_CHUNK_HASH__';
+
+/**
+ * Hashes every chunk the bundling generated and stamps the hash into the entry,
+ * so an app can tell the chunk it runs from the one the server now serves. Each
+ * chunk is renamed into place whole, so a reader never gets the placeholder.
+ */
+async function writeStampedAppChunks(
+	tempDir: string,
+	output: readonly (
+		| { type: 'chunk'; fileName: string; code: string; isEntry: boolean }
+		| { type: 'asset' }
+	)[],
+): Promise<string> {
+	const chunks = output.flatMap((chunk) => {
+		return chunk.type === 'chunk'
+			? [chunk]
+			: [];
+	});
+
+	const hasher = createHash('sha256');
+
+	const sortedChunks = [...chunks].sort(
+		(left, right) => left.fileName.localeCompare(right.fileName),
+	);
+
+	for (const chunk of sortedChunks) {
+		hasher.update(chunk.fileName).update(chunk.code);
+	}
+
+	const chunkHash = hasher.digest('hex');
+
+	await mkdir(tempDir, { recursive: true });
+
+	for (const chunk of sortedChunks) {
+		const chunkPath = join(tempDir, chunk.fileName);
+		const writingPath = `${chunkPath}.${process.pid}.tmp`;
+
+		await writeFile(
+			writingPath,
+			chunk.isEntry
+				? chunk.code.replace(APP_CHUNK_HASH_PLACEHOLDER, chunkHash)
+				: chunk.code,
+		);
+
+		await rename(writingPath, chunkPath);
+	}
+
+	return chunkHash;
+}
+
+/** A bundle declaring its entries in code may ship no app side at all. */
+async function withoutAppLessCodeBundles(
+	extensions: Map<string, Extension>,
+): Promise<Map<string, Extension>> {
+	const kept = new Map<string, Extension>();
+
+	for (const [folder, extension] of extensions) {
+		const isAppLess = extension.type === 'bundle'
+			&& extension.entriesFrom === 'code'
+			&& !(await pathExists(path.resolve(extension.path, extension.entrypoint.app)));
+
+		if (!isAppLess) {
+			kept.set(folder, extension);
+		}
+	}
+
+	return kept;
 }

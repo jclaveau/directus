@@ -90,6 +90,7 @@ extension_missing: Missing
 extension_reload_required: Page Reload Required
 extension_reload_required_copy: A page reload is required to see the changes after enabling or disabling app extensions.
 extension_reload_now: Reload now
+extension_app_chunk_stale_copy: The extensions were rebuilt on the server. Reload to run the new version.
 published_relative: Published {relativeTime}
 compatible_with_your_project: Compatible with your Project
 compatible_with_your_project_copy:
