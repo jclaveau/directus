@@ -5,6 +5,7 @@ import { getColumnPath } from '../../../../utils/get-column-path.js';
 import { getColumn } from '../../utils/get-column.js';
 import { getRelationInfo } from '../../../../utils/get-relation-info.js';
 import { addJoin } from './add-join.js';
+import type { AliasGenerator } from './create-alias-generator.js';
 
 export type ColumnSortRecord = { order: 'asc' | 'desc'; column: string };
 
@@ -16,6 +17,7 @@ export function applySort(
 	aggregate: Aggregate | null | undefined,
 	collection: string,
 	aliasMap: AliasMap,
+	generateAlias: AliasGenerator,
 	returnRecords = false,
 ) {
 	const relations: Relation[] = schema.relations;
@@ -72,7 +74,11 @@ export function applySort(
 			if (!relation || ['m2o', 'a2o'].includes(relationType ?? '')) {
 				return {
 					order,
-					column: returnRecords ? column[0] : (getColumn(knex, collection, column[0]!, false, schema) as any),
+					column: returnRecords
+						? column[0]
+						: (getColumn(knex, collection, column[0]!, false, schema, {
+							generateAlias,
+						}) as any),
 				};
 			}
 		}
@@ -84,6 +90,7 @@ export function applySort(
 			rootQuery,
 			schema,
 			knex,
+			generateAlias,
 		});
 
 		const { columnPath } = getColumnPath({
@@ -106,7 +113,11 @@ export function applySort(
 
 		return {
 			order,
-			column: returnRecords ? columnPath : (getColumn(knex, alias!, field!, false, schema) as any),
+			column: returnRecords
+				? columnPath
+				: (getColumn(knex, alias!, field!, false, schema, {
+					generateAlias,
+				}) as any),
 		};
 	});
 

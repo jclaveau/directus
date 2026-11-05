@@ -7,6 +7,7 @@ import type { AliasMap } from '../../../../utils/get-column-path.js';
 import { isValidUuid } from '../../../../utils/is-valid-uuid.js';
 import { parseNumericString } from '../../../../utils/parse-numeric-string.js';
 import { getHelpers } from '../../../helpers/index.js';
+import type { AliasGenerator } from './create-alias-generator.js';
 import { applyFilter } from './filter/index.js';
 
 export function applySearch(
@@ -17,6 +18,7 @@ export function applySearch(
 	collection: string,
 	aliasMap: AliasMap,
 	permissions: Permission[],
+	generateAlias: AliasGenerator,
 ) {
 	const { number: numberHelper } = getHelpers(knex);
 
@@ -50,7 +52,17 @@ export function applySearch(
 				queryBuilder.orWhere((subQuery) => {
 					addSearchCondition(subQuery, name, fieldType, 'and');
 
-					applyFilter(knex, schema, subQuery, { _or: whenCases }, collection, aliasMap, cases, permissions);
+					applyFilter(
+						knex,
+						schema,
+						subQuery,
+						{ _or: whenCases },
+						collection,
+						aliasMap,
+						cases,
+						permissions,
+						generateAlias,
+					);
 				});
 			} else {
 				addSearchCondition(queryBuilder, name, fieldType, 'or');
