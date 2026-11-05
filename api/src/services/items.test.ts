@@ -1729,19 +1729,40 @@ describe('Integration Tests', () => {
 			// A list creates the children of every row in one insert, alterations
 			// one insert per row
 			it.each([
-				{ payload: { children: [{}] }, insertedChildren: [{ id: 8 }, { id: 9 }] },
+				{
+					payload: { children: [{}] },
+					insertedChildren: [{ id: 8 }, { id: 9 }],
+					insertStatements: [
+						{
+							sql: 'insert into "children" ("parent_id") values (?), (?)',
+							bindings: [1, 2],
+						},
+					],
+				},
 				{
 					payload: { children: { create: [{}], delete: [7] } },
 					insertedChildren: [{ id: 8 }],
+					insertStatements: [
+						{
+							sql: 'insert into "children" ("parent_id") values (?)',
+							bindings: [1],
+						},
+						{
+							sql: 'insert into "children" ("parent_id") values (?)',
+							bindings: [2],
+						},
+					],
 				},
 			])(oneLine`
 				gives each of several rows its own child created inline: %j
-			`, async ({ payload, insertedChildren }) => {
+			`, async ({ payload, insertedChildren, insertStatements }) => {
 				tracker.on.insert('children').response(insertedChildren);
 
 				await expect(service.updateMany([1, 2], payload))
 					.resolves
 					.toEqual([1, 2]);
+
+				expect(tracker.history.insert).toMatchObject(insertStatements);
 			});
 
 			it('should NOT skip an object on a relational alias that is not alterations-shaped', async () => {
@@ -7006,6 +7027,36 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 				+ ' and `children`.`id` not in (?)) order by `children`.`id` asc',
 			'update `children` set `parent_id` = ? where `id` in (?)',
 			'COMMIT;',
+		]);
+	});
+
+	it(oneLine`
+		deselects only for the parent its probe finds holding a child left out
+	`, async () => {
+		await new ItemsService('test', { knex: database, schema: parentSchema })
+			.updateMany([1, 2], { children: [7, 8] });
+
+		// parent 1 leaves child 6, parent 2 gets back all it holds
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id`, `parent_id` from `children` where `id` in (?, ?, ?, ?)',
+			'select `id` from `children` where `id` in (?, ?)',
+			'update `children` set `parent_id` = ? where `id` in (?, ?)',
+			'select `id` from `children` where `id` in (?, ?)',
+			'update `children` set `parent_id` = ? where `id` in (?, ?)',
+			'select `id`, `parent_id` from `children` where `parent_id` in (?, ?)',
+			'select `children`.`id` from `children` where (`children`.`parent_id` = ?'
+				+ ' and `children`.`id` not in (?, ?)) order by `children`.`id` asc',
+			'update `children` set `parent_id` = ? where `id` in (?)',
+			'COMMIT;',
+		]);
+
+		await expect(database('children').select('id', 'parent_id')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 5, parent_id: null },
+			{ id: 6, parent_id: null },
+			{ id: 7, parent_id: 2 },
+			{ id: 8, parent_id: 2 },
 		]);
 	});
 
