@@ -195,3 +195,44 @@ test('a join inside a _some subquery continues the numbering', () => {
 
 	expect(query.bindings).toEqual(['ann', 'bob', 10]);
 });
+
+test('a count filtered through an o2m reads each parent key once', () => {
+	const query = getDBQuery(
+		{
+			table: 'articles',
+			fieldNodes: [],
+			o2mNodes: [],
+			query: {
+				aggregate: { count: ['*'] },
+				filter: { links: { name: { _eq: 'im' } } },
+				limit: 10,
+			},
+			cases: [],
+			permissions: [],
+		},
+		{
+			knex: knex.default({ client: Client_SQLite3 }),
+			schema: new SchemaBuilder()
+				.collection('articles', (c) => {
+					c.field('id').id();
+					c.field('links').o2m('links_list', 'article_id');
+				})
+				.collection('links_list', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build(),
+		},
+	).toSQL();
+
+	expect(query.sql).toEqual(
+		'select count(*) as "count" from "articles"'
+		+ ' where "articles"."id" in'
+		+ ' (select distinct "articles"."id" from "articles"'
+		+ ' left join "links_list" as "__alias_1"'
+		+ ' on "articles"."id" = "__alias_1"."article_id"'
+		+ ' where "__alias_1"."name" = ?) limit ?',
+	);
+
+	expect(query.bindings).toEqual(['im', 10]);
+});
