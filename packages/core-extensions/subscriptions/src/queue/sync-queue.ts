@@ -38,6 +38,7 @@ export function selectDueSync(
 		.orderBy('next_attempt_at')
 		.first();
 
+	// TODO(#610): MariaDB 10.6+ also has SKIP LOCKED; SQLite has no row lock.
 	if (trx.client.dialect === 'postgresql') {
 		dueQuery.forUpdate()
 			.skipLocked();
