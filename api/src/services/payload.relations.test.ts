@@ -205,7 +205,9 @@ describe('processO2M', () => {
 
 		const service = new PayloadService('country', { knex: db, schema });
 
-		await service.processO2M({ cities: [{ id: 4, name: 'Lyon' }] }, 1);
+		await service.processO2M([
+			{ data: { cities: [{ id: 4, name: 'Lyon' }] }, key: 1 },
+		]);
 
 		expect(upsertManySpy).toHaveBeenCalledWith(
 			[{ id: 4, name: 'Lyon' }],
@@ -221,10 +223,9 @@ describe('processO2M', () => {
 			updateOne: updateOneSpy,
 		} as unknown as ItemsService);
 
-		await new PayloadService('country', { knex: db, schema }).processO2M(
-			{ cities: { update: [{ id: 4, name: 'Lyon' }] } },
-			1,
-		);
+		await new PayloadService('country', { knex: db, schema }).processO2M([
+			{ data: { cities: { update: [{ id: 4, name: 'Lyon' }] } }, key: 1 },
+		]);
 
 		expect(updateOneSpy).toHaveBeenCalledWith(
 			4,
@@ -241,10 +242,9 @@ describe('processO2M', () => {
 			updateOne: updateOneSpy,
 		} as unknown as ItemsService);
 
-		await new PayloadService('country', { knex: db, schema }).processO2M(
-			{ cities: { update: [{ id: 4, name: 'Lyon' }] } },
-			1,
-		);
+		await new PayloadService('country', { knex: db, schema }).processO2M([
+			{ data: { cities: { update: [{ id: 4, name: 'Lyon' }] } }, key: 1 },
+		]);
 
 		expect(updateOneSpy).toHaveBeenCalledWith(
 			4,
@@ -263,7 +263,7 @@ describe('processO2M', () => {
 		} as unknown as ItemsService);
 
 		await new PayloadService('country', { knex: db, schema })
-			.processO2M({ cities: [4] }, 1);
+			.processO2M([{ data: { cities: [4] }, key: 1 }]);
 
 		expect(upsertManySpy).toHaveBeenCalledWith([], expect.any(Object));
 	});
@@ -278,7 +278,7 @@ describe('processO2M', () => {
 		} as unknown as ItemsService);
 
 		await new PayloadService('country', { knex: db, schema })
-			.processO2M({ cities: [4] }, 1);
+			.processO2M([{ data: { cities: [4] }, key: 1 }]);
 
 		expect(upsertManySpy).toHaveBeenCalledWith(
 			[{ id: 4, country_id: 1 }],
@@ -310,11 +310,14 @@ describe('processO2M', () => {
 		} as unknown as ItemsService);
 
 		await new PayloadService('country', { knex: db, schema: sortedSchema })
-			.processO2M({
-				cities: {
-					create: [{ name: 'Lyon' }, { name: 'Nice', sort: 1 }],
+			.processO2M([{
+				data: {
+					cities: {
+						create: [{ name: 'Lyon' }, { name: 'Nice', sort: 1 }],
+					},
 				},
-			}, 1);
+				key: 1,
+			}]);
 
 		expect(createManySpy).toHaveBeenCalledWith(
 			[

@@ -4,10 +4,11 @@ import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { Helpers } from '../database/helpers/index.js';
 import { getHelpers } from '../database/helpers/index.js';
-import { PayloadService } from './index.js';
+import { ItemsService, PayloadService } from './index.js';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Item, Accountability, FieldOverview } from '@directus/types';
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
+import { oneLine } from '@directus/utils';
 
 vi.mock('../../src/database/index', () => ({
 	getDatabaseClient: vi.fn().mockReturnValue('postgres'),
@@ -925,11 +926,61 @@ describe('Integration Tests', () => {
 				// The related-record lookup by PK resolves to no row, so the existing-record guard fails.
 				tracker.on.select('city').response([]);
 
-				await expect(service.processO2M({ cities: [99] }, 1)).rejects.toThrowError(ForbiddenError);
+				await expect(service.processO2M([{ data: { cities: [99] }, key: 1 }]))
+					.rejects.toThrowError(ForbiddenError);
 
-				await expect(service.processO2M({ cities: [99] }, 1)).rejects.toThrowError(
+				await expect(service.processO2M([{ data: { cities: [99] }, key: 1 }]))
+					.rejects.toThrowError(
 					"Could not find a 'city' record having the primary key 99 while processing O2M relation",
 				);
+			});
+
+			test(oneLine`
+				reads the children a list names 10 000 keys at a time, since one
+				statement past 65 535 keys would overflow Postgres's bind parameters
+			`, async () => {
+				tracker.on.select('city').response(Array.from(
+					{ length: 10_001 },
+					(_, index) => ({ id: index + 1, country_id: 1 }),
+				));
+
+				vi.spyOn(ItemsService.prototype, 'upsertMany').mockResolvedValue([]);
+				vi.spyOn(ItemsService.prototype, 'updateByQuery').mockResolvedValue([]);
+
+				await service.processO2M([{
+					data: {
+						cities: Array.from({ length: 10_001 }, (_, index) => index + 1),
+					},
+					key: 1,
+				}]);
+
+				expect(tracker.history.select).toMatchObject([
+					{ bindings: Array.from({ length: 10_000 }, (_, index) => index + 1) },
+					{ bindings: [10_001] },
+				]);
+			});
+
+			test('refuses a revision reported without the key of its item', async () => {
+				vi.spyOn(ItemsService.prototype, 'upsertMany')
+					.mockImplementation(async (_payloads, opts) => {
+						opts!.onRevisionCreate!(9, undefined as never);
+						return [5];
+					});
+
+				await expect(service.processO2M([{ data: { cities: [{}] }, key: 1 }]))
+					.rejects.toThrowError(new Error(
+						'Revision 9 of "city" came without the key of its item: undefined',
+					));
+			});
+
+			test(oneLine`
+				refuses the parent payload and key of the former signature
+			`, async () => {
+				await expect(service.processO2M({ cities: [] } as never))
+					.rejects.toThrowError(new Error(
+						'processO2M takes the parent rows as [{ data, key }],'
+						+ ' got {"cities":[]}',
+					));
 			});
 		});
 	});

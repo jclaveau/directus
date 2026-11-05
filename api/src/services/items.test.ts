@@ -1726,15 +1726,43 @@ describe('Integration Tests', () => {
 					.toEqual([1, 1]);
 			});
 
+			// A list creates the children of every row in one insert, alterations
+			// one insert per row
 			it.each([
-				{ children: [{}] },
-				{ children: { create: [{}], delete: [7] } },
+				{
+					payload: { children: [{}] },
+					insertedChildren: [{ id: 8 }, { id: 9 }],
+					insertStatements: [
+						{
+							sql: 'insert into "children" ("parent_id") values (?), (?)',
+							bindings: [1, 2],
+						},
+					],
+				},
+				{
+					payload: { children: { create: [{}], delete: [7] } },
+					insertedChildren: [{ id: 8 }],
+					insertStatements: [
+						{
+							sql: 'insert into "children" ("parent_id") values (?)',
+							bindings: [1],
+						},
+						{
+							sql: 'insert into "children" ("parent_id") values (?)',
+							bindings: [2],
+						},
+					],
+				},
 			])(oneLine`
 				gives each of several rows its own child created inline: %j
-			`, async (payload) => {
+			`, async ({ payload, insertedChildren, insertStatements }) => {
+				tracker.on.insert('children').response(insertedChildren);
+
 				await expect(service.updateMany([1, 2], payload))
 					.resolves
 					.toEqual([1, 2]);
+
+				expect(tracker.history.insert).toMatchObject(insertStatements);
 			});
 
 			it('should NOT skip an object on a relational alias that is not alterations-shaped', async () => {
@@ -6847,6 +6875,406 @@ describe('Services / Items / a batched upsert', () => {
 					},
 				]);
 		});
+	});
+});
+
+describe('Services / Items / the nested O2M rows of several parents', () => {
+	let database: Knex;
+	let sqlStatements: string[];
+
+	const parentSchema = new SchemaBuilder()
+		.collection('test', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('children').o2m('children', 'parent_id');
+		})
+		.collection('children', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('parent_id').m2o('test');
+		})
+		.build();
+
+	// the relational paths below load PayloadService's lazy `get-service.js` graph
+	beforeAll(async () => {
+		await import('../utils/get-service.js');
+	}, 120_000);
+
+	beforeEach(async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+		database = knex.default({
+			client: 'sqlite3',
+			connection: { filename: ':memory:' },
+			useNullAsDefault: true,
+			pool: { min: 1, max: 1 },
+		});
+
+		await database.schema.createTable('test', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		await database.schema.createTable('children', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('parent_id');
+		});
+
+		await database('test').insert([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+
+		await database('children').insert([
+			{ id: 5, name: 'five', parent_id: null },
+			{ id: 6, name: 'six', parent_id: 1 },
+			{ id: 7, name: 'seven', parent_id: 2 },
+			{ id: 8, name: 'eight', parent_id: 2 },
+		]);
+
+		revisionWrites.length = 0;
+		revisionParentWrites.length = 0;
+		revisionIds.issued = 0;
+		sqlStatements = [];
+
+		database.on('query', (query: { sql: string }) => {
+			sqlStatements.push(query.sql);
+		});
+	});
+
+	afterEach(async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+		await database.destroy();
+	});
+
+	it('gives each created parent its own children', async () => {
+		await expect(new ItemsService('test', { knex: database, schema: parentSchema })
+			.createMany([
+				{ id: 3, children: [5, { name: 'new of three' }] },
+				{ id: 4, children: [7, { id: 6, name: 'six renamed' }] },
+			])).resolves.toStrictEqual([3, 4]);
+
+		await expect(database('children').select('id', 'name', 'parent_id')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 5, name: 'five', parent_id: 3 },
+			{ id: 6, name: 'six renamed', parent_id: 4 },
+			{ id: 7, name: 'seven', parent_id: 4 },
+			{ id: 8, name: 'eight', parent_id: 2 },
+			{ id: 9, name: 'new of three', parent_id: 3 },
+		]);
+	});
+
+	it(oneLine`
+		leaves a child on the later parent when an earlier one updates it
+		and a later one lists it
+	`, async () => {
+		await expect(new ItemsService('test', { knex: database, schema: parentSchema })
+			.createMany([
+				{ id: 3, children: { update: [{ id: 6, name: 'six of three' }] } },
+				{ id: 4, children: [6] },
+			])).resolves.toStrictEqual([3, 4]);
+
+		await expect(database('children').select('id', 'name', 'parent_id')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 5, name: 'five', parent_id: null },
+			{ id: 6, name: 'six of three', parent_id: 4 },
+			{ id: 7, name: 'seven', parent_id: 2 },
+			{ id: 8, name: 'eight', parent_id: 2 },
+		]);
+	});
+
+	it(oneLine`
+		reads the children the lists name once, and the children the parents
+		hold once, for every created parent
+	`, async () => {
+		await new ItemsService('test', { knex: database, schema: parentSchema })
+			.createMany([
+				{ id: 3, children: [5, { name: 'new of three' }] },
+				{ id: 4, children: [7, { id: 6, name: 'six renamed' }] },
+			]);
+
+		// sqlite writes one statement per update group (#610), postgres one batch
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select sqlite_version() as version limit ?',
+			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
+			'insert into `test` (`id`) select ? as `id` union all select ? as `id`'
+				+ ' returning `id`',
+			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
+			'select `id`, `parent_id` from `children` where `id` in (?, ?, ?)',
+			'select `id` from `children` where `id` in (?, ?, ?)',
+			'update `children` set `parent_id` = ? where `id` in (?)',
+			'update `children` set `parent_id` = ? where `id` in (?)',
+			'update `children` set `name` = ?, `parent_id` = ? where `id` in (?)',
+			'insert into `children` (`name`, `parent_id`) values (?, ?) returning `id`',
+			'select `id`, `parent_id` from `children` where `parent_id` in (?, ?)',
+			'COMMIT;',
+		]);
+	});
+
+	it(oneLine`
+		goes straight to the deselect of a single parent, its own read telling
+		whether it holds a child left out
+	`, async () => {
+		await new ItemsService('test', { knex: database, schema: parentSchema })
+			.updateOne(2, { children: [7] });
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id`, `parent_id` from `children` where `id` in (?)',
+			'select `children`.`id` from `children` where (`children`.`parent_id` = ?'
+				+ ' and `children`.`id` not in (?)) order by `children`.`id` asc',
+			'update `children` set `parent_id` = ? where `id` in (?)',
+			'COMMIT;',
+		]);
+	});
+
+	it(oneLine`
+		deselects only for the parent its probe finds holding a child left out
+	`, async () => {
+		await new ItemsService('test', { knex: database, schema: parentSchema })
+			.updateMany([1, 2], { children: [7, 8] });
+
+		// parent 1 leaves child 6, parent 2 gets back all it holds
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id`, `parent_id` from `children` where `id` in (?, ?, ?, ?)',
+			'select `id` from `children` where `id` in (?, ?)',
+			'update `children` set `parent_id` = ? where `id` in (?, ?)',
+			'select `id` from `children` where `id` in (?, ?)',
+			'update `children` set `parent_id` = ? where `id` in (?, ?)',
+			'select `id`, `parent_id` from `children` where `parent_id` in (?, ?)',
+			'select `children`.`id` from `children` where (`children`.`parent_id` = ?'
+				+ ' and `children`.`id` not in (?, ?)) order by `children`.`id` asc',
+			'update `children` set `parent_id` = ? where `id` in (?)',
+			'COMMIT;',
+		]);
+
+		await expect(database('children').select('id', 'parent_id')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 5, parent_id: null },
+			{ id: 6, parent_id: null },
+			{ id: 7, parent_id: 2 },
+			{ id: 8, parent_id: 2 },
+		]);
+	});
+
+	it(oneLine`
+		matches parents and children named with leading zeros to the rows they
+		name
+	`, async () => {
+		await new ItemsService('test', { knex: database, schema: parentSchema })
+			.updateMany(['001', '002'], { children: ['007', '008'] });
+
+		await expect(database('children').select('id', 'parent_id')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 5, parent_id: null },
+			{ id: 6, parent_id: null },
+			{ id: 7, parent_id: 2 },
+			{ id: 8, parent_id: 2 },
+		]);
+	});
+
+	it('leaves a child two created parents name on the last one', async () => {
+		await expect(new ItemsService('test', { knex: database, schema: parentSchema })
+			.createMany([
+				{ id: 3, children: [7] },
+				{ id: 4, children: [7] },
+			])).resolves.toStrictEqual([3, 4]);
+
+		await expect(database('children').select('id', 'parent_id')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 5, parent_id: null },
+			{ id: 6, parent_id: 1 },
+			{ id: 7, parent_id: 4 },
+			{ id: 8, parent_id: 2 },
+		]);
+	});
+
+	it(oneLine`
+		leaves a child the updated keys name on the last key, back on the parent
+		holding it
+	`, async () => {
+		await expect(new ItemsService('test', { knex: database, schema: parentSchema })
+			.updateMany([1, 2], { children: [7] })).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('children').select('id', 'parent_id')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 5, parent_id: null },
+			{ id: 6, parent_id: null },
+			{ id: 7, parent_id: 2 },
+			{ id: 8, parent_id: null },
+		]);
+	});
+
+	it(oneLine`
+		nullifies, per updated key, the children the payload leaves out, a
+		child moved to another key included
+	`, async () => {
+		await expect(new ItemsService('test', { knex: database, schema: parentSchema })
+			.updateBatch([
+				{ id: 1, children: [7] },
+				{ id: 2, children: [5] },
+			])).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('children').select('id', 'parent_id')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 5, parent_id: 2 },
+			{ id: 6, parent_id: null },
+			{ id: 7, parent_id: 1 },
+			{ id: 8, parent_id: null },
+		]);
+	});
+
+	it('deletes, per updated key, the children the payload leaves out', async () => {
+		const deletingSchema = structuredClone(parentSchema);
+
+		deletingSchema.relations[0]!.meta!.one_deselect_action = 'delete';
+
+		await expect(new ItemsService('test', { knex: database, schema: deletingSchema })
+			.updateMany([1, 2], { children: [{ name: 'new' }] }))
+			.resolves.toStrictEqual([1, 2]);
+
+		await expect(database('children').select('id', 'name', 'parent_id')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 5, name: 'five', parent_id: null },
+			{ id: 9, name: 'new', parent_id: 1 },
+			{ id: 10, name: 'new', parent_id: 2 },
+		]);
+	});
+
+	it('files each child revision under the revision of its own parent', async () => {
+		await new ItemsService('test', {
+			knex: database,
+			schema: parentSchema,
+			accountability: { user: 'u1', role: 'r1', admin: true, app: true } as any,
+		}).createMany([
+			{ id: 3, name: 'three', children: [5, { name: 'new of three' }] },
+			{ id: 4, name: 'four', children: [7] },
+		]);
+
+		expect(revisionWrites).toStrictEqual([
+			[{
+				activity: 1,
+				collection: 'children',
+				item: 5,
+				data: '{"id":5,"name":"five","parent_id":3}',
+				delta: '{"parent_id":3}',
+			}],
+			[{
+				activity: 1,
+				collection: 'children',
+				item: 7,
+				data: '{"id":7,"name":"seven","parent_id":4}',
+				delta: '{"parent_id":4}',
+			}],
+			[{
+				activity: 1,
+				collection: 'children',
+				item: 9,
+				data: '{"name":"new of three","parent_id":3}',
+				delta: '{"name":"new of three","parent_id":3}',
+			}],
+			[
+				{
+					activity: 1,
+					collection: 'test',
+					item: 3,
+					data: '{"id":3,"name":"three","children":[5,{"name":"new of three"}]}',
+					delta: '{"id":3,"name":"three","children":[5,{"name":"new of three"}]}',
+				},
+				{
+					activity: 2,
+					collection: 'test',
+					item: 4,
+					data: '{"id":4,"name":"four","children":[7]}',
+					delta: '{"id":4,"name":"four","children":[7]}',
+				},
+			],
+		]);
+
+		// revisions 1 and 3 are the children of 3, revision 2 the child of 4
+		expect(revisionParentWrites).toStrictEqual([
+			{ keys: [1, 3], data: { parent: 4 } },
+			{ keys: [2], data: { parent: 5 } },
+		]);
+	});
+
+	it(oneLine`
+		files the revisions of a child two lists name under their parents in
+		list order
+	`, async () => {
+		await new ItemsService('test', {
+			knex: database,
+			schema: parentSchema,
+			accountability: { user: 'u1', role: 'r1', admin: true, app: true } as any,
+		}).createMany([
+			{ id: 3, name: 'three', children: [{ id: 6, name: 'six of three' }] },
+			{ id: 4, name: 'four', children: [{ id: 6, name: 'six of four' }] },
+		]);
+
+		// revision 1 is the child of 3, revision 2 the child of 4
+		expect(revisionParentWrites).toStrictEqual([
+			{ keys: [1], data: { parent: 3 } },
+			{ keys: [2], data: { parent: 4 } },
+		]);
+	});
+
+	it(oneLine`
+		files the revision of a child under the parent naming it after a list
+		naming it again writes no revision
+	`, async () => {
+		await new ItemsService('test', {
+			knex: database,
+			schema: parentSchema,
+			accountability: { user: 'u1', role: 'r1', admin: true, app: true } as any,
+		}).createMany([
+			{ id: 3, name: 'three', children: [{ id: 10, name: 'ten' }] },
+			{ id: 4, name: 'four', children: [{ id: 10 }, { id: 10 }] },
+			{ id: 11, name: 'eleven', children: [{ id: 10 }] },
+		]);
+
+		// revisions 1 to 3 are the child's, 4 to 6 the parents'; the second
+		// { id: 10 } of 4 changes nothing, so it writes no revision
+		expect(revisionParentWrites).toStrictEqual([
+			{ keys: [1], data: { parent: 4 } },
+			{ keys: [2], data: { parent: 5 } },
+			{ keys: [3], data: { parent: 6 } },
+		]);
+	});
+
+	it('refuses a child key that is not an integer, writing nothing', async () => {
+		await expect(new ItemsService('test', { knex: database, schema: parentSchema })
+			.createMany([
+				{ id: 3, children: [5] },
+				{ id: 4, children: [' 7'] },
+			])).rejects.toStrictEqual(new InvalidPayloadError({
+			reason: 'Primary key of children must be an integer instead of " 7"',
+		}));
+
+		await expect(database('test')
+			.select('id')
+			.orderBy('id'))
+			.resolves.toStrictEqual([{ id: 1 }, { id: 2 }]);
+	});
+
+	it('refuses a bare child key no row holds, writing nothing', async () => {
+		await expect(new ItemsService('test', { knex: database, schema: parentSchema })
+			.createMany([
+				{ id: 3, children: [5] },
+				{ id: 4, children: [99] },
+			])).rejects.toStrictEqual(new ForbiddenError({
+			reason: oneLine`
+				Could not find a 'children' record having the primary key 99 while
+				processing O2M relation
+			`,
+		}));
+
+		await expect(database('test')
+			.select('id')
+			.orderBy('id'))
+			.resolves.toStrictEqual([{ id: 1 }, { id: 2 }]);
 	});
 });
 
