@@ -103,7 +103,7 @@ export function defineNestedWriteSteps(
 		},
 	);
 
-	then(
+	then.optional(
 		/^the rows of (\S+) whose key starts with "([^"]+)" are:$/,
 		async (
 			collection: string,
