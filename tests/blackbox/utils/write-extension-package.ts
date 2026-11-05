@@ -1,5 +1,5 @@
 import { mkdir, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 /**
  * Writes into `directory` a package.json whose dependencies are the extensions
@@ -27,6 +27,10 @@ export async function writeExtensionPackage(
 	await mkdir(join(directory, 'node_modules'), { recursive: true });
 
 	for (const [packageName, extensionFolder] of Object.entries(extensionFolders)) {
-		await symlink(extensionFolder, join(directory, 'node_modules', packageName));
+		const packageLink = join(directory, 'node_modules', packageName);
+
+		// A scoped name links one folder deeper: `node_modules/@scope/name`.
+		await mkdir(dirname(packageLink), { recursive: true });
+		await symlink(extensionFolder, packageLink);
 	}
 }
