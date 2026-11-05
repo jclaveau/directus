@@ -58,6 +58,32 @@ for (const key of ['_some', '_none']) {
 	});
 }
 
+test('_some over an _and returns the _some', () => {
+	expect(
+		getOperation('_some', {
+			_and: [{ name: { _eq: 'a' } }, { status: { _eq: 'b' } }],
+		}),
+	).toEqual({
+		operator: '_some',
+		value: {
+			_and: [{ name: { _eq: 'a' } }, { status: { _eq: 'b' } }],
+		},
+	});
+});
+
+test('_none over an _or returns the _none', () => {
+	expect(
+		getOperation('_none', {
+			_or: [{ name: { _eq: 'a' } }, { name: { _eq: 'b' } }],
+		}),
+	).toEqual({
+		operator: '_none',
+		value: {
+			_or: [{ name: { _eq: 'a' } }, { name: { _eq: 'b' } }],
+		},
+	});
+});
+
 for (const key of ['_and', '_or']) {
 	test(`key as invalid ${key}`, () => {
 		const result = getOperation(key, {});

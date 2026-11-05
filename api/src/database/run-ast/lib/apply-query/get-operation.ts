@@ -15,7 +15,15 @@ export function getOperation(key: string, value: unknown): { operator: string; v
 	const childKey = Object.keys(value)[0];
 
 	if (childKey) {
-		return getOperation(childKey, Object.values(value)[0]);
+		const childOperation = getOperation(childKey, Object.values(value)[0]);
+
+		// An _and/_or under a quantifier has no single operation, but its
+		// subquery applies it whole: returning null would drop the clause
+		if (!childOperation && (key === '_none' || key === '_some')) {
+			return { operator: key, value };
+		}
+
+		return childOperation;
 	}
 
 	return null;
