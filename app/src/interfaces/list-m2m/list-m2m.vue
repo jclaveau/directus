@@ -120,7 +120,12 @@ const fields = computed(() => {
 		);
 	}
 
-	if (props.managedByField) {
+	const junctionCollection = relationInfo.value.junctionCollection.collection;
+
+	if (
+		props.managedByField
+		&& fieldsStore.getField(junctionCollection, props.managedByField)
+	) {
 		displayFields.push(props.managedByField);
 	}
 
