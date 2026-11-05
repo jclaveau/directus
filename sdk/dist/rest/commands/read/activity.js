@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=e=>()=>({path:`/activity`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/activity/${t}`,params:n??{},method:`GET`});export{t as readActivities,n as readActivity};
+//# sourceMappingURL=activity.js.map
