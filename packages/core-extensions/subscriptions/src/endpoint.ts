@@ -4,6 +4,7 @@ import type { Accountability } from '@directus/types';
 import type { Request } from 'express';
 import { cancelOwnSubscription } from './cancel/cancel-own-subscription.js';
 import { readSubscriptionsConfig } from './config/read-subscriptions-config.js';
+import { archivePlan } from './plans/archive-plan.js';
 import { createProviders } from './providers/create-providers.js';
 import { receiveWebhook } from './webhook/receive-webhook.js';
 
@@ -47,5 +48,21 @@ export const subscriptionsEndpoint = defineEndpoint(
 						.end();
 				}, next);
 		});
+
+		router.post(
+			'/plans/:id/archive',
+			(request: AccountableRequest, response, next) => {
+				archivePlan({
+					database,
+					enabledProviders,
+					planId: String(request.params['id']),
+					confirmation: request.body?.confirmation,
+					accountability: request.accountability ?? null,
+				})
+					.then((archivedPlan) => {
+						response.json({ data: archivedPlan });
+					}, next);
+			},
+		);
 	},
 );

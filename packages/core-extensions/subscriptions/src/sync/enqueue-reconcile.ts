@@ -1,7 +1,7 @@
 import type { Knex } from 'knex';
 import { TERMINAL_STATUSES } from '../constants.js';
 import type { SubscriptionProviders } from '../providers/types.js';
-import { enqueueSync } from '../queue/sync-queue.js';
+import { enqueueSync, MAX_SYNC_ATTEMPTS } from '../queue/sync-queue.js';
 
 /**
  * Re-syncs every subscription a provider may still change, and every one
@@ -28,6 +28,16 @@ export async function enqueueReconcile(
 		})
 		.orderBy('subscriptions.id');
 
+	// Without this the hourly run would undo the attempt ceiling; a webhook, news
+	// about the subscription, still re-arms a row parked there.
+	const parkedRows = await database('subscription_sync_queue')
+		.select('provider', 'resource_id')
+		.where('attempts', '>=', MAX_SYNC_ATTEMPTS);
+
+	const parkedResources = new Set(parkedRows.map((parkedRow) => {
+		return `${parkedRow.provider} ${parkedRow.resource_id}`;
+	}));
+
 	const disabledProviders = new Set<string>();
 	let enqueuedCount = 0;
 
@@ -39,12 +49,18 @@ export async function enqueueReconcile(
 			continue;
 		}
 
+		const resourceId = rowProvider.composeResourceId({
+			subscriptionId: reconciledRow.provider_subscription_id,
+			customerId: reconciledRow.provider_customer_id,
+		});
+
+		if (parkedResources.has(`${reconciledRow.provider} ${resourceId}`)) {
+			continue;
+		}
+
 		await enqueueSync(database, {
 			provider: reconciledRow.provider,
-			resourceId: rowProvider.composeResourceId({
-				subscriptionId: reconciledRow.provider_subscription_id,
-				customerId: reconciledRow.provider_customer_id,
-			}),
+			resourceId,
 		});
 
 		enqueuedCount++;

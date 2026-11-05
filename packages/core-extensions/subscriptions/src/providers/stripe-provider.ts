@@ -1,5 +1,8 @@
 import Stripe from 'stripe';
-import { WebhookRefusedError } from '../errors.js';
+import {
+	MissingProviderSubscriptionError,
+	WebhookRefusedError,
+} from '../errors.js';
 import type { SubscriptionProvider } from './types.js';
 
 export function createStripeProvider(
@@ -45,7 +48,8 @@ export function createStripeProvider(
 		},
 
 		async fetchSubscription(resourceId) {
-			const stripeSubscription = await stripeClient.subscriptions.retrieve(
+			const stripeSubscription = await retrieveStripeSubscription(
+				stripeClient,
 				resourceId,
 			);
 
@@ -84,6 +88,26 @@ export function createStripeProvider(
 			return subscriptionId;
 		},
 	};
+}
+
+async function retrieveStripeSubscription(
+	stripeClient: Stripe,
+	resourceId: string,
+) {
+	try {
+		return await stripeClient.subscriptions.retrieve(resourceId);
+	}
+	catch (error) {
+		if (error instanceof Stripe.errors.StripeError
+			&& error.code === 'resource_missing') {
+			throw new MissingProviderSubscriptionError(
+				{ resourceId, subscriptionId: resourceId },
+				{ cause: error },
+			);
+		}
+
+		throw error;
+	}
 }
 
 function readEventSubscriptionId(stripeEvent: Stripe.Event): string {

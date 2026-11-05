@@ -41,7 +41,7 @@ describe('enqueueSync', () => {
 		}]);
 	});
 
-	test('re-arms a failed sync of the same resource', async () => {
+	test('brings a failed sync forward, keeping its history', async () => {
 		vi.useFakeTimers({ now: new Date('2026-11-05T00:00:00Z'), toFake: ['Date'] });
 
 		await database('subscription_sync_queue').insert({
@@ -60,9 +60,9 @@ describe('enqueueSync', () => {
 			provider: 'stripe',
 			resource_id: 'sub_1',
 			pending: 1,
-			attempts: 0,
+			attempts: 3,
 			next_attempt_at: 1_793_836_800_000,
-			last_error: null,
+			last_error: 'Stripe is down',
 		}]);
 	});
 });
@@ -102,6 +102,7 @@ describe('selectDueSync', () => {
 				provider: 'mollie',
 				resource_id: 'cst_1/sub_1',
 				attempts: 0,
+				next_attempt_at: 1_793_664_000_000,
 			});
 	});
 
@@ -118,7 +119,8 @@ describe('selectDueSync', () => {
 			.toSQL()
 			.toNative())
 			.toEqual({
-				sql: 'select "id", "provider", "resource_id", "attempts"'
+				sql: 'select "id", "provider", "resource_id", "attempts",'
+					+ ' "next_attempt_at"'
 					+ ' from "subscription_sync_queue"'
 					+ ' where "pending" = $1 and "next_attempt_at" <= $2'
 					+ ' order by "next_attempt_at" asc limit $3'

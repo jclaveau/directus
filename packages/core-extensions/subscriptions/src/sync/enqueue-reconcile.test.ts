@@ -106,6 +106,75 @@ describe('enqueueReconcile', () => {
 			]);
 	});
 
+	test('leaves out a sync parked at the attempt ceiling', async () => {
+		await database('subscribers').insert({ user: 'user-1' });
+
+		await database('subscriber_customers')
+			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
+
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 990,
+			currency: 'EUR',
+			interval: 'month',
+		});
+
+		await database('subscriptions').insert([
+			{
+				subscriber: 1,
+				customer: 1,
+				plan: 1,
+				provider: 'stripe',
+				provider_subscription_id: 'sub_parked',
+				status: 'active',
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+			{
+				subscriber: 1,
+				customer: 1,
+				plan: 1,
+				provider: 'stripe',
+				provider_subscription_id: 'sub_retrying',
+				status: 'active',
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+		]);
+
+		await database('subscription_sync_queue').insert([
+			{
+				provider: 'stripe',
+				resource_id: 'sub_parked',
+				pending: false,
+				attempts: 48,
+				next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+				last_error: 'Stripe is down',
+			},
+			{
+				provider: 'stripe',
+				resource_id: 'sub_retrying',
+				pending: false,
+				attempts: 47,
+				next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+				last_error: 'Stripe is down',
+			},
+		]);
+
+		await enqueueReconcile(database, new Map([
+			['stripe', createStripeProvider(new Stripe('sk_test_1'), 'whsec_1')],
+		]));
+
+		expect(await database('subscription_sync_queue')
+			.select('resource_id', 'pending'))
+			.toEqual([
+				{ resource_id: 'sub_parked', pending: 0 },
+				{ resource_id: 'sub_retrying', pending: 1 },
+			]);
+	});
+
 	test('refuses subscriptions of disabled providers after the others', async () => {
 		await database('subscribers').insert({ user: 'user-1' });
 
