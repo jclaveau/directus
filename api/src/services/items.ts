@@ -3590,10 +3590,18 @@ implements AbstractService<Item> {
 		const existingKeyNames = new Set<string>();
 
 		for (const keyChunk of chunk(sentKeys, UPSERT_PROBE_CHUNK_SIZE)) {
-			const existingRows = await this.knex
+			const existenceRead = this.knex
 				.select(primaryKeyField)
 				.from(this.collection)
 				.whereIn(primaryKeyField, keyChunk);
+
+			// a row found is updated: a delete committing before the update would
+			// leave it writing nothing, so the found rows stay locked until commit
+			if (getHelpers(this.knex).capabilities.supportsRowLocks()) {
+				existenceRead.forUpdate();
+			}
+
+			const existingRows = await existenceRead;
 
 			for (const existingRow of existingRows) {
 				existingKeyNames.add(this.primaryKeyNameOf(existingRow[primaryKeyField]));

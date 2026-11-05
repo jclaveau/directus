@@ -25,6 +25,7 @@ import {
 	type MockInstance,
 	vi,
 } from 'vitest';
+import { CapabilitiesHelper } from '../database/helpers/capabilities/types.js';
 import getDatabase, { getDatabaseClient } from '../database/index.js';
 import {
 	validateAccess,
@@ -2930,6 +2931,12 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 	beforeAll(() => {
 		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
+	});
+
+	beforeEach(() => {
+		// this MockClient compiles no FOR UPDATE: the existence read takes no lock
+		vi.spyOn(CapabilitiesHelper.prototype, 'supportsRowLocks')
+			.mockReturnValue(false);
 	});
 
 	afterEach(() => {
@@ -7147,5 +7154,50 @@ describe('updateBatch on postgres', () => {
 				bindings: ['[{"title":"first","id":1},{"title":"second","id":2}]'],
 			}),
 		]);
+	});
+});
+
+describe('upsertMany on postgres', () => {
+	const postsSchema = new SchemaBuilder()
+		.collection('posts', (c) => {
+			c.field('id').id();
+			c.field('title').string();
+		})
+		.build();
+
+	let pgDatabase: Knex;
+	let pgTracker: Tracker;
+
+	beforeAll(() => {
+		pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+		delete Object.getPrototypeOf(MockClient.prototype)._events;
+		pgTracker = createTracker(pgDatabase);
+	});
+
+	beforeEach(() => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+	});
+
+	afterEach(() => {
+		pgTracker.reset();
+	});
+
+	it('locks the rows it finds until the run commits', async () => {
+		pgTracker.on.select('posts').response([{ id: 1 }]);
+		pgTracker.on.update('posts').response(1);
+		pgTracker.on.insert('posts').response([{ id: 2 }]);
+		pgTracker.on.any('posts').response([]);
+
+		const upsertedKeys = await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).upsertMany([{ id: 1, title: 'uno' }, { id: 2, title: 'dos' }]);
+
+		expect(upsertedKeys).toEqual([1, 2]);
+
+		expect(pgTracker.history.select[0]).toMatchObject({
+			sql: 'select "id" from "posts" where "id" in ($1, $2) for update',
+			bindings: [1, 2],
+		});
 	});
 });

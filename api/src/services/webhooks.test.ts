@@ -2,6 +2,7 @@ import type { Knex } from 'knex';
 import knex from 'knex';
 import { createTracker, MockClient, Tracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import { CapabilitiesHelper } from '../database/helpers/capabilities/types.js';
 import { useBus } from '../bus/index.js';
 import { WebhooksService } from './index.js';
 import { SchemaBuilder } from '@directus/schema-builder';
@@ -25,10 +26,15 @@ describe('Integration Tests', () => {
 
 	beforeEach(() => {
 		tracker.on.any('directus_webhooks').response({});
+
+		// this MockClient compiles no FOR UPDATE: the existence read takes no lock
+		vi.spyOn(CapabilitiesHelper.prototype, 'supportsRowLocks')
+			.mockReturnValue(false);
 	});
 
 	afterEach(() => {
 		tracker.reset();
+		vi.mocked(CapabilitiesHelper.prototype.supportsRowLocks).mockRestore();
 	});
 
 	describe('Services / Webhooks', () => {
