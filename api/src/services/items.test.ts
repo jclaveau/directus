@@ -7221,6 +7221,21 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 		]);
 	});
 
+	it('refuses a child key that is not an integer, writing nothing', async () => {
+		await expect(new ItemsService('test', { knex: database, schema: parentSchema })
+			.createMany([
+				{ id: 3, children: [5] },
+				{ id: 4, children: [' 7'] },
+			])).rejects.toStrictEqual(new InvalidPayloadError({
+			reason: 'Primary key of children must be an integer instead of " 7"',
+		}));
+
+		await expect(database('test')
+			.select('id')
+			.orderBy('id'))
+			.resolves.toStrictEqual([{ id: 1 }, { id: 2 }]);
+	});
+
 	it('refuses a bare child key no row holds, writing nothing', async () => {
 		await expect(new ItemsService('test', { knex: database, schema: parentSchema })
 			.createMany([

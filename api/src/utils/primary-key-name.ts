@@ -21,7 +21,8 @@ export function primaryKeyNameOf(
 		return String(key).toLowerCase();
 	}
 
-	// A child key comes unvalidated: as numbers, 'abc' and 'xyz' would both be NaN.
+	// Not every caller validates its keys: as numbers, 'abc' and 'xyz' would
+	// both be NaN.
 	if (!/^[+-]?\d+$/.test(String(key))) {
 		return String(key);
 	}

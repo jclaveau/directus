@@ -39,6 +39,7 @@ import {
 	pick,
 } from '../utils/lodash-es-used.js';
 import { primaryKeyNameOf } from '../utils/primary-key-name.js';
+import { validateKeys } from '../utils/validate-keys.js';
 import type { ItemsService } from './items.js';
 
 // One read names at most this many keys, under every dialect's bind limit
@@ -940,6 +941,15 @@ export class PayloadService {
 				? []
 				: [relatedId];
 		});
+
+		// A key the column cannot hold, such as '{uuid}' or ' 7', is a 400, not a
+		// missing row
+		validateKeys(
+			this.schema,
+			relation.collection,
+			relatedPrimaryKeyField,
+			namedChildKeys,
+		);
 
 		// The children the lists name, by key name: the key a row answers to and the
 		// parent it holds as the lists before the current one leave it
