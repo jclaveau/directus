@@ -81,11 +81,11 @@ test('two joins of one statement get distinct aliases', () => {
 
 	expect(query.sql).toEqual(
 		'select "articles"."id" from "articles"'
-		+ ' left join "users" as "alias_1"'
-		+ ' on "articles"."author" = "alias_1"."id"'
-		+ ' left join "companies" as "alias_2"'
-		+ ' on "alias_1"."company" = "alias_2"."id"'
-		+ ' where "alias_2"."name" = ? limit ?',
+		+ ' left join "users" as "__alias_1"'
+		+ ' on "articles"."author" = "__alias_1"."id"'
+		+ ' left join "companies" as "__alias_2"'
+		+ ' on "__alias_1"."company" = "__alias_2"."id"'
+		+ ' where "__alias_2"."name" = ? limit ?',
 	);
 
 	expect(query.bindings).toEqual(['acme', 10]);
@@ -184,16 +184,16 @@ test('a join inside a _some subquery continues the numbering', () => {
 	expect(query.sql).toEqual(
 		'select "articles"."id" from "articles"'
 		+ ' inner join (select distinct "articles"."id" from "articles"'
-		+ ' left join "users" as "alias_1"'
-		+ ' on "articles"."author" = "alias_1"."id"'
-		+ ' left join "links_list" as "alias_2"'
-		+ ' on "articles"."id" = "alias_2"."article_id"'
-		+ ' where ("alias_1"."name" = ? and "articles"."id" in'
+		+ ' left join "users" as "__alias_1"'
+		+ ' on "articles"."author" = "__alias_1"."id"'
+		+ ' left join "links_list" as "__alias_2"'
+		+ ' on "articles"."id" = "__alias_2"."article_id"'
+		+ ' where ("__alias_1"."name" = ? and "articles"."id" in'
 		+ ' (select "links_list"."article_id" as "article_id"'
-		+ ' from "links_list" left join "users" as "alias_4"'
-		+ ' on "links_list"."owner" = "alias_4"."id"'
+		+ ' from "links_list" left join "users" as "__alias_4"'
+		+ ' on "links_list"."owner" = "__alias_4"."id"'
 		+ ' where "links_list"."article_id" is not null'
-		+ ' and "alias_4"."name" = ?)) limit ?) as "inner"'
+		+ ' and "__alias_4"."name" = ?)) limit ?) as "inner"'
 		+ ' on "articles"."id" = "inner"."id"',
 	);
 

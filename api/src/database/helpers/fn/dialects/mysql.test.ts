@@ -25,8 +25,8 @@ test('count of a relational field aliases its subquery from the generator', () =
 		.toSQL();
 
 	expect(rawQuery.sql).toEqual(
-		'(select count(*) from "links" as "alias_1"'
-		+ ' where "alias_1"."article_id" = "articles"."id")',
+		'(select count(*) from "links" as "__alias_1"'
+		+ ' where "__alias_1"."article_id" = "articles"."id")',
 	);
 
 	expect(rawQuery.bindings).toEqual([]);

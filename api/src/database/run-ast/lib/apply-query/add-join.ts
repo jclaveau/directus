@@ -40,8 +40,8 @@ import type { AliasGenerator } from './create-alias-generator.js';
  *   pages.id in (
  *     SELECT articles.page_id AS page_id
  *     FROM articles
- *     LEFT JOIN authors AS alias_1 ON articles.author = alias_1.id
- *     WHERE alias_1.name = 'Rijk'
+ *     LEFT JOIN authors AS __alias_1 ON articles.author = __alias_1.id
+ *     WHERE __alias_1.name = 'Rijk'
  *   )
  * ```
  */

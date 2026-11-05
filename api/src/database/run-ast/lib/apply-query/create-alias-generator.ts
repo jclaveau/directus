@@ -2,10 +2,11 @@ export type AliasGenerator = () => string;
 
 /**
  * The join aliases of one SQL statement, subqueries included:
- * `alias_1`, `alias_2`, … never twice in that statement
+ * `__alias_1`, `__alias_2`, … never twice in that statement, the leading
+ * `__` keeping them off a collection named `alias_1`
  */
 export function createAliasGenerator(): AliasGenerator {
 	let aliasCount = 0;
 
-	return () => `alias_${++aliasCount}`;
+	return () => `__alias_${++aliasCount}`;
 }
