@@ -19,16 +19,16 @@ export type AggregateCaseOptions = {
 	generateAlias: AliasGenerator;
 };
 
-const aggregateSqlByOperation: Record<string, string> = {
-	count: 'count(?)',
-	countDistinct: 'count(distinct ?)',
-	avg: 'avg(?)',
-	avgDistinct: 'avg(distinct ?)',
-	sum: 'sum(?)',
-	sumDistinct: 'sum(distinct ?)',
-	min: 'min(?)',
-	max: 'max(?)',
-};
+const aggregateSqlByOperation = new Map([
+	['count', 'count(?)'],
+	['countDistinct', 'count(distinct ?)'],
+	['avg', 'avg(?)'],
+	['avgDistinct', 'avg(distinct ?)'],
+	['sum', 'sum(?)'],
+	['sumDistinct', 'sum(distinct ?)'],
+	['min', 'min(?)'],
+	['max', 'max(?)'],
+]);
 
 export function applyAggregate(
 	schema: SchemaOverview,
@@ -56,7 +56,7 @@ export function applyAggregate(
 				? getAggregateFieldCases(collection, field, caseOptions)
 				: [];
 
-			const aggregateSql = aggregateSqlByOperation[operation];
+			const aggregateSql = aggregateSqlByOperation.get(operation);
 
 			if (caseOptions && aggregateSql && fieldCases.length > 0) {
 				const { knex, cases, permissions, generateAlias } = caseOptions;
