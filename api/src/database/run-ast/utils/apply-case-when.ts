@@ -44,6 +44,18 @@ export function applyCaseWhen(
 		const keyColumn = `${table}.${schema.collections[table]!.primary}`;
 		const matchedKeys = knex.from(table).distinct(keyColumn);
 
+		applyFilter(
+			knex,
+			schema,
+			matchedKeys,
+			{ _or: columnCases },
+			table,
+			Object.create(null),
+			cases,
+			permissions,
+			generateAlias,
+		);
+
 		caseQuery.whereIn(keyColumn, matchedKeys);
 	}
 	else {
