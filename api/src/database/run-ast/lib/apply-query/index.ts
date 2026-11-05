@@ -125,6 +125,7 @@ export default function applyQuery(
 							table: collection,
 							permissions,
 							generateAlias,
+							readsCasesByKey: options?.filteredInSubquery,
 						},
 						{
 							knex,

@@ -13,6 +13,8 @@ import type { AliasGenerator } from '../lib/apply-query/create-alias-generator.j
 interface NodePreProcessOptions {
 	/** Don't assign an alias to the column but instead return the column as is */
 	noAlias?: boolean;
+	/** The query reads its filter from a subquery: the cases read keys the same way */
+	readsCasesByKey?: boolean;
 }
 
 export function getColumnPreprocessor(
@@ -92,6 +94,7 @@ export function getColumnPreprocessor(
 					alias,
 					permissions,
 					generateAlias,
+					readsCasesByKey: options?.readsCasesByKey,
 				},
 				{ knex, schema },
 			);

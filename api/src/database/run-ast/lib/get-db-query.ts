@@ -136,7 +136,9 @@ export function getDBQuery(
 			},
 		).query;
 
-		flatQuery.select(fieldNodes.map((node) => preProcess(node)));
+		flatQuery.select(fieldNodes.map((node) => {
+			return preProcess(node, { readsCasesByKey: filtersThroughChildren });
+		}));
 
 		if (
 			helpers.capabilities.supportsDeduplicationOfParameters() &&

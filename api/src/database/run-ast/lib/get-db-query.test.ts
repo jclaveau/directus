@@ -297,13 +297,5 @@ test('a grouped case through an o2m reads the keys it matches', () => {
 		+ ' THEN "articles"."category" END) limit ?',
 	);
 
-	expect(query.bindings).toEqual([
-		'im',
-		'articles.category',
-		'category',
-		'im',
-		'im',
-		'articles.category',
-		10,
-	]);
+	expect(query.bindings).toEqual(['im', 'im', 'im', 10]);
 });
