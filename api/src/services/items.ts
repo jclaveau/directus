@@ -546,16 +546,18 @@ implements AbstractService<Item> {
 				payloadWithoutAliases: Record<string, unknown>;
 				revisionPayload: AnyItem;
 				primaryKey: PrimaryKey | undefined;
-				revisionsM2O: Awaited<ReturnType<PayloadService['processM2O']>>['revisions'];
-				revisionsA2O: Awaited<ReturnType<PayloadService['processA2O']>>['revisions'];
-				nestedActionEventsM2O: ActionEventParams[];
-				nestedActionEventsA2O: ActionEventParams[];
-				userIntegrityCheckFlagsM2O: UserIntegrityCheckFlag;
-				userIntegrityCheckFlagsA2O: UserIntegrityCheckFlag;
+				revisionsM2O: PrimaryKey[];
+				revisionsA2O: PrimaryKey[];
 				payloadService: PayloadService;
 			};
 
 			const prepared: PreparedRow[] = [];
+
+			const presetRows: {
+				index: number;
+				payloadAfterHooks: AnyItem;
+				payloadWithPresets: AnyItem;
+			}[] = [];
 
 			// Resolved once every other row has its key.
 			const sameRowPositions: { index: number; sameRowAs: number }[] = [];
@@ -688,34 +690,43 @@ implements AbstractService<Item> {
 					)
 					: payloadAfterHooks;
 
-				if (opts.preMutationError) {
-					throw opts.preMutationError;
-				}
+				presetRows.push({ index, payloadAfterHooks, payloadWithPresets });
+			}
 
+			if (presetRows.length > 0 && opts.preMutationError) {
+				throw opts.preMutationError;
+			}
+
+			// We're creating new services instances so they can use the transaction
+			// as their Knex interface
+			const payloadService = new PayloadService(this.collection, {
+				accountability: this.accountability,
+				knex: trx,
+				schema: this.schema,
+				nested: this.nested,
+			});
+
+			// Once for every row, so each related collection takes one upsert.
+			const m2o = await payloadService.processM2O(
+				presetRows.map((row) => row.payloadWithPresets),
+				opts,
+			);
+
+			const a2o = await payloadService.processA2O(m2o.payloads, opts);
+
+			userIntegrityCheckFlags |=
+				m2o.userIntegrityCheckFlags | a2o.userIntegrityCheckFlags;
+
+			nestedActionEvents.push(
+				...m2o.nestedActionEvents,
+				...a2o.nestedActionEvents,
+			);
+
+			for (const [rowIndex, presetRow] of presetRows.entries()) {
+				const { index, payloadAfterHooks, payloadWithPresets } = presetRow;
 				// Ensure the action hook payload has the post filter hook + preset changes
 				const actionHookPayload = payloadWithPresets;
-
-				// We're creating new services instances so they can use the transaction as their Knex interface
-				const payloadService = new PayloadService(this.collection, {
-					accountability: this.accountability,
-					knex: trx,
-					schema: this.schema,
-					nested: this.nested,
-				});
-
-				const {
-					payload: payloadWithM2O,
-					revisions: revisionsM2O,
-					nestedActionEvents: nestedActionEventsM2O,
-					userIntegrityCheckFlags: userIntegrityCheckFlagsM2O,
-				} = await payloadService.processM2O(payloadWithPresets, opts);
-
-				const {
-					payload: payloadWithA2O,
-					revisions: revisionsA2O,
-					nestedActionEvents: nestedActionEventsA2O,
-					userIntegrityCheckFlags: userIntegrityCheckFlagsA2O,
-				} = await payloadService.processA2O(payloadWithM2O, opts);
+				const payloadWithA2O = a2o.payloads[rowIndex]!;
 
 				const payloadWithoutAliases = pick(payloadWithA2O, without(fields, ...aliases));
 				const payloadWithTypeCasting = await payloadService.processValues('create', payloadWithoutAliases);
@@ -760,12 +771,8 @@ implements AbstractService<Item> {
 					payloadWithoutAliases,
 					revisionPayload,
 					primaryKey,
-					revisionsM2O,
-					revisionsA2O,
-					nestedActionEventsM2O,
-					nestedActionEventsA2O,
-					userIntegrityCheckFlagsM2O,
-					userIntegrityCheckFlagsA2O,
+					revisionsM2O: m2o.revisionsByParent[rowIndex]!,
+					revisionsA2O: a2o.revisionsByParent[rowIndex]!,
 					payloadService,
 				});
 			}
@@ -921,16 +928,6 @@ implements AbstractService<Item> {
 				schema: this.schema,
 				nested: this.nested,
 			}).processO2M(parentRows, opts);
-
-			for (const p of prepared) {
-				userIntegrityCheckFlags |=
-					p.userIntegrityCheckFlagsM2O | p.userIntegrityCheckFlagsA2O;
-
-				nestedActionEvents.push(
-					...p.nestedActionEventsM2O,
-					...p.nestedActionEventsA2O,
-				);
-			}
 
 			const postPrepared: PostRow[] = prepared.map((p, index) => {
 				return {
@@ -2694,19 +2691,20 @@ implements AbstractService<Item> {
 			});
 
 			const {
-				payload: payloadWithM2O,
-				revisions: revisionsM2O,
+				payloads: payloadsWithM2O,
+				revisionsByParent: revisionsM2OByParent,
 				nestedActionEvents: nestedActionEventsM2O,
 				userIntegrityCheckFlags: userIntegrityCheckFlagsM2O,
-			} = await payloadService.processM2O(payloadWithPresets, opts);
+			} = await payloadService.processM2O([payloadWithPresets], opts);
 
 			const {
-				payload: payloadWithA2O,
-				revisions: revisionsA2O,
+				payloads: payloadsWithA2O,
+				revisionsByParent: revisionsA2OByParent,
 				nestedActionEvents: nestedActionEventsA2O,
 				userIntegrityCheckFlags: userIntegrityCheckFlagsA2O,
-			} = await payloadService.processA2O(payloadWithM2O, opts);
+			} = await payloadService.processA2O(payloadsWithM2O, opts);
 
+			const payloadWithA2O = payloadsWithA2O[0]!;
 			const payloadWithoutAliasAndPK = pick(payloadWithA2O, without(fields, primaryKeyField, ...aliases));
 			const payloadWithTypeCasting = await payloadService.processValues('update', payloadWithoutAliasAndPK);
 
@@ -2732,7 +2730,10 @@ implements AbstractService<Item> {
 				await this.refuseKeysNoRowHolds(keys, trx);
 			}
 
-			const childrenRevisions = [...revisionsM2O, ...revisionsA2O];
+			const childrenRevisions = [
+				...revisionsM2OByParent[0]!,
+				...revisionsA2OByParent[0]!,
+			];
 
 			let userIntegrityCheckFlags =
 				opts.userIntegrityCheckFlags ??
