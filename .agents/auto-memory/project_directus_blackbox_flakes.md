@@ -211,5 +211,8 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 - `cache-m2o-through-fk-no-key.test.ts:206` `expected 'HIT' to be 'MISS'` after a write (shard-3 rerun; the first run passed). Root cause undecided: test race vs real stale cache (HIGH if product). #655 touches no cache code.
 - The rerun relocated the failure to the second test; a push replaces a second rerun. jean: "fix both flakes in a dedicated pr".
 
+## 2026-11-05 (#678 `common`, sqlite): schedule-hook count
+- `flows/schedule-hook` `expected 4 to be 5` (4 scheduled hook fires, 5 expected) failed together with `assets/concurrency` on a tree identical to a run that passed `common`; one `--failed` rerun cleared both. Timing flake by assertion shape only, never root-caused. Second sighting after #427 (see [[project_directus_pr427_accepted_exceptions]]): a third means diagnose.
+
 ## 2026-11-03 (#673 shard 1): invite statement-count flake
 - `singular-write-users-invite` expected 1 insert each into `directus_activity` / `directus_revisions` on request 3, saw 3. #673 touches neither the users service nor that test; not in the list above. Treated as flake, `gh run rerun --failed` unasked. If the rerun is red the same way (2+ identical), stop rerunning and diagnose (see the twice-red rule above).
