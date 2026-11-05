@@ -37,11 +37,14 @@ Feature: A read joins the relation a permission case filters on
       |   permissions:                             |           |
       |     - collection: test_mixed_cases_article |           |
       |       action: read                         |           |
-      |       fields: [id, title]                  |           |
+      |       fields:                              |           |
+      |         - id                               |           |
+      |         - title                            |           |
       |       permissions: {}                      |           |
       |     - collection: test_mixed_cases_author  |           |
       |       action: read                         |           |
-      |       fields: ['*']                        |           |
+      |       fields:                              |           |
+      |         - '*'                              |           |
       |       permissions: {}                      |           |
       | method: POST                               | code: 200 |+
       | path: /policies                            |           |
@@ -53,7 +56,8 @@ Feature: A read joins the relation a permission case filters on
       |   permissions:                             |           |
       |     - collection: test_mixed_cases_article |           |
       |       action: read                         |           |
-      |       fields: [secret]                     |           |
+      |       fields:                              |           |
+      |         - secret                           |           |
       |       permissions:                         |           |
       |         author:                            |           |
       |           status:                          |           |
