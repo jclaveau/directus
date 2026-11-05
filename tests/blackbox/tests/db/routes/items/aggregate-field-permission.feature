@@ -200,7 +200,7 @@ Feature: An aggregate reads a field only on the rows granting it
       |   aggregate[sum]: salary            |       sum:            |
       |   groupBy: category                 |         salary: "100" |
       |   filter[id][_starts_with]: <run>-  |     - category: sport |
-      |   sort: category                    |       sum:            |
+      |   sort: sum.salary                  |       sum:            |
       |                                     |         salary: null  |
       | as: <reader-token>                  | code: 200             |+
       | method: GET                         | body:                 |
@@ -209,7 +209,7 @@ Feature: An aggregate reads a field only on the rows granting it
       |   aggregate[sum]: salary            |       sum:            |
       |   groupBy: category                 |         salary: "100" |
       |   filter[id][_starts_with]: <run>-  |     - category: sport |
-      |   sort: sum.salary                  |       sum:            |
+      |   sort: category                    |       sum:            |
       |                                     |         salary: null  |
 
   Scenario: a grouped aggregate reads its field by that field's rule, not the group's
@@ -313,19 +313,19 @@ Feature: An aggregate reads a field only on the rows granting it
       | as: <reader-token>                        | code: 200             |+
       | method: GET                               | body:                 |
       | path: /items/test_agg_field_article       |   data:               |
-      | query:                                    |     - count: "2"      |
-      |   aggregate[sum]: salary                  |       sum:            |
-      |   aggregate[count]: '*'                   |         salary: null  |
-      |   filter[id][_starts_with]: <run>-        |                       |
-      |   filter[author][status][_eq]: draft      |                       |
-      | as: <reader-token>                        | code: 200             |+
-      | method: GET                               | body:                 |
-      | path: /items/test_agg_field_article       |   data:               |
       | query:                                    |     - count: "3"      |
       |   aggregate[sum]: salary                  |       sum:            |
       |   aggregate[count]: '*'                   |         salary: "100" |
       |   filter[id][_starts_with]: <run>-        |                       |
       |   filter[author][status][_in]: live,draft |                       |
+      | as: <reader-token>                        | code: 200             |+
+      | method: GET                               | body:                 |
+      | path: /items/test_agg_field_article       |   data:               |
+      | query:                                    |     - count: "2"      |
+      |   aggregate[sum]: salary                  |       sum:            |
+      |   aggregate[count]: '*'                   |         salary: null  |
+      |   filter[id][_starts_with]: <run>-        |                       |
+      |   filter[author][status][_eq]: draft      |                       |
 
   Scenario: two aggregated fields each read through their own rule
     Given the rows of test_agg_field_author:
@@ -433,3 +433,4 @@ Feature: An aggregate reads a field only on the rows granting it
       |   filter[id][_eq]: <run>-a             |         - article: <run>-a |
       |   deep[links][_groupBy]: article       |           sum:             |
       |   deep[links][_aggregate][sum]: weight |             weight: "5"    |
+      |   deep[links][_sort]: article          |                            |

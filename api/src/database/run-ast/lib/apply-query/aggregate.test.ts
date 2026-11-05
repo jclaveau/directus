@@ -98,6 +98,7 @@ test.each([
 		+ ' where ("articles"."id" > ?))'
 		+ ` THEN "articles"."salary" END)) as "${operation}->salary"`,
 	);
+
 	expect(queryBuilder.toSQL().bindings).toEqual([5]);
 });
 
@@ -168,6 +169,7 @@ test('countDistinct of a primary key one rule grants goes through that rule', ()
 		+ ' where ("articles"."id" > ?))'
 		+ ' THEN "articles"."id" END)) as "countDistinct->id"',
 	);
+
 	expect(queryBuilder.toSQL().bindings).toEqual([5]);
 });
 
@@ -274,6 +276,7 @@ test('a field granted by a rule the rows do not go through reads a case', () => 
 		+ ' where ("articles"."id" > ?))'
 		+ ' THEN "articles"."salary" END)) as "sum->salary"',
 	);
+
 	expect(queryBuilder.toSQL().bindings).toEqual([5]);
 });
 
