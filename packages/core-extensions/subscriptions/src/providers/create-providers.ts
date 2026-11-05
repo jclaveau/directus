@@ -1,4 +1,5 @@
-import createMollieClient from '@mollie/api-client';
+// Named: under Node's ESM the default of this CommonJS package is its exports.
+import { createMollieClient } from '@mollie/api-client';
 import Stripe from 'stripe';
 import type { SubscriptionsConfig } from '../config/read-subscriptions-config.js';
 import { UnknownProviderError } from '../errors.js';
