@@ -3455,6 +3455,8 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const nestingFields = new Set<string>();
 		const selfRelationFields = new Set<string>();
+		// `null` clears every child, deleting them under `one_deselect_action: 'delete'`
+		const selfChildrenFields = new Set<string>();
 
 		for (const relation of this.schema.relations) {
 			if (relation.collection === this.collection) {
@@ -3476,6 +3478,7 @@ implements AbstractService<Item> {
 
 				if (relation.collection === this.collection) {
 					selfRelationFields.add(relation.meta.one_field);
+					selfChildrenFields.add(relation.meta.one_field);
 				}
 			}
 		}
@@ -3488,7 +3491,8 @@ implements AbstractService<Item> {
 					|| (Array.isArray(value) && value.some(isPlainObject));
 			})
 				|| [...selfRelationFields].some((field) => {
-					return payload[field] !== undefined && payload[field] !== null;
+					return payload[field] !== undefined
+						&& (payload[field] !== null || selfChildrenFields.has(field));
 				});
 		};
 

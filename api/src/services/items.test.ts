@@ -6088,6 +6088,11 @@ describe('Services / Items / a batched upsert', () => {
 	let database: Knex;
 	let sqlStatements: string[];
 
+	// the relational paths below load PayloadService's lazy `get-service.js` graph
+	beforeAll(async () => {
+		await import('../utils/get-service.js');
+	}, 120_000);
+
 	beforeEach(async () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
 
@@ -6366,6 +6371,44 @@ describe('Services / Items / a batched upsert', () => {
 			.orderBy('id')).resolves.toStrictEqual([
 			{ id: 1, name: 'one', parent: null },
 			{ id: 2, name: 'y', parent: 1 },
+		]);
+	});
+
+	it(oneLine`
+		recreates a row a payload before it deleted by clearing its children
+	`, async () => {
+		const nodesSchema = new SchemaBuilder()
+			.collection('nodes', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('children').o2m('nodes', 'parent');
+				c.field('parent').m2o('nodes');
+			})
+			.build();
+
+		nodesSchema.relations[0]!.meta!.one_deselect_action = 'delete';
+
+		await database.schema.createTable('nodes', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('parent');
+		});
+
+		await database('nodes').insert([
+			{ id: 2, name: 'two' },
+			{ id: 7, name: 'seven', parent: 2 },
+		]);
+
+		await expect(new ItemsService('nodes', { knex: database, schema: nodesSchema })
+			.upsertMany([
+				{ id: 2, children: null },
+				{ id: 7, name: 'x' },
+			])).resolves.toStrictEqual([2, 7]);
+
+		await expect(database('nodes').select('id', 'name', 'parent')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 2, name: 'two', parent: null },
+			{ id: 7, name: 'x', parent: null },
 		]);
 	});
 
