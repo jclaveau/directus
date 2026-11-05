@@ -1,9 +1,6 @@
 import { SchemaBuilder } from '@directus/schema-builder';
 import knex from 'knex';
 import { expect, test } from 'vitest';
-import {
-	createAliasGenerator,
-} from '../../../run-ast/lib/apply-query/create-alias-generator.js';
 import { Client_SQLite3 } from '../../../run-ast/lib/apply-query/mock.js';
 import { mysql as FnHelperMySQL } from '../index.js';
 
@@ -20,13 +17,13 @@ test('count of a relational field aliases its subquery from the generator', () =
 		type: undefined,
 		originalCollectionName: undefined,
 		relationalCountOptions: undefined,
-		generateAlias: createAliasGenerator(),
+		generateAlias: () => '__alias_7',
 	})
 		.toSQL();
 
 	expect(rawQuery.sql).toEqual(
-		'(select count(*) from "links" as "__alias_1"'
-		+ ' where "__alias_1"."article_id" = "articles"."id")',
+		'(select count(*) from "links" as "__alias_7"'
+		+ ' where "__alias_7"."article_id" = "articles"."id")',
 	);
 
 	expect(rawQuery.bindings).toEqual([]);
