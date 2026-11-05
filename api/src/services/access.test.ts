@@ -226,7 +226,74 @@ describe('Services / Access', () => {
 		});
 
 		it('refuses a request setting managed_by on an unmanaged access', async () => {
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response([]);
+
 			await expect(new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).updateOne('6f1c2a4e-0000-4000-8000-000000000001', {
+				managed_by: '@scalabus/subscriptions',
+			})).rejects.toThrow(new InvalidPayloadError({
+				reason: '"managed_by" is set by the extension granting the access,'
+					+ ' not by a request',
+			}));
+		});
+
+		it('answers a 403 to a request with no access setting managed_by', async () => {
+			vi.mocked(validateAccess).mockRejectedValueOnce(new ForbiddenError());
+
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response([]);
+
+			const accountability = {
+				admin: false,
+				app: false,
+				ip: null,
+				role: null,
+				roles: [],
+				user: null,
+			};
+
+			await expect(new AccessService({
+				accountability,
+				knex: database,
+				schema,
+			}).updateOne('6f1c2a4e-0000-4000-8000-000000000001', {
+				managed_by: '@scalabus/subscriptions',
+			})).rejects.toThrow(new ForbiddenError());
+
+			expect(validateAccess).toHaveBeenLastCalledWith(
+				{
+					accountability,
+					action: 'update',
+					collection: 'directus_access',
+					fields: ['managed_by'],
+					primaryKeys: ['6f1c2a4e-0000-4000-8000-000000000001'],
+				},
+				{ knex: database, schema },
+			);
+		});
+
+		it('lets a request create an access with a null managed_by', async () => {
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['access-id-7']);
+
+			await new AccessService({
 				accountability: {
 					admin: true,
 					app: true,
@@ -237,12 +304,157 @@ describe('Services / Access', () => {
 				},
 				knex: knex.default({ client: MockClient }),
 				schema,
+			}).createOne({
+				managed_by: null,
+				policy: 'policy-id-7',
+				user: 'user-id-7',
+			});
+
+			expect(createMany).toHaveBeenCalledWith(
+				[{ managed_by: null, policy: 'policy-id-7', user: 'user-id-7' }],
+				{ userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits },
+			);
+		});
+
+		it('lets a request send back the null managed_by it read', async () => {
+			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue(['6f1c2a4e-0000-4000-8000-000000000001']);
+
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response([]);
+
+			await new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).updateOne('6f1c2a4e-0000-4000-8000-000000000001', {
+				managed_by: null,
+				policy: 'policy-id-1',
+			});
+
+			expect(updateGroups).toHaveBeenCalledWith(
+				[{
+					keys: ['6f1c2a4e-0000-4000-8000-000000000001'],
+					data: { managed_by: null, policy: 'policy-id-1' },
+				}],
+				expect.anything(),
+			);
+		});
+
+		it('lets a request send back the managed row it read', async () => {
+			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue(['6f1c2a4e-0000-4000-8000-000000000007']);
+
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+					.response([{
+						id: '6f1c2a4e-0000-4000-8000-000000000007',
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+					}]);
+
+			await new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).updateOne('6f1c2a4e-0000-4000-8000-000000000007', {
+				managed_by: '@scalabus/subscriptions',
+				role: null,
+				user: 'user-id-7',
+				policy: 'policy-id-7',
+				sort: 2,
+			});
+
+			expect(updateGroups).toHaveBeenCalledWith(
+				[{
+					keys: ['6f1c2a4e-0000-4000-8000-000000000007'],
+					data: {
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+						sort: 2,
+					},
+				}],
+				expect.anything(),
+			);
+		});
+
+		it.each([
+			null,
+			'@scalabus/other',
+			'@SCALABUS/subscriptions',
+		])('refuses a request turning a managed_by into %j', async (managedBy) => {
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+					.response([{
+						id: '6f1c2a4e-0000-4000-8000-000000000007',
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+					}]);
+
+			await expect(new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).updateOne('6f1c2a4e-0000-4000-8000-000000000007', {
+				managed_by: managedBy,
+			})).rejects.toThrow(new InvalidPayloadError({
+				reason: 'Access "6f1c2a4e-0000-4000-8000-000000000007" is managed by'
+					+ ' "@scalabus/subscriptions", which alone changes it',
+			}));
+		});
+
+		it('lets an extension, without accountability, update managed_by', async () => {
+			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue(['6f1c2a4e-0000-4000-8000-000000000001']);
+
+			await new AccessService({
+				knex: knex.default({ client: MockClient }),
+				schema,
 			}).updateOne('6f1c2a4e-0000-4000-8000-000000000001', {
 				managed_by: '@scalabus/subscriptions',
-			})).rejects.toThrow(new InvalidPayloadError({
-				reason: '"managed_by" is set by the extension granting the access,'
-					+ ' not by a request',
-			}));
+			});
+
+			expect(updateGroups).toHaveBeenCalledWith(
+				[{
+					keys: ['6f1c2a4e-0000-4000-8000-000000000001'],
+					data: { managed_by: '@scalabus/subscriptions' },
+				}],
+				expect.anything(),
+			);
 		});
 
 		it('refuses a request updating a managed access', async () => {

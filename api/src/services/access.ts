@@ -34,6 +34,15 @@ class ManagedAccessChangeError extends InvalidPayloadError {
 	}
 }
 
+class ManagedBySetError extends InvalidPayloadError {
+	constructor() {
+		super({
+			reason: '"managed_by" is set by the extension granting the access,'
+				+ ' not by a request',
+		});
+	}
+}
+
 function includesAccessKey(keys: PrimaryKey[], accessId: string): boolean {
 	// A uuid key matches its row whatever its case.
 	return keys.some((key) => {
@@ -45,6 +54,17 @@ function lowerCaseKey(relatedKey: unknown): unknown {
 	return typeof relatedKey === 'string'
 		? relatedKey.toLowerCase()
 		: relatedKey;
+}
+
+function setsManagedBy(item: Partial<Item>): boolean {
+	return 'managed_by' in item && item.managed_by !== null;
+}
+
+function changesManagedBy(
+	data: Partial<Item>,
+	managedAccess: ManagedAccessRow,
+): boolean {
+	return 'managed_by' in data && data.managed_by !== managedAccess.managed_by;
 }
 
 /** A relation may come as its key, or as an object holding it: `{ id, ... }`. */
@@ -88,12 +108,9 @@ export class AccessService extends ItemsService {
 	 * runs without accountability: a request changing it by hand would be undone
 	 * by the extension, or strand the subscription it tracks.
 	 */
-	private refuseManagedByInRequest(data: Partial<Item>[]) {
-		if (this.accountability && data.some((item) => 'managed_by' in item)) {
-			throw new InvalidPayloadError({
-				reason: '"managed_by" is set by the extension granting the access,'
-					+ ' not by a request',
-			});
+	private refuseManagedByInCreate(data: Partial<Item>[]) {
+		if (this.accountability && data.some((item) => setsManagedBy(item))) {
+			throw new ManagedBySetError();
 		}
 	}
 
@@ -122,34 +139,41 @@ export class AccessService extends ItemsService {
 	}
 
 	// The base class checks access after this guard: a caller with none gets its
-	// 403 here, as the refusal would name the row and the extension managing it.
-	private async refuseManagedAccessChange(
-		managedAccess: ManagedAccessRow,
+	// 403 here, as a refusal would tell which rows the extension manages.
+	private async validateRefusedRequest(
+		primaryKeys: PrimaryKey[],
 		accessCheck: Pick<ValidateAccessOptions, 'action' | 'fields'>,
-	): Promise<never> {
+	): Promise<void> {
 		await validateAccess(
 			{
 				accountability: this.accountability!,
 				collection: this.collection,
-				primaryKeys: [managedAccess.id],
+				primaryKeys,
 				...accessCheck,
 			},
 			{ knex: this.knex, schema: this.schema },
 		);
-
-		throw new ManagedAccessChangeError(managedAccess);
 	}
 
 	private async refuseManagedAccessDelete(keys: PrimaryKey[]) {
 		const [managedAccess] = await this.readManagedAccessInRequest(keys);
 
 		if (managedAccess) {
-			await this.refuseManagedAccessChange(managedAccess, { action: 'delete' });
+			await this.validateRefusedRequest([managedAccess.id], { action: 'delete' });
+
+			throw new ManagedAccessChangeError(managedAccess);
 		}
 	}
 
-	/** Who gets which policy is the extension's; `sort` and the rest are not. */
-	private async refuseManagedGrantChange(groups: UpdateGroup<Item>[]) {
+	/**
+	 * Who gets which policy is the extension's; `sort` and the rest are not. A
+	 * value sent back as it is stored changes nothing, so it is no refusal.
+	 */
+	private async refuseManagedAccessUpdate(groups: UpdateGroup<Item>[]) {
+		if (!this.accountability) {
+			return;
+		}
+
 		const managedRows = await this.readManagedAccessInRequest(
 			groups.flatMap((group) => group.keys),
 		);
@@ -157,14 +181,32 @@ export class AccessService extends ItemsService {
 		for (const managedAccess of managedRows) {
 			const refusedGroup = groups.find((group) => {
 				return includesAccessKey(group.keys, managedAccess.id)
-					&& changesGrantField(group.data, managedAccess);
+					&& (changesManagedBy(group.data, managedAccess)
+						|| changesGrantField(group.data, managedAccess));
 			});
 
 			if (refusedGroup) {
-				await this.refuseManagedAccessChange(managedAccess, {
+				await this.validateRefusedRequest([managedAccess.id], {
 					action: 'update',
 					fields: Object.keys(refusedGroup.data),
 				});
+
+				throw new ManagedAccessChangeError(managedAccess);
+			}
+		}
+
+		for (const group of groups.filter(({ data }) => setsManagedBy(data))) {
+			const unmanagedKeys = group.keys.filter((key) => {
+				return !managedRows.some(({ id }) => includesAccessKey([key], id));
+			});
+
+			if (unmanagedKeys.length > 0) {
+				await this.validateRefusedRequest(unmanagedKeys, {
+					action: 'update',
+					fields: Object.keys(group.data),
+				});
+
+				throw new ManagedBySetError();
 			}
 		}
 	}
@@ -173,7 +215,7 @@ export class AccessService extends ItemsService {
 		data: Partial<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
-		this.refuseManagedByInRequest(data);
+		this.refuseManagedByInCreate(data);
 
 		// Creating a new policy attachments affects the number of admin/app/api users.
 		// But it can only add app or admin users, so no need to check the remaining admin users.
@@ -194,8 +236,7 @@ export class AccessService extends ItemsService {
 		groups: UpdateGroup<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
-		this.refuseManagedByInRequest(groups.map((group) => group.data));
-		await this.refuseManagedGrantChange(groups);
+		await this.refuseManagedAccessUpdate(groups);
 
 		// Updating policy attachments might affect the number of admin/app/api users
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
