@@ -6639,6 +6639,174 @@ describe('Services / Items / a batched upsert', () => {
 			'COMMIT;',
 		]);
 	});
+
+	describe('a users upsert handing over the last admin role', () => {
+		beforeEach(async () => {
+			const { validateUserCountIntegrity: validateForReal }
+				= await vi.importActual<
+					typeof import('../utils/validate-user-count-integrity.js')
+				>('../utils/validate-user-count-integrity.js');
+
+			vi.mocked(validateUserCountIntegrity)
+				.mockImplementation(validateForReal);
+
+			await database.schema.createTable('directus_users', (table) => {
+				table.uuid('id').primary();
+				table.uuid('role');
+				table.string('status');
+			});
+
+			await database.schema.createTable('directus_roles', (table) => {
+				table.uuid('id').primary();
+				table.uuid('parent');
+			});
+
+			await database.schema.createTable('directus_policies', (table) => {
+				table.uuid('id').primary();
+				table.boolean('admin_access');
+				table.boolean('app_access');
+			});
+
+			await database.schema.createTable('directus_access', (table) => {
+				table.uuid('id').primary();
+				table.uuid('role');
+				table.uuid('user');
+				table.uuid('policy');
+			});
+
+			await database('directus_roles').insert([
+				{ id: 'a0000000-0000-4000-8000-000000000001', parent: null },
+				{ id: 'e0000000-0000-4000-8000-000000000001', parent: null },
+			]);
+
+			await database('directus_policies').insert({
+				id: 'f0000000-0000-4000-8000-000000000001',
+				admin_access: true,
+				app_access: true,
+			});
+
+			await database('directus_access').insert({
+				id: 'c0000000-0000-4000-8000-000000000001',
+				role: 'a0000000-0000-4000-8000-000000000001',
+				user: null,
+				policy: 'f0000000-0000-4000-8000-000000000001',
+			});
+
+			await database('directus_users').insert({
+				id: '10000000-0000-4000-8000-000000000001',
+				role: 'a0000000-0000-4000-8000-000000000001',
+				status: 'active',
+			});
+		});
+
+		afterEach(() => {
+			vi.mocked(validateUserCountIntegrity).mockReset();
+		});
+
+		it('creates the new admin before counting the admins left', async () => {
+			await expect(new UsersService({
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('directus_users', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('role').uuid();
+						c.field('status').string();
+					})
+					.build(),
+			}).upsertMany([
+				{
+					id: '20000000-0000-4000-8000-000000000002',
+					role: 'a0000000-0000-4000-8000-000000000001',
+					status: 'active',
+				},
+				{
+					id: '10000000-0000-4000-8000-000000000001',
+					role: 'e0000000-0000-4000-8000-000000000001',
+				},
+			])).resolves.toStrictEqual([
+				'20000000-0000-4000-8000-000000000002',
+				'10000000-0000-4000-8000-000000000001',
+			]);
+
+			await expect(database('directus_users').select('id', 'role')
+				.orderBy('id')).resolves.toStrictEqual([
+				{
+					id: '10000000-0000-4000-8000-000000000001',
+					role: 'e0000000-0000-4000-8000-000000000001',
+				},
+				{
+					id: '20000000-0000-4000-8000-000000000002',
+					role: 'a0000000-0000-4000-8000-000000000001',
+				},
+			]);
+		});
+
+		it('hands the check to a caller collecting it', async () => {
+			const onRequireUserIntegrityCheck = vi.fn();
+
+			await expect(new UsersService({
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('directus_users', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('role').uuid();
+						c.field('status').string();
+					})
+					.build(),
+			}).upsertMany(
+				[
+					{
+						id: '10000000-0000-4000-8000-000000000001',
+						role: 'e0000000-0000-4000-8000-000000000001',
+					},
+				],
+				{ onRequireUserIntegrityCheck },
+			)).resolves.toStrictEqual(['10000000-0000-4000-8000-000000000001']);
+
+			expect(onRequireUserIntegrityCheck)
+				.toHaveBeenCalledExactlyOnceWith(UserIntegrityCheckFlag.All);
+		});
+
+		it('refuses a batch leaving no admin', async () => {
+			await expect(new UsersService({
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('directus_users', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('role').uuid();
+						c.field('status').string();
+					})
+					.build(),
+			}).upsertMany([
+				{
+					id: '20000000-0000-4000-8000-000000000002',
+					role: 'e0000000-0000-4000-8000-000000000001',
+					status: 'active',
+				},
+				{
+					id: '10000000-0000-4000-8000-000000000001',
+					role: 'e0000000-0000-4000-8000-000000000001',
+				},
+			])).rejects.toMatchObject({
+				message: "Can't process content. "
+					+ 'Cannot remove the last admin user from the system.',
+			});
+
+			await expect(database('directus_users').select('id', 'role'))
+				.resolves.toStrictEqual([
+					{
+						id: '10000000-0000-4000-8000-000000000001',
+						role: 'a0000000-0000-4000-8000-000000000001',
+					},
+				]);
+		});
+	});
 });
 
 describe('updateBatch on postgres', () => {

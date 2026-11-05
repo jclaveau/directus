@@ -3319,6 +3319,7 @@ implements AbstractService<Item> {
 				const primaryKeys: PrimaryKey[] = [];
 				const hookAddedKeys: PrimaryKey[] = [];
 				const hookAddedSnapshots: ScopedCacheSnapshot[] = [];
+				let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
 
 				const childOpts: DeferredPurgeOptions = {
 					...(opts || {}),
@@ -3337,11 +3338,28 @@ implements AbstractService<Item> {
 					onResponseCacheFlushDeferred: () => {
 						responseCacheFlushDeferred = true;
 					},
+					// counted once every run wrote: a run's updates go before its
+					// creates, so a new admin is created after the old one is demoted
+					onRequireUserIntegrityCheck: (flags) => {
+						userIntegrityCheckFlags |= flags;
+					},
 				};
 
 				for (const run of service.upsertRunsOf(payloads)) {
 					for (const primaryKey of await service.upsertRun(run, childOpts)) {
 						primaryKeys.push(primaryKey);
+					}
+				}
+
+				if (userIntegrityCheckFlags) {
+					if (opts.onRequireUserIntegrityCheck) {
+						opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
+					}
+					else {
+						await validateUserCountIntegrity({
+							flags: userIntegrityCheckFlags,
+							knex,
+						});
 					}
 				}
 
