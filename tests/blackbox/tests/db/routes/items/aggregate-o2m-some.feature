@@ -47,7 +47,7 @@ Feature: An aggregate over an o2m quantifier counts each parent once
       |   filter[id][_starts_with]: nn-          |                  |
       |   filter[links][_none][name][_eq]: nn    |                  |
 
-  Scenario: a count through an o2m filter with no quantifier counts a parent once
+  Scenario: a count filtered by links.name counts a parent with two links once
     Given the rows of test_aggregate_some_article:
       | id   |
       | im-a |
@@ -65,3 +65,21 @@ Feature: An aggregate over an o2m quantifier counts each parent once
       |   aggregate[count]: '*'                  |     - count: "1" |
       |   filter[id][_starts_with]: im-          |                  |
       |   filter[links][name][_eq]: im           |                  |
+
+  Scenario: two _and conditions on links must hold on the same link
+    Given the rows of test_aggregate_some_article:
+      | id   |
+      | an-a |
+    And their children in test_aggregate_some_link:
+      | id    | article | name  | status   |
+      | an-a1 | an-a    | an    | draft    |
+      | an-a2 | an-a    | other | archived |
+    When these requests get these responses:
+      | request                                         | response         |
+      | method: GET                                     | code: 200        |+
+      | path: /items/test_aggregate_some_article        | body:            |
+      | query:                                          |   data:          |
+      |   aggregate[count]: '*'                         |     - count: "0" |
+      |   filter[id][_starts_with]: an-                 |                  |
+      |   filter[_and][0][links][name][_eq]: an         |                  |
+      |   filter[_and][1][links][status][_eq]: archived |                  |

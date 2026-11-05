@@ -26,7 +26,10 @@ export const seedDBStructure = () => {
 						{
 							collection: collectionLink,
 							primaryKeyType: 'string',
-							fields: [{ field: 'name', type: 'string', meta: {} }],
+							fields: [
+								{ field: 'name', type: 'string', meta: {} },
+								{ field: 'status', type: 'string', meta: {} },
+							],
 						},
 					],
 				});
