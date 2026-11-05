@@ -57,7 +57,7 @@ export abstract class FnHelper extends DatabaseHelper {
 		}
 
 		// generate a unique alias for the relation collection, to prevent collisions in self referencing relations
-		const alias = options.generateAlias();
+		const alias = '__alias_1';
 
 		let countQuery = this.knex
 			.count('*')

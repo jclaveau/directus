@@ -56,7 +56,7 @@ export function applyFilter(
 					// or the length of value is 1, ie. only the empty filter.
 					// If the length is more than one it means that some items (and fields) might now be available, so
 					// the joins are required for the case/when construction.
-					if (!isEqual(value, normalizedCases) || value.length === 1) {
+					if (!isEqual(value, normalizedCases.slice(1)) || value.length === 1) {
 						continue;
 					} else {
 						// Otherwise we can at least filter out all empty filters that would not add joins anyway
