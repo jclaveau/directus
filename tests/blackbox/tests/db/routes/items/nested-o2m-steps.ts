@@ -16,6 +16,7 @@ type RequestCell = {
 	path: string;
 	query?: Record<string, string>;
 	payload?: unknown;
+	token?: string;
 };
 
 const REQUEST_CELL_KEYS = [
@@ -23,6 +24,7 @@ const REQUEST_CELL_KEYS = [
 	'path',
 	'query',
 	'payload',
+	'token',
 ] as const satisfies readonly (keyof RequestCell)[];
 
 const RESPONSE_CELL_KEYS = ['code', 'body'] as const;
@@ -55,7 +57,13 @@ export function defineNestedWriteSteps(
 
 	// A cell is YAML: the fork's multiline notation dedents it as a block.
 	function sendRequest(requestCell: string) {
-		const { method, path, query = {}, payload } = cellOfKnownKeys<RequestCell>(
+		const {
+			method,
+			path,
+			query = {},
+			payload,
+			token,
+		} = cellOfKnownKeys<RequestCell>(
 			'request',
 			loadYaml(requestCell),
 			REQUEST_CELL_KEYS,
@@ -68,7 +76,14 @@ export function defineNestedWriteSteps(
 			POST: () => request(instanceUrl()).post(path),
 		}[method]();
 
-		pendingRequest.query(query).set('Authorization', AUTH);
+		pendingRequest
+			.query(query)
+			.set(
+				'Authorization',
+				token === undefined
+					? AUTH
+					: `Bearer ${token}`,
+			);
 
 		return payload === undefined
 			? pendingRequest
