@@ -4,6 +4,8 @@ export const createSubscriptionTables = defineMigration(
 	'20261105A-create-subscription-tables',
 	{
 		async up(knex) {
+			// TODO(#610): only Postgres wraps this in a transaction; elsewhere a
+			// failure past the first table fails every later boot on "already exists".
 			await knex.schema.createTable('subscribers', (table) => {
 				table.increments('id');
 
