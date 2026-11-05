@@ -31,6 +31,7 @@
 		"@directus/extensions-sdk": "workspace:*",
 		"@directus/tsconfig": "catalog:",
 		"@directus/types": "workspace:*",
+		"@directus/utils": "workspace:*",
 		"@types/express": "catalog:",
 		"@types/node": "catalog:",
 		"@vitest/coverage-v8": "catalog:",
