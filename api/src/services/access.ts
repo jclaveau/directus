@@ -7,6 +7,10 @@ import type {
 } from '@directus/types';
 import { InvalidPayloadError } from '@directus/errors';
 import { UserIntegrityCheckFlag } from '@directus/types';
+import {
+	validateAccess,
+	type ValidateAccessOptions,
+} from '../permissions/modules/validate-access/validate-access.js';
 import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
 import { validateKeys } from '../utils/validate-keys.js';
 import { ItemsService } from './items.js';
@@ -37,6 +41,12 @@ function includesAccessKey(keys: PrimaryKey[], accessId: string): boolean {
 	});
 }
 
+function lowerCaseKey(relatedKey: unknown): unknown {
+	return typeof relatedKey === 'string'
+		? relatedKey.toLowerCase()
+		: relatedKey;
+}
+
 /** A relation may come as its key, or as an object holding it: `{ id, ... }`. */
 function changesGrantField(
 	data: Partial<Item>,
@@ -49,11 +59,18 @@ function changesGrantField(
 
 		const fieldValue = data[grantField];
 
-		const relatedKey = typeof fieldValue === 'object' && fieldValue !== null
+		const isRelatedObject = typeof fieldValue === 'object' && fieldValue !== null;
+
+		// `{ id: null }` finds no row, so the payload creates the related item.
+		if (isRelatedObject && fieldValue.id === null) {
+			return true;
+		}
+
+		const relatedKey = isRelatedObject
 			? fieldValue.id
 			: fieldValue;
 
-		return relatedKey !== managedAccess[grantField];
+		return lowerCaseKey(relatedKey) !== lowerCaseKey(managedAccess[grantField]);
 	});
 }
 
@@ -104,11 +121,30 @@ export class AccessService extends ItemsService {
 			.whereNotNull('managed_by');
 	}
 
+	// The base class checks access after this guard: a caller with none gets its
+	// 403 here, as the refusal would name the row and the extension managing it.
+	private async refuseManagedAccessChange(
+		managedAccess: ManagedAccessRow,
+		accessCheck: Pick<ValidateAccessOptions, 'action' | 'fields'>,
+	): Promise<never> {
+		await validateAccess(
+			{
+				accountability: this.accountability!,
+				collection: this.collection,
+				primaryKeys: [managedAccess.id],
+				...accessCheck,
+			},
+			{ knex: this.knex, schema: this.schema },
+		);
+
+		throw new ManagedAccessChangeError(managedAccess);
+	}
+
 	private async refuseManagedAccessDelete(keys: PrimaryKey[]) {
 		const [managedAccess] = await this.readManagedAccessInRequest(keys);
 
 		if (managedAccess) {
-			throw new ManagedAccessChangeError(managedAccess);
+			await this.refuseManagedAccessChange(managedAccess, { action: 'delete' });
 		}
 	}
 
@@ -119,11 +155,16 @@ export class AccessService extends ItemsService {
 		);
 
 		for (const managedAccess of managedRows) {
-			if (groups.some((group) => {
+			const refusedGroup = groups.find((group) => {
 				return includesAccessKey(group.keys, managedAccess.id)
 					&& changesGrantField(group.data, managedAccess);
-			})) {
-				throw new ManagedAccessChangeError(managedAccess);
+			});
+
+			if (refusedGroup) {
+				await this.refuseManagedAccessChange(managedAccess, {
+					action: 'update',
+					fields: Object.keys(refusedGroup.data),
+				});
 			}
 		}
 	}

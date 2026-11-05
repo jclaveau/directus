@@ -1,10 +1,13 @@
-import { InvalidPayloadError } from '@directus/errors';
+import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
+import {
+	validateAccess,
+} from '../permissions/modules/validate-access/validate-access.js';
 import { AccessService } from './access.js';
 import { transaction } from '../utils/transaction.js';
 import { ItemsService } from './items.js';
@@ -22,6 +25,8 @@ vi.mock('../cache.js', async (importOriginal) => {
 		clearSystemCache: vi.fn(),
 	};
 });
+
+vi.mock('../permissions/modules/validate-access/validate-access.js');
 
 const schema = new SchemaBuilder()
 	.collection('directus_access', (c) => {
@@ -388,6 +393,215 @@ describe('Services / Access', () => {
 				reason: 'Access "6f1c2a4e-0000-4000-8000-000000000007" is managed by'
 					+ ' "@scalabus/subscriptions", which alone changes it',
 			}));
+		});
+
+		it('answers a request with no delete access a 403', async () => {
+			vi.mocked(validateAccess).mockRejectedValueOnce(new ForbiddenError());
+
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response([{
+					id: '6f1c2a4e-0000-4000-8000-000000000007',
+					managed_by: '@scalabus/subscriptions',
+					role: null,
+					user: 'user-id-7',
+					policy: 'policy-id-7',
+				}]);
+
+			const accountability = {
+				admin: false,
+				app: false,
+				ip: null,
+				role: null,
+				roles: [],
+				user: null,
+			};
+
+			await expect(new AccessService({
+				accountability,
+				knex: database,
+				schema,
+			}).deleteMany(['6f1c2a4e-0000-4000-8000-000000000007']))
+				.rejects.toThrow(new ForbiddenError());
+
+			expect(validateAccess).toHaveBeenLastCalledWith(
+				{
+					accountability,
+					action: 'delete',
+					collection: 'directus_access',
+					primaryKeys: ['6f1c2a4e-0000-4000-8000-000000000007'],
+				},
+				{ knex: database, schema },
+			);
+		});
+
+		it('answers a request with no update access a 403', async () => {
+			vi.mocked(validateAccess).mockRejectedValueOnce(new ForbiddenError());
+
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response([{
+					id: '6f1c2a4e-0000-4000-8000-000000000007',
+					managed_by: '@scalabus/subscriptions',
+					role: null,
+					user: 'user-id-7',
+					policy: 'policy-id-7',
+				}]);
+
+			const accountability = {
+				admin: false,
+				app: false,
+				ip: null,
+				role: null,
+				roles: [],
+				user: null,
+			};
+
+			await expect(new AccessService({
+				accountability,
+				knex: database,
+				schema,
+			}).updateOne('6f1c2a4e-0000-4000-8000-000000000007', {
+				policy: 'policy-id-1',
+			})).rejects.toThrow(new ForbiddenError());
+
+			expect(validateAccess).toHaveBeenLastCalledWith(
+				{
+					accountability,
+					action: 'update',
+					collection: 'directus_access',
+					primaryKeys: ['6f1c2a4e-0000-4000-8000-000000000007'],
+					fields: ['policy'],
+				},
+				{ knex: database, schema },
+			);
+		});
+
+		it('refuses a request creating the role of a managed access', async () => {
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response([{
+					id: '6f1c2a4e-0000-4000-8000-000000000007',
+					managed_by: '@scalabus/subscriptions',
+					role: null,
+					user: 'user-id-7',
+					policy: 'policy-id-7',
+				}]);
+
+			await expect(new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).updateOne('6f1c2a4e-0000-4000-8000-000000000007', {
+				role: { id: null, name: 'Created role' },
+			})).rejects.toThrow(new InvalidPayloadError({
+				reason: 'Access "6f1c2a4e-0000-4000-8000-000000000007" is managed by'
+					+ ' "@scalabus/subscriptions", which alone changes it',
+			}));
+		});
+
+		it('lets a request send a managed user key in another case', async () => {
+			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue(['6f1c2a4e-0000-4000-8000-000000000007']);
+
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response([{
+					id: '6f1c2a4e-0000-4000-8000-000000000007',
+					managed_by: '@scalabus/subscriptions',
+					role: null,
+					user: 'user-id-7',
+					policy: 'policy-id-7',
+				}]);
+
+			await new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).updateOne('6f1c2a4e-0000-4000-8000-000000000007', {
+				sort: 2,
+				user: 'USER-ID-7',
+			});
+
+			expect(updateGroups).toHaveBeenCalledWith(
+				[{
+					keys: ['6f1c2a4e-0000-4000-8000-000000000007'],
+					data: { sort: 2, user: 'USER-ID-7' },
+				}],
+				expect.anything(),
+			);
+		});
+
+		it('lets a batch move one access and reorder a managed one', async () => {
+			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue([
+					'6f1c2a4e-0000-4000-8000-000000000001',
+					'6f1c2a4e-0000-4000-8000-000000000007',
+				]);
+
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response([{
+					id: '6f1c2a4e-0000-4000-8000-000000000007',
+					managed_by: '@scalabus/subscriptions',
+					role: null,
+					user: 'user-id-7',
+					policy: 'policy-id-7',
+				}]);
+
+			await new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).updateBatch([
+				{ id: '6f1c2a4e-0000-4000-8000-000000000001', policy: 'policy-id-1' },
+				{ id: '6f1c2a4e-0000-4000-8000-000000000007', sort: 2 },
+			]);
+
+			expect(updateGroups).toHaveBeenCalledWith(
+				[
+					{
+						data: { policy: 'policy-id-1' },
+						keys: ['6f1c2a4e-0000-4000-8000-000000000001'],
+					},
+					{
+						data: { sort: 2 },
+						keys: ['6f1c2a4e-0000-4000-8000-000000000007'],
+					},
+				],
+				expect.anything(),
+			);
 		});
 
 		it('refuses a request nulling the user of a managed access', async () => {
