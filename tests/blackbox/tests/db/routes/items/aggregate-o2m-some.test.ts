@@ -11,6 +11,8 @@ describe.each(vendors)('%s', (vendor) => {
 		for (const title of [
 			'a count filtered by _some counts a parent with two links once',
 			'a count filtered by _none counts a parent with two links once',
+			'a count filtered through an o2m field without a quantifier '
+				+ 'counts a parent with two links once',
 		]) {
 			scenario(title, (steps) => {
 				defineNestedWriteSteps(steps, vendor, () => getUrl(vendor));

@@ -8,7 +8,7 @@ Feature: An aggregate over an o2m quantifier counts each parent once
     scenario's keys sharing a prefix of its own.
 
   # TODO(#610): `count: "1"` is the string pg returns; sqlite returns the
-  # number 1, so both scenarios fail on sqlite until the count is normalised
+  # number 1, so every scenario fails on sqlite until the count is normalised
   Scenario: a count filtered by _some counts a parent with two links once
     Given the rows of test_aggregate_some_article:
       | id   |
@@ -46,3 +46,22 @@ Feature: An aggregate over an o2m quantifier counts each parent once
       |   aggregate[count]: '*'                  |     - count: "1" |
       |   filter[id][_starts_with]: nn-          |                  |
       |   filter[links][_none][name][_eq]: nn    |                  |
+
+  Scenario: a count filtered through an o2m field without a quantifier counts a parent with two links once
+    Given the rows of test_aggregate_some_article:
+      | id   |
+      | im-a |
+      | im-b |
+    And their children in test_aggregate_some_link:
+      | id    | article | name  |
+      | im-a1 | im-a    | im    |
+      | im-a2 | im-a    | im    |
+      | im-b1 | im-b    | other |
+    When these requests get these responses:
+      | request                                  | response         |
+      | method: GET                              | code: 200        |+
+      | path: /items/test_aggregate_some_article | body:            |
+      | query:                                   |   data:          |
+      |   aggregate[count]: '*'                  |     - count: "1" |
+      |   filter[id][_starts_with]: im-          |                  |
+      |   filter[links][name][_eq]: im           |                  |
