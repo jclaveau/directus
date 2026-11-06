@@ -1166,10 +1166,11 @@ describe(oneLine`
 				item: [{}],
 			});
 
-			await CreateItem(vendor, {
+			const [link] = await CreateItem(vendor, {
 				collection: QUANTIFIER_LINK,
 				item: [{
 					name: 'ruled',
+					status: 'open',
 					article: article.id,
 					project: project.id,
 				}],
@@ -1192,7 +1193,12 @@ describe(oneLine`
 							collection: QUANTIFIER_LINK,
 							action: 'read',
 							fields: ['*'],
-							permissions: { project: { org: { _eq: 'granted' } } },
+							permissions: {
+								_and: [
+									{ status: { _eq: 'open' } },
+									{ project: { org: { _eq: 'granted' } } },
+								],
+							},
 						},
 					],
 				})
@@ -1226,12 +1232,28 @@ describe(oneLine`
 
 			expect((await read()).body.data).toEqual([{ id: article.id }]);
 
-			const written = await request(getUrl(vendor, env))
+			const closed = await request(getUrl(vendor, env))
+				.patch(`/items/${QUANTIFIER_LINK}/${link.id}`)
+				.send({ status: 'closed' })
+				.set('Authorization', auth);
+
+			expect(closed.statusCode).toBe(200);
+			expect((await read()).body.data).toEqual([]);
+
+			const reopened = await request(getUrl(vendor, env))
+				.patch(`/items/${QUANTIFIER_LINK}/${link.id}`)
+				.send({ status: 'open' })
+				.set('Authorization', auth);
+
+			expect(reopened.statusCode).toBe(200);
+			expect((await read()).body.data).toEqual([{ id: article.id }]);
+
+			const revoked = await request(getUrl(vendor, env))
 				.patch(`/items/${QUANTIFIER_PROJECT}/${project.id}`)
 				.send({ org: 'revoked' })
 				.set('Authorization', auth);
 
-			expect(written.statusCode).toBe(200);
+			expect(revoked.statusCode).toBe(200);
 			expect((await read()).body.data).toEqual([]);
 		});
 

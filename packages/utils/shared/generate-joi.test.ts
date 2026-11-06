@@ -71,6 +71,16 @@ describe(`generateJoi`, () => {
 		expect(error?.message).toBe('"links" contains an invalid value');
 	});
 
+	it(`refuses a _some with two keys holding on two different objects`, () => {
+		const { error } = generateJoi({
+			links: { _some: { name: { _eq: 'a' }, status: { _eq: 'b' } } },
+		} as unknown as FieldFilter).validate({
+			links: [{ name: 'a', status: 'x' }, { name: 'y', status: 'b' }],
+		});
+
+		expect(error?.message).toBe('"links" contains an invalid value');
+	});
+
 	it(`refuses a _none an object of the array matches`, () => {
 		const { error } = generateJoi({
 			links: { _none: { name: { _eq: 'a' } } },
