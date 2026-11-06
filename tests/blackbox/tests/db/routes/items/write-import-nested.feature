@@ -152,15 +152,15 @@ Feature: An import writes the nested changes of every row it reads
       |   sort: id                                   |                         |
     And on postgres the requests ran these statements:
       | request | table                     | select | insert | update | delete |
-      | 1       | directus_activity         | 0      | 4      | 0      | 0      |
-      | 1       | directus_revisions        | 0      | 4      | 1      | 0      |
+      | 1       | directus_activity         | 0      | 3      | 0      | 0      |
+      | 1       | directus_revisions        | 0      | 3      | 1      | 0      |
       | 1       | directus_users            | 1      | 0      | 0      | 0      |
       | 1       | test_write_import_deleted | 4      | 1      | 0      | 0      |
-      | 1       | test_write_import_nulled  | 6      | 2      | 0      | 0      |
+      | 1       | test_write_import_nulled  | 4      | 1      | 0      | 0      |
       | 1       | test_write_import_parent  | 1      | 1      | 0      | 0      |
       | 2       | directus_activity         | 0      | 4      | 0      | 0      |
       | 2       | directus_revisions        | 0      | 2      | 0      | 0      |
       | 2       | directus_users            | 1      | 0      | 0      | 0      |
       | 2       | test_write_import_deleted | 2      | 0      | 0      | 1      |
       | 2       | test_write_import_nulled  | 5      | 0      | 2      | 0      |
-      | 2       | test_write_import_parent  | 3      | 0      | 0      | 0      |
+      | 2       | test_write_import_parent  | 2      | 0      | 0      | 0      |

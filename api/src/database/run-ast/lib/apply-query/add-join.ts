@@ -5,7 +5,7 @@ import type { AliasMap } from '../../../../utils/get-column-path.js';
 import { getRelationInfo } from '../../../../utils/get-relation-info.js';
 import { clone } from '../../../../utils/lodash-es-used.js';
 import { getHelpers } from '../../../helpers/index.js';
-import { generateAlias } from './index.js';
+import type { AliasGenerator } from './create-alias-generator.js';
 
 /**
  * Apply a given filter object to the Knex QueryBuilder instance.
@@ -40,8 +40,8 @@ import { generateAlias } from './index.js';
  *   pages.id in (
  *     SELECT articles.page_id AS page_id
  *     FROM articles
- *     LEFT JOIN authors AS xviqp ON articles.author = xviqp.id
- *     WHERE xviqp.name = 'Rijk'
+ *     LEFT JOIN authors AS __alias_1 ON articles.author = __alias_1.id
+ *     WHERE __alias_1.name = 'Rijk'
  *   )
  * ```
  */
@@ -53,9 +53,18 @@ type AddJoinProps = {
 	rootQuery: Knex.QueryBuilder;
 	schema: SchemaOverview;
 	knex: Knex;
+	generateAlias: AliasGenerator;
 };
 
-export function addJoin({ path, collection, aliasMap, rootQuery, schema, knex }: AddJoinProps) {
+export function addJoin({
+	path,
+	collection,
+	aliasMap,
+	rootQuery,
+	schema,
+	knex,
+	generateAlias,
+}: AddJoinProps) {
 	let hasMultiRelational = false;
 	let isJoinAdded = false;
 

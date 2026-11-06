@@ -35,7 +35,7 @@ export class FnHelperMySQL extends FnHelper {
 		return this.knex.raw('SECOND(??.??)', [table, column]);
 	}
 
-	count(table: string, column: string, options?: FnHelperOptions): Knex.Raw {
+	count(table: string, column: string, options: FnHelperOptions): Knex.Raw {
 		const collectionName = options?.originalCollectionName || table;
 		const type = this.schema.collections?.[collectionName]?.fields?.[column]?.type ?? 'unknown';
 

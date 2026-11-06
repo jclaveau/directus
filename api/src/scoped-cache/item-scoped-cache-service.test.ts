@@ -6,6 +6,9 @@ import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { scopedCacheIndexPath } from './index-path.js';
 import type Keyv from 'keyv';
+import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
+import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
+import type { AST } from '../types/ast.js';
 import { transaction } from '../utils/transaction.js';
 import { ItemScopedCacheService } from './item-scoped-cache-service.js';
 import { purgeScopedCache } from './purge.js';
@@ -24,6 +27,14 @@ vi.mock('./config.js', async (importOriginal) => {
 	};
 });
 
+vi.mock('../permissions/lib/fetch-permissions.js', () => {
+	return { fetchPermissions: vi.fn() };
+});
+
+vi.mock('../permissions/lib/fetch-policies.js', () => {
+	return { fetchPolicies: vi.fn() };
+});
+
 let purgeEnabled = true;
 let db: knex.Knex;
 let tracker: Tracker;
@@ -37,6 +48,8 @@ beforeEach(() => {
 afterEach(() => {
 	tracker.reset();
 	vi.mocked(purgeScopedCache).mockClear();
+	vi.mocked(fetchPermissions).mockReset();
+	vi.mocked(fetchPolicies).mockReset();
 });
 
 // `item` scopes on two flat columns, and on the owner its `parent` M2O leads to, so
@@ -59,6 +72,94 @@ schema.collections['item']!.scopedCacheFields = [
 	'method',
 	'parent.area',
 ];
+
+describe('planRead', () => {
+	const quantifierSchema = new SchemaBuilder()
+		.collection('project', (c) => {
+			c.field('id').id();
+			c.field('org').string();
+		})
+		.collection('link', (c) => {
+			c.field('id').id();
+			c.field('project').m2o('project');
+		})
+		.collection('article', (c) => {
+			c.field('id').id();
+			c.field('links').o2m('link', 'article');
+		})
+		.build();
+
+	const quantifierAst = {
+		type: 'root',
+		name: 'article',
+		query: { filter: { links: { _some: { id: { _eq: 7 } } } } },
+		cases: [],
+		children: [],
+	} as unknown as AST;
+
+	it('plans a read with the rule of the rows its quantifier reads', async () => {
+		vi.mocked(fetchPolicies).mockResolvedValue(['reader']);
+
+		vi.mocked(fetchPermissions).mockResolvedValue([{
+			collection: 'link',
+			action: 'read',
+			fields: ['*'],
+			permissions: { project: { org: { _eq: 'granted' } } },
+			validation: null,
+			presets: null,
+			policy: 'reader',
+		}]);
+
+		const plan = await new ItemScopedCacheService(
+			'article',
+			quantifierSchema,
+			db,
+			null,
+			{ admin: false } as Accountability,
+		).planRead(quantifierAst, []);
+
+		expect(plan.filterKeying.get('project')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('fetches no permissions for an admin', async () => {
+		const plan = await new ItemScopedCacheService(
+			'article',
+			quantifierSchema,
+			db,
+			null,
+			{ admin: true } as Accountability,
+		).planRead(quantifierAst, []);
+
+		expect(fetchPermissions).not.toHaveBeenCalled();
+		expect(plan.filterKeying.get('project')).toBeUndefined();
+	});
+
+	it('fetches no permissions with no accountability', async () => {
+		await new ItemScopedCacheService(
+			'article',
+			quantifierSchema,
+			db,
+			null,
+			null,
+		).planRead(quantifierAst, []);
+
+		expect(fetchPermissions).not.toHaveBeenCalled();
+	});
+
+	it('fetches no permissions while purging is off', async () => {
+		purgeEnabled = false;
+
+		await new ItemScopedCacheService(
+			'article',
+			quantifierSchema,
+			db,
+			null,
+			{ admin: false } as Accountability,
+		).planRead(quantifierAst, []);
+
+		expect(fetchPermissions).not.toHaveBeenCalled();
+	});
+});
 
 describe('snapshot', () => {
 	it(oneLine`

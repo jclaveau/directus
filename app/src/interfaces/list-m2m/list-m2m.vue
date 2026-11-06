@@ -44,6 +44,9 @@ const props = withDefaults(
 		allowDuplicates?: boolean;
 		junctionFieldLocation?: string;
 		junctionFilter?: Filter | null;
+		// A user who cannot read this field sees the remove button, and the API
+		// refuses the save.
+		managedByField?: string | null;
 	}>(),
 	{
 		value: () => [],
@@ -60,6 +63,7 @@ const props = withDefaults(
 		limit: 15,
 		allowDuplicates: false,
 		junctionFieldLocation: 'bottom',
+		managedByField: null,
 	},
 );
 
@@ -116,6 +120,15 @@ const fields = computed(() => {
 			getFieldsFromTemplate(templateWithDefaults.value),
 			relationInfo.value.junctionCollection.collection,
 		);
+	}
+
+	const junctionCollection = relationInfo.value.junctionCollection.collection;
+
+	if (
+		props.managedByField
+		&& fieldsStore.getField(junctionCollection, props.managedByField)
+	) {
+		displayFields.push(props.managedByField);
 	}
 
 	return addRelatedPrimaryKeyToFields(relationInfo.value.junctionCollection.collection, displayFields);
@@ -449,6 +462,13 @@ const customFilter = computed(() => {
 	return filter;
 });
 
+// A row staged for deletion keeps its button: it is what undoes the deletion.
+function showsManagedBy(displayItem: DisplayItem) {
+	return props.managedByField
+		&& displayItem[props.managedByField]
+		&& displayItem.$type !== 'deleted';
+}
+
 function getLinkForItem(item: DisplayItem) {
 	if (relationInfo.value) {
 		const primaryKey = get(item, [
@@ -560,8 +580,17 @@ function getLinkForItem(item: DisplayItem) {
 							<v-icon name="launch" />
 						</router-link>
 
+						<v-chip
+							v-if="showsManagedBy(item)"
+							x-small
+						>
+							{{ t('managed_by_extension', {
+								extension: item[managedByField!],
+							}) }}
+						</v-chip>
+
 						<v-remove
-							v-if="!disabled && (deleteAllowed || isLocalItem(item))"
+							v-else-if="!disabled && (deleteAllowed || isLocalItem(item))"
 							:class="{ deleted: item.$type === 'deleted' }"
 							:item-type="item.$type"
 							:item-info="relationInfo"
@@ -626,8 +655,17 @@ function getLinkForItem(item: DisplayItem) {
 									<v-icon name="launch" />
 								</router-link>
 
+								<v-chip
+									v-if="showsManagedBy(element)"
+									x-small
+								>
+									{{ t('managed_by_extension', {
+										extension: element[managedByField!],
+									}) }}
+								</v-chip>
+
 								<v-remove
-									v-if="!disabled && (deleteAllowed || isLocalItem(element))"
+									v-else-if="!disabled && (deleteAllowed || isLocalItem(element))"
 									:item-type="element.$type"
 									:item-info="relationInfo"
 									:item-is-local="isLocalItem(element)"
