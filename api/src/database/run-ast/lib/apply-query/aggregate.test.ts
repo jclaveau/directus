@@ -134,7 +134,7 @@ test('an operation named after an object key selects nothing', () => {
 	expect(queryBuilder.toSQL().sql).toEqual('select *');
 });
 
-test('countDistinct of a primary key one rule grants goes through that rule', () => {
+test('countDistinct of a primary key one rule grants counts every row read', () => {
 	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
@@ -164,10 +164,118 @@ test('countDistinct of a primary key one rule grants goes through that rule', ()
 	);
 
 	expect(queryBuilder.toSQL().sql).toEqual(
-		'select count(distinct (CASE WHEN "articles"."id" in'
+		'select count("articles"."id") as "countDistinct->id"',
+	);
+
+	expect(queryBuilder.toSQL().bindings).toEqual([]);
+});
+
+test('countDistinct of a rule-granted primary key stays distinct over a join', () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyAggregate(
+		schema,
+		queryBuilder,
+		{ countDistinct: ['id'] },
+		'articles',
+		true,
+		{
+			knex: db,
+			cases: [{}, { id: { _gt: 5 } }],
+			permissions: [
+				{
+					collection: 'articles',
+					permissions: {},
+					fields: ['salary'],
+				},
+				{
+					collection: 'articles',
+					permissions: { id: { _gt: 5 } },
+					fields: ['id'],
+				},
+			] as Permission[],
+			generateAlias: createAliasGenerator(),
+		},
+	);
+
+	expect(queryBuilder.toSQL().sql).toEqual(
+		'select count(distinct "articles"."id") as "countDistinct->id"',
+	);
+
+	expect(queryBuilder.toSQL().bindings).toEqual([]);
+});
+
+test('count of a primary key one rule grants counts every row read', () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyAggregate(
+		schema,
+		queryBuilder,
+		{ count: ['id'] },
+		'articles',
+		false,
+		{
+			knex: db,
+			cases: [{}, { id: { _gt: 5 } }],
+			permissions: [
+				{
+					collection: 'articles',
+					permissions: {},
+					fields: ['salary'],
+				},
+				{
+					collection: 'articles',
+					permissions: { id: { _gt: 5 } },
+					fields: ['id'],
+				},
+			] as Permission[],
+			generateAlias: createAliasGenerator(),
+		},
+	);
+
+	expect(queryBuilder.toSQL().sql).toEqual(
+		'select count("articles"."id") as "count->id"',
+	);
+
+	expect(queryBuilder.toSQL().bindings).toEqual([]);
+});
+
+test('min of a primary key one rule grants goes through that rule', () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyAggregate(
+		schema,
+		queryBuilder,
+		{ min: ['id'] },
+		'articles',
+		false,
+		{
+			knex: db,
+			cases: [{}, { id: { _gt: 5 } }],
+			permissions: [
+				{
+					collection: 'articles',
+					permissions: {},
+					fields: ['salary'],
+				},
+				{
+					collection: 'articles',
+					permissions: { id: { _gt: 5 } },
+					fields: ['id'],
+				},
+			] as Permission[],
+			generateAlias: createAliasGenerator(),
+		},
+	);
+
+	expect(queryBuilder.toSQL().sql).toEqual(
+		'select min((CASE WHEN "articles"."id" in'
 		+ ' (select distinct "articles"."id" from "articles"'
 		+ ' where ("articles"."id" > ?))'
-		+ ' THEN "articles"."id" END)) as "countDistinct->id"',
+		+ ' THEN "articles"."id" END)) as "min->id"',
 	);
 
 	expect(queryBuilder.toSQL().bindings).toEqual([5]);

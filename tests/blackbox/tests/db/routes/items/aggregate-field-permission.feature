@@ -434,3 +434,45 @@ Feature: An aggregate reads a field only on the rows granting it
       |   deep[links][_groupBy]: article       |           sum:             |
       |   deep[links][_aggregate][sum]: weight |             weight: "5"    |
       |   deep[links][_sort]: article          |                            |
+
+  Scenario: a count of the primary key counts every row read, a min keeps its rule
+    Given the rows of test_agg_field_author:
+      | id        | status |
+      | <run>-pub | live   |
+      | <run>-dft | draft  |
+    And their children in test_agg_field_article:
+      | id      | author    | category |
+      | <run>-a | <run>-dft | news     |
+      | <run>-b | <run>-dft | news     |
+      | <run>-c | <run>-pub | sport    |
+    And a user whose token is <reader-token> may read:
+      | collection             | fields      | permissions                     |
+      | test_agg_field_article | category    | {category: {_eq: news}}         |
+      | test_agg_field_article | id,category | {author: {status: {_eq: live}}} |
+    Then these requests get these responses:
+      | request                             | response             |
+      | as: <reader-token>                  | code: 200            |+
+      | method: GET                         | body:                |
+      | path: /items/test_agg_field_article |   meta:              |
+      | query:                              |     filter_count: 3  |
+      |   fields: category                  |                      |
+      |   meta: filter_count                |                      |
+      |   filter[id][_starts_with]: <run>-  |                      |
+      | as: <reader-token>                  | code: 200            |+
+      | method: GET                         | body:                |
+      | path: /items/test_agg_field_article |   data:              |
+      | query:                              |     - count:         |
+      |   aggregate[count]: id              |         id: "3"      |
+      |   filter[id][_starts_with]: <run>-  |                      |
+      | as: <reader-token>                  | code: 200            |+
+      | method: GET                         | body:                |
+      | path: /items/test_agg_field_article |   data:              |
+      | query:                              |     - countDistinct: |
+      |   aggregate[countDistinct]: id      |         id: "3"      |
+      |   filter[id][_starts_with]: <run>-  |                      |
+      | as: <reader-token>                  | code: 200            |+
+      | method: GET                         | body:                |
+      | path: /items/test_agg_field_article |   data:              |
+      | query:                              |     - min:           |
+      |   aggregate[min]: id                |         id: <run>-c  |
+      |   filter[id][_starts_with]: <run>-  |                      |
