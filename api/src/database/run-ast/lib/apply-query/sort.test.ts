@@ -3,14 +3,9 @@ import { expect, test, vi } from 'vitest';
 import { Client_SQLite3 } from './mock.js';
 import knex from 'knex';
 import { createTracker } from 'knex-mock-client';
+import { applySort } from './sort.js';
 
-const aliasFn = vi.fn();
-
-vi.doMock('nanoid/non-secure', () => ({
-	customAlphabet: () => aliasFn,
-}));
-
-const { applySort } = await import('./sort.js');
+const aliasFn = vi.fn<() => string>();
 
 const schema = new SchemaBuilder()
 	.collection('articles', (c) => {
@@ -24,7 +19,7 @@ test('no sorting', async () => {
 	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
-	applySort(db, schema, queryBuilder, [], null, 'articles', {});
+	applySort(db, schema, queryBuilder, [], null, 'articles', {}, aliasFn);
 
 	const tracker = createTracker(db);
 	tracker.on.select('*').response([]);
@@ -41,7 +36,7 @@ test('sorting of id', async () => {
 	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
-	applySort(db, schema, queryBuilder, ['id'], null, 'articles', {});
+	applySort(db, schema, queryBuilder, ['id'], null, 'articles', {}, aliasFn);
 
 	const tracker = createTracker(db);
 	tracker.on.select('*').response([]);
@@ -58,7 +53,7 @@ test('sorting of id desc', async () => {
 	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
-	applySort(db, schema, queryBuilder, ['-id'], null, 'articles', {});
+	applySort(db, schema, queryBuilder, ['-id'], null, 'articles', {}, aliasFn);
 
 	const tracker = createTracker(db);
 	tracker.on.select('*').response([]);
@@ -75,7 +70,16 @@ test('sorting of id and title', async () => {
 	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
-	applySort(db, schema, queryBuilder, ['id', 'title'], null, 'articles', {});
+	applySort(
+		db,
+		schema,
+		queryBuilder,
+		['id', 'title'],
+		null,
+		'articles',
+		{},
+		aliasFn,
+	);
 
 	const tracker = createTracker(db);
 	tracker.on.select('*').response([]);
@@ -102,6 +106,7 @@ test('sorting of title with unused aggregation', async () => {
 		},
 		'articles',
 		{},
+		aliasFn,
 	);
 
 	const tracker = createTracker(db);
@@ -129,6 +134,7 @@ test('sorting of count(*) with aggregation', async () => {
 		},
 		'articles',
 		{},
+		aliasFn,
 	);
 
 	const tracker = createTracker(db);
@@ -148,7 +154,16 @@ test('sorting of count(links)', async () => {
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
 
-	applySort(db, schema, queryBuilder, ['count(links)'], undefined, 'articles', {});
+	applySort(
+		db,
+		schema,
+		queryBuilder,
+		['count(links)'],
+		undefined,
+		'articles',
+		{},
+		aliasFn,
+	);
 
 	const tracker = createTracker(db);
 	tracker.on.select('*').response([]);
@@ -180,6 +195,7 @@ test('sorting of count(links) with aggregation', async () => {
 		},
 		'articles',
 		{},
+		aliasFn,
 	);
 
 	const tracker = createTracker(db);

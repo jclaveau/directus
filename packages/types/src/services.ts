@@ -24,7 +24,11 @@ import type { Policy } from './policies.js';
 import type { EmailOptions } from './mail.js';
 import type { DeepPartial } from './misc.js';
 import type { Notification } from './notifications.js';
-import type { PayloadAction, PayloadServiceProcessRelationResult } from './payload.js';
+import type {
+	PayloadAction,
+	PayloadServiceProcessO2MResult,
+	PayloadServiceProcessRelationResult,
+} from './payload.js';
 import type { Aggregate, Query } from './query.js';
 import type { FieldOverview } from './schema.js';
 import type { Range, Stat } from './storage.js';
@@ -321,10 +325,9 @@ interface PayloadService {
 		}
 	>;
 	processO2M(
-		data: Partial<Item>,
-		parent: PrimaryKey,
+		parentRows: { data: Partial<Item>; key: PrimaryKey }[],
 		opts?: MutationOptions,
-	): Promise<PayloadServiceProcessRelationResult>;
+	): Promise<PayloadServiceProcessO2MResult>;
 	prepareDelta(data: Partial<Item>): Promise<string | null>;
 }
 

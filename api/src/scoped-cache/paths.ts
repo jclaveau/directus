@@ -426,8 +426,8 @@ function nearRowAnswerKeys(
  * `resolveScopedCacheM2oJoinChainFromPath` accepts: what a hop reaches at its FAR
  * end is named by the key the condition
  * gives, whichever direction the relation runs. `filter/index.ts` joins O2M, M2M
- * and A2O the same way it joins M2O, and `_some`/`_none` push the same condition
- * into a subquery over the same one row.
+ * and A2O the same way it joins M2O. Each `_some`/`_none` is a subquery over a row
+ * of its own, so it walks at an alias of its own.
  */
 function scopedCacheFilterKeyingByAlias(
 	schema: SchemaOverview,
@@ -480,14 +480,15 @@ function scopedCacheFilterKeyingByAlias(
 			continue;
 		}
 
-		// Quantifiers over a to-many hop the caller already crossed: the condition
-		// inside still names one row of the same collection, at the same alias.
+		// Quantifiers over a to-many hop the caller already crossed: the conditions
+		// inside hold for one row of the same collection, which no sibling condition
+		// describes. The map grows on every walk, so its size names this one alone.
 		if ((key === '_some' || key === '_none') && isFilterNode(value)) {
 			parts.push(scopedCacheFilterKeyingByAlias(
 				schema,
 				collection,
 				value as Filter,
-				alias,
+				`${alias}.${key}:${collectionByAlias.size}`,
 				collectionByAlias,
 			));
 
@@ -937,6 +938,58 @@ export function scopedCacheFilterKeyingByCollection(
 	readKeyingOfChildren(ast.children);
 
 	return keyingByCollection;
+}
+
+/**
+ * The collections a read's root filter reaches through a `_some`/`_none` row and
+ * through another row besides. No conjunct's key or value bounds such a collection:
+ * each one describes its own row.
+ */
+export function scopedCacheCollectionsAcrossQuantifiers(
+	schema: SchemaOverview,
+	ast: AST,
+): Set<CollectionKey> {
+	const filter = joinFilterWithCases(ast.query.filter, ast.cases);
+
+	if (!filter) {
+		return new Set();
+	}
+
+	const collectionByAlias = new Map<string, CollectionKey>();
+
+	const keyingByAlias = scopedCacheFilterKeyingByAlias(
+		schema,
+		ast.name,
+		expandRelatedKeyFilters(schema, ast.name, filter),
+		'',
+		collectionByAlias,
+	);
+
+	const aliasesByCollection = new Map<CollectionKey, string[]>();
+
+	for (const alias of keyingByAlias.keys()) {
+		const aliasCollection = collectionByAlias.get(alias);
+
+		if (aliasCollection !== undefined) {
+			aliasesByCollection.set(aliasCollection, [
+				...(aliasesByCollection.get(aliasCollection) ?? []),
+				alias,
+			]);
+		}
+	}
+
+	const crossingCollections = new Set<CollectionKey>();
+
+	for (const [collection, aliases] of aliasesByCollection) {
+		if (
+			aliases.length > 1
+			&& aliases.some((alias) => /\._(some|none):/.test(alias))
+		) {
+			crossingCollections.add(collection);
+		}
+	}
+
+	return crossingCollections;
 }
 
 /**

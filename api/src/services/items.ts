@@ -71,8 +71,10 @@ import {
 	isMissingPrimaryKey,
 	isPrimaryKey,
 } from '../utils/is-primary-key.js';
+import { primaryKeyNameOf } from '../utils/primary-key-name.js';
 import {
 	assign,
+	chunk,
 	clone,
 	cloneDeep,
 	isEqual,
@@ -86,6 +88,9 @@ import { validateUserCountIntegrity } from '../utils/validate-user-count-integri
 import { PayloadService } from './payload.js';
 
 const env = useEnv();
+
+// Keys per existence probe, well under Postgres' 65535 bind parameters.
+const UPSERT_PROBE_CHUNK_SIZE = 10_000;
 
 /**
  * The options `upsertMany` hands the updates it defers its purge for. Only the
@@ -898,34 +903,45 @@ implements AbstractService<Item> {
 
 			type PostRow = PreparedRow & {
 				primaryKey: PrimaryKey;
-				revisionsO2M: Awaited<ReturnType<PayloadService['processO2M']>>['revisions'];
-				nestedActionEventsO2M: ActionEventParams[];
+				revisionsO2M: PrimaryKey[];
 			};
 
-			const postPrepared: PostRow[] = [];
+			// At this point, the primary key is guaranteed to be set.
+			const parentRows = prepared.map((p) => {
+				return { data: p.payloadWithPresets, key: p.primaryKey as PrimaryKey };
+			});
+
+			const {
+				revisionsByParent: revisionsO2MByParent,
+				nestedActionEvents: nestedActionEventsO2M,
+				userIntegrityCheckFlags: userIntegrityCheckFlagsO2M,
+			} = await new PayloadService(this.collection, {
+				accountability: this.accountability,
+				knex: trx,
+				schema: this.schema,
+				nested: this.nested,
+			}).processO2M(parentRows, opts);
 
 			for (const p of prepared) {
-				// At this point, the primary key is guaranteed to be set.
-				const primaryKey = p.primaryKey as PrimaryKey;
-
-				const {
-					revisions: revisionsO2M,
-					nestedActionEvents: nestedActionEventsO2M,
-					userIntegrityCheckFlags: userIntegrityCheckFlagsO2M,
-				} = await p.payloadService.processO2M(p.payloadWithPresets, primaryKey, opts);
-
 				userIntegrityCheckFlags |=
-					p.userIntegrityCheckFlagsM2O | p.userIntegrityCheckFlagsA2O | userIntegrityCheckFlagsO2M;
+					p.userIntegrityCheckFlagsM2O | p.userIntegrityCheckFlagsA2O;
 
-				nestedActionEvents.push(...p.nestedActionEventsM2O, ...p.nestedActionEventsA2O, ...nestedActionEventsO2M);
-
-				postPrepared.push({
-					...p,
-					primaryKey,
-					revisionsO2M,
-					nestedActionEventsO2M,
-				});
+				nestedActionEvents.push(
+					...p.nestedActionEventsM2O,
+					...p.nestedActionEventsA2O,
+				);
 			}
+
+			const postPrepared: PostRow[] = prepared.map((p, index) => {
+				return {
+					...p,
+					primaryKey: parentRows[index]!.key,
+					revisionsO2M: revisionsO2MByParent[index]!,
+				};
+			});
+
+			userIntegrityCheckFlags |= userIntegrityCheckFlagsO2M;
+			nestedActionEvents.push(...nestedActionEventsO2M);
 
 			if (userIntegrityCheckFlags) {
 				if (opts.onRequireUserIntegrityCheck) {
@@ -990,7 +1006,7 @@ implements AbstractService<Item> {
 						}
 
 						if (opts.onRevisionCreate) {
-							opts.onRevisionCreate(revisionId);
+							opts.onRevisionCreate(revisionId, p.primaryKey);
 						}
 					}
 				}
@@ -1156,7 +1172,7 @@ implements AbstractService<Item> {
 			{ knex: this.knex, schema: this.schema },
 		);
 
-		const scopedCachePlan = this.scopedCache.planRead(
+		const scopedCachePlan = await this.scopedCache.planRead(
 			ast,
 			ownershipInjections,
 		);
@@ -1424,38 +1440,14 @@ implements AbstractService<Item> {
 	}
 
 	/**
-	 * A uuid names one row whatever the case of its letters (RFC 9562), an integer
-	 * or a bigInteger whatever zeros lead it. A string key is taken as spelled:
-	 * on a column comparing without case (citext) or padding (char), two
-	 * spellings of one row read as two rows, and a row named by the spelling
-	 * the read does not return is told missing.
+	 * The name of a key of this service's collection, or of `keyCollection`, as
+	 * `primaryKeyNameOf` (utils/primary-key-name.ts) spells it.
 	 */
 	protected primaryKeyNameOf(
 		key: PrimaryKey,
 		keyCollection: string = this.collection,
 	): string {
-		const primaryKeyField = this.schema.collections[keyCollection]!.primary;
-
-		const primaryKeyType = this.schema.collections[keyCollection]!
-			.fields[primaryKeyField]!.type;
-
-		if (primaryKeyType === 'uuid') {
-			return String(key).toLowerCase();
-		}
-
-		// A child key comes unvalidated: as numbers, 'abc' and 'xyz' would both be NaN.
-		if (!/^[+-]?\d+$/.test(String(key))) {
-			return String(key);
-		}
-
-		if (primaryKeyType === 'integer') {
-			return String(Number(key));
-		}
-
-		// Past 2^53 a Number would round two rows onto one name.
-		return primaryKeyType === 'bigInteger'
-			? String(BigInt(key))
-			: String(key);
+		return primaryKeyNameOf(key, keyCollection, this.schema);
 	}
 
 	/**
@@ -1626,6 +1618,16 @@ implements AbstractService<Item> {
 	 */
 	protected async validateGroupsToUpdate(
 		_groups: UpdateGroup<Item>[],
+		_trx: Knex,
+	): Promise<void> {}
+
+	/**
+	 * Refuses keys a delete would take. Handed them after the hooks and the access
+	 * check, inside the delete's transaction.
+	 */
+	protected async validateKeysToDelete(
+		_keys: PrimaryKey[],
+		_opts: MutationOptions,
 		_trx: Knex,
 	): Promise<void> {}
 
@@ -2024,7 +2026,13 @@ implements AbstractService<Item> {
 					const keyName = keyNameOf(key);
 					const answeredCount = (answeredKeyCounts.get(keyName) ?? 0) + 1;
 
-					if (refusesRepeatedPks && answeredCount > 1) {
+					// A row the caller lets a hook add may also be in the batch: both
+					// writes land, in the hook's answer order, as two UPDATEs would.
+					if (
+						refusesRepeatedPks
+						&& opts.refuseHookAddedRows !== false
+						&& answeredCount > 1
+					) {
 						throw refuseHookAnswer(new InvalidPayloadError({
 							reason: oneLine`
 								A "${this.eventScope}.update" filter hook answered with row
@@ -2743,17 +2751,18 @@ implements AbstractService<Item> {
 			nestedActionEvents.push(...nestedActionEventsM2O);
 			nestedActionEvents.push(...nestedActionEventsA2O);
 
-			for (const key of keys) {
-				const {
-					revisions,
-					nestedActionEvents: nestedActionEventsO2M,
-					userIntegrityCheckFlags: userIntegrityCheckFlagsO2M,
-				} = await payloadService.processO2M(payloadWithA2O, key, opts);
+			const {
+				revisionsByParent,
+				nestedActionEvents: nestedActionEventsO2M,
+				userIntegrityCheckFlags: userIntegrityCheckFlagsO2M,
+			} = await payloadService.processO2M(
+				keys.map((key) => ({ data: payloadWithA2O, key })),
+				opts,
+			);
 
-				childrenRevisions.push(...revisions);
-				nestedActionEvents.push(...nestedActionEventsO2M);
-				userIntegrityCheckFlags |= userIntegrityCheckFlagsO2M;
-			}
+			childrenRevisions.push(...revisionsByParent.flat());
+			nestedActionEvents.push(...nestedActionEventsO2M);
+			userIntegrityCheckFlags |= userIntegrityCheckFlagsO2M;
 
 			if (userIntegrityCheckFlags) {
 				if (opts?.onRequireUserIntegrityCheck) {
@@ -3149,7 +3158,7 @@ implements AbstractService<Item> {
 					const revisionID = revisionIDs[i]!;
 
 					if (opts.onRevisionCreate) {
-						opts.onRevisionCreate(revisionID);
+						opts.onRevisionCreate(revisionID, revisions[i]!.item);
 					}
 
 					if (i === 0) {
@@ -3172,37 +3181,26 @@ implements AbstractService<Item> {
 	/**
 	 * Upsert a single item.
 	 *
-	 * Uses `this.createOne` / `this.updateOne` under the hood.
+	 * Uses `this.upsertMany` under the hood, refusing by default a row an update
+	 * hook adds, as `updateOne` does.
 	 */
 	async upsertOne(payload: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
-		const primaryKeyField = this.schema.collections[this.collection]!.primary;
-		const primaryKey: PrimaryKey | undefined = payload[primaryKeyField];
+		const [primaryKey] = await this.upsertMany([payload], {
+			...opts,
+			refuseHookAddedRows: opts?.refuseHookAddedRows ?? true,
+		});
 
-		if (!isMissingPrimaryKey(primaryKey)) {
-			validateKeys(this.schema, this.collection, primaryKeyField, primaryKey);
-		}
-
-		const exists =
-			!isMissingPrimaryKey(primaryKey) &&
-			!!(await this.knex
-				.select(primaryKeyField)
-				.from(this.collection)
-				.where({ [primaryKeyField]: primaryKey })
-				.first());
-
-		if (exists) {
-			const { [primaryKeyField]: _, ...data } = payload;
-			return await this.updateOne(primaryKey as PrimaryKey, data as Partial<Item>, opts);
-		}
-		else {
-			return await this.createOne(payload, opts);
-		}
+		return primaryKey!;
 	}
 
 	/**
 	 * Upsert many items.
 	 *
-	 * Uses `this.upsertOne` under the hood.
+	 * Payloads go in runs, a run ending where a payload repeats a key the run
+	 * already holds. Per run: one existence read, then one `updateGroups` for the
+	 * keys it found and one `createMany` for the rest, so the updates write before
+	 * the creates. A repeated key starts a new run, which reads the row the run
+	 * before wrote, like the raw `INSERT … ON CONFLICT` of each payload in turn.
 	 */
 	async upsertMany(
 		payloads: Partial<Item>[],
@@ -3224,6 +3222,19 @@ implements AbstractService<Item> {
 				? [key]
 				: [];
 		});
+
+		validateKeys(
+			this.schema,
+			this.collection,
+			primaryKeyField,
+			payloads.flatMap((payload) => {
+				const key = payload[primaryKeyField];
+
+				return isMissingPrimaryKey(key)
+					? []
+					: [key];
+			}),
+		);
 
 		const oldScopedCacheSnapshot = await this.scopedCache.snapshot(inputKeys);
 
@@ -3307,13 +3318,14 @@ implements AbstractService<Item> {
 				const primaryKeys: PrimaryKey[] = [];
 				const hookAddedKeys: PrimaryKey[] = [];
 				const hookAddedSnapshots: ScopedCacheSnapshot[] = [];
+				let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
 
 				const childOpts: DeferredPurgeOptions = {
 					...(opts || {}),
 					autoPurgeCache: false,
-					// upsertMany takes the rows its update hook adds (onHookAddedRows),
-					// though it writes them one upsertOne at a time (#414).
-					refuseHookAddedRows: false,
+					// upsertMany takes the rows its update hook adds (onHookAddedRows);
+					// upsertOne refuses them, like updateOne.
+					refuseHookAddedRows: opts.refuseHookAddedRows ?? false,
 					scopedCacheHookDeclarations,
 					onHookAddedRows: (addedKeys, addedSnapshot) => {
 						for (const addedKey of addedKeys) {
@@ -3325,10 +3337,45 @@ implements AbstractService<Item> {
 					onResponseCacheFlushDeferred: () => {
 						responseCacheFlushDeferred = true;
 					},
+					// counted once every run wrote: a run's updates go before its
+					// creates, so a new admin is created after the old one is demoted
+					onRequireUserIntegrityCheck: (flags) => {
+						userIntegrityCheckFlags |= flags;
+					},
 				};
 
-				for (const payload of payloads) {
-					primaryKeys.push(await service.upsertOne(payload, childOpts));
+				for (const run of service.upsertRunsOf(payloads)) {
+					const runOffset = primaryKeys.length;
+
+					const runOpts: DeferredPurgeOptions = {
+						...childOpts,
+						onRevisionCreate: opts.onRevisionCreate
+							&& ((revision, item, payloadIndex) => {
+								opts.onRevisionCreate!(
+									revision,
+									item,
+									payloadIndex === undefined
+										? undefined
+										: runOffset + payloadIndex,
+								);
+							}),
+					};
+
+					for (const primaryKey of await service.upsertRun(run, runOpts)) {
+						primaryKeys.push(primaryKey);
+					}
+				}
+
+				if (userIntegrityCheckFlags) {
+					if (opts.onRequireUserIntegrityCheck) {
+						opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
+					}
+					else {
+						await validateUserCountIntegrity({
+							flags: userIntegrityCheckFlags,
+							knex,
+						});
+					}
 				}
 
 				return { primaryKeys, hookAddedKeys, hookAddedSnapshots };
@@ -3425,6 +3472,235 @@ implements AbstractService<Item> {
 		}
 
 		return primaryKeys;
+	}
+
+	/**
+	 * Splits upsert payloads where one repeats a key its run already holds, so
+	 * no run sends `updateGroups` or `createMany` a row twice.
+	 *
+	 * A payload nesting rows, naming a row through a self relation (its key
+	 * alone included), or setting an o2m alias in any form, upserts in a run of
+	 * its own, in payload order: a run writes its updates before its creates,
+	 * so a row it names, or a row its nested rows point back at through any
+	 * number of collections, may not exist yet, a row a nested write creates
+	 * would be created again, and of two payloads naming one child by key the
+	 * first would keep it, where the last does in payload order.
+	 */
+	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const nestingFields = new Set<string>();
+		const selfRelationFields = new Set<string>();
+		// an o2m alias rewrites its children's foreign key, `null` and `[]` included
+		const childrenFields = new Set<string>();
+
+		for (const relation of this.schema.relations) {
+			if (relation.collection === this.collection) {
+				nestingFields.add(relation.field);
+
+				if (
+					relation.related_collection === this.collection
+					|| relation.meta?.one_allowed_collections?.includes(this.collection)
+				) {
+					selfRelationFields.add(relation.field);
+				}
+			}
+
+			if (
+				relation.related_collection === this.collection
+				&& relation.meta?.one_field
+			) {
+				nestingFields.add(relation.meta.one_field);
+				childrenFields.add(relation.meta.one_field);
+			}
+		}
+
+		const runsAlone = (payload: Partial<Item>) => {
+			return [...nestingFields].some((field) => {
+				const value = payload[field];
+
+				return isPlainObject(value)
+					|| (Array.isArray(value) && value.some(isPlainObject));
+			})
+				|| [...childrenFields].some((field) => {
+					return payload[field] !== undefined;
+				})
+				|| [...selfRelationFields].some((field) => {
+					return payload[field] !== undefined && payload[field] !== null;
+				});
+		};
+
+		const upsertRuns: Partial<Item>[][] = [];
+		let currentRun: Partial<Item>[] = [];
+		let runKeyNames = new Set<string>();
+
+		for (const payload of payloads) {
+			if (runsAlone(payload)) {
+				if (currentRun.length > 0) {
+					upsertRuns.push(currentRun);
+				}
+
+				upsertRuns.push([payload]);
+				currentRun = [];
+				runKeyNames = new Set();
+				continue;
+			}
+
+			const primaryKey: PrimaryKey | undefined = payload[primaryKeyField];
+
+			const keyName = isMissingPrimaryKey(primaryKey)
+				? null
+				: this.primaryKeyNameOf(primaryKey);
+
+			if (keyName !== null && runKeyNames.has(keyName)) {
+				upsertRuns.push(currentRun);
+				currentRun = [];
+				runKeyNames = new Set();
+			}
+
+			currentRun.push(payload);
+
+			if (keyName !== null) {
+				runKeyNames.add(keyName);
+			}
+		}
+
+		if (currentRun.length > 0) {
+			upsertRuns.push(currentRun);
+		}
+
+		return upsertRuns;
+	}
+
+	/**
+	 * Upserts a run holding each key once: one read tells which keys exist, those
+	 * are updated in one `updateGroups`, the others created in one `createMany`.
+	 * Answers one key per payload, in the run's order.
+	 *
+	 * Keys are matched as the read returns them: under a case-insensitive key
+	 * (MariaDB `_ci`, Postgres `citext`) `'ABC'` misses a stored `'abc'`, and
+	 * its create fails on the duplicate key.
+	 *
+	 * A row an update hook adds is updated only if it existed before the run:
+	 * the hook sees the found keys, never the ones the run creates. An upsert
+	 * hook seeing the whole run could allow it.
+	 *
+	 * A unique value an update frees can go to a create of the same run:
+	 * `[{ id: 2, code: 'A' }, { id: 1, code: 'B' }]`, row 1 holding `'A'`,
+	 * writes both, where each payload in turn would refuse the create.
+	 */
+	protected async upsertRun(
+		upsertRun: Partial<Item>[],
+		opts: DeferredPurgeOptions,
+	): Promise<PrimaryKey[]> {
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+
+		const sentKeys = upsertRun.flatMap((payload) => {
+			const primaryKey: PrimaryKey | undefined = payload[primaryKeyField];
+
+			return isMissingPrimaryKey(primaryKey)
+				? []
+				: [primaryKey];
+		});
+
+		const existingKeyNames = new Set<string>();
+
+		for (const keyChunk of chunk(sentKeys, UPSERT_PROBE_CHUNK_SIZE)) {
+			const existenceRead = this.knex
+				.select(primaryKeyField)
+				.from(this.collection)
+				.whereIn(primaryKeyField, keyChunk);
+
+			// a row found is updated: a delete committing before the update would
+			// leave it writing nothing, so the found rows stay locked until commit
+			if (getHelpers(this.knex).capabilities.supportsRowLocks()) {
+				existenceRead.forUpdate();
+			}
+
+			const existingRows = await existenceRead;
+
+			for (const existingRow of existingRows) {
+				existingKeyNames.add(this.primaryKeyNameOf(existingRow[primaryKeyField]));
+			}
+		}
+
+		const updateGroups: UpdateGroup<Item>[] = [];
+		const createPayloads: Partial<Item>[] = [];
+		const upsertedKeys: PrimaryKey[] = [];
+		const updateIndexes: number[] = [];
+		const createIndexes: number[] = [];
+
+		for (const [index, payload] of upsertRun.entries()) {
+			const primaryKey: PrimaryKey | undefined = payload[primaryKeyField];
+
+			if (
+				!isMissingPrimaryKey(primaryKey)
+				&& existingKeyNames.has(this.primaryKeyNameOf(primaryKey))
+			) {
+				updateGroups.push({
+					data: omit(payload, primaryKeyField) as Partial<Item>,
+					keys: [primaryKey],
+				});
+
+				updateIndexes.push(index);
+			}
+			else {
+				createPayloads.push(payload);
+				createIndexes.push(index);
+			}
+		}
+
+		// Held until the run returns its keys, the created ones included: a run
+		// holds each key once, so a key tells the payload its revision is of.
+		const runRevisions: { revision: PrimaryKey; item: PrimaryKey }[] = [];
+
+		const writeOpts: DeferredPurgeOptions = opts.onRevisionCreate
+			? {
+				...opts,
+				onRevisionCreate: (revision, item) => {
+					runRevisions.push({ revision, item });
+				},
+			}
+			: opts;
+
+		if (updateGroups.length > 0) {
+			// one key per group, so one answer per group: null where a filter cancelled it
+			const updatedKeys = await this.updateGroups(updateGroups, writeOpts);
+
+			for (const [updateIndex, updatedKey] of updatedKeys.entries()) {
+				upsertedKeys[updateIndexes[updateIndex]!] = updatedKey;
+			}
+		}
+
+		if (createPayloads.length > 0) {
+			const createdKeys = await this.createMany(createPayloads, writeOpts);
+
+			for (const [createIndex, createdKey] of createdKeys.entries()) {
+				upsertedKeys[createIndexes[createIndex]!] = createdKey;
+			}
+		}
+
+		if (opts.onRevisionCreate) {
+			const payloadIndexOfKeyNames = new Map<string, number>();
+
+			for (const [payloadIndex, upsertedKey] of upsertedKeys.entries()) {
+				if (!isMissingPrimaryKey(upsertedKey)) {
+					payloadIndexOfKeyNames.set(
+						this.primaryKeyNameOf(upsertedKey),
+						payloadIndex,
+					);
+				}
+			}
+
+			for (const { revision, item } of runRevisions) {
+				opts.onRevisionCreate(
+					revision,
+					item,
+					payloadIndexOfKeyNames.get(this.primaryKeyNameOf(item)),
+				);
+			}
+		}
+
+		return upsertedKeys;
 	}
 
 	/**
@@ -3718,6 +3994,8 @@ implements AbstractService<Item> {
 			if (opts.preMutationError) {
 				throw opts.preMutationError;
 			}
+
+			await this.validateKeysToDelete(keys, opts, trx);
 
 			try {
 				await this.deleteKeyRows(keys, trx, opts.keysFromQuery === true);

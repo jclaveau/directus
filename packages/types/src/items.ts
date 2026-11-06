@@ -95,9 +95,14 @@ export type RepeatedPkAnswer = (typeof RepeatedPkAnswers)[number];
 
 export type MutationOptions = {
 	/**
-	 * Callback function that's fired whenever a revision is made in the mutation
+	 * Callback function that's fired whenever a revision is made in the mutation,
+	 * with the key of the revision and the key of the item it revises. `upsertMany`
+	 * also passes the index of the payload the item was written from, none for a
+	 * row a hook added
 	 */
-	onRevisionCreate?: ((pk: PrimaryKey) => void) | undefined;
+	onRevisionCreate?:
+		| ((pk: PrimaryKey, item: PrimaryKey, payloadIndex?: number) => void)
+		| undefined;
 
 	/**
 	 * Flag to disable the auto purging of the cache. Is ignored when CACHE_AUTO_PURGE isn't enabled.
@@ -171,6 +176,12 @@ export type MutationOptions = {
 	 * caller: a key another delete took meanwhile is skipped, not a 404.
 	 */
 	keysFromQuery?: boolean | undefined;
+
+	/**
+	 * A role delete takes the role's access rows along, those an extension manages
+	 * included, as the database's cascade does for a deleted user or policy.
+	 */
+	deletesManagedAccess?: boolean | undefined;
 
 	/**
 	 * An update refuses with a 404 a key no row holds, told off the UPDATE's

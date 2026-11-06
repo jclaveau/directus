@@ -1,6 +1,5 @@
 import type { Filter, Permission, Query, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
-import { customAlphabet } from 'nanoid/non-secure';
 import { getHelpers } from '../../../helpers/index.js';
 import { applyCaseWhen } from '../../utils/apply-case-when.js';
 import type { AliasMap } from '../../../../utils/get-column-path.js';
@@ -11,8 +10,7 @@ import { applySort } from './sort.js';
 import { applyFilter } from './filter/index.js';
 import { applySearch } from './search.js';
 import { applyAggregate } from './aggregate.js';
-
-export const generateAlias = customAlphabet('abcdefghijklmnopqrstuvwxyz', 5);
+import type { AliasGenerator } from './create-alias-generator.js';
 
 type ApplyQueryOptions = {
 	aliasMap?: AliasMap;
@@ -20,6 +18,7 @@ type ApplyQueryOptions = {
 	hasMultiRelationalSort?: boolean | undefined;
 	groupWhenCases?: number[][] | undefined;
 	groupColumnPositions?: number[] | undefined;
+	filteredInSubquery?: boolean;
 };
 
 /**
@@ -33,6 +32,7 @@ export default function applyQuery(
 	schema: SchemaOverview,
 	cases: Filter[],
 	permissions: Permission[],
+	generateAlias: AliasGenerator,
 	options?: ApplyQueryOptions,
 ) {
 	const aliasMap: AliasMap = options?.aliasMap ?? Object.create(null);
@@ -50,7 +50,16 @@ export default function applyQuery(
 	}
 
 	if (query.sort && !options?.isInnerQuery && !options?.hasMultiRelationalSort) {
-		const sortResult = applySort(knex, schema, dbQuery, query.sort, query.aggregate, collection, aliasMap);
+		const sortResult = applySort(
+			knex,
+			schema,
+			dbQuery,
+			query.sort,
+			query.aggregate,
+			collection,
+			aliasMap,
+			generateAlias,
+		);
 
 		if (!hasJoins) {
 			hasJoins = sortResult.hasJoins;
@@ -63,10 +72,22 @@ export default function applyQuery(
 	// is reused in the column selection case/when to dynamically return or nullify the field values
 	// you're actually allowed to read
 
-	const filter: Filter | null = joinFilterWithCases(query.filter, cases);
+	const filter: Filter | null = options?.filteredInSubquery
+		? null
+		: joinFilterWithCases(query.filter, cases);
 
 	if (filter) {
-		const filterResult = applyFilter(knex, schema, dbQuery, filter, collection, aliasMap, cases, permissions);
+		const filterResult = applyFilter(
+			knex,
+			schema,
+			dbQuery,
+			filter,
+			collection,
+			aliasMap,
+			cases,
+			permissions,
+			generateAlias,
+		);
 
 		if (!hasJoins) {
 			hasJoins = filterResult.hasJoins;
@@ -77,7 +98,13 @@ export default function applyQuery(
 
 	if (query.group) {
 		const helpers = getHelpers(knex);
-		const rawColumns = query.group.map((column) => getColumn(knex, collection, column, false, schema));
+
+		const rawColumns = query.group.map((column) => {
+			return getColumn(knex, collection, column, false, schema, {
+				generateAlias,
+			});
+		});
+
 		let columns;
 
 		if (options?.groupWhenCases) {
@@ -97,6 +124,8 @@ export default function applyQuery(
 							cases,
 							table: collection,
 							permissions,
+							generateAlias,
+							readsCasesByKey: options?.filteredInSubquery,
 						},
 						{
 							knex,
@@ -125,8 +154,17 @@ export default function applyQuery(
 		dbQuery.groupBy(columns);
 	}
 
-	if (query.search) {
-		applySearch(knex, schema, dbQuery, query.search, collection, aliasMap, permissions);
+	if (query.search && !options?.filteredInSubquery) {
+		applySearch(
+			knex,
+			schema,
+			dbQuery,
+			query.search,
+			collection,
+			aliasMap,
+			permissions,
+			generateAlias,
+		);
 	}
 
 	if (query.aggregate) {

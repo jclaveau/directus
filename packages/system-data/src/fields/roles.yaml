@@ -69,6 +69,7 @@ fields:
     interface: list-m2m
     options:
       layout: list
+      managedByField: managed_by
     display: related-values
     special:
       - m2m
