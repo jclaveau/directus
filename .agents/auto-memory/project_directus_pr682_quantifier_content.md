@@ -1,6 +1,6 @@
 ---
 name: project_directus_pr682_quantifier_content
-description: PR #682 (quantifier content stays whole) plus 5 predating quantifier fixes; a slice can outlive a keying fix, gate on aliases not on unkeyed
+description: PR #682, merged as ff66eb6d8d on 2026-11-06 (quantifier content stays whole) plus 5 predating quantifier fixes; a slice can outlive a keying fix, gate on aliases not on unkeyed
 metadata:
   type: project
 ---

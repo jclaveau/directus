@@ -214,6 +214,7 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 ## 2026-11-05 (#678 `common`, sqlite): schedule-hook count
 - `flows/schedule-hook` `expected 4 to be 5` (4 scheduled hook fires, 5 expected) failed together with `assets/concurrency` on a tree identical to a run that passed `common`; one `--failed` rerun cleared both. Timing flake by assertion shape only, never root-caused. Second sighting after #427 (see [[project_directus_pr427_accepted_exceptions]]): a third means diagnose.
 - `common/assets/concurrency` again on #682, 2026-11-06: failed on d7e09ce793, 991859ae37 and e0cbb9cb55, passed on 170b475809 and ee7f4578c9 with no change to its path: still the known flake.
+- Same test failed twice on one sha, #683 `8b51d69f0f`, 2026-11-06: first run and its one `--failed` rerun, while 6 sibling PRs at the same base went green. #683 only touches `api/src/cli` migrate code. One rerun does not always clear it (#367).
 
 ## 2026-11-03 (#673 shard 1): invite statement-count flake
 - `singular-write-users-invite` expected 1 insert each into `directus_activity` / `directus_revisions` on request 3, saw 3. #673 touches neither the users service nor that test; not in the list above. Treated as flake, `gh run rerun --failed` unasked. If the rerun is red the same way (2+ identical), stop rerunning and diagnose (see the twice-red rule above).
