@@ -4426,6 +4426,15 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 			})).toEqual(new Set());
 		});
 
+		it('names nothing for two paths to one collection, no quantifier', () => {
+			expect(crossedBy({
+				_and: [
+					{ owner: { name: { _eq: 'open' } } },
+					{ owned_sub_items: { owned_item: { owner: { name: { _eq: 'shut' } } } } },
+				],
+			})).toEqual(new Set());
+		});
+
 		it('names nothing with no filter', () => {
 			expect(scopedCacheCollectionsAcrossQuantifiers(schema, {
 				type: 'root',
