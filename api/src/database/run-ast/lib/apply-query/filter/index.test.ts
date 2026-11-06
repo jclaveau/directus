@@ -364,8 +364,8 @@ test(`filtering o2m relation with _some from an aliased table`, async () => {
 
 	expect(queryBuilder.toSQL().sql).toEqual(
 		oneLine`
-			select * where "aliased"."id" in (
-			select "links_list"."article_id" as "article_id" from "links_list"
+			select * where "aliased"."id" in (select "links_list"."article_id"
+			as "article_id" from "links_list"
 			where "links_list"."article_id" is not null
 			and "links_list"."name" = ?)
 		`,
@@ -406,8 +406,8 @@ test(`filtering $FOLLOW with _some reads the rows of its own collection`, async 
 
 	expect(rawQuery.sql).toEqual(
 		oneLine`
-			select * where CAST("article"."id" AS CHAR(255)) in (
-			select "mention"."item" as "item" from "mention"
+			select * where CAST("article"."id" AS CHAR(255)) in (select
+			"mention"."item" as "item" from "mention"
 			where "mention"."item" is not null
 			and "mention"."collection" = ?
 			and "mention"."status" = ?)
