@@ -500,8 +500,14 @@ export class PayloadService {
 		});
 
 		for (const relation of relations) {
-			// If the required a2o configuration fields are missing, this is a m2o instead of an a2o
-			if (!relation.meta?.one_collection_field || !relation.meta?.one_allowed_collections) continue;
+			// If the required a2o configuration fields are missing, this is a m2o
+			// instead of an a2o
+			if (
+				!relation.meta?.one_collection_field
+				|| !relation.meta?.one_allowed_collections
+			) {
+				continue;
+			}
 
 			const collectionField = relation.meta.one_collection_field;
 			const allowedCollections = relation.meta.one_allowed_collections;
@@ -588,7 +594,9 @@ export class PayloadService {
 
 		for (const relation of relations) {
 			// If no "one collection" exists, this is a A2O, not a M2O
-			if (!relation.related_collection) continue;
+			if (!relation.related_collection) {
+				continue;
+			}
 
 			// Only process related records that are actually in the payload
 			const rowIndexes = [...rowsResult.payloads.keys()].filter((rowIndex) => {
