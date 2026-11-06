@@ -50,7 +50,6 @@ describe('archivePlan', () => {
 	test.each([
 		[null, '1'],
 		[{ admin: false }, '1'],
-		[{ admin: true }, '1 or 1=1'],
 		[{ admin: true }, '99'],
 	])('refuses %j on plan %j', async (accountability, planId) => {
 		await expect(archivePlan({
@@ -262,6 +261,56 @@ describe('archivePlan', () => {
 
 		expect(await database('subscription_events').select('user'))
 			.toEqual([{ user: null }]);
+	});
+
+	test('writes the queue row before the subscription', async () => {
+		await database('subscriptions').insert({
+			subscriber: 1,
+			customer: 1,
+			plan: 1,
+			provider: 'stripe',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		// Same order as the sync worker, or the two deadlock on postgres.
+		await database.raw(`
+			CREATE TRIGGER queue_row_first BEFORE UPDATE ON subscriptions
+			WHEN NOT EXISTS (SELECT 1 FROM subscription_sync_queue)
+			BEGIN SELECT RAISE(ABORT, 'subscription updated before the queue'); END
+		`);
+
+		await archivePlan({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{
+					cancelAtPeriodEnd: vi.fn(),
+					composeResourceId: vi.fn().mockReturnValue('sub_1'),
+				} as unknown as SubscriptionProvider,
+			]]),
+			planId: '1',
+			confirmation: 'End 1 subscription and lose this customer',
+			accountability: { admin: true } as Accountability,
+		});
+
+		expect(await database('subscriptions')
+			.select('cancel_at_period_end'))
+			.toEqual([{ cancel_at_period_end: 1 }]);
+	});
+
+	test('answers an admin sending a malformed plan id with a 400', async () => {
+		await expect(archivePlan({
+			database,
+			enabledProviders: new Map(),
+			planId: '1 or 1=1',
+			confirmation: undefined,
+			accountability: { admin: true } as Accountability,
+		})).rejects.toThrow(new InvalidPayloadError({
+			reason: 'Plan id "1 or 1=1" must be an integer',
+		}));
 	});
 
 	test('ends nothing when a provider is disabled', async () => {

@@ -65,19 +65,21 @@ export async function cancelOwnSubscription({
 		customerId: ownSubscription.provider_customer_id,
 	});
 
+	// A provider refusal answers 500 with no sync queued: the hourly reconcile
+	// closes a row the provider no longer has, then a retry works.
 	await subscriptionProvider.cancelAtPeriodEnd(resourceId);
 
 	await database.transaction(async (trx) => {
+		await enqueueSync(trx, {
+			provider: ownSubscription.provider,
+			resourceId,
+		});
+
 		await recordCancelRequest(trx, {
 			subscription: ownSubscription,
 			source: 'user',
 			userId,
 			requestedAt: new Date(),
-		});
-
-		await enqueueSync(trx, {
-			provider: ownSubscription.provider,
-			resourceId,
 		});
 	});
 }
