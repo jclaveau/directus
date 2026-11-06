@@ -5788,6 +5788,36 @@ describe('the canonical scope value', () => {
 	);
 });
 
+describe('ScopedCacheReadPlan.collectionsToGuard', () => {
+	it('names a collection only the aggregate cases reach', () => {
+		const schema = new SchemaBuilder()
+			.collection('author', (c) => {
+				c.field('id').id();
+				c.field('status').string();
+			})
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('category').string();
+				c.field('salary').integer();
+				c.field('author').m2o('author');
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('article', schema, {
+			type: 'root',
+			name: 'article',
+			query: { aggregate: { sum: ['salary'] }, group: ['category'] },
+			cases: [{}],
+			aggregateCases: [{ author: { status: { _eq: 'live' } } }],
+			children: [
+				{ type: 'field', name: 'category', fieldKey: 'category', whenCase: [] },
+			],
+		} as unknown as AST, []);
+
+		expect(plan.collectionsToGuard()).toContain('author');
+	});
+});
+
 // The view a fingerprint narrows to: a write rewriting none of these fields is
 // taken not to change the response, so each one the read depends on has to be
 // here.

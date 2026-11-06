@@ -289,6 +289,7 @@ test('Processes a2o children recursively', () => {
 				type: 'a2o',
 				fieldKey: 'test-field-b',
 				names: ['test-collection-b', 'test-collection-c'],
+				query: {},
 				cases: {},
 				children: {
 					'test-collection-b': [
@@ -332,6 +333,7 @@ test('Processes a2o children recursively', () => {
 			type: 'a2o',
 			fieldKey: 'test-field-b',
 			names: ['test-collection-b', 'test-collection-c'],
+			query: {},
 			cases: {
 				'test-collection-b': [{ status: { _eq: 'draft' } }, { status: { _eq: 'under-review' } }],
 				'test-collection-c': [{}],
