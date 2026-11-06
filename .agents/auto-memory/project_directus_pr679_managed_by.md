@@ -8,6 +8,8 @@ metadata:
 
 `directus_access.managed_by` (varchar 255, null) marks a row owned by an extension (`'@scalabus/subscriptions'`). Core fork PR #679, base of the subscriptions bundle #680 (see [[project_directus_issue652_subscriptions_stripe_survey]]).
 
+**Merged 2026-11-06 as `0b74cde186` (head `ff673181ed`).** Branch kept: #680 still bases on it, and its retarget to `v11.10.1-hhh-dev` is a separate go.
+
 Guard (`api/src/services/access.ts`, `AccessService`): a request (accountability set) may not create with `managed_by`, nor PATCH/DELETE a managed row → `InvalidPayloadError` 400; accountability null (extension code) passes. App: `list-m2m` option `managedByField` shows a "Managed by …" chip instead of remove.
 
 **Why / traps found:**
