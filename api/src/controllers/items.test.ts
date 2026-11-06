@@ -327,9 +327,45 @@ describe('items controller', () => {
 			const res = { locals: {} } as any;
 			const next = vi.fn();
 			await handler()(req, res, next);
-			expect(upsertSingleton).toHaveBeenCalledWith({ a: 1 });
+
+			expect(upsertSingleton)
+				.toHaveBeenCalledWith({ a: 1 }, { mutationBatching: undefined });
+
 			expect(res.locals['payload']).toEqual({ data: { id: 1 } });
 			expect(next).toHaveBeenCalledOnce();
+		});
+
+		test('passes mutationBatching to the singleton upsert', async () => {
+			upsertSingleton.mockResolvedValueOnce(undefined);
+			readSingleton.mockResolvedValueOnce({ id: 1 });
+
+			await handler()(makeReq({
+				singleton: true,
+				body: { a: 1 },
+				query: { mutationBatching: 'preserveMutationOrder' },
+			}), { locals: {} } as any, vi.fn());
+
+			expect(upsertSingleton).toHaveBeenCalledWith(
+				{ a: 1 },
+				{ mutationBatching: 'preserveMutationOrder' },
+			);
+		});
+
+		test('refuses an unknown mutationBatching on a singleton', async () => {
+			const refusal = await nextError(handler(), makeReq({
+				singleton: true,
+				body: { a: 1 },
+				query: { mutationBatching: 'batchEverything' },
+			}));
+
+			expect(refusal).toBeInstanceOf(InvalidQueryError);
+
+			expect(refusal.message).toEqual(oneLine`
+				Invalid query. "mutationBatching" must be one of minimizeMutations,
+				preserveMutationOrder, disableBatching.
+			`);
+
+			expect(upsertSingleton).not.toHaveBeenCalled();
 		});
 
 		test('updateBatch for array body', async () => {

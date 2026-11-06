@@ -226,7 +226,10 @@ router.patch(
 		});
 
 		if (req.singleton === true) {
-			await service.upsertSingleton(req.body);
+			await service.upsertSingleton(req.body, {
+				mutationBatching: mutationBatchingFromQuery(req.query),
+			});
+
 			const item = await service.readSingleton(req.sanitizedQuery);
 
 			res.locals['payload'] = { data: item || null };
