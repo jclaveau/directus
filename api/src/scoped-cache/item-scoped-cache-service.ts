@@ -1223,7 +1223,12 @@ export class ItemScopedCacheService {
 					});
 				}
 
-				if (!nestedRowsBounded) {
+				// The keying met a row no key names, a sibling quantifier's say; the
+				// pinner's `_and` would take one conjunct's slice for the whole read.
+				if (
+					!nestedRowsBounded
+					|| filterKeying.get(collection)?.kind === 'unkeyed'
+				) {
 					continue;
 				}
 
