@@ -25,7 +25,9 @@ export type ArchivedPlan = {
 /**
  * Ends the plan's subscriptions at their period end, without refund. A failure
  * half way leaves the plan unarchived; the ones already ended no longer count,
- * so a retry asks for a smaller sentence and carries on.
+ * so a retry asks for a smaller sentence and carries on. A provider refusal
+ * answers 500 with no sync queued: the hourly reconcile closes a row the
+ * provider no longer has, then the retry carries on.
  */
 export async function archivePlan({
 	database,
@@ -34,8 +36,14 @@ export async function archivePlan({
 	confirmation,
 	accountability,
 }: PlanArchive): Promise<ArchivedPlan> {
-	if (accountability?.admin !== true || !PLAN_ID_PATTERN.test(planId)) {
+	if (accountability?.admin !== true) {
 		throw new ForbiddenError();
+	}
+
+	if (!PLAN_ID_PATTERN.test(planId)) {
+		throw new InvalidPayloadError({
+			reason: `Plan id ${JSON.stringify(planId)} must be an integer`,
+		});
 	}
 
 	const storedPlan = await database('subscription_plans')
@@ -95,16 +103,16 @@ export async function archivePlan({
 			.cancelAtPeriodEnd(plannedCancel.resourceId);
 
 		await database.transaction(async (trx) => {
+			await enqueueSync(trx, {
+				provider: plannedCancel.endingSubscription.provider,
+				resourceId: plannedCancel.resourceId,
+			});
+
 			await recordCancelRequest(trx, {
 				subscription: plannedCancel.endingSubscription,
 				source: 'plan_archived',
 				userId: accountability.user ?? null,
 				requestedAt: new Date(),
-			});
-
-			await enqueueSync(trx, {
-				provider: plannedCancel.endingSubscription.provider,
-				resourceId: plannedCancel.resourceId,
 			});
 		});
 	}
