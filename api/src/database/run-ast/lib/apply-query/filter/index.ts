@@ -151,7 +151,9 @@ export function applyFilter(
 				if (!relation) continue;
 
 				if (relationType === 'o2m' || relationType === 'o2a') {
-					let pkField: Knex.Raw<any> | string = `${collection}.${
+					let pkField: Knex.Raw<any> | string = `${
+						aliasMap['']?.alias || collection
+					}.${
 						schema.collections[relation!.related_collection!]!.primary
 					}`;
 
@@ -165,13 +167,20 @@ export function applyFilter(
 						const subQueryBuilder =
 							(filter: Filter, cases: Filter[]) => (subQueryKnex: Knex.QueryBuilder<any, unknown[]>) => {
 								const field = relation!.field;
-								const collection = relation!.collection;
-								const column = `${collection}.${field}`;
+								const relatedCollection = relation!.collection;
+								const column = `${relatedCollection}.${field}`;
 
 								subQueryKnex
 									.select({ [field]: column })
-									.from(collection)
+									.from(relatedCollection)
 									.whereNotNull(column);
+
+								if (relationType === 'o2a') {
+									subQueryKnex.where(
+										`${relatedCollection}.${relation!.meta!.one_collection_field}`,
+										collection,
+									);
+								}
 
 								applyQuery(
 									knex,

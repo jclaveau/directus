@@ -1172,7 +1172,7 @@ implements AbstractService<Item> {
 			{ knex: this.knex, schema: this.schema },
 		);
 
-		const scopedCachePlan = this.scopedCache.planRead(
+		const scopedCachePlan = await this.scopedCache.planRead(
 			ast,
 			ownershipInjections,
 		);
