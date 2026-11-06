@@ -75,17 +75,20 @@ Feature: The conditions under an o2m quantifier hold for one related row
       | id   |
       | qx-a |
       | qx-b |
+      | qx-c |
     And their children in test_quantifier_link:
       | id    | article | name | status |
       | qx-a1 | qx-a    | a    | x      |
       | qx-b1 | qx-b    | a    | b      |
+      | qx-c1 | qx-c    | a    | x      |
+      | qx-c2 | qx-c    | y    | b      |
     When these requests get these responses:
       | request                                | response       |
       | method: GET                            | code: 200      |+
       | path: /items/test_quantifier_article   | body:          |
       | query:                                 |   data:        |
       |   fields: id                           |     - id: qx-a |
-      |   sort: id                             |                |
+      |   sort: id                             |     - id: qx-c |
       |   filter[id][_starts_with]: qx-        |                |
       |   filter[links][_none][name][_eq]: a   |                |
       |   filter[links][_none][status][_eq]: b |                |
@@ -95,10 +98,12 @@ Feature: The conditions under an o2m quantifier hold for one related row
       | id   |
       | qn-a |
       | qn-b |
+      | qn-c |
     And their children in test_quantifier_link:
       | id    | article | name | status |
       | qn-a1 | qn-a    | a    | x      |
       | qn-b1 | qn-b    | c    | x      |
+      | qn-c1 | qn-c    | b    | x      |
     When these requests get these responses:
       | request                                      | response       |
       | method: GET                                  | code: 200      |+

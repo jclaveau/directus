@@ -400,7 +400,6 @@ test(`filtering o2m relation with sibling keys inside _some`, async () => {
 
 	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
-	aliasFn.mockReturnValueOnce('alias');
 
 	applyFilter(
 		db,
@@ -425,9 +424,7 @@ test(`filtering o2m relation with sibling keys inside _some`, async () => {
 
 	// one subquery holding both siblings: a single link has to match both
 	expect(rawQuery.sql).toEqual(
-		'select * left join "links_list" as "alias"'
-		+ ' on "article"."id" = "alias"."article_id"'
-		+ ' where "article"."id" in (select "links_list"."article_id"'
+		'select * where "article"."id" in (select "links_list"."article_id"'
 		+ ' as "article_id" from "links_list"'
 		+ ' where "links_list"."article_id" is not null'
 		+ ' and ("links_list"."name" = ? and "links_list"."status" = ?))',
@@ -439,7 +436,6 @@ test(`filtering o2m relation with sibling keys inside _some`, async () => {
 test(`filtering o2m relation with an _or inside _none`, async () => {
 	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
-	aliasFn.mockReturnValueOnce('alias');
 
 	applyFilter(
 		db,
@@ -457,15 +453,14 @@ test(`filtering o2m relation with an _or inside _none`, async () => {
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
 
 	// one subquery holding the _or: no link may match either
 	expect(rawQuery.sql).toEqual(
-		'select * left join "links_list" as "alias"'
-		+ ' on "article"."id" = "alias"."article_id"'
-		+ ' where "article"."id" not in (select "links_list"."article_id"'
+		'select * where "article"."id" not in (select "links_list"."article_id"'
 		+ ' as "article_id" from "links_list"'
 		+ ' where "links_list"."article_id" is not null'
 		+ ' and ("links_list"."name" = ? or "links_list"."name" = ?))',

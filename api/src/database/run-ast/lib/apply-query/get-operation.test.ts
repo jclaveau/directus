@@ -105,3 +105,17 @@ test('nested empty object', () => {
 
 	expect(result).toBeNull();
 });
+
+for (const [title, content] of [
+	['an empty _and', { _and: [] }],
+	['an empty _or', { _or: [] }],
+	['an _and holding an empty filter', { _and: [{}] }],
+	['an _or holding an empty filter', { _or: [{}] }],
+	['a nested empty quantifier', { sub: { _some: {} } }],
+] as const) {
+	for (const key of ['_some', '_none']) {
+		test(`${key} over ${title} reads no field`, () => {
+			expect(getOperation(key, content)).toBeNull();
+		});
+	}
+}
