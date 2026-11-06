@@ -189,6 +189,10 @@ describe('Services / Access', () => {
 
 	describe('managed_by', () => {
 		it('refuses a request setting managed_by', async () => {
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database);
+
 			await expect(new AccessService({
 				accountability: {
 					admin: true,
@@ -198,7 +202,7 @@ describe('Services / Access', () => {
 					roles: [],
 					user: 'admin-id-1',
 				},
-				knex: knex.default({ client: MockClient }),
+				knex: database,
 				schema,
 			}).createOne({
 				managed_by: '@scalabus/subscriptions',
@@ -951,6 +955,10 @@ describe('Services / Access', () => {
 		});
 
 		it('refuses a batch setting managed_by on its second row', async () => {
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database);
+
 			await expect(new AccessService({
 				accountability: {
 					admin: true,
@@ -960,7 +968,7 @@ describe('Services / Access', () => {
 					roles: [],
 					user: 'admin-id-1',
 				},
-				knex: knex.default({ client: MockClient }),
+				knex: database,
 				schema,
 			}).createMany([
 				{ policy: 'policy-id-7', user: 'user-id-1' },
@@ -976,8 +984,12 @@ describe('Services / Access', () => {
 		});
 
 		it('answers a 400 to a create that is no list of rows', async () => {
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database);
+
 			await expect(new AccessService({
-				knex: knex.default({ client: MockClient }),
+				knex: database,
 				schema,
 				accountability: {
 					admin: true,
@@ -996,6 +1008,10 @@ describe('Services / Access', () => {
 		});
 
 		it('refuses the managed_by a permission preset sets on a create', async () => {
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database);
+
 			vi.mocked(processPayload).mockResolvedValueOnce({
 				managed_by: '@scalabus/subscriptions',
 				policy: 'policy-id-7',
@@ -1011,7 +1027,7 @@ describe('Services / Access', () => {
 					roles: [],
 					user: 'admin-id-1',
 				},
-				knex: knex.default({ client: MockClient }),
+				knex: database,
 				schema,
 			}).createOne({
 				policy: 'policy-id-7',
@@ -1073,6 +1089,10 @@ describe('Services / Access', () => {
 			emitter.onFilter('access.create', addManagedBy);
 
 			try {
+				const database = knex.default({ client: MockClient });
+
+				createTracker(database);
+
 				await expect(new AccessService({
 					accountability: {
 						admin: true,
@@ -1082,7 +1102,7 @@ describe('Services / Access', () => {
 						roles: [],
 						user: 'admin-id-1',
 					},
-					knex: knex.default({ client: MockClient }),
+					knex: database,
 					schema,
 				}).createOne({
 					policy: 'policy-id-7',
