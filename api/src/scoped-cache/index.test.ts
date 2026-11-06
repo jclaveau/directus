@@ -4049,6 +4049,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		})
 		.collection('owned_sub_item', (c) => {
 			c.field('id').id();
+			c.field('label').string();
 			c.field('owned_item').m2o('owned_item');
 		})
 		.collection('category', (c) => {
@@ -4342,6 +4343,40 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 			filter: { owned_sub_items: { _none: { id: { _eq: 7 } } } },
 		}).get('owned_sub_item'))
 			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7]) });
+	});
+
+	it('keeps a key inside one quantifier beside its other conditions', () => {
+		expect(keyingOf({
+			filter: {
+				owned_sub_items: {
+					_some: { _and: [{ id: { _eq: 7 } }, { label: { _eq: 'open' } }] },
+				},
+			},
+		}).get('owned_sub_item'))
+			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7]) });
+	});
+
+	it('keys no row through two quantifiers, each on a row of its own', () => {
+		expect(keyingOf({
+			filter: {
+				_and: [
+					{ owned_sub_items: { _some: { id: { _eq: 7 } } } },
+					{ owned_sub_items: { _some: { label: { _eq: 'open' } } } },
+				],
+			},
+		}).get('owned_sub_item')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('unions the keys of two quantifiers, each on a row of its own', () => {
+		expect(keyingOf({
+			filter: {
+				_and: [
+					{ owned_sub_items: { _some: { id: { _eq: 7 } } } },
+					{ owned_sub_items: { _none: { id: { _eq: 8 } } } },
+				],
+			},
+		}).get('owned_sub_item'))
+			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7, 8]) });
 	});
 
 	it('keys the far side of an M2M and leaves its junction unkeyed', () => {
