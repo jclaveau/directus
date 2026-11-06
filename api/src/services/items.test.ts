@@ -8116,4 +8116,52 @@ describe('Services / Items / mutationBatching', () => {
 			['update action', [{ data: { name: 'dos' }, keys: [2] }]],
 		]);
 	});
+
+	it('no refuseChildJoiningSeveralRows under disableBatching: create', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.createMany([{ id: 3, name: 'three' }], {
+			mutationBatching: 'disableBatching',
+			refuseChildJoiningSeveralRows: true,
+		})).rejects.toStrictEqual(new Error(
+			'"refuseChildJoiningSeveralRows" cannot run under disableBatching '
+			+ '(from "mutationBatching")',
+		));
+
+		expect(sqlStatements).toStrictEqual([]);
+		expect(hookCalls).toStrictEqual([]);
+	});
+
+	it('no refuseChildJoiningSeveralRows under disableBatching: update', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.updateBatch([{ id: 1, name: 'uno' }], {
+			mutationBatching: 'disableBatching',
+			refuseChildJoiningSeveralRows: true,
+		})).rejects.toStrictEqual(new Error(
+			'"refuseChildJoiningSeveralRows" cannot run under disableBatching '
+			+ '(from "mutationBatching")',
+		));
+
+		expect(sqlStatements).toStrictEqual([]);
+		expect(hookCalls).toStrictEqual([]);
+	});
+
+	it('no refuseChildJoiningSeveralRows under disableBatching: upsert', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.upsertMany([
+			{ id: 1, name: 'uno' },
+			{ id: 3, name: 'three' },
+		], {
+			mutationBatching: 'disableBatching',
+			refuseChildJoiningSeveralRows: true,
+		})).rejects.toStrictEqual(new Error(
+			'"refuseChildJoiningSeveralRows" cannot run under disableBatching '
+			+ '(from "mutationBatching")',
+		));
+
+		expect(sqlStatements).toStrictEqual([]);
+		expect(hookCalls).toStrictEqual([]);
+	});
 });

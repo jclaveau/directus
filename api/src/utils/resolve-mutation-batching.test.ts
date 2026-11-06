@@ -52,3 +52,25 @@ test('an unknown mutationBatching is refused', () => {
 		+ 'preserveMutationOrder, disableBatching, got "batchEverything"',
 	));
 });
+
+test('refuseChildJoiningSeveralRows is refused under disableBatching', () => {
+	vi.mocked(useEnv)
+		.mockReturnValue({ DEFAULT_MUTATION_BATCHING: 'disableBatching' });
+
+	expect(() => {
+		resolveMutationBatching({ refuseChildJoiningSeveralRows: true });
+	}).toThrowError(new Error(
+		'"refuseChildJoiningSeveralRows" cannot run under disableBatching '
+		+ '(from "DEFAULT_MUTATION_BATCHING")',
+	));
+});
+
+test('refuseChildJoiningSeveralRows runs under the other modes', () => {
+	vi.mocked(useEnv)
+		.mockReturnValue({ DEFAULT_MUTATION_BATCHING: 'disableBatching' });
+
+	expect(resolveMutationBatching({
+		mutationBatching: 'preserveMutationOrder',
+		refuseChildJoiningSeveralRows: true,
+	})).toBe('preserveMutationOrder');
+});

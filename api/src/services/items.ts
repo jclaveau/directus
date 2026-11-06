@@ -481,7 +481,7 @@ implements AbstractService<Item> {
 			return [];
 		}
 
-		if (data.length > 1 && resolveMutationBatching(opts) === 'disableBatching') {
+		if (resolveMutationBatching(opts) === 'disableBatching' && data.length > 1) {
 			return await this.createRowByRow(data, opts, opts.mutationTracker);
 		}
 
@@ -1847,7 +1847,7 @@ implements AbstractService<Item> {
 			return { data: group.data, keys: uniqueKeys };
 		});
 
-		if (groups.length > 1 && resolveMutationBatching(opts) === 'disableBatching') {
+		if (resolveMutationBatching(opts) === 'disableBatching' && groups.length > 1) {
 			untrackInputKeys();
 
 			return await this.updateGroupByGroup(groups, opts, mutationTracker);

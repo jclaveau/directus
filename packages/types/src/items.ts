@@ -159,6 +159,7 @@ export type MutationOptions = {
 	 * `true` refuses a create or update naming one existing o2m child for several
 	 * rows, with a 400. Off by default: each row takes the child in turn and the
 	 * last one keeps it, as the database would; a unique index refuses it there.
+	 * Refused under `disableBatching`, where each row is written on its own.
 	 */
 	refuseChildJoiningSeveralRows?: boolean | undefined;
 
