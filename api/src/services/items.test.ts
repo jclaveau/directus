@@ -7430,6 +7430,23 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 				{ id: 5, collection: 'post', item: { id: 1, title: 'Hello renamed' } },
 			])).resolves.toStrictEqual([3, 4, 5]);
 
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `post` where `id` in (?)',
+			'update `post` set `title` = ? where `id` in (?)',
+			'insert into `post` (`title`) values (?) returning `id`',
+			'insert into `page` (`title`) values (?) returning `id`',
+			'select sqlite_version() as version limit ?',
+			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
+			'insert into `test` (`collection`, `id`, `item`)'
+				+ ' select ? as `collection`, ? as `id`, ? as `item`'
+				+ ' union all select ? as `collection`, ? as `id`, ? as `item`'
+				+ ' union all select ? as `collection`, ? as `id`, ? as `item`'
+				+ ' returning `id`',
+			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
+			'COMMIT;',
+		]);
+
 		await expect(database('test').select('id', 'collection', 'item')
 			.orderBy('id')).resolves.toStrictEqual([
 			{ id: 3, collection: 'post', item: '2' },
@@ -7441,19 +7458,6 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 			.orderBy('id')).resolves.toStrictEqual([
 			{ id: 1, title: 'Hello renamed' },
 			{ id: 2, title: 'New post' },
-		]);
-
-		expect(sqlStatements.filter((sql) => {
-			return /^(insert|update)/.test(sql);
-		})).toStrictEqual([
-			'update `post` set `title` = ? where `id` in (?)',
-			'insert into `post` (`title`) values (?) returning `id`',
-			'insert into `page` (`title`) values (?) returning `id`',
-			'insert into `test` (`collection`, `id`, `item`)'
-				+ ' select ? as `collection`, ? as `id`, ? as `item`'
-				+ ' union all select ? as `collection`, ? as `id`, ? as `item`'
-				+ ' union all select ? as `collection`, ? as `id`, ? as `item`'
-				+ ' returning `id`',
 		]);
 	});
 
@@ -7516,6 +7520,39 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 			.orderBy('id')).resolves.toStrictEqual([
 			{ id: 3, country: 8 },
 			{ id: 4, country: 8 },
+		]);
+	});
+
+	it(oneLine`
+		links and files the country of a row behind one a filter hook
+		cancelled under that row
+	`, async () => {
+		const cancelFirstRow = () => {
+			return [null, { data: { id: 4, country: { id: 1, name: 'Spain' } } }];
+		};
+
+		emitter.onFilter('test.items.create', cancelFirstRow);
+
+		try {
+			await expect(new ItemsService('test', {
+				knex: database,
+				schema: rowSchema,
+				accountability: { user: 'u1', role: 'r1', admin: true, app: true } as any,
+			}).createMany([
+				{ id: 3, name: 'three' },
+				{ id: 4, country: { id: 1, name: 'Spain' } },
+			], { allowFilterCancel: true })).resolves.toStrictEqual([null, 4]);
+		}
+		finally {
+			emitter.offFilter('test.items.create', cancelFirstRow);
+		}
+
+		await expect(database('test').select('id', 'country')
+			.orderBy('id')).resolves.toStrictEqual([{ id: 4, country: 1 }]);
+
+		// revision 1 is Spain's, 2 the row's
+		expect(revisionParentWrites).toStrictEqual([
+			{ keys: [1], data: { parent: 2 } },
 		]);
 	});
 });

@@ -65,10 +65,17 @@ describe('processA2O', () => {
 
 		expect(upsertManySpy).toHaveBeenCalledWith(
 			[{ title: 'Hello' }],
-			expect.objectContaining({ refuseHookAddedRows: true }),
+			{
+				refuseHookAddedRows: true,
+				onRevisionCreate: expect.any(Function),
+				onRequireUserIntegrityCheck: expect.any(Function),
+				bypassEmitAction: expect.any(Function),
+				emitEvents: undefined,
+				mutationTracker: undefined,
+			},
 		);
 
-		expect(result.payloads).toEqual([{ collection: 'post', item: 11 }]);
+		expect(result.payloads).toStrictEqual([{ collection: 'post', item: 11 }]);
 	});
 
 	test('upserts a nested record that has fields beside its key', async () => {
@@ -92,7 +99,7 @@ describe('processA2O', () => {
 			expect.any(Object),
 		);
 
-		expect(result.payloads).toEqual([{ collection: 'post', item: 5 }]);
+		expect(result.payloads).toStrictEqual([{ collection: 'post', item: 5 }]);
 	});
 
 	test('links a record holding only the key of a row, writing nothing', async () => {
@@ -111,7 +118,7 @@ describe('processA2O', () => {
 		}]);
 
 		expect(upsertManySpy).not.toHaveBeenCalled();
-		expect(result.payloads).toEqual([{ collection: 'post', item: 5 }]);
+		expect(result.payloads).toStrictEqual([{ collection: 'post', item: 5 }]);
 	});
 
 	test('creates a nested record holding only a key no row has', async () => {
@@ -134,7 +141,7 @@ describe('processA2O', () => {
 			expect.any(Object),
 		);
 
-		expect(result.payloads).toEqual([{ collection: 'post', item: 5 }]);
+		expect(result.payloads).toStrictEqual([{ collection: 'post', item: 5 }]);
 	});
 
 	test('leaves a nested m2o record to processM2O', async () => {
@@ -143,7 +150,7 @@ describe('processA2O', () => {
 		const result = await service.processA2O([{ author: { name: 'Ada' } }]);
 
 		expect(getService).not.toHaveBeenCalled();
-		expect(result.payloads).toEqual([{ author: { name: 'Ada' } }]);
+		expect(result.payloads).toStrictEqual([{ author: { name: 'Ada' } }]);
 	});
 
 	test('refuses a nested record without its collection field', async () => {
@@ -229,10 +236,17 @@ describe('processM2O', () => {
 
 		expect(upsertManySpy).toHaveBeenCalledWith(
 			[{ id: 3, name: 'France' }, { name: 'Spain' }],
-			expect.objectContaining({ refuseHookAddedRows: true }),
+			{
+				refuseHookAddedRows: true,
+				onRevisionCreate: expect.any(Function),
+				onRequireUserIntegrityCheck: expect.any(Function),
+				bypassEmitAction: expect.any(Function),
+				emitEvents: undefined,
+				mutationTracker: undefined,
+			},
 		);
 
-		expect(result.payloads).toEqual([{ country: 3 }, { country: 4 }]);
+		expect(result.payloads).toStrictEqual([{ country: 3 }, { country: 4 }]);
 	});
 
 	test('refuses a single row passed without its array', async () => {
