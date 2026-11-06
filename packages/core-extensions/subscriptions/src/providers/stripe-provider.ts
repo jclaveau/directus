@@ -57,7 +57,9 @@ export function createStripeProvider(
 
 			if (firstItem === undefined) {
 				throw new Error(
-					`Stripe subscription ${JSON.stringify(resourceId)} has no item`,
+					`Stripe subscription ${JSON.stringify(resourceId)} has`
+					+ ` ${JSON.stringify(stripeSubscription.items.data.length)}`
+					+ ' items, expected one',
 				);
 			}
 
