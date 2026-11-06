@@ -53,13 +53,11 @@ export function createStripeProvider(
 				resourceId,
 			);
 
-			const [onlyItem, ...otherItems] = stripeSubscription.items.data;
+			const [firstItem, ...otherItems] = stripeSubscription.items.data;
 
-			if (onlyItem === undefined || otherItems.length > 0) {
+			if (firstItem === undefined) {
 				throw new Error(
-					`Stripe subscription ${JSON.stringify(resourceId)} has`
-					+ ` ${JSON.stringify(stripeSubscription.items.data.length)}`
-					+ ' items, expected one',
+					`Stripe subscription ${JSON.stringify(resourceId)} has no item`,
 				);
 			}
 
@@ -71,9 +69,11 @@ export function createStripeProvider(
 					? stripeCustomer
 					: stripeCustomer.id,
 				status: stripeSubscription.status,
-				currentPeriodEnd: new Date(onlyItem.current_period_end * 1000),
+				currentPeriodEnd: new Date(firstItem.current_period_end * 1000),
 				cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
-				planReference: onlyItem.price.id,
+				planReference: otherItems.length === 0
+					? firstItem.price.id
+					: null,
 			};
 		},
 

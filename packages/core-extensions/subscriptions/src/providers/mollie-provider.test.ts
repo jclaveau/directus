@@ -428,66 +428,29 @@ describe('fetchSubscription', () => {
 		});
 	});
 
-	test('refuses metadata without a plan', async () => {
+	test.each([
+		[{ plan: 3 }],
+		[null],
+		['monthly'],
+	])('names no plan on metadata %j', async (metadata) => {
 		const mollieClient = {
 			customerSubscriptions: {
 				get: vi.fn().mockResolvedValue({
 					id: 'sub_1',
 					customerId: 'cst_1',
-					status: 'active',
+					status: 'suspended',
 					interval: '1 month',
 					nextPaymentDate: '2026-12-01',
-					metadata: { plan: 3 },
+					metadata,
 				}),
 			},
 		};
 
 		await expect(createMollieProvider(mollieClient as unknown as MollieClient)
-			.fetchSubscription('cst_1/sub_1')).rejects.toThrow(new Error(
-			'Mollie subscription "cst_1/sub_1" metadata {"plan":3}'
-			+ ' has no string "plan"',
-		));
-	});
-
-	test('refuses null metadata', async () => {
-		const mollieClient = {
-			customerSubscriptions: {
-				get: vi.fn().mockResolvedValue({
-					id: 'sub_1',
-					customerId: 'cst_1',
-					status: 'active',
-					interval: '1 month',
-					nextPaymentDate: '2026-12-01',
-					metadata: null,
-				}),
-			},
-		};
-
-		await expect(createMollieProvider(mollieClient as unknown as MollieClient)
-			.fetchSubscription('cst_1/sub_1')).rejects.toThrow(new Error(
-			'Mollie subscription "cst_1/sub_1" metadata null has no string "plan"',
-		));
-	});
-
-	test('refuses string metadata', async () => {
-		const mollieClient = {
-			customerSubscriptions: {
-				get: vi.fn().mockResolvedValue({
-					id: 'sub_1',
-					customerId: 'cst_1',
-					status: 'active',
-					interval: '1 month',
-					nextPaymentDate: '2026-12-01',
-					metadata: 'monthly',
-				}),
-			},
-		};
-
-		await expect(createMollieProvider(mollieClient as unknown as MollieClient)
-			.fetchSubscription('cst_1/sub_1')).rejects.toThrow(new Error(
-			'Mollie subscription "cst_1/sub_1" metadata "monthly"'
-			+ ' has no string "plan"',
-		));
+			.fetchSubscription('cst_1/sub_1')).resolves.toMatchObject({
+			status: 'suspended',
+			planReference: null,
+		});
 	});
 
 	test.each([
