@@ -8047,6 +8047,52 @@ describe('Services / Items / mutationBatching', () => {
 		expect(validateUserCountIntegrity).toHaveBeenCalledTimes(1);
 	});
 
+	it('disableBatching defers the user check on createMany', async () => {
+		vi.mocked(validateUserCountIntegrity).mockClear();
+
+		const onRequireUserIntegrityCheck = vi.fn();
+
+		await new ItemsService('test', { knex: database, schema }).createMany([
+			{ id: 3, name: 'three' },
+			{ id: 4, name: 'four' },
+		], {
+			mutationBatching: 'disableBatching',
+			userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+			onRequireUserIntegrityCheck,
+		});
+
+		expect(onRequireUserIntegrityCheck).toHaveBeenCalledTimes(1);
+
+		expect(onRequireUserIntegrityCheck).toHaveBeenCalledWith(
+			UserIntegrityCheckFlag.All,
+		);
+
+		expect(validateUserCountIntegrity).not.toHaveBeenCalled();
+	});
+
+	it('disableBatching defers the user check on updateBatch', async () => {
+		vi.mocked(validateUserCountIntegrity).mockClear();
+
+		const onRequireUserIntegrityCheck = vi.fn();
+
+		await new ItemsService('test', { knex: database, schema }).updateBatch([
+			{ id: 1, name: 'uno' },
+			{ id: 2, name: 'dos' },
+		], {
+			mutationBatching: 'disableBatching',
+			userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+			onRequireUserIntegrityCheck,
+		});
+
+		expect(onRequireUserIntegrityCheck).toHaveBeenCalledTimes(1);
+
+		expect(onRequireUserIntegrityCheck).toHaveBeenCalledWith(
+			UserIntegrityCheckFlag.All,
+		);
+
+		expect(validateUserCountIntegrity).not.toHaveBeenCalled();
+	});
+
 	it('disableBatching updates one group at a time', async () => {
 		const service = new ItemsService('test', { knex: database, schema });
 
