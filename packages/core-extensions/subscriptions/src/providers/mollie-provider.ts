@@ -68,7 +68,7 @@ export function createMollieProvider(
 					mollieSubscription,
 				),
 				cancelAtPeriodEnd: mollieSubscription.status === 'canceled',
-				planReference: readPlanReference(resourceId, mollieSubscription),
+				planReference: readPlanReference(mollieSubscription),
 			};
 		},
 
@@ -219,9 +219,8 @@ function addMollieInterval(startDate: Date, mollieInterval: string): Date {
 }
 
 function readPlanReference(
-	resourceId: string,
 	mollieSubscription: MollieSubscription,
-): string {
+): string | null {
 	const subscriptionMetadata = mollieSubscription.metadata;
 
 	const planReference = typeof subscriptionMetadata === 'object'
@@ -229,12 +228,7 @@ function readPlanReference(
 		? (subscriptionMetadata as Record<string, unknown>)['plan']
 		: undefined;
 
-	if (typeof planReference !== 'string') {
-		throw new Error(
-			`Mollie subscription ${JSON.stringify(resourceId)} metadata`
-			+ ` ${JSON.stringify(subscriptionMetadata)} has no string "plan"`,
-		);
-	}
-
-	return planReference;
+	return typeof planReference === 'string'
+		? planReference
+		: null;
 }

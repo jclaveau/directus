@@ -299,18 +299,31 @@ describe('fetchSubscription', () => {
 		));
 	});
 
-	test('refuses a subscription with several items', async () => {
+	test('names no plan on several items, so a status can still revoke', async () => {
 		const stripeClient = new Stripe('sk_test_1');
 
 		vi.spyOn(stripeClient.subscriptions, 'retrieve').mockResolvedValue({
 			id: 'sub_1',
-			items: { data: [{}, {}] },
+			customer: 'cus_1',
+			status: 'unpaid',
+			cancel_at_period_end: false,
+			items: {
+				data: [
+					{ current_period_end: 1_796_083_200, price: { id: 'price_1' } },
+					{ current_period_end: 1_796_083_200, price: { id: 'price_2' } },
+				],
+			},
 		} as never);
 
-		await expect(createStripeProvider(stripeClient, 'whsec_1')
-			.fetchSubscription('sub_1')).rejects.toThrow(new Error(
-			'Stripe subscription "sub_1" has 2 items, expected one',
-		));
+		expect(await createStripeProvider(stripeClient, 'whsec_1')
+			.fetchSubscription('sub_1')).toEqual({
+			subscriptionId: 'sub_1',
+			customerId: 'cus_1',
+			status: 'unpaid',
+			currentPeriodEnd: new Date(1_796_083_200_000),
+			cancelAtPeriodEnd: false,
+			planReference: null,
+		});
 	});
 
 	test('reports a subscription Stripe does not have', async () => {
