@@ -170,7 +170,7 @@ test('countDistinct of a primary key one rule grants counts every row read', () 
 	expect(queryBuilder.toSQL().bindings).toEqual([]);
 });
 
-test('countDistinct of a rule-granted primary key stays distinct over a join', () => {
+test('countDistinct of a granted primary key stays distinct over a join', () => {
 	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 

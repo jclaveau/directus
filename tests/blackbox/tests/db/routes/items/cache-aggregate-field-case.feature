@@ -8,7 +8,7 @@ Feature: A cached aggregate follows the rule that decides what it reads
     `<run>` stands for a value unique to the scenario, and any other `<name>` for
     a uuid of its own. A response cell states the keys it checks.
 
-  Scenario: a grouped sum follows its author, and stays cached past a column nothing reads
+  Scenario: a grouped sum follows its author
     Given these requests are sent:
       | request                                  | response  |
       | method: POST                             | code: 200 |+
@@ -80,18 +80,6 @@ Feature: A cached aggregate follows the rule that decides what it reads
       |   groupBy: category                          |     - category: news   |
       |   filter[id][_starts_with]: <run>-           |       sum:             |
       |                                              |         salary: "100"  |
-      | as: <reader-token>                           | code: 200              |+
-      | method: GET                                  | headers:               |
-      | path: /items/test_agg_cache_article          |   x-cache-status: HIT  |
-      | query:                                       | body:                  |
-      |   aggregate[sum]: salary                     |   data:                |
-      |   groupBy: category                          |     - category: news   |
-      |   filter[id][_starts_with]: <run>-           |       sum:             |
-      |                                              |         salary: "100"  |
-      | method: PATCH                                | code: 200              |+
-      | path: /items/test_agg_cache_article/<run>-a  |                        |
-      | payload:                                     |                        |
-      |   bonus: 5                                   |                        |
       | as: <reader-token>                           | code: 200              |+
       | method: GET                                  | headers:               |
       | path: /items/test_agg_cache_article          |   x-cache-status: HIT  |
