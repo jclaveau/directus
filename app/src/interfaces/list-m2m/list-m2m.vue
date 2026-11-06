@@ -585,7 +585,7 @@ function getLinkForItem(item: DisplayItem) {
 							x-small
 						>
 							{{ t('managed_by_extension', {
-								extension: item[managedByField],
+								extension: item[managedByField!],
 							}) }}
 						</v-chip>
 
@@ -660,7 +660,7 @@ function getLinkForItem(item: DisplayItem) {
 									x-small
 								>
 									{{ t('managed_by_extension', {
-										extension: element[managedByField],
+										extension: element[managedByField!],
 									}) }}
 								</v-chip>
 
