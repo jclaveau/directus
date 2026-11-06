@@ -1890,6 +1890,86 @@ describe('Services / Access', () => {
 			}
 		});
 
+		it('matches 1000 single-key groups to their rows in one pass', async () => {
+			const accessKeys = Array.from({ length: 1000 }, (_, index) => {
+				return `6f1c2a4e-0000-4000-8000-${String(index).padStart(12, '0')}`;
+			});
+
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response(accessKeys.map((id) => {
+					return {
+						id,
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+					};
+				}));
+
+			const toLowerCase = vi.spyOn(String.prototype, 'toLowerCase');
+
+			await new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			})['validateGroupsToUpdate'](
+				accessKeys.map((id) => ({ keys: [id], data: { sort: 2 } })),
+				database,
+			);
+
+			expect(toLowerCase.mock.calls.length).toBeLessThan(20_000);
+		});
+
+		it('matches a group of 1000 keys to their rows in one pass', async () => {
+			const accessKeys = Array.from({ length: 1000 }, (_, index) => {
+				return `6f1c2a4e-0000-4000-8000-${String(index).padStart(12, '0')}`;
+			});
+
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response(accessKeys.map((id) => {
+					return {
+						id,
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+					};
+				}));
+
+			const toLowerCase = vi.spyOn(String.prototype, 'toLowerCase');
+
+			await new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			})['validateGroupsToUpdate'](
+				[{ keys: accessKeys, data: { managed_by: '@scalabus/subscriptions' } }],
+				database,
+			);
+
+			expect(toLowerCase.mock.calls.length).toBeLessThan(20_000);
+		});
+
 		it('leaves a role delete the managed rows it takes along', async () => {
 			const database = knex.default({ client: MockClient });
 			const tracker = createTracker(database);
