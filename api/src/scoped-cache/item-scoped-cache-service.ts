@@ -24,8 +24,6 @@ import type {
 import {
 	collectionsInFieldMap,
 } from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
-import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
-import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
 import type { AST } from '../types/ast.js';
 import { queueMergedAfterCommit } from '../utils/transaction.js';
 import {
@@ -680,24 +678,42 @@ export class ItemScopedCacheService {
 		ast: AST,
 		injections: ScopedCacheOwnershipInjection[],
 	): Promise<ScopedCacheReadPlan> {
-		const context = { schema: this.schema, knex: this.knex };
+		let plannedAst = ast;
 
-		const readPermissions = this.accountability && !this.accountability.admin
+		if (
+			this.accountability
+			&& !this.accountability.admin
 			&& scopedCachePurgeEnabled()
-			? await fetchPermissions(
-				{
-					action: 'read',
-					accountability: this.accountability,
-					policies: await fetchPolicies(this.accountability, context),
-				},
-				context,
-			)
-			: [];
+		) {
+			// Imported here: both modules open the permissions cache on load.
+			const { fetchPermissions } = await import(
+				'../permissions/lib/fetch-permissions.js'
+			);
+
+			const { fetchPolicies } = await import(
+				'../permissions/lib/fetch-policies.js'
+			);
+
+			const context = { schema: this.schema, knex: this.knex };
+
+			plannedAst = scopedCacheAstWithQuantifierCases(
+				this.schema,
+				ast,
+				await fetchPermissions(
+					{
+						action: 'read',
+						accountability: this.accountability,
+						policies: await fetchPolicies(this.accountability, context),
+					},
+					context,
+				),
+			);
+		}
 
 		return new ScopedCacheReadPlan(
 			this.collection,
 			this.schema,
-			scopedCacheAstWithQuantifierCases(this.schema, ast, readPermissions),
+			plannedAst,
 			injections,
 		);
 	}

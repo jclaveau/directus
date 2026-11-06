@@ -1,4 +1,5 @@
 import { SchemaBuilder } from '@directus/schema-builder';
+import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import { describe, expect, test, vi } from 'vitest';
 import { Client_SQLite3 } from '../mock.js';
@@ -344,6 +345,77 @@ for (const quantifier of ['_some', '_none']) {
 		expect(rawQuery.bindings).toEqual([2]);
 	});
 }
+
+test(`filtering o2m relation with _some from an aliased table`, async () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyFilter(
+		db,
+		o2m_schema,
+		queryBuilder,
+		{ links: { _some: { name: { _eq: 2 } } } },
+		'article',
+		{ '': { alias: 'aliased', collection: 'article' } },
+		[],
+		[],
+		aliasFn,
+	);
+
+	expect(queryBuilder.toSQL().sql).toEqual(
+		oneLine`
+			select * where "aliased"."id" in (
+			select "links_list"."article_id" as "article_id" from "links_list"
+			where "links_list"."article_id" is not null
+			and "links_list"."name" = ?)
+		`,
+	);
+});
+
+test(`filtering $FOLLOW with _some reads the rows of its own collection`, async () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyFilter(
+		db,
+		new SchemaBuilder()
+			.collection('article', (c) => {
+				c.field('id').id();
+			})
+			.collection('mention', (c) => {
+				c.field('id').id();
+				c.field('item').string();
+				c.field('collection').string();
+				c.field('status').string();
+			})
+			.build(),
+		queryBuilder,
+		{
+			'$FOLLOW(mention, item, collection)': {
+				_some: { status: { _eq: 'open' } },
+			},
+		},
+		'article',
+		{},
+		[],
+		[],
+		aliasFn,
+	);
+
+	const rawQuery = queryBuilder.toSQL();
+
+	expect(rawQuery.sql).toEqual(
+		oneLine`
+			select * where CAST("article"."id" AS CHAR(255)) in (
+			select "mention"."item" as "item" from "mention"
+			where "mention"."item" is not null
+			and "mention"."collection" = ?
+			and "mention"."status" = ?)
+		`,
+	);
+
+	expect(rawQuery.bindings).toEqual(['article', 'open']);
+});
 
 test(`filtering o2m relation with sibling relational keys`, async () => {
 	const schema = new SchemaBuilder()

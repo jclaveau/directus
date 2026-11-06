@@ -4351,7 +4351,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 				owned_sub_items: {
 					_some: { _and: [{ id: { _eq: 7 } }, { label: { _eq: 'open' } }] },
 				},
-			},
+			} as unknown as Filter,
 		}).get('owned_sub_item'))
 			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7]) });
 	});
