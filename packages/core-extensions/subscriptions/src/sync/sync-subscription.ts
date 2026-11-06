@@ -150,6 +150,9 @@ export async function syncSubscription({
 	const isCancelRequested = isUserDeleted
 		&& !providerSubscription.cancelAtPeriodEnd;
 
+	// Outside the transaction: after a rollback the retry finds the provider
+	// already cancelling and records `sync`. A stored cancel the provider no
+	// longer holds cancels again with no event.
 	if (isCancelRequested) {
 		await subscriptionProvider.cancelAtPeriodEnd(
 			subscriptionProvider.composeResourceId({
@@ -265,7 +268,15 @@ async function readStoredSubscription(
 	providerName: string,
 	subscriptionId: string,
 ): Promise<StoredSubscription | undefined> {
-	return await trx('subscriptions')
+	return await selectStoredSubscription(trx, providerName, subscriptionId);
+}
+
+export function selectStoredSubscription(
+	trx: Knex,
+	providerName: string,
+	subscriptionId: string,
+) {
+	const storedQuery = trx('subscriptions')
 		.select(
 			'id',
 			'subscriber',
@@ -281,6 +292,14 @@ async function readStoredSubscription(
 			provider_subscription_id: subscriptionId,
 		})
 		.first();
+
+	// Two queue rows can name one subscription (Mollie's tr_ and cst/sub), and
+	// overlapping batches would each create an access.
+	if (trx.client.dialect === 'postgresql') {
+		storedQuery.forUpdate();
+	}
+
+	return storedQuery;
 }
 
 type SubscriptionStateWrite = {

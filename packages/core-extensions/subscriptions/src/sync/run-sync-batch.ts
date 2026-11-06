@@ -176,7 +176,14 @@ async function recordSyncFailure(
 			),
 			last_error: readErrorMessage(syncError),
 			...isParked
-				? { pending: false }
+				// TODO(#610): MariaDB's SET reads the next_attempt_at just written, so
+				// there this always keeps the row pending.
+				? {
+					pending: database.raw(
+						'CASE WHEN next_attempt_at = ? THEN ? ELSE pending END',
+						[failedRow.next_attempt_at, false],
+					),
+				}
 				: {},
 		});
 }

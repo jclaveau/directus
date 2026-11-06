@@ -7,6 +7,7 @@ import {
 import type { SubscriptionProvider } from '../providers/types.js';
 import {
 	closeMissingSubscription,
+	selectStoredSubscription,
 	syncSubscription,
 } from './sync-subscription.js';
 
@@ -941,4 +942,20 @@ describe('closeMissingSubscription', () => {
 			expect(await database('subscription_events')).toEqual([]);
 		},
 	);
+});
+
+describe('selectStoredSubscription', () => {
+	test('locks the row on postgres, so overlapping syncs grant one access', () => {
+		expect(selectStoredSubscription(knex({ client: 'pg' }), 'mollie', 'sub_1')
+			.toSQL()
+			.toNative())
+			.toEqual({
+				sql: 'select "id", "subscriber", "customer", "plan", "status",'
+					+ ' "current_period_end", "cancel_at_period_end", "access"'
+					+ ' from "subscriptions"'
+					+ ' where "provider" = $1 and "provider_subscription_id" = $2'
+					+ ' limit $3 for update',
+				bindings: ['mollie', 'sub_1', 1],
+			});
+	});
 });
