@@ -6,7 +6,8 @@ export type ProviderSubscription = {
 	status: string;
 	currentPeriodEnd: Date | null;
 	cancelAtPeriodEnd: boolean;
-	planReference: string;
+	/** Null when not exactly one plan is named: revoking works, keeping refuses. */
+	planReference: string | null;
 };
 
 export type ProviderSubscriptionIds = {
