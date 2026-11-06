@@ -271,6 +271,53 @@ describe('runSyncBatch', () => {
 		}]);
 	});
 
+	test('keeps pending a row a webhook set due during its last try', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 47,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const runTransaction = database.transaction.bind(database);
+
+		vi.spyOn(database, 'transaction').mockImplementation(((
+			transactionHandler: (trx: Knex.Transaction) => Promise<void>,
+		) => {
+			return runTransaction(transactionHandler)
+				.catch(async (transactionError: unknown) => {
+					await database('subscription_sync_queue').update({
+						next_attempt_at: new Date('2026-11-05T00:00:30Z'),
+					});
+
+					throw transactionError;
+				});
+		}) as never);
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{
+					fetchSubscription: vi.fn()
+						.mockRejectedValue(new Error('Stripe is down')),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(await database('subscription_sync_queue')
+			.select('pending', 'attempts', 'next_attempt_at'))
+			.toEqual([{
+				pending: 1,
+				attempts: 48,
+				next_attempt_at: 1_793_836_830_000,
+			}]);
+	});
+
 	test('keeps the due time a webhook set while the sync was failing', async () => {
 		await database('subscription_sync_queue').insert({
 			provider: 'stripe',
