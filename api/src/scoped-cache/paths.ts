@@ -970,7 +970,7 @@ export function scopedCacheCollectionsAcrossQuantifiers(
 	for (const [alias, keying] of keyingByAlias) {
 		const aliasCollection = collectionByAlias.get(alias);
 
-		if (aliasCollection !== undefined) {
+		if (aliasCollection !== undefined && keying.kind !== 'absent') {
 			aliasesByCollection.set(aliasCollection, [
 				...(aliasesByCollection.get(aliasCollection) ?? []),
 				alias,
@@ -981,7 +981,10 @@ export function scopedCacheCollectionsAcrossQuantifiers(
 	const crossingCollections = new Set<CollectionKey>();
 
 	for (const [collection, aliases] of aliasesByCollection) {
-		if (aliases.length > 1) {
+		if (
+			aliases.length > 1
+			&& aliases.some((alias) => /\._(some|none):/.test(alias))
+		) {
 			crossingCollections.add(collection);
 		}
 	}
