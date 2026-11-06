@@ -16,7 +16,7 @@ import {
 import {
 	getInfoForPath,
 } from '../permissions/modules/process-ast/utils/get-info-for-path.js';
-import type { AST } from '../types/ast.js';
+import type { AST, M2ONode, O2MNode } from '../types/ast.js';
 import { parseFilterKey } from '../utils/parse-filter-key.js';
 import {
 	getRelationInfo,
@@ -449,6 +449,14 @@ const SEARCHABLE_TYPES: readonly Type[] = [
 ];
 
 /**
+ * What decides a node's response: the rules bounding its rows, and the rules its
+ * aggregates read on top of them.
+ */
+function casesReadBy(node: AST | M2ONode | O2MNode): Filter[] {
+	return [...node.cases, ...node.aggregateCases ?? []];
+}
+
+/**
  * The fields a read depends on that `fieldMapFromAst` leaves out, filed the way
  * the field map files its own: per path, under the collection at that path.
  *
@@ -548,7 +556,10 @@ export function scopedCacheViewFieldsBeyondFieldMap(
 					addNodeFields(
 						relatedCollection,
 						child.query[relatedCollection] ?? {},
-						child.cases[relatedCollection] ?? [],
+						[
+							...child.cases[relatedCollection] ?? [],
+							...child.aggregateCases?.[relatedCollection] ?? [],
+						],
 						namedPath,
 					);
 
@@ -562,12 +573,12 @@ export function scopedCacheViewFieldsBeyondFieldMap(
 				continue;
 			}
 
-			addNodeFields(child.name, child.query, child.cases, childPath);
+			addNodeFields(child.name, child.query, casesReadBy(child), childPath);
 			addFieldsOf(child.name, child.children, childPath);
 		}
 	};
 
-	addNodeFields(ast.name, ast.query, ast.cases, []);
+	addNodeFields(ast.name, ast.query, casesReadBy(ast), []);
 	addFieldsOf(ast.name, ast.children, []);
 
 	return viewFieldMap;
@@ -808,7 +819,7 @@ export function scopedCacheCollectionsBeyondNestedRows(
 		}
 	};
 
-	addCollectionsQueriedBy(ast.name, ast.query, ast.cases);
+	addCollectionsQueriedBy(ast.name, ast.query, casesReadBy(ast));
 
 	// `whenCase` indexes the cases of the collection the node hangs OFF, which
 	// `injectCases` fills from the parent's `caseMap` — not the related
@@ -841,7 +852,11 @@ export function scopedCacheCollectionsBeyondNestedRows(
 				for (const name of child.names) {
 					const namedCases = child.cases[name] ?? [];
 
-					addCollectionsQueriedBy(name, child.query[name] ?? {}, namedCases);
+					addCollectionsQueriedBy(name, child.query[name] ?? {}, [
+						...namedCases,
+						...child.aggregateCases?.[name] ?? [],
+					]);
+
 					addWhatNestedNodesDependOn(child.children[name] ?? [], namedCases, path);
 				}
 
@@ -852,7 +867,7 @@ export function scopedCacheCollectionsBeyondNestedRows(
 				addCollectionsQueriedBy(
 					child.name,
 					child.query,
-					child.cases,
+					casesReadBy(child),
 					scopedCacheO2mChildPinnedByParentKey(
 						schema,
 						child.name,
@@ -868,7 +883,7 @@ export function scopedCacheCollectionsBeyondNestedRows(
 			addCollectionsQueriedBy(
 				child.relation.related_collection!,
 				child.query,
-				child.cases,
+				casesReadBy(child),
 			);
 
 			// Not a filter, so nothing above reads it: the case decides per ROW
