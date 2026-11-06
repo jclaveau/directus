@@ -1099,7 +1099,7 @@ describe(oneLine`
 					.set('Authorization', auth);
 			};
 
-			expect((await read()).body.data).toEqual([{ id: article.id }]);
+			const firstRead = await read();
 
 			const written = await request(getUrl(vendor, env))
 				.patch(`/items/${QUANTIFIER_LINK}/${otherLink.id}`)
@@ -1107,7 +1107,16 @@ describe(oneLine`
 				.set('Authorization', auth);
 
 			expect(written.statusCode).toBe(200);
-			expect((await read()).body.data).toEqual([]);
+			const afterWrite = await read();
+			await clearCache();
+			const uncached = await read();
+			expect({
+				firstTags: firstRead.headers[cacheTagsHeader],
+				status: afterWrite.headers[cacheStatusHeader],
+				tags: afterWrite.headers[cacheTagsHeader],
+				data: afterWrite.body.data,
+				uncached: uncached.body.data,
+			}).toEqual('DIAGNOSTIC');
 		});
 
 		it(oneLine`
@@ -1140,7 +1149,7 @@ describe(oneLine`
 					.set('Authorization', auth);
 			};
 
-			expect((await read()).body.data).toEqual([]);
+			const firstRead = await read();
 
 			const written = await request(getUrl(vendor, env))
 				.patch(`/items/${QUANTIFIER_LINK}/${otherLink.id}`)
@@ -1148,7 +1157,16 @@ describe(oneLine`
 				.set('Authorization', auth);
 
 			expect(written.statusCode).toBe(200);
-			expect((await read()).body.data).toEqual([{ id: article.id }]);
+			const afterWrite = await read();
+			await clearCache();
+			const uncached = await read();
+			expect({
+				firstTags: firstRead.headers[cacheTagsHeader],
+				status: afterWrite.headers[cacheStatusHeader],
+				tags: afterWrite.headers[cacheTagsHeader],
+				data: afterWrite.body.data,
+				uncached: uncached.body.data,
+			}).toEqual('DIAGNOSTIC');
 		});
 
 		it(oneLine`
