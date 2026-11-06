@@ -219,6 +219,186 @@ test('shows "Managed by" in place of the remove button in a table', () => {
 		.toBe(true);
 });
 
+test('keeps the undo button of a row staged for deletion in a list', () => {
+	const pinia = createTestingPinia({ createSpy: vi.fn });
+
+	vi.mocked(useFieldsStore(pinia).getField).mockReturnValue({
+		collection: 'directus_access',
+		field: 'managed_by',
+		name: 'Managed By',
+		type: 'string',
+		schema: null,
+		meta: { display: null },
+	} as Field);
+
+	vi.mocked(useRelationM2M).mockReturnValue({
+		relationInfo: ref({
+			junctionCollection: { collection: 'directus_access', meta: null },
+			relatedCollection: { collection: 'directus_policies', meta: null },
+			relation: { field: 'policy' },
+			junctionPrimaryKeyField: { field: 'id' },
+			relatedPrimaryKeyField: { field: 'id' },
+			junctionField: { field: 'policy' },
+			reverseJunctionField: { field: 'user' },
+		}),
+	} as any);
+
+	vi.mocked(useRelationMultiple).mockReturnValue({
+		displayItems: ref([{
+			id: 1,
+			policy: { id: 'p1', name: 'Billing' },
+			managed_by: 'stripe-sync',
+			$type: 'deleted',
+		}]),
+		totalItemCount: ref(1),
+		loading: ref(false),
+		selected: ref([]),
+		isLocalItem: vi.fn(),
+		getItemEdits: vi.fn(),
+	} as any);
+
+	vi.mocked(useRelationPermissionsM2M).mockReturnValue({
+		createAllowed: ref(false),
+		updateAllowed: ref(false),
+		deleteAllowed: ref(true),
+		selectAllowed: ref(false),
+	} as any);
+
+	const wrapper = mount(ListM2M, {
+		props: {
+			primaryKey: 'user-id',
+			collection: 'directus_users',
+			field: 'policies',
+			width: 'full',
+			version: null,
+			layout: LAYOUTS.LIST,
+			template: '{{policy.name}}',
+			managedByField: 'managed_by',
+		},
+		global: {
+			plugins: [i18n, pinia],
+			directives: { tooltip: { mounted: () => undefined } },
+			stubs: {
+				Draggable: {
+					props: ['modelValue'],
+					setup: (props: any, { slots }: any) => {
+						return () => {
+							return h('div', props.modelValue.map((element: any) => {
+								return slots.item({ element });
+							}));
+						};
+					},
+				},
+				DrawerItem: true,
+				DrawerCollection: true,
+				DrawerBatch: true,
+				SearchInput: true,
+			},
+			config: {
+				compilerOptions: {
+					isCustomElement: (tag: string) => tag.includes('-'),
+				},
+			},
+		},
+	});
+
+	expect(wrapper.findAll('.item-actions')[0]!.text()).toBe('');
+
+	expect(wrapper.findAll('.item-actions')[0]!.find('v-remove').exists())
+		.toBe(true);
+});
+
+test('keeps the undo button of a row staged for deletion in a table', () => {
+	const pinia = createTestingPinia({ createSpy: vi.fn });
+
+	vi.mocked(useFieldsStore(pinia).getField).mockReturnValue({
+		collection: 'directus_access',
+		field: 'managed_by',
+		name: 'Managed By',
+		type: 'string',
+		schema: null,
+		meta: { display: null },
+	} as Field);
+
+	vi.mocked(useRelationM2M).mockReturnValue({
+		relationInfo: ref({
+			junctionCollection: { collection: 'directus_access', meta: null },
+			relatedCollection: { collection: 'directus_policies', meta: null },
+			relation: { field: 'policy' },
+			junctionPrimaryKeyField: { field: 'id' },
+			relatedPrimaryKeyField: { field: 'id' },
+			junctionField: { field: 'policy' },
+			reverseJunctionField: { field: 'user' },
+		}),
+	} as any);
+
+	vi.mocked(useRelationMultiple).mockReturnValue({
+		displayItems: ref([{
+			id: 1,
+			policy: { id: 'p1', name: 'Billing' },
+			managed_by: 'stripe-sync',
+			$type: 'deleted',
+		}]),
+		totalItemCount: ref(1),
+		loading: ref(false),
+		selected: ref([]),
+		isLocalItem: vi.fn(),
+		getItemEdits: vi.fn(),
+	} as any);
+
+	vi.mocked(useRelationPermissionsM2M).mockReturnValue({
+		createAllowed: ref(false),
+		updateAllowed: ref(false),
+		deleteAllowed: ref(true),
+		selectAllowed: ref(false),
+	} as any);
+
+	const wrapper = mount(ListM2M, {
+		props: {
+			primaryKey: 'user-id',
+			collection: 'directus_users',
+			field: 'policies',
+			width: 'full',
+			version: null,
+			layout: LAYOUTS.TABLE,
+			fields: ['policy.name'],
+			managedByField: 'managed_by',
+		},
+		global: {
+			plugins: [i18n, pinia],
+			directives: { tooltip: { mounted: () => undefined } },
+			components: {
+				VTable: {
+					props: ['items'],
+					setup: (props: any, { slots }: any) => {
+						return () => {
+							return h('div', props.items.map((item: any) => {
+								return slots['item-append']({ item });
+							}));
+						};
+					},
+				},
+			},
+			stubs: {
+				DrawerItem: true,
+				DrawerCollection: true,
+				DrawerBatch: true,
+				SearchInput: true,
+			},
+			config: {
+				compilerOptions: {
+					isCustomElement: (tag: string) => tag.includes('-'),
+				},
+			},
+		},
+	});
+
+	expect(wrapper.findAll('.item-actions')[0]!.text()).toBe('');
+
+	expect(wrapper.findAll('.item-actions')[0]!.find('v-remove').exists())
+		.toBe(true);
+});
+
 test('does not fetch the managed-by field when it is not readable', () => {
 	const pinia = createTestingPinia({ createSpy: vi.fn });
 

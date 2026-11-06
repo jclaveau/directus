@@ -462,6 +462,13 @@ const customFilter = computed(() => {
 	return filter;
 });
 
+// A row staged for deletion keeps its button: it is what undoes the deletion.
+function showsManagedBy(displayItem: DisplayItem) {
+	return props.managedByField
+		&& displayItem[props.managedByField]
+		&& displayItem.$type !== 'deleted';
+}
+
 function getLinkForItem(item: DisplayItem) {
 	if (relationInfo.value) {
 		const primaryKey = get(item, [
@@ -574,7 +581,7 @@ function getLinkForItem(item: DisplayItem) {
 						</router-link>
 
 						<v-chip
-							v-if="managedByField && item[managedByField]"
+							v-if="showsManagedBy(item)"
 							x-small
 						>
 							{{ t('managed_by_extension', {
@@ -649,7 +656,7 @@ function getLinkForItem(item: DisplayItem) {
 								</router-link>
 
 								<v-chip
-									v-if="managedByField && element[managedByField]"
+									v-if="showsManagedBy(element)"
 									x-small
 								>
 									{{ t('managed_by_extension', {
