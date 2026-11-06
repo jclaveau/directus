@@ -1172,7 +1172,7 @@ implements AbstractService<Item> {
 			{ knex: this.knex, schema: this.schema },
 		);
 
-		const scopedCachePlan = this.scopedCache.planRead(
+		const scopedCachePlan = await this.scopedCache.planRead(
 			ast,
 			ownershipInjections,
 		);
@@ -1618,6 +1618,16 @@ implements AbstractService<Item> {
 	 */
 	protected async validateGroupsToUpdate(
 		_groups: UpdateGroup<Item>[],
+		_trx: Knex,
+	): Promise<void> {}
+
+	/**
+	 * Refuses keys a delete would take. Handed them after the hooks and the access
+	 * check, inside the delete's transaction.
+	 */
+	protected async validateKeysToDelete(
+		_keys: PrimaryKey[],
+		_opts: MutationOptions,
 		_trx: Knex,
 	): Promise<void> {}
 
@@ -3984,6 +3994,8 @@ implements AbstractService<Item> {
 			if (opts.preMutationError) {
 				throw opts.preMutationError;
 			}
+
+			await this.validateKeysToDelete(keys, opts, trx);
 
 			try {
 				await this.deleteKeyRows(keys, trx, opts.keysFromQuery === true);
