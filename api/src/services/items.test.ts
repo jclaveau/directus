@@ -8,7 +8,11 @@ import {
 } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import {
+	type AbstractServiceOptions,
 	type CreateEntry,
+	type Item,
+	type MutationOptions,
+	type PrimaryKey,
 	type UpdateGroup,
 	UserIntegrityCheckFlag,
 } from '@directus/types';
@@ -7929,10 +7933,118 @@ describe('Services / Items / mutationBatching', () => {
 
 		expect(hookCalls).toStrictEqual([
 			['create filter', [{ data: { id: 3, name: 'three' } }]],
-			['create action', [3]],
 			['create filter', [{ data: { id: 4, name: 'four' } }]],
+			['create action', [3]],
 			['create action', [4]],
 		]);
+	});
+
+	it('disableBatching fires no create action for a rolled-back row', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.createMany([
+			{ id: 3, name: 'three' },
+			{ id: 4, name: 'one' },
+		], { mutationBatching: 'disableBatching' }))
+			.rejects.toStrictEqual(new RecordNotUniqueError({
+				collection: 'test',
+				field: 'name',
+				value: 'one',
+			}));
+
+		expect(hookCalls).toStrictEqual([
+			['create filter', [{ data: { id: 3, name: 'three' } }]],
+			['create filter', [{ data: { id: 4, name: 'one' } }]],
+		]);
+	});
+
+	it('disableBatching runs a subclass createMany once', async () => {
+		const overrideCalls: unknown[] = [];
+
+		class RecordingService extends ItemsService {
+			constructor(options: AbstractServiceOptions) {
+				super('test', options);
+			}
+
+			override async createMany(
+				data: Partial<Item>[],
+				opts?: MutationOptions,
+			): Promise<PrimaryKey[]> {
+				overrideCalls.push(data);
+
+				return await super.createMany(data, opts);
+			}
+		}
+
+		await expect(new RecordingService({ knex: database, schema })
+			.createMany([
+				{ id: 3, name: 'three' },
+				{ id: 4, name: 'four' },
+			], { mutationBatching: 'disableBatching' }))
+			.resolves.toStrictEqual([3, 4]);
+
+		expect(overrideCalls).toStrictEqual([
+			[{ id: 3, name: 'three' }, { id: 4, name: 'four' }],
+		]);
+	});
+
+	it('disableBatching runs a subclass updateGroups once', async () => {
+		const overrideCalls: unknown[] = [];
+
+		class RecordingService extends ItemsService {
+			constructor(options: AbstractServiceOptions) {
+				super('test', options);
+			}
+
+			override async updateGroups(
+				groups: UpdateGroup<Item>[],
+				opts?: MutationOptions,
+			): Promise<PrimaryKey[]> {
+				overrideCalls.push(groups);
+
+				return await super.updateGroups(groups, opts);
+			}
+		}
+
+		await expect(new RecordingService({ knex: database, schema })
+			.updateBatch([
+				{ id: 1, name: 'uno' },
+				{ id: 2, name: 'dos' },
+			], { mutationBatching: 'disableBatching' }))
+			.resolves.toStrictEqual([1, 2]);
+
+		expect(overrideCalls).toStrictEqual([[
+			{ data: { name: 'uno' }, keys: [1] },
+			{ data: { name: 'dos' }, keys: [2] },
+		]]);
+	});
+
+	it('disableBatching checks the user count once per createMany', async () => {
+		vi.mocked(validateUserCountIntegrity).mockClear();
+
+		await new ItemsService('test', { knex: database, schema }).createMany([
+			{ id: 3, name: 'three' },
+			{ id: 4, name: 'four' },
+		], {
+			mutationBatching: 'disableBatching',
+			userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+		});
+
+		expect(validateUserCountIntegrity).toHaveBeenCalledTimes(1);
+	});
+
+	it('disableBatching checks the user count once per updateBatch', async () => {
+		vi.mocked(validateUserCountIntegrity).mockClear();
+
+		await new ItemsService('test', { knex: database, schema }).updateBatch([
+			{ id: 1, name: 'uno' },
+			{ id: 2, name: 'dos' },
+		], {
+			mutationBatching: 'disableBatching',
+			userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+		});
+
+		expect(validateUserCountIntegrity).toHaveBeenCalledTimes(1);
 	});
 
 	it('disableBatching updates one group at a time', async () => {

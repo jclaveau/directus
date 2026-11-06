@@ -1134,25 +1134,74 @@ implements AbstractService<Item> {
 
 	/**
 	 * `createMany` under `disableBatching`: one `createMany` per row, in one
-	 * transaction, each row with its own filter, insert and action.
+	 * transaction, each row with its own filter and insert. As before batching,
+	 * the actions fire once the transaction commits and the user count is checked
+	 * once. Each row takes `ItemsService`'s `createMany`: a subclass override
+	 * already ran for the whole batch, and its side effects (a notification's
+	 * email) would repeat.
 	 */
 	private async createRowByRow(
 		data: Partial<Item>[],
 		opts: MutationOptions,
 		mutationTracker: MutationTracker,
 	): Promise<(PrimaryKey | null)[]> {
-		return await transaction(this.knex, async (trx) => {
+		const rowActionEvents: ActionEventParams[] = [];
+
+		const createdKeys = await transaction(this.knex, async (trx) => {
 			const service = this.fork({ knex: trx });
-			const createdKeys: (PrimaryKey | null)[] = [];
+			const rowKeys: (PrimaryKey | null)[] = [];
+			let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
+
+			const rowOpts: MutationOptions = {
+				...opts,
+				bypassEmitAction: (actionEvent) => {
+					rowActionEvents.push(actionEvent);
+				},
+				onRequireUserIntegrityCheck: (flags) => {
+					userIntegrityCheckFlags |= flags;
+				},
+			};
 
 			for (const row of data) {
-				for (const createdKey of await service.createMany([row], opts)) {
-					createdKeys.push(createdKey);
+				const createRow = ItemsService.prototype.createMany;
+
+				for (const rowKey of await createRow.call(service, [row], rowOpts)) {
+					rowKeys.push(rowKey);
 				}
 			}
 
-			return createdKeys;
+			await this.checkUserIntegrityOnce(userIntegrityCheckFlags, trx, opts);
+
+			return rowKeys;
 		}, mutationTracker.snapshot());
+
+		await emitActionEvents(rowActionEvents, opts);
+
+		return createdKeys;
+	}
+
+	/**
+	 * Report the user-count flags a row-by-row write collected to the caller, or
+	 * validate them on its transaction when no caller collects them.
+	 */
+	private async checkUserIntegrityOnce(
+		userIntegrityCheckFlags: UserIntegrityCheckFlag,
+		trx: Knex,
+		opts: MutationOptions,
+	): Promise<void> {
+		if (!userIntegrityCheckFlags) {
+			return;
+		}
+
+		if (opts.onRequireUserIntegrityCheck) {
+			opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
+		}
+		else {
+			await validateUserCountIntegrity({
+				flags: userIntegrityCheckFlags,
+				knex: trx,
+			});
+		}
 	}
 
 	/**
@@ -2473,7 +2522,9 @@ implements AbstractService<Item> {
 
 	/**
 	 * `updateGroups` under `disableBatching`: one `updateGroups` per group, in
-	 * one transaction, each group with its own filter, write and action.
+	 * one transaction, each group with its own filter, write and action, and the
+	 * user count checked once, as `updateBatch` did before batching. Each group
+	 * takes `ItemsService`'s `updateGroups`, for the reason `createRowByRow` gives.
 	 */
 	private async updateGroupByGroup(
 		groups: UpdateGroup<Item>[],
@@ -2483,12 +2534,24 @@ implements AbstractService<Item> {
 		return await transaction(this.knex, async (trx) => {
 			const service = this.fork({ knex: trx });
 			const rowKeys: (PrimaryKey | null)[] = [];
+			let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
+
+			const groupOpts: DeferredPurgeOptions = {
+				...opts,
+				onRequireUserIntegrityCheck: (flags) => {
+					userIntegrityCheckFlags |= flags;
+				},
+			};
 
 			for (const group of groups) {
-				for (const rowKey of await service.updateGroups([group], opts)) {
+				const updateGroup = ItemsService.prototype.updateGroups;
+
+				for (const rowKey of await updateGroup.call(service, [group], groupOpts)) {
 					rowKeys.push(rowKey);
 				}
 			}
+
+			await this.checkUserIntegrityOnce(userIntegrityCheckFlags, trx, opts);
 
 			return rowKeys;
 		}, mutationTracker.snapshot());
