@@ -2,7 +2,7 @@ name: mutationBatching
 description: >
   How the write batches its statements, nested writes included. `minimizeMutations` writes a run's updates before
   its creates, in as few statements as it can. `preserveMutationOrder` writes them in the order sent, consecutive
-  rows of one kind in one statement, with each write's filter hooks before it and every action hook at the end.
+  rows of one kind in one statement, with each write's filter hooks before it and their action hooks after those writes.
   `disableBatching` writes one row at a time, each with its own filter and action hooks. Left out, the
   `DEFAULT_MUTATION_BATCHING` env var decides.
 in: query

@@ -235,14 +235,18 @@ export type MutationOptions = {
 	 * ```
 	 * upsertMany([U1, C2, U3, C4])     U = key found, C = new row
 	 *
-	 * minimizeMutations      filters · update U1,U3 · insert C2,C4 · actions
+	 * minimizeMutations      update U1,U3 · insert C2,C4, each with its
+	 *                        filters before it and its actions after it
 	 * preserveMutationOrder  update U1 · insert C2 · update U3 · insert C4,
-	 *                        each with its filters; actions at the end
+	 *                        each with its filters; actions at the end of
+	 *                        the run
 	 * disableBatching        per payload: filter · write · action
 	 * ```
 	 *
-	 * `disableBatching` also creates one row at a time in `createMany`, and
-	 * writes one group at a time in `updateGroups`.
+	 * A run ends before a key it already holds, or around a payload nesting
+	 * rows. `disableBatching` also creates one row at a time in `createMany`,
+	 * firing the actions once the transaction commits, and writes one group at
+	 * a time in `updateGroups`.
 	 */
 	mutationBatching?: MutationBatchingMode | undefined;
 
