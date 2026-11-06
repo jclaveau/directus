@@ -717,10 +717,14 @@ implements AbstractService<Item> {
 			userIntegrityCheckFlags |=
 				m2o.userIntegrityCheckFlags | a2o.userIntegrityCheckFlags;
 
-			nestedActionEvents.push(
-				...m2o.nestedActionEvents,
-				...a2o.nestedActionEvents,
-			);
+			// every row's events: a spread could pass more arguments than allowed
+			for (const nestedActionEvent of m2o.nestedActionEvents) {
+				nestedActionEvents.push(nestedActionEvent);
+			}
+
+			for (const nestedActionEvent of a2o.nestedActionEvents) {
+				nestedActionEvents.push(nestedActionEvent);
+			}
 
 			for (const [rowIndex, presetRow] of presetRows.entries()) {
 				const { index, payloadAfterHooks, payloadWithPresets } = presetRow;

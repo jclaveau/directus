@@ -533,10 +533,11 @@ export class PayloadService {
 					});
 				}
 
-				rowIndexesOfCollections.set(relatedCollection, [
-					...rowIndexesOfCollections.get(relatedCollection) ?? [],
-					rowIndex,
-				]);
+				const collectionRowIndexes =
+					rowIndexesOfCollections.get(relatedCollection) ?? [];
+
+				collectionRowIndexes.push(rowIndex);
+				rowIndexesOfCollections.set(relatedCollection, collectionRowIndexes);
 			}
 
 			for (const [relatedCollection, rowIndexes] of rowIndexesOfCollections) {
