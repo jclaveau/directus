@@ -49,5 +49,8 @@ Guard (`api/src/services/access.ts`, `AccessService`): a request (accountability
 - A knex-mock `select` handler answers whatever the bindings: a test passing keys `[]` still got the managed row, so it also pins `history.select[0].bindings`.
 - A vitest typecheck error fails the unit job with every test passed: read `Errors  N errors`, not only `Tests`.
 
+**#680 autoreview of the 8 late commits (2026-11-06, head 043e4c431a):** fixed lock order (queue row before subscription, same as the worker), stored subscription read `FOR UPDATE` on PG, parking follows the due-time CASE, no-plan subscription still revokes (`planReference: null`), malformed plan id 400, malformed secret exits boot. Filed: #651 point 5, #610 points 13-14. The CASE on `pending` has never run on postgres' failure path. Choices awaiting jean: S1, P1, P2, P5, S5+S6, V4.
+- A throwaway test inside the suite's describe (`it('red guard …', () => step([{}, {}]))`) sees several helper guards red in one run, where a single sequential scenario stops at the first.
+
 **Why:** a review that only reads the guard unit tests misses the paths that reach the base class (revert, flows, nested payload creates).
 **How to apply:** when reviewing any service-level guard, list every `new ItemsService(` caller and every nested-payload create path before trusting it.
