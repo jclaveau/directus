@@ -24,6 +24,8 @@ import type {
 import {
 	collectionsInFieldMap,
 } from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
+import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
+import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
 import type { AST } from '../types/ast.js';
 import { queueMergedAfterCommit } from '../utils/transaction.js';
 import {
@@ -35,6 +37,7 @@ import {
 	resolveScopedCacheM2oJoinChainFromPath,
 	type ScopedCacheM2oJoin,
 } from './paths.js';
+import { scopedCacheAstWithQuantifierCases } from './quantifier-cases.js';
 import { ScopedCacheReadPlan } from './read-plan.js';
 import {
 	scopedCachePurgeEnabled,
@@ -673,14 +676,28 @@ export class ItemScopedCacheService {
 	 * before
 	 * the query runs. The plan fills its own row-dependent half from inside it.
 	 */
-	planRead(
+	async planRead(
 		ast: AST,
 		injections: ScopedCacheOwnershipInjection[],
-	): ScopedCacheReadPlan {
+	): Promise<ScopedCacheReadPlan> {
+		const context = { schema: this.schema, knex: this.knex };
+
+		const readPermissions = this.accountability && !this.accountability.admin
+			&& scopedCachePurgeEnabled()
+			? await fetchPermissions(
+				{
+					action: 'read',
+					accountability: this.accountability,
+					policies: await fetchPolicies(this.accountability, context),
+				},
+				context,
+			)
+			: [];
+
 		return new ScopedCacheReadPlan(
 			this.collection,
 			this.schema,
-			ast,
+			scopedCacheAstWithQuantifierCases(this.schema, ast, readPermissions),
 			injections,
 		);
 	}
