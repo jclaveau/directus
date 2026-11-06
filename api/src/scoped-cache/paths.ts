@@ -967,10 +967,10 @@ export function scopedCacheCollectionsAcrossQuantifiers(
 
 	const aliasesByCollection = new Map<CollectionKey, string[]>();
 
-	for (const [alias, keying] of keyingByAlias) {
+	for (const alias of keyingByAlias.keys()) {
 		const aliasCollection = collectionByAlias.get(alias);
 
-		if (aliasCollection !== undefined && keying.kind !== 'absent') {
+		if (aliasCollection !== undefined) {
 			aliasesByCollection.set(aliasCollection, [
 				...(aliasesByCollection.get(aliasCollection) ?? []),
 				alias,
