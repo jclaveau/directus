@@ -267,6 +267,24 @@ export function validateSubscriptionsEnv(): void {
 		process.exit(1);
 	}
 
+	const malformedVariable = SUBSCRIPTIONS_ENV.find((variableName) => {
+		const variableValue = env[variableName];
+
+		return variableValue !== undefined
+			&& (typeof variableValue !== 'string'
+				|| variableValue !== variableValue.trim());
+	});
+
+	// These are secrets: the message names the variable, never its value.
+	if (malformedVariable !== undefined) {
+		useLogger().error(
+			`${JSON.stringify(malformedVariable)} must be a string without`
+			+ ' surrounding whitespace.',
+		);
+
+		process.exit(1);
+	}
+
 	for (const [setVariable, requiredVariable] of SUBSCRIPTIONS_STRIPE_ENV_PAIRS) {
 		if (env[setVariable] !== undefined && env[requiredVariable] === undefined) {
 			useLogger().error(

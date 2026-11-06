@@ -419,6 +419,26 @@ describe('validateSubscriptionsEnv', () => {
 		expect(process.exit).toHaveBeenCalledWith(1);
 	});
 
+	test.each([
+		['whsec_1\n'],
+		[' whsec_1'],
+		['   '],
+		[1],
+	])('exits on variable value %j without logging it', (variableValue) => {
+		vi.mocked(useEnv).mockReturnValueOnce({
+			SUBSCRIPTIONS_MOLLIE_API_KEY: variableValue,
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_MOLLIE_API_KEY" must be a string without surrounding'
+			+ ' whitespace.',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
 	test('exits on an empty variable', () => {
 		vi.mocked(useEnv).mockReturnValueOnce({ SUBSCRIPTIONS_MOLLIE_API_KEY: '' });
 
