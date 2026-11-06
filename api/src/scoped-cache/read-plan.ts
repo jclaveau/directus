@@ -308,6 +308,7 @@ export class ScopedCacheReadPlan {
 			this.collection,
 			...collectionsInFieldMap(this.fieldMap),
 			...this.filterKeying.keys(),
+			...this.beyondNestedRows,
 		];
 	}
 }

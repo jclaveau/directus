@@ -1013,6 +1013,7 @@ export class ItemScopedCacheService {
 		const fingerprintedCollections = new Set([
 			...collectionsInFieldMap(fieldMap),
 			...filterKeying.keys(),
+			...beyondNestedRows,
 		]);
 
 		// Every field-map path reaching a collection, deduped: the read and the other
