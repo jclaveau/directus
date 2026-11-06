@@ -1,6 +1,6 @@
 ---
 name: project_directus_pr682_quantifier_content
-description: PR #682 (quantifier content stays whole) autoreviewed 2026-11-06; empty content reads no relation via flattenFilter; predating quantifier findings, traced not run, await a routing decision
+description: PR #682 (quantifier content stays whole) plus 5 predating quantifier fixes; a slice can outlive a keying fix, gate on aliases not on unkeyed
 metadata:
   type: project
 ---
@@ -18,14 +18,21 @@ path, or it is unchecked and unpinned. Red evidence needs witnesses: a filter te
 passes with one condition silently dropped unless a parent separates the branches
 (`qx-c`, `qn-c`), shown by a temporary one-branch mutation in `subQueryBuilder`.
 
-Predating findings, reported on #682, not fixed there, routing not decided at
-2026-11-06 (read in code, not run):
-- two quantifiers on one relation keyed as one joined row, `paths.ts:268-271`;
-- `count(rel)` with a quantifier in a permission case: bare `collection`,
-  `filter/index.ts:154`;
-- `$FOLLOW` quantifier subquery lacks the collection column an o2a join checks;
-- subquery rule of the related collection, `filter/index.ts:188`: no `getCases`
-  in `api/src/scoped-cache`, full trace unfinished.
+Predating findings fixed on #682 (2026-11-06, base synced, NOT merged):
+two quantifiers keyed as one row, a quantifier's rule unpinned, a count over a
+quantifier rule 500, `$FOLLOW` o2a lacking its collection column, `generateJoi`
+passing `_some`/`_none`.
+
+**A slice can outlive a keying fix:** `slicePinsFor` lists the primary key among
+its slices and the root pinner's `_and` keeps any conjunct's value, walking through
+`_some`. So `filterKeying` going `unkeyed` did not unpin the read; a second gate
+was needed (`scopedCacheCollectionsAcrossQuantifiers`). Gating on `unkeyed` itself
+is too wide: it also holds for two scoped fields on one row and for a case folded
+in from a nested node, where a slice is sound (12 tests fell bare).
+
+**How to apply:** when a stale read survives a keying fix, print the read's tags and
+`x-…-status` once before theorising; it took one diagnostic run to see `HIT` on
+`link:id=1`.
 
 Related: [[project_directus_pr678_join_alias_counter]],
 [[reference_directus_query_now_not_cache_poison]].

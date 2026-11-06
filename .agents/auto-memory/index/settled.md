@@ -33,4 +33,4 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [PR #605 row-helpers](../project_directus_pr605_row_helpers.md) — mapUpdateRows/mapCreateRows replace `.one` events; deep-review findings, purgeBy-gate options D+B (item 3 open), bb message gotchas
 - [PR #678 join-alias counter](../project_directus_pr678_join_alias_counter.md) — issue #676; alias_<n> per statement; accepted: dropped-dialect count tests (codecov gate), alias_4 gap, no docstrings; pre-existing findings listed
 - [PR #688 aggregate field cases](../project_directus_pr688_aggregate_field_cases.md) — CASE by the granting rules; open: grouped case unseen by the scoped cache, meta count on a cased key; nested aggregate needs `_sort`
-- [PR #682 quantifier content](../project_directus_pr682_quantifier_content.md) — empty content must stay null (flattenFilter check); witnesses via one-branch mutation; predating quantifier findings await routing
+- [PR #682 quantifier content](../project_directus_pr682_quantifier_content.md) — empty content must stay null (flattenFilter check); 5 predating fixes; a slice can outlive a keying fix: gate on aliases, not `unkeyed`
