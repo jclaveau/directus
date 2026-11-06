@@ -271,7 +271,7 @@ Feature: A write takes the less travelled side of each payload rule
       | 1       | directus_activity  | 0      | 4      | 0      | 0      |
       | 1       | directus_revisions | 0      | 1      | 0      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
-      | 1       | test_wpp_child     | 7      | 0      | 0      | 0      |
+      | 1       | test_wpp_child     | 6      | 0      | 0      | 0      |
       | 1       | test_wpp_leaf      | 3      | 0      | 0      | 1      |
       | 1       | test_wpp_note      | 4      | 0      | 1      | 0      |
       | 1       | test_wpp_parent    | 3      | 0      | 0      | 0      |

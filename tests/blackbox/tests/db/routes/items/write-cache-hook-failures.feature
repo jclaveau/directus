@@ -435,7 +435,7 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       | 1       | directus_users           | 1      | 0      | 0      | 0      | 0    |
       | 1       | test_wcf_upsert_takeover | 2      | 1      | 0      | 0      | 1    |
       | 6       | directus_users           | 1      | 0      | 0      | 0      | 0    |
-      | 6       | test_wcf_upsert_takeover | 2      | 0      | 1      | 0      | 0    |
+      | 6       | test_wcf_upsert_takeover | 1      | 0      | 1      | 0      | 0    |
 
   Scenario: a failed upsert taking nothing over purges only what its hook declared
     When these requests get these responses:

@@ -61,6 +61,10 @@ vi.mock('../scoped-cache/config.js', async (importOriginal) => {
 });
 
 const { ItemsService } = await import('./items.js');
+
+const { CapabilitiesHelper } =
+	await import('../database/helpers/capabilities/types.js');
+
 const { readMeta } = await import('../utils/read-meta.js');
 const { default: emitter } = await import('../emitter.js');
 
@@ -173,10 +177,15 @@ describe(oneLine`
 
 	beforeEach(() => {
 		tracker.on.any('test').response({});
+
+		// this MockClient compiles no FOR UPDATE: the existence read takes no lock
+		vi.spyOn(CapabilitiesHelper.prototype, 'supportsRowLocks')
+			.mockReturnValue(false);
 	});
 
 	afterEach(() => {
 		tracker.reset();
+		vi.mocked(CapabilitiesHelper.prototype.supportsRowLocks).mockRestore();
 		purgeScopedCache.mockClear();
 		vi.mocked(getDatabase).mockReset();
 		// A test writing its groups one by one runs off postgres, since this

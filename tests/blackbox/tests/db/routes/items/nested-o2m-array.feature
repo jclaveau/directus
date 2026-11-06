@@ -17,8 +17,8 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
     database, that reports the statements each request ran
     (`QUERY_AUDIT_HEADER`). The last step counts a request's statements per
     table and kind, on postgres alone: other vendors run other statements.
-  - Those counts are the baseline before the batched writes of #414, which
-    are expected to drop them.
+  - Those counts follow the batched upserts of #414; its other batched
+    writes are expected to drop them further.
 
   Scenario: a child named by its key joins the parent, the ones left out are nullified
     Given the rows of test_nested_o2m_list:
@@ -48,11 +48,11 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | ak-x1 | ak-a |
     And on postgres the requests ran these statements:
       | request | table                      | select | insert | update | delete |
-      | 1       | directus_activity          | 0      | 4      | 0      | 0      |
-      | 1       | directus_revisions         | 0      | 3      | 0      | 0      |
+      | 1       | directus_activity          | 0      | 3      | 0      | 0      |
+      | 1       | directus_revisions         | 0      | 2      | 0      | 0      |
       | 1       | directus_users             | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list       | 3      | 0      | 0      | 0      |
-      | 1       | test_nested_o2m_list_entry | 11     | 0      | 3      | 0      |
+      | 1       | test_nested_o2m_list_entry | 7      | 0      | 2      | 0      |
 
   Scenario: a child named by a key no row has is refused, writing nothing
     Given the rows of test_nested_o2m_list:
@@ -113,7 +113,7 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | 1       | directus_revisions         | 0      | 3      | 0      | 0      |
       | 1       | directus_users             | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list       | 3      | 0      | 0      | 0      |
-      | 1       | test_nested_o2m_list_entry | 11     | 1      | 2      | 0      |
+      | 1       | test_nested_o2m_list_entry | 7      | 1      | 2      | 0      |
 
   Scenario: a batch deletes the children each parent leaves out when the relation deletes
     Given the rows of test_nested_o2m_bin:
@@ -200,11 +200,11 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | mc-o1 | mc-a |
     And on postgres the requests ran these statements:
       | request | table                      | select | insert | update | delete |
-      | 1       | directus_activity          | 0      | 4      | 0      | 0      |
-      | 1       | directus_revisions         | 0      | 4      | 2      | 0      |
+      | 1       | directus_activity          | 0      | 3      | 0      | 0      |
+      | 1       | directus_revisions         | 0      | 3      | 2      | 0      |
       | 1       | directus_users             | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list       | 1      | 1      | 0      | 0      |
-      | 1       | test_nested_o2m_list_entry | 10     | 2      | 1      | 0      |
+      | 1       | test_nested_o2m_list_entry | 5      | 1      | 1      | 0      |
 
   Scenario: a batch swaps children between its parents, nullifying each one's others
     Given the rows of test_nested_o2m_list:
@@ -328,13 +328,13 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | mm-j3 | mm-p                    | mm-t3                  |
     And on postgres the requests ran these statements:
       | request | table                    | select | insert | update | delete |
-      | 1       | directus_activity        | 0      | 3      | 0      | 0      |
-      | 1       | directus_revisions       | 0      | 3      | 1      | 0      |
+      | 1       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 2      | 1      | 0      |
       | 1       | directus_users           | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_post     | 1      | 1      | 0      | 0      |
-      | 1       | test_nested_o2m_post_tag | 6      | 2      | 0      | 0      |
+      | 1       | test_nested_o2m_post_tag | 4      | 1      | 0      | 0      |
       | 2       | directus_activity        | 0      | 3      | 0      | 0      |
       | 2       | directus_revisions       | 0      | 2      | 0      | 0      |
       | 2       | directus_users           | 1      | 0      | 0      | 0      |
       | 2       | test_nested_o2m_post     | 3      | 0      | 0      | 0      |
-      | 2       | test_nested_o2m_post_tag | 7      | 1      | 1      | 0      |
+      | 2       | test_nested_o2m_post_tag | 6      | 1      | 1      | 0      |
