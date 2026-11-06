@@ -3,10 +3,12 @@ import {
 	createDirectus,
 	createItem,
 	createItems,
+	createUsers,
 	rest,
 	updateItem,
 	updateItems,
 	updateItemsBatch,
+	updateSettings,
 } from '../src/index.js';
 import type { TestSchema } from './schema.js';
 
@@ -61,6 +63,36 @@ describe('mutationBatching on a create or an update', () => {
 		assertType(
 			restClient.request(
 				createItems('collection_a', [{ id: 1 }], {
+					fields: ['id'],
+					// @ts-expect-error batchEverything is not a mutationBatching mode
+					mutationBatching: 'batchEverything',
+				}),
+			),
+		);
+	});
+
+	test('a system create and update take it', () => {
+		assertType(
+			restClient.request(
+				createUsers([{ email: 'ada@example.com' }], {
+					mutationBatching: 'preserveMutationOrder',
+				}),
+			),
+		);
+
+		assertType(
+			restClient.request(
+				updateSettings({ project_name: 'kept' }, {
+					mutationBatching: 'disableBatching',
+				}),
+			),
+		);
+	});
+
+	test('an unknown mode is refused on a system command', () => {
+		assertType(
+			restClient.request(
+				createUsers([{ email: 'ada@example.com' }], {
 					fields: ['id'],
 					// @ts-expect-error batchEverything is not a mutationBatching mode
 					mutationBatching: 'batchEverything',
