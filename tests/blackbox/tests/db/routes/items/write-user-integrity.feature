@@ -112,7 +112,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | 3       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
       | 3       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
       | 3       | directus_users       | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_access      | 6      | 0      | 0      | 1      | 0    |
+      | 4       | directus_access      | 7      | 0      | 0      | 1      | 0    |
       | 4       | directus_activity    | 0      | 2      | 0      | 0      | 0    |
       | 4       | directus_collections | 1      | 0      | 0      | 0      | 0    |
       | 4       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
@@ -159,7 +159,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
       | 2       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
       | 2       | directus_users       | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_access      | 6      | 0      | 0      | 1      | 0    |
+      | 3       | directus_access      | 7      | 0      | 0      | 1      | 0    |
       | 3       | directus_activity    | 0      | 2      | 0      | 0      | 0    |
       | 3       | directus_collections | 1      | 0      | 0      | 0      | 0    |
       | 3       | directus_fields      | 1      | 0      | 0      | 0      | 0    |

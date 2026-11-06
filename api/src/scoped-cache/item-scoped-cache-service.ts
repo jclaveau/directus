@@ -33,8 +33,10 @@ import {
 import {
 	composeScopedCachePaths,
 	resolveScopedCacheM2oJoinChainFromPath,
+	scopedCacheCollectionsAcrossQuantifiers,
 	type ScopedCacheM2oJoin,
 } from './paths.js';
+import { scopedCacheAstWithQuantifierCases } from './quantifier-cases.js';
 import { ScopedCacheReadPlan } from './read-plan.js';
 import {
 	scopedCachePurgeEnabled,
@@ -673,14 +675,46 @@ export class ItemScopedCacheService {
 	 * before
 	 * the query runs. The plan fills its own row-dependent half from inside it.
 	 */
-	planRead(
+	async planRead(
 		ast: AST,
 		injections: ScopedCacheOwnershipInjection[],
-	): ScopedCacheReadPlan {
+	): Promise<ScopedCacheReadPlan> {
+		let plannedAst = ast;
+
+		if (
+			this.accountability
+			&& !this.accountability.admin
+			&& scopedCachePurgeEnabled()
+		) {
+			// Imported here: both modules open the permissions cache on load.
+			const { fetchPermissions } = await import(
+				'../permissions/lib/fetch-permissions.js'
+			);
+
+			const { fetchPolicies } = await import(
+				'../permissions/lib/fetch-policies.js'
+			);
+
+			const context = { schema: this.schema, knex: this.knex };
+
+			plannedAst = scopedCacheAstWithQuantifierCases(
+				this.schema,
+				ast,
+				await fetchPermissions(
+					{
+						action: 'read',
+						accountability: this.accountability,
+						policies: await fetchPolicies(this.accountability, context),
+					},
+					context,
+				),
+			);
+		}
+
 		return new ScopedCacheReadPlan(
 			this.collection,
 			this.schema,
-			ast,
+			plannedAst,
 			injections,
 		);
 	}
@@ -1133,6 +1167,14 @@ export class ItemScopedCacheService {
 		// A filter that keyed the collection somewhere ELSE cannot stand in: its keys
 		// name rows reached by a hop this collection never takes, which is the
 		// wrong-scope-value stale hit `cache-ancestor-slice-wrong-value` forbids.
+		//
+		// Across two quantifiers no slice stands in either: the pinner's `_and` would
+		// take one conjunct's for the whole read, and each conjunct has its own row.
+		const collectionsAcrossQuantifiers = scopedCacheCollectionsAcrossQuantifiers(
+			this.schema,
+			ast,
+		);
+
 		const slicePinsFor = (collection: string): ScopedCacheCollectionPin[] => {
 			if (collection === this.collection) {
 				return [];
@@ -1190,7 +1232,7 @@ export class ItemScopedCacheService {
 					});
 				}
 
-				if (!nestedRowsBounded) {
+				if (!nestedRowsBounded || collectionsAcrossQuantifiers.has(collection)) {
 					continue;
 				}
 

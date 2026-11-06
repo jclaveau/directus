@@ -1,3 +1,4 @@
+import type { Filter } from '@directus/types';
 import { describe, expect, test } from 'vitest';
 import { normalizeFilter } from './normalize-filter.js';
 
@@ -190,6 +191,79 @@ describe('normalizeFilter', () => {
 
 		expect(normalizeFilter(filter)).toEqual({
 			_and: [{ rel: { _none: { field: { _eq: 1 } } } }, { rel: { other: { _eq: 2 } } }],
+		});
+	});
+
+	test('keeps sibling keys inside _some under one _some', () => {
+		expect(
+			normalizeFilter({
+				rel: {
+					_some: { name: { _eq: 'a' }, status: { _eq: 'b' } },
+				},
+			}),
+		).toEqual({
+			rel: {
+				_some: {
+					_and: [{ name: { _eq: 'a' } }, { status: { _eq: 'b' } }],
+				},
+			},
+		});
+	});
+
+	test('keeps an _and inside _some under the _some', () => {
+		expect(
+			// the types allow no _and/_or under a quantifier; REST sends one
+			normalizeFilter({
+				rel: {
+					_some: {
+						_and: [{ name: { _eq: 'a' } }, { status: { _eq: 'b' } }],
+					},
+				},
+			} as unknown as Filter),
+		).toEqual({
+			rel: {
+				_some: {
+					_and: [{ name: { _eq: 'a' } }, { status: { _eq: 'b' } }],
+				},
+			},
+		});
+	});
+
+	test('keeps an _or inside _none under the _none', () => {
+		expect(
+			// the types allow no _and/_or under a quantifier; REST sends one
+			normalizeFilter({
+				rel: {
+					_none: {
+						_or: [{ name: { _eq: 'a' } }, { name: { _eq: 'b' } }],
+					},
+				},
+			} as unknown as Filter),
+		).toEqual({
+			rel: {
+				_none: {
+					_or: [{ name: { _eq: 'a' } }, { name: { _eq: 'b' } }],
+				},
+			},
+		});
+	});
+
+	test('normalizes the content of a _some as a filter of its own', () => {
+		expect(
+			normalizeFilter({
+				rel: {
+					_some: { sub: { name: { _eq: 'a' }, status: { _eq: 'b' } } },
+				},
+			}),
+		).toEqual({
+			rel: {
+				_some: {
+					_and: [
+						{ sub: { name: { _eq: 'a' } } },
+						{ sub: { status: { _eq: 'b' } } },
+					],
+				},
+			},
 		});
 	});
 

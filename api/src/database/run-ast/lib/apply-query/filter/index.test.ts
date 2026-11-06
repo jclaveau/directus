@@ -1,8 +1,9 @@
 import { SchemaBuilder } from '@directus/schema-builder';
+import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import { describe, expect, test, vi } from 'vitest';
 import { Client_SQLite3 } from '../mock.js';
-import type { Permission } from '@directus/types';
+import type { Filter, Permission } from '@directus/types';
 import { DEFUAULT_PERMISSION } from '../../../../../permissions/utils/default-permission.js';
 import { applyFilter } from './index.js';
 
@@ -345,6 +346,77 @@ for (const quantifier of ['_some', '_none']) {
 	});
 }
 
+test(`filtering o2m relation with _some from an aliased table`, async () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyFilter(
+		db,
+		o2m_schema,
+		queryBuilder,
+		{ links: { _some: { name: { _eq: 2 } } } },
+		'article',
+		{ '': { alias: 'aliased', collection: 'article' } },
+		[],
+		[],
+		aliasFn,
+	);
+
+	expect(queryBuilder.toSQL().sql).toEqual(
+		oneLine`
+			select * where "aliased"."id" in (select "links_list"."article_id"
+			as "article_id" from "links_list"
+			where "links_list"."article_id" is not null
+			and "links_list"."name" = ?)
+		`,
+	);
+});
+
+test(`filtering $FOLLOW with _some reads the rows of its own collection`, async () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyFilter(
+		db,
+		new SchemaBuilder()
+			.collection('article', (c) => {
+				c.field('id').id();
+			})
+			.collection('mention', (c) => {
+				c.field('id').id();
+				c.field('item').string();
+				c.field('collection').string();
+				c.field('status').string();
+			})
+			.build(),
+		queryBuilder,
+		{
+			'$FOLLOW(mention, item, collection)': {
+				_some: { status: { _eq: 'open' } },
+			},
+		},
+		'article',
+		{},
+		[],
+		[],
+		aliasFn,
+	);
+
+	const rawQuery = queryBuilder.toSQL();
+
+	expect(rawQuery.sql).toEqual(
+		oneLine`
+			select * where CAST("article"."id" AS CHAR(255)) in (select
+			"mention"."item" as "item" from "mention"
+			where "mention"."item" is not null
+			and "mention"."collection" = ?
+			and "mention"."status" = ?)
+		`,
+	);
+
+	expect(rawQuery.bindings).toEqual(['article', 'open']);
+});
+
 test(`filtering o2m relation with sibling relational keys`, async () => {
 	const schema = new SchemaBuilder()
 		.collection('article', (c) => {
@@ -422,10 +494,51 @@ test(`filtering o2m relation with sibling keys inside _some`, async () => {
 
 	const rawQuery = queryBuilder.toSQL();
 
-	// the quantifier still produces a subquery, and both siblings survive inside it
-	expect(rawQuery.sql).toContain('select');
-	expect(rawQuery.bindings).toContain('a');
-	expect(rawQuery.bindings).toContain('b');
+	// one subquery holding both siblings: a single link has to match both
+	expect(rawQuery.sql).toEqual(
+		'select * where "article"."id" in (select "links_list"."article_id"'
+		+ ' as "article_id" from "links_list"'
+		+ ' where "links_list"."article_id" is not null'
+		+ ' and ("links_list"."name" = ? and "links_list"."status" = ?))',
+	);
+
+	expect(rawQuery.bindings).toEqual(['a', 'b']);
+});
+
+test(`filtering o2m relation with an _or inside _none`, async () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyFilter(
+		db,
+		o2m_schema,
+		queryBuilder,
+		// the types allow no _or under a quantifier; REST sends one
+		{
+			links: {
+				_none: {
+					_or: [{ name: { _eq: 'a' } }, { name: { _eq: 'b' } }],
+				},
+			},
+		} as unknown as Filter,
+		'article',
+		{},
+		[],
+		[],
+		aliasFn,
+	);
+
+	const rawQuery = queryBuilder.toSQL();
+
+	// one subquery holding the _or: no link may match either
+	expect(rawQuery.sql).toEqual(
+		'select * where "article"."id" not in (select "links_list"."article_id"'
+		+ ' as "article_id" from "links_list"'
+		+ ' where "links_list"."article_id" is not null'
+		+ ' and ("links_list"."name" = ? or "links_list"."name" = ?))',
+	);
+
+	expect(rawQuery.bindings).toEqual(['a', 'b']);
 });
 
 test(`filtering a2o relation`, async () => {
