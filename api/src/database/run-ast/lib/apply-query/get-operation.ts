@@ -1,4 +1,6 @@
+import type { Filter } from '@directus/types';
 import { isObject } from '@directus/utils/values';
+import { flattenFilter } from '../../../../permissions/modules/process-ast/utils/flatten-filter.js';
 
 /**
  * Returns null or the operation information form a FieldFilter
@@ -18,8 +20,14 @@ export function getOperation(key: string, value: unknown): { operator: string; v
 		const childOperation = getOperation(childKey, Object.values(value)[0]);
 
 		// An _and/_or under a quantifier has no single operation, but its
-		// subquery applies it whole: returning null would drop the clause
-		if (!childOperation && (key === '_none' || key === '_some')) {
+		// subquery applies it whole: returning null would drop the clause.
+		// Content reading no field stays null: no permission check or cache
+		// pin sees that relation, so it must not read it
+		if (
+			!childOperation
+			&& (key === '_none' || key === '_some')
+			&& readsField(value as Filter)
+		) {
 			return { operator: key, value };
 		}
 
@@ -27,4 +35,12 @@ export function getOperation(key: string, value: unknown): { operator: string; v
 	}
 
 	return null;
+}
+
+function readsField(filter: Filter) {
+	const fieldPaths: string[][] = [];
+
+	flattenFilter(fieldPaths, filter);
+
+	return fieldPaths.length > 0;
 }

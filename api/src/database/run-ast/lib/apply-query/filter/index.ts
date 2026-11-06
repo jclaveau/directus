@@ -163,17 +163,7 @@ export function applyFilter(
 
 					if (childKey === '_none' || childKey === '_some') {
 						const subQueryBuilder =
-							(mutationFilter: Filter, cases: Filter[]) => (subQueryKnex: Knex.QueryBuilder<any, unknown[]>) => {
-								// TEMP MUTATION for #682 red evidence: keep one branch only
-								const orBranches = (mutationFilter as any)?._or as Filter[] | undefined;
-								const andBranches = (mutationFilter as any)?._and as Filter[] | undefined;
-
-								const filter = (orBranches?.length
-									? { _or: [orBranches[0]] }
-									: andBranches?.length
-										? { _and: [andBranches[andBranches.length - 1]] }
-										: mutationFilter) as Filter;
-
+							(filter: Filter, cases: Filter[]) => (subQueryKnex: Knex.QueryBuilder<any, unknown[]>) => {
 								const field = relation!.field;
 								const collection = relation!.collection;
 								const column = `${collection}.${field}`;
