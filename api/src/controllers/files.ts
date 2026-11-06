@@ -16,6 +16,7 @@ import { validateBatch } from '../middleware/validate-batch.js';
 import { FilesService } from '../services/files.js';
 import { MetaService } from '../services/meta.js';
 import asyncHandler from '../utils/async-handler.js';
+import { mutationBatchingFromQuery } from '../utils/mutation-batching-from-query.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
 const router = express.Router();
@@ -49,6 +50,10 @@ export const multipartHandler: RequestHandler = (req, res, next) => {
 	const service = new FilesService({ accountability: req.accountability, schema: req.schema });
 
 	const existingPrimaryKey = req.params['pk'] || undefined;
+
+	const mutationOptions = {
+		mutationBatching: mutationBatchingFromQuery(req.query),
+	};
 
 	/**
 	 * The order of the fields in multipart/form-data is important. We require that all fields
@@ -106,7 +111,13 @@ export const multipartHandler: RequestHandler = (req, res, next) => {
 		payload = {};
 
 		try {
-			const primaryKey = await service.uploadOne(fileStream, payloadWithRequiredFields, existingPrimaryKey);
+			const primaryKey = await service.uploadOne(
+				fileStream,
+				payloadWithRequiredFields,
+				existingPrimaryKey,
+				mutationOptions,
+			);
+
 			savedFiles.push(primaryKey);
 			tryDone();
 		} catch (error: any) {
@@ -152,7 +163,9 @@ router.post(
 		if (req.is('multipart/form-data')) {
 			keys = res.locals['savedFiles'];
 		} else {
-			keys = await service.createOne(req.body);
+			keys = await service.createOne(req.body, {
+			mutationBatching: mutationBatchingFromQuery(req.query),
+		});
 		}
 
 		try {
@@ -274,15 +287,28 @@ router.patch(
 			schema: req.schema,
 		});
 
+		const mutationOptions = {
+			mutationBatching: mutationBatchingFromQuery(req.query),
+		};
+
 		let keys: PrimaryKey[] = [];
 
 		if (Array.isArray(req.body)) {
-			keys = await service.updateBatch(req.body);
+			keys = await service.updateBatch(req.body, mutationOptions);
 		} else if (req.body.keys) {
-			keys = await service.updateMany(req.body.keys, req.body.data);
+			keys = await service.updateMany(
+				req.body.keys,
+				req.body.data,
+				mutationOptions,
+			);
 		} else {
 			const sanitizedQuery = await sanitizeQuery(req.body.query, req.schema, req.accountability);
-			keys = await service.updateByQuery(sanitizedQuery, req.body.data);
+
+			keys = await service.updateByQuery(
+				sanitizedQuery,
+				req.body.data,
+				mutationOptions,
+			);
 		}
 
 		try {
@@ -310,7 +336,9 @@ router.patch(
 			schema: req.schema,
 		});
 
-		await service.updateOne(req.params['pk']!, req.body);
+		await service.updateOne(req.params['pk']!, req.body, {
+			mutationBatching: mutationBatchingFromQuery(req.query),
+		});
 
 		try {
 			const record = await service.readOne(req.params['pk']!, req.sanitizedQuery);

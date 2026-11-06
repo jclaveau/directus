@@ -29,6 +29,7 @@ patch:
   parameters:
     - $ref: '../../openapi.yaml#/components/parameters/Fields'
     - $ref: '../../openapi.yaml#/components/parameters/Meta'
+    - $ref: '../../openapi.yaml#/components/parameters/MutationBatching'
   requestBody:
     content:
       multipart/data:

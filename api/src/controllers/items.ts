@@ -7,15 +7,12 @@ import {
 } from '@directus/errors';
 import { isSystemCollection } from '@directus/system-data';
 import {
-	MutationBatchingModes,
 	RepeatedPkAnswers,
-	type MutationBatchingMode,
 	type MutationOptions,
 	type PrimaryKey,
 	type RepeatedPkAnswer,
 } from '@directus/types';
-import { oneLine } from '@directus/utils';
-import express, { type Request } from 'express';
+import express from 'express';
 import collectionExists from '../middleware/collection-exists.js';
 import { mergeContentVersions } from '../middleware/merge-content-versions.js';
 import { respond } from '../middleware/respond.js';
@@ -23,33 +20,11 @@ import { validateBatch } from '../middleware/validate-batch.js';
 import { ItemsService } from '../services/items.js';
 import { MetaService } from '../services/meta.js';
 import asyncHandler from '../utils/async-handler.js';
+import { mutationBatchingFromQuery } from '../utils/mutation-batching-from-query.js';
 import { readMeta } from '../utils/read-meta.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
 const router = express.Router();
-
-/**
- * The `mutationBatching` query param, left unset when absent; read off the
- * raw query, since `sanitizeQuery` keeps only the read params.
- */
-function mutationBatchingFromQuery(
-	query: Request['query'],
-): MutationBatchingMode | undefined {
-	const mutationBatching = query['mutationBatching'];
-
-	if (
-		mutationBatching !== undefined
-		&& !MutationBatchingModes.includes(mutationBatching as MutationBatchingMode)
-	) {
-		throw new InvalidQueryError({
-			reason: oneLine`
-				"mutationBatching" must be one of ${MutationBatchingModes.join(', ')}
-			`,
-		});
-	}
-
-	return mutationBatching as MutationBatchingMode | undefined;
-}
 
 router.post(
 	'/:collection',

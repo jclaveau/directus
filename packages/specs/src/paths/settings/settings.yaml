@@ -29,6 +29,8 @@ patch:
   summary: Update Settings
   description: Update the settings
   operationId: updateSetting
+  parameters:
+    - $ref: '../../openapi.yaml#/components/parameters/MutationBatching'
   requestBody:
     content:
       application/json:
