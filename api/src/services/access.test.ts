@@ -1525,6 +1525,43 @@ describe('Services / Access', () => {
 			}));
 		});
 
+		it('reads the managed rows of every group', async () => {
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			tracker.on.select('directus_access').response([]);
+
+			await new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			})['validateGroupsToUpdate'](
+				[
+					{
+						keys: ['6f1c2a4e-0000-4000-8000-000000000001'],
+						data: { sort: 2 },
+					},
+					{
+						keys: ['6f1c2a4e-0000-4000-8000-000000000007'],
+						data: { sort: 3 },
+					},
+				],
+				database,
+			);
+
+			expect(tracker.history.select[0]?.bindings).toStrictEqual([
+				'6f1c2a4e-0000-4000-8000-000000000001',
+				'6f1c2a4e-0000-4000-8000-000000000007',
+			]);
+		});
+
 		it('leaves a role delete the managed rows it takes along', async () => {
 			const database = knex.default({ client: MockClient });
 			const tracker = createTracker(database);
