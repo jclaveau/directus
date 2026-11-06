@@ -7,12 +7,8 @@ import type {
 } from '@directus/types';
 import { InvalidPayloadError } from '@directus/errors';
 import { UserIntegrityCheckFlag } from '@directus/types';
-import {
-	validateAccess,
-	type ValidateAccessOptions,
-} from '../permissions/modules/validate-access/validate-access.js';
+import type { Knex } from 'knex';
 import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
-import { validateKeys } from '../utils/validate-keys.js';
 import { ItemsService } from './items.js';
 
 const MANAGED_ACCESS_GRANT_FIELDS = ['role', 'user', 'policy'] as const;
@@ -107,60 +103,44 @@ export class AccessService extends ItemsService {
 	 * An access row with `managed_by` is granted by that extension, whose code
 	 * runs without accountability: a request changing it by hand would be undone
 	 * by the extension, or strand the subscription it tracks.
+	 *
+	 * Judged like the write's other checks, after the filter hooks, the 403s and
+	 * the permission presets: a side effect of a refused request belongs in an
+	 * action hook, which it never reaches.
 	 */
-	private refuseManagedByInCreate(data: Partial<Item>[]) {
-		if (this.accountability && data.some((item) => setsManagedBy(item))) {
+	protected override async validateRowsToCreate(
+		rows: Partial<Item>[],
+	): Promise<void> {
+		if (this.accountability && rows.some((row) => setsManagedBy(row))) {
 			throw new ManagedBySetError();
 		}
 	}
 
-	// Read outside the write's transaction: an extension marking a row between
-	// this read and the write is not seen, and the request's write lands.
-	private async readManagedAccessInRequest(
+	// No row is locked: an extension marking a row between this read and the
+	// write is not seen, and the request's write lands.
+	private async readManagedAccess(
 		keys: PrimaryKey[],
+		trx: Knex,
 	): Promise<ManagedAccessRow[]> {
-		if (!this.accountability) {
-			return [];
-		}
-
-		// Before the read, whose uuid cast would fail in the database instead.
-		validateKeys(
-			this.schema,
-			this.collection,
-			this.schema.collections[this.collection]!.primary,
-			keys,
-		);
-
-		return await this.knex
+		return await trx
 			.select('id', 'managed_by', ...MANAGED_ACCESS_GRANT_FIELDS)
 			.from('directus_access')
 			.whereIn('id', keys)
 			.whereNotNull('managed_by');
 	}
 
-	// The base class checks access after this guard: a caller with none gets its
-	// 403 here, as a refusal would tell which rows the extension manages.
-	private async validateRefusedRequest(
-		primaryKeys: PrimaryKey[],
-		accessCheck: Pick<ValidateAccessOptions, 'action' | 'fields'>,
+	protected override async validateKeysToDelete(
+		keys: PrimaryKey[],
+		opts: MutationOptions,
+		trx: Knex,
 	): Promise<void> {
-		await validateAccess(
-			{
-				accountability: this.accountability!,
-				collection: this.collection,
-				primaryKeys,
-				...accessCheck,
-			},
-			{ knex: this.knex, schema: this.schema },
-		);
-	}
+		if (!this.accountability || opts.deletesManagedAccess) {
+			return;
+		}
 
-	private async refuseManagedAccessDelete(keys: PrimaryKey[]) {
-		const [managedAccess] = await this.readManagedAccessInRequest(keys);
+		const [managedAccess] = await this.readManagedAccess(keys, trx);
 
 		if (managedAccess) {
-			await this.validateRefusedRequest([managedAccess.id], { action: 'delete' });
-
 			throw new ManagedAccessChangeError(managedAccess);
 		}
 	}
@@ -169,43 +149,37 @@ export class AccessService extends ItemsService {
 	 * Who gets which policy is the extension's; `sort` and the rest are not. A
 	 * value sent back as it is stored changes nothing, so it is no refusal.
 	 */
-	private async refuseManagedAccessUpdate(groups: UpdateGroup<Item>[]) {
+	protected override async validateGroupsToUpdate(
+		groups: UpdateGroup<Item>[],
+		trx: Knex,
+	): Promise<void> {
 		if (!this.accountability) {
 			return;
 		}
 
-		const managedRows = await this.readManagedAccessInRequest(
+		const managedRows = await this.readManagedAccess(
 			groups.flatMap((group) => group.keys),
+			trx,
 		);
 
 		for (const managedAccess of managedRows) {
-			const refusedGroup = groups.find((group) => {
+			const isRefused = groups.some((group) => {
 				return includesAccessKey(group.keys, managedAccess.id)
 					&& (changesManagedBy(group.data, managedAccess)
 						|| changesGrantField(group.data, managedAccess));
 			});
 
-			if (refusedGroup) {
-				await this.validateRefusedRequest([managedAccess.id], {
-					action: 'update',
-					fields: Object.keys(refusedGroup.data),
-				});
-
+			if (isRefused) {
 				throw new ManagedAccessChangeError(managedAccess);
 			}
 		}
 
 		for (const group of groups.filter(({ data }) => setsManagedBy(data))) {
-			const unmanagedKeys = group.keys.filter((key) => {
+			const hasUnmanagedKey = group.keys.some((key) => {
 				return !managedRows.some(({ id }) => includesAccessKey([key], id));
 			});
 
-			if (unmanagedKeys.length > 0) {
-				await this.validateRefusedRequest(unmanagedKeys, {
-					action: 'update',
-					fields: Object.keys(group.data),
-				});
-
+			if (hasUnmanagedKey) {
 				throw new ManagedBySetError();
 			}
 		}
@@ -215,8 +189,6 @@ export class AccessService extends ItemsService {
 		data: Partial<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
-		this.refuseManagedByInCreate(data);
-
 		// Creating a new policy attachments affects the number of admin/app/api users.
 		// But it can only add app or admin users, so no need to check the remaining admin users.
 		opts.userIntegrityCheckFlags =
@@ -236,8 +208,6 @@ export class AccessService extends ItemsService {
 		groups: UpdateGroup<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
-		await this.refuseManagedAccessUpdate(groups);
-
 		// Updating policy attachments might affect the number of admin/app/api users
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
@@ -254,9 +224,16 @@ export class AccessService extends ItemsService {
 	}
 
 	override async deleteMany(keys: PrimaryKey[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
-		await this.refuseManagedAccessDelete(keys);
+		// Changes here can affect the number of admin/app/api users
+		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
+		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
-		return await this.deleteAccessRows(keys, opts);
+		const result = await super.deleteMany(keys, opts);
+
+		// Some policy attachments have been deleted, clear the caches
+		await this.clearCaches();
+
+		return result;
 	}
 
 	/**
@@ -272,23 +249,11 @@ export class AccessService extends ItemsService {
 		});
 
 		return accessKeys.length > 0
-			? await this.deleteAccessRows(accessKeys, { ...opts, keysFromQuery: true })
+			? await this.deleteMany(accessKeys, {
+				...opts,
+				deletesManagedAccess: true,
+				keysFromQuery: true,
+			})
 			: [];
-	}
-
-	private async deleteAccessRows(
-		keys: PrimaryKey[],
-		opts: MutationOptions,
-	): Promise<PrimaryKey[]> {
-		// Changes here can affect the number of admin/app/api users
-		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
-		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
-
-		const result = await super.deleteMany(keys, opts);
-
-		// Some policy attachments have been deleted, clear the caches
-		await this.clearCaches();
-
-		return result;
 	}
 }
