@@ -521,15 +521,18 @@ export class PayloadService {
 				if (!relatedCollection) {
 					throw new InvalidPayloadError({
 						reason: `Can't update nested record`
-							+ ` "${relation.collection}.${relation.field}" without field`
-							+ ` "${relation.collection}.${collectionField}" being set`,
+							+ ` ${JSON.stringify(`${relation.collection}.${relation.field}`)}`
+							+ ' without field'
+							+ ` ${JSON.stringify(`${relation.collection}.${collectionField}`)}`
+							+ ' being set',
 					});
 				}
 
 				if (allowedCollections.includes(relatedCollection) === false) {
 					throw new InvalidPayloadError({
-						reason: `"${relation.collection}.${relation.field}" can't be`
-							+ ` linked to collection "${relatedCollection}"`,
+						reason: `${JSON.stringify(`${relation.collection}.${relation.field}`)}`
+							+ ' can\'t be linked to collection'
+							+ ` ${JSON.stringify(relatedCollection)}`,
 					});
 				}
 

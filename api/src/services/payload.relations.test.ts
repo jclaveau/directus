@@ -167,6 +167,16 @@ describe('processA2O', () => {
 		}));
 	});
 
+	test('refuses a nested record naming its collection by a list', async () => {
+		const service = new PayloadService('comment', { knex: db, schema });
+
+		await expect(
+			service.processA2O([{ collection: ['post'], item: { title: 'Hello' } }]),
+		).rejects.toStrictEqual(new InvalidPayloadError({
+			reason: '"comment.item" can\'t be linked to collection ["post"]',
+		}));
+	});
+
 	test('refuses a single row passed without its array', async () => {
 		const service = new PayloadService('comment', { knex: db, schema });
 
