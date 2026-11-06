@@ -33,6 +33,7 @@ import {
 import {
 	composeScopedCachePaths,
 	resolveScopedCacheM2oJoinChainFromPath,
+	scopedCacheCollectionsAcrossQuantifiers,
 	type ScopedCacheM2oJoin,
 } from './paths.js';
 import { scopedCacheAstWithQuantifierCases } from './quantifier-cases.js';
@@ -1166,6 +1167,14 @@ export class ItemScopedCacheService {
 		// A filter that keyed the collection somewhere ELSE cannot stand in: its keys
 		// name rows reached by a hop this collection never takes, which is the
 		// wrong-scope-value stale hit `cache-ancestor-slice-wrong-value` forbids.
+		//
+		// Across two quantifiers no slice stands in either: the pinner's `_and` would
+		// take one conjunct's for the whole read, and each conjunct has its own row.
+		const collectionsAcrossQuantifiers = scopedCacheCollectionsAcrossQuantifiers(
+			this.schema,
+			ast,
+		);
+
 		const slicePinsFor = (collection: string): ScopedCacheCollectionPin[] => {
 			if (collection === this.collection) {
 				return [];
@@ -1223,12 +1232,7 @@ export class ItemScopedCacheService {
 					});
 				}
 
-				// The keying met a row no key names, a sibling quantifier's say; the
-				// pinner's `_and` would take one conjunct's slice for the whole read.
-				if (
-					!nestedRowsBounded
-					|| filterKeying.get(collection)?.kind === 'unkeyed'
-				) {
+				if (!nestedRowsBounded || collectionsAcrossQuantifiers.has(collection)) {
 					continue;
 				}
 

@@ -47,6 +47,7 @@ import {
 	resolveScopedCacheM2oJoinChainFromPath,
 	releaseStrandedScopedCacheSweeps,
 	retryPendingScopedCachePurges,
+	scopedCacheCollectionsAcrossQuantifiers,
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheCollectionsWithoutGuard,
@@ -4377,6 +4378,63 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 			},
 		}).get('owned_sub_item'))
 			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7, 8]) });
+	});
+
+	describe('scopedCacheCollectionsAcrossQuantifiers', () => {
+		function crossedBy(filter: Filter) {
+			return scopedCacheCollectionsAcrossQuantifiers(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: { filter },
+				cases: [],
+				children: [],
+			} as unknown as AST);
+		}
+
+		it('names a collection two quantifiers reach', () => {
+			expect(crossedBy({
+				_and: [
+					{ owned_sub_items: { _some: { id: { _eq: 7 } } } },
+					{ owned_sub_items: { _none: { label: { _eq: 'open' } } } },
+				],
+			})).toEqual(new Set(['owned_sub_item']));
+		});
+
+		it('names a collection a quantifier and a bare path reach', () => {
+			expect(crossedBy({
+				_and: [
+					{ owned_sub_items: { _some: { id: { _eq: 7 } } } },
+					{ owned_sub_items: { label: { _eq: 'open' } } },
+				],
+			})).toEqual(new Set(['owned_sub_item']));
+		});
+
+		it('names nothing for one quantifier over two conditions', () => {
+			expect(crossedBy({
+				owned_sub_items: {
+					_some: { id: { _eq: 7 }, label: { _eq: 'open' } },
+				},
+			} as unknown as Filter)).toEqual(new Set());
+		});
+
+		it('names nothing for two conditions on one row, no quantifier', () => {
+			expect(crossedBy({
+				_and: [
+					{ owned_sub_items: { id: { _eq: 7 } } },
+					{ owned_sub_items: { label: { _eq: 'open' } } },
+				],
+			})).toEqual(new Set());
+		});
+
+		it('names nothing with no filter', () => {
+			expect(scopedCacheCollectionsAcrossQuantifiers(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [],
+			} as unknown as AST)).toEqual(new Set());
+		});
 	});
 
 	it('keys the far side of an M2M and leaves its junction unkeyed', () => {

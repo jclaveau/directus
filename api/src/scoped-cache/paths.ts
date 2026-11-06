@@ -941,6 +941,58 @@ export function scopedCacheFilterKeyingByCollection(
 }
 
 /**
+ * The collections a read's root filter reaches through a `_some`/`_none` row and
+ * through another row besides. No conjunct's key or value bounds such a collection:
+ * each one describes its own row.
+ */
+export function scopedCacheCollectionsAcrossQuantifiers(
+	schema: SchemaOverview,
+	ast: AST,
+): Set<CollectionKey> {
+	const filter = joinFilterWithCases(ast.query.filter, ast.cases);
+
+	if (!filter) {
+		return new Set();
+	}
+
+	const collectionByAlias = new Map<string, CollectionKey>();
+
+	const keyingByAlias = scopedCacheFilterKeyingByAlias(
+		schema,
+		ast.name,
+		expandRelatedKeyFilters(schema, ast.name, filter),
+		'',
+		collectionByAlias,
+	);
+
+	const aliasesByCollection = new Map<CollectionKey, string[]>();
+
+	for (const [alias, keying] of keyingByAlias) {
+		const aliasCollection = collectionByAlias.get(alias);
+
+		if (aliasCollection !== undefined && keying.kind !== 'absent') {
+			aliasesByCollection.set(aliasCollection, [
+				...(aliasesByCollection.get(aliasCollection) ?? []),
+				alias,
+			]);
+		}
+	}
+
+	const crossingCollections = new Set<CollectionKey>();
+
+	for (const [collection, aliases] of aliasesByCollection) {
+		if (
+			aliases.length > 1
+			&& aliases.some((alias) => /\._(some|none):/.test(alias))
+		) {
+			crossingCollections.add(collection);
+		}
+	}
+
+	return crossingCollections;
+}
+
+/**
  * Auto-derive multi-hop scope paths from LOCAL scope fields, so each collection
  * declares only its own column and the grand-owner path composes itself. A scope
  * field on `collection` that is an M2O to a collection which itself declares scope
