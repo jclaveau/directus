@@ -39,11 +39,31 @@ class ManagedBySetError extends InvalidPayloadError {
 	}
 }
 
-function includesAccessKey(keys: PrimaryKey[], accessId: string): boolean {
-	// A uuid key matches its row whatever its case.
-	return keys.some((key) => {
-		return String(key).toLowerCase() === accessId.toLowerCase();
-	});
+// A uuid key matches its row whatever its case.
+function lowerCaseAccessKey(accessKey: PrimaryKey): string {
+	return String(accessKey).toLowerCase();
+}
+
+function groupDataByKey(
+	groups: UpdateGroup<Item>[],
+): Map<string, Partial<Item>[]> {
+	const dataByKey = new Map<string, Partial<Item>[]>();
+
+	for (const { keys, data } of groups) {
+		for (const key of keys) {
+			const accessKey = lowerCaseAccessKey(key);
+			const keyData = dataByKey.get(accessKey);
+
+			if (keyData) {
+				keyData.push(data);
+			}
+			else {
+				dataByKey.set(accessKey, [data]);
+			}
+		}
+	}
+
+	return dataByKey;
 }
 
 function lowerCaseKey(relatedKey: unknown): unknown {
@@ -162,11 +182,14 @@ export class AccessService extends ItemsService {
 			trx,
 		);
 
+		const dataByKey = groupDataByKey(groups);
+
 		for (const managedAccess of managedRows) {
-			const isRefused = groups.some((group) => {
-				return includesAccessKey(group.keys, managedAccess.id)
-					&& (changesManagedBy(group.data, managedAccess)
-						|| changesGrantField(group.data, managedAccess));
+			const keyData = dataByKey.get(lowerCaseAccessKey(managedAccess.id)) ?? [];
+
+			const isRefused = keyData.some((data) => {
+				return changesManagedBy(data, managedAccess)
+					|| changesGrantField(data, managedAccess);
 			});
 
 			if (isRefused) {
@@ -174,9 +197,13 @@ export class AccessService extends ItemsService {
 			}
 		}
 
+		const managedKeys = new Set(
+			managedRows.map(({ id }) => lowerCaseAccessKey(id)),
+		);
+
 		for (const group of groups.filter(({ data }) => setsManagedBy(data))) {
 			const hasUnmanagedKey = group.keys.some((key) => {
-				return !managedRows.some(({ id }) => includesAccessKey([key], id));
+				return !managedKeys.has(lowerCaseAccessKey(key));
 			});
 
 			if (hasUnmanagedKey) {

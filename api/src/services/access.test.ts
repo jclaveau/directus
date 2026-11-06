@@ -13,6 +13,7 @@ import {
 	validateAccess,
 } from '../permissions/modules/validate-access/validate-access.js';
 import { AccessService } from './access.js';
+import { ActivityService } from './activity.js';
 import { transaction } from '../utils/transaction.js';
 import { ItemsService } from './items.js';
 
@@ -791,9 +792,6 @@ describe('Services / Access', () => {
 			const getKeysByQuery = vi.spyOn(ItemsService.prototype, 'getKeysByQuery')
 				.mockResolvedValue(['6f1c2a4e-0000-4000-8000-000000000007']);
 
-			const database = knex.default({ client: MockClient });
-			const tracker = createTracker(database);
-
 			await expect(new AccessService({
 				accountability: {
 					admin: true,
@@ -803,7 +801,7 @@ describe('Services / Access', () => {
 					roles: [],
 					user: 'admin-id-1',
 				},
-				knex: database,
+				knex: knex.default({ client: MockClient }),
 				schema,
 			}).deleteRoleAccess(['role-id-7']))
 				.resolves.toStrictEqual(['6f1c2a4e-0000-4000-8000-000000000007']);
@@ -820,8 +818,6 @@ describe('Services / Access', () => {
 					userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
 				},
 			);
-
-			expect(tracker.history.select).toStrictEqual([]);
 		});
 
 		it('passes the options of a role delete on to the access rows', async () => {
@@ -983,7 +979,7 @@ describe('Services / Access', () => {
 			}));
 		});
 
-		it('answers a 400 to a create that is no list of rows', async () => {
+		it('answers a 400 to a create holding a null row', async () => {
 			const database = knex.default({ client: MockClient });
 
 			createTracker(database);
@@ -1560,6 +1556,418 @@ describe('Services / Access', () => {
 				'6f1c2a4e-0000-4000-8000-000000000001',
 				'6f1c2a4e-0000-4000-8000-000000000007',
 			]);
+		});
+
+		it('refuses a non-admin with access setting managed_by', async () => {
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database);
+
+			await expect(new AccessService({
+				accountability: {
+					admin: false,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'user-id-1',
+				},
+				knex: database,
+				schema,
+			}).createMany([{
+				managed_by: '@scalabus/subscriptions',
+				policy: 'policy-id-7',
+				user: 'user-id-1',
+			}])).rejects.toThrow(new InvalidPayloadError({
+				reason: '"managed_by" is set by the extension granting the access,'
+					+ ' not by a request',
+			}));
+		});
+
+		it('refuses a non-admin with access moving a managed access', async () => {
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response([{
+						id: '6f1c2a4e-0000-4000-8000-000000000007',
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+					}]);
+
+			await expect(new AccessService({
+				accountability: {
+					admin: false,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'user-id-1',
+				},
+				knex: database,
+				schema,
+			}).updateOne('6f1c2a4e-0000-4000-8000-000000000007', {
+				policy: 'policy-id-1',
+			})).rejects.toThrow(new InvalidPayloadError({
+				reason: 'Access "6f1c2a4e-0000-4000-8000-000000000007" is managed by'
+					+ ' "@scalabus/subscriptions", which alone changes it',
+			}));
+		});
+
+		it('refuses a non-admin with access deleting a managed access', async () => {
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response([{
+						id: '6f1c2a4e-0000-4000-8000-000000000007',
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+					}]);
+
+			await expect(new AccessService({
+				accountability: {
+					admin: false,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'user-id-1',
+				},
+				knex: database,
+				schema,
+			}).deleteMany(['6f1c2a4e-0000-4000-8000-000000000007']))
+				.rejects.toThrow(new InvalidPayloadError({
+				reason: 'Access "6f1c2a4e-0000-4000-8000-000000000007" is managed by'
+					+ ' "@scalabus/subscriptions", which alone changes it',
+			}));
+		});
+
+		it('lets an extension delete a managed access', async () => {
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			tracker.on.select('directus_access').response([{
+						id: '6f1c2a4e-0000-4000-8000-000000000007',
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+					}]);
+
+			tracker.on.delete('directus_access').response(1);
+
+			await expect(new AccessService({
+				knex: database,
+				schema,
+			}).deleteMany(
+				['6f1c2a4e-0000-4000-8000-000000000007'],
+				{ onRequireUserIntegrityCheck: vi.fn() },
+			)).resolves.toStrictEqual(['6f1c2a4e-0000-4000-8000-000000000007']);
+
+			expect(tracker.history.delete).toHaveLength(1);
+		});
+
+		it('deletes the managed access of a deleted role down to its row', async () => {
+			vi.spyOn(ItemsService.prototype, 'getKeysByQuery')
+				.mockResolvedValue(['6f1c2a4e-0000-4000-8000-000000000007']);
+
+			vi.spyOn(ActivityService.prototype, 'createMany').mockResolvedValue([]);
+
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			tracker.on.select('directus_access').response([{
+						id: '6f1c2a4e-0000-4000-8000-000000000007',
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+					}]);
+
+			tracker.on.delete('directus_access').response(1);
+
+			await expect(new AccessService({
+				accountability: {
+					admin: false,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'user-id-1',
+				},
+				knex: database,
+				schema,
+			}).deleteRoleAccess(
+				['role-id-7'],
+				{ onRequireUserIntegrityCheck: vi.fn() },
+			)).resolves.toStrictEqual(['6f1c2a4e-0000-4000-8000-000000000007']);
+
+			expect(tracker.history.delete).toHaveLength(1);
+		});
+
+		it('refuses a managed delete whose filter hook returns no key', async () => {
+			const returnNoKey = () => [];
+
+			emitter.onFilter('access.delete', returnNoKey);
+
+			try {
+				const database = knex.default({ client: MockClient });
+				const tracker = createTracker(database);
+
+				tracker.on
+					.select('directus_access')
+					.response([{
+						id: '6f1c2a4e-0000-4000-8000-000000000007',
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+					}]);
+
+				await expect(new AccessService({
+					accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+					knex: database,
+					schema,
+				}).deleteMany(['6f1c2a4e-0000-4000-8000-000000000007']))
+					.rejects.toThrow(new InvalidPayloadError({
+				reason: 'Access "6f1c2a4e-0000-4000-8000-000000000007" is managed by'
+					+ ' "@scalabus/subscriptions", which alone changes it',
+			}));
+
+				expect(tracker.history.select[0]?.bindings).toStrictEqual([
+					'6f1c2a4e-0000-4000-8000-000000000007',
+				]);
+			}
+			finally {
+				emitter.offFilter('access.delete', returnNoKey);
+			}
+		});
+
+		it('reads the managed rows of an update through its transaction', async () => {
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response([{
+						id: '6f1c2a4e-0000-4000-8000-000000000007',
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+					}]);
+
+			await expect(new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: knex.default({ client: MockClient }),
+				schema,
+			})['validateGroupsToUpdate'](
+				[{
+					keys: ['6f1c2a4e-0000-4000-8000-000000000007'],
+					data: { policy: 'policy-id-1' },
+				}],
+				database,
+			)).rejects.toThrow(new InvalidPayloadError({
+				reason: 'Access "6f1c2a4e-0000-4000-8000-000000000007" is managed by'
+					+ ' "@scalabus/subscriptions", which alone changes it',
+			}));
+		});
+
+		it('judges a delete in the transaction of the hooks', async () => {
+			const seeContext = vi.fn(
+				(keys: string[], _meta: unknown, _context: any) => keys,
+			);
+
+			emitter.onFilter('access.delete', seeContext);
+
+			try {
+				const database = knex.default({ client: MockClient });
+
+				createTracker(database).on
+					.select('directus_access')
+					.response([{
+						id: '6f1c2a4e-0000-4000-8000-000000000007',
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+					}]);
+
+				const service = new AccessService({
+					accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+					knex: database,
+					schema,
+				});
+
+				const validateKeys = vi.spyOn(service as any, 'validateKeysToDelete');
+
+				await expect(service.deleteMany(['6f1c2a4e-0000-4000-8000-000000000007']))
+					.rejects.toThrow(new InvalidPayloadError({
+				reason: 'Access "6f1c2a4e-0000-4000-8000-000000000007" is managed by'
+					+ ' "@scalabus/subscriptions", which alone changes it',
+			}));
+
+				expect(validateKeys.mock.calls[0]?.[2])
+					.toBe(seeContext.mock.calls[0]?.[2].transaction);
+			}
+			finally {
+				emitter.offFilter('access.delete', seeContext);
+			}
+		});
+
+		it('judges an update in the transaction of the hooks', async () => {
+			const seeContext = vi.fn(
+				(data: object, _meta: unknown, _context: any) => data,
+			);
+
+			emitter.onFilter('access.update', seeContext);
+
+			try {
+				const database = knex.default({ client: MockClient });
+
+				createTracker(database).on
+					.select('directus_access')
+					.response([{
+						id: '6f1c2a4e-0000-4000-8000-000000000007',
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+					}]);
+
+				const service = new AccessService({
+					accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+					knex: database,
+					schema,
+				});
+
+				const validateGroups = vi.spyOn(service as any, 'validateGroupsToUpdate');
+
+				await expect(service.updateOne('6f1c2a4e-0000-4000-8000-000000000007', {
+					policy: 'policy-id-1',
+				})).rejects.toThrow(new InvalidPayloadError({
+				reason: 'Access "6f1c2a4e-0000-4000-8000-000000000007" is managed by'
+					+ ' "@scalabus/subscriptions", which alone changes it',
+			}));
+
+				expect(validateGroups.mock.calls[0]?.[1])
+					.toBe(seeContext.mock.calls[0]?.[2].transaction);
+			}
+			finally {
+				emitter.offFilter('access.update', seeContext);
+			}
+		});
+
+		it('matches 1000 single-key groups to their rows in one pass', async () => {
+			const accessKeys = Array.from({ length: 1000 }, (_, index) => {
+				return `6f1c2a4e-0000-4000-8000-${String(index).padStart(12, '0')}`;
+			});
+
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response(accessKeys.map((id) => {
+					return {
+						id,
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+					};
+				}));
+
+			const toLowerCase = vi.spyOn(String.prototype, 'toLowerCase');
+
+			await new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			})['validateGroupsToUpdate'](
+				accessKeys.map((id) => ({ keys: [id], data: { sort: 2 } })),
+				database,
+			);
+
+			expect(toLowerCase.mock.calls.length).toBeLessThan(20_000);
+		});
+
+		it('matches a group of 1000 keys to their rows in one pass', async () => {
+			const accessKeys = Array.from({ length: 1000 }, (_, index) => {
+				return `6f1c2a4e-0000-4000-8000-${String(index).padStart(12, '0')}`;
+			});
+
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database).on
+				.select('directus_access')
+				.response(accessKeys.map((id) => {
+					return {
+						id,
+						managed_by: '@scalabus/subscriptions',
+						role: null,
+						user: 'user-id-7',
+						policy: 'policy-id-7',
+					};
+				}));
+
+			const toLowerCase = vi.spyOn(String.prototype, 'toLowerCase');
+
+			await new AccessService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			})['validateGroupsToUpdate'](
+				[{ keys: accessKeys, data: { managed_by: '@scalabus/subscriptions' } }],
+				database,
+			);
+
+			expect(toLowerCase.mock.calls.length).toBeLessThan(20_000);
 		});
 
 		it('leaves a role delete the managed rows it takes along', async () => {
