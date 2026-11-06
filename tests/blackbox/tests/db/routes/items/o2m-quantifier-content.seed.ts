@@ -8,6 +8,7 @@ import { expect, it } from 'vitest';
 
 export const collectionArticle = 'test_quantifier_article';
 export const collectionLink = 'test_quantifier_link';
+export const collectionMention = 'test_quantifier_mention';
 
 export const seedDBStructure = () => {
 	it.each(vendors)(
@@ -15,7 +16,11 @@ export const seedDBStructure = () => {
 		async (vendor) => {
 			try {
 				// Children before parents: a child's FK blocks dropping its parent.
-				for (const collection of [collectionLink, collectionArticle]) {
+				for (const collection of [
+					collectionMention,
+					collectionLink,
+					collectionArticle,
+				]) {
 					await DeleteCollectionIfPresent(vendor, { collection });
 				}
 
@@ -29,6 +34,15 @@ export const seedDBStructure = () => {
 							fields: [
 								{ field: 'name', type: 'string', meta: {} },
 								{ field: 'status', type: 'string', meta: {} },
+							],
+						},
+						{
+							collection: collectionMention,
+							primaryKeyType: 'string',
+							fields: [
+								{ field: 'item', type: 'string', meta: {} },
+								{ field: 'collection', type: 'string', meta: {} },
+								{ field: 'note', type: 'string', meta: {} },
 							],
 						},
 					],

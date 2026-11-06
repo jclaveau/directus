@@ -8,6 +8,7 @@ import { expect, it } from 'vitest';
 
 export const collectionArticle = 'test_quantifier_perm_article';
 export const collectionLink = 'test_quantifier_perm_link';
+export const collectionNote = 'test_quantifier_perm_note';
 
 export const seedDBStructure = () => {
 	it.each(vendors)(
@@ -15,7 +16,11 @@ export const seedDBStructure = () => {
 		async (vendor) => {
 			try {
 				// Children before parents: a child's FK blocks dropping its parent.
-				for (const collection of [collectionLink, collectionArticle]) {
+				for (const collection of [
+					collectionNote,
+					collectionLink,
+					collectionArticle,
+				]) {
 					await DeleteCollectionIfPresent(vendor, { collection });
 				}
 
@@ -31,6 +36,11 @@ export const seedDBStructure = () => {
 								{ field: 'status', type: 'string', meta: {} },
 							],
 						},
+						{
+							collection: collectionNote,
+							primaryKeyType: 'string',
+							fields: [{ field: 'text', type: 'string', meta: {} }],
+						},
 					],
 				});
 
@@ -40,6 +50,14 @@ export const seedDBStructure = () => {
 					primaryKeyType: 'string',
 					otherCollection: collectionLink,
 					otherField: 'article',
+				});
+
+				await CreateFieldO2M(vendor, {
+					collection: collectionLink,
+					field: 'notes',
+					primaryKeyType: 'string',
+					otherCollection: collectionNote,
+					otherField: 'link',
 				});
 
 				expect(true).toBeTruthy();

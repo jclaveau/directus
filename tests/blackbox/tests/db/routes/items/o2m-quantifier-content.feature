@@ -1,7 +1,8 @@
 Feature: The conditions under an o2m quantifier hold for one related row
 
   - `test_quantifier_article` lists its `test_quantifier_link` rows through
-    the o2m field `links`.
+    the o2m field `links`. `test_quantifier_mention` names a row of any
+    collection by its `collection` and `item`, read with `$FOLLOW`.
   - A Given creates its table's rows in one request; an empty cell is null.
   - A request authenticates as the admin. A response cell states the keys it
     checks; every key is a string the scenario chooses, all of one
@@ -114,3 +115,51 @@ Feature: The conditions under an o2m quantifier hold for one related row
       |   filter[id][_starts_with]: qn-              |                |
       |   filter[links][_none][_or][0][name][_eq]: a |                |
       |   filter[links][_none][_or][1][name][_eq]: b |                |
+
+  Scenario: a $FOLLOW _some reads only the mentions of its own collection
+    Given the rows of test_quantifier_article:
+      | id   |
+      | qf-a |
+      | qf-b |
+    And their children in test_quantifier_mention:
+      | id    | item | collection              | note |
+      | qf-a1 | qf-a | another_collection      | seen |
+      | qf-b1 | qf-b | test_quantifier_article | seen |
+    When these requests get these responses:
+      | request                                               | response       |
+      | method: GET                                           | code: 200      |+
+      | path: /items/test_quantifier_article                  | body:          |
+      | query:                                                |   data:        |
+      |   fields: id                                          |     - id: qf-b |
+      |   sort: id                                            |                |
+      |   filter:                                             |                |
+      |     id:                                               |                |
+      |       _starts_with: qf-                               |                |
+      |     $FOLLOW(test_quantifier_mention,item,collection): |                |
+      |       _some:                                          |                |
+      |         note:                                         |                |
+      |           _eq: seen                                   |                |
+
+  Scenario: a $FOLLOW _none reads only the mentions of its own collection
+    Given the rows of test_quantifier_article:
+      | id   |
+      | qg-a |
+      | qg-b |
+    And their children in test_quantifier_mention:
+      | id    | item | collection              | note |
+      | qg-a1 | qg-a | another_collection      | seen |
+      | qg-b1 | qg-b | test_quantifier_article | seen |
+    When these requests get these responses:
+      | request                                               | response       |
+      | method: GET                                           | code: 200      |+
+      | path: /items/test_quantifier_article                  | body:          |
+      | query:                                                |   data:        |
+      |   fields: id                                          |     - id: qg-a |
+      |   sort: id                                            |                |
+      |   filter:                                             |                |
+      |     id:                                               |                |
+      |       _starts_with: qg-                               |                |
+      |     $FOLLOW(test_quantifier_mention,item,collection): |                |
+      |       _none:                                          |                |
+      |         note:                                         |                |
+      |           _eq: seen                                   |                |

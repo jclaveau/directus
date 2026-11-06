@@ -51,6 +51,65 @@ describe(`generateJoi`, () => {
 		expect(generateJoi(mockFieldFilter, mockOptions).describe()).toStrictEqual(mockSchema);
 	});
 
+	it(`refuses a _some no object of the array matches`, () => {
+		const { error } = generateJoi({
+			links: { _some: { name: { _eq: 'a' } } },
+		} as unknown as FieldFilter).validate({ links: [{ name: 'b' }] });
+
+		expect(error?.message).toBe('"links" contains an invalid value');
+	});
+
+	it(`refuses a _some whose conditions hold on two different objects`, () => {
+		const { error } = generateJoi({
+			links: {
+				_some: { _and: [{ name: { _eq: 'a' } }, { status: { _eq: 'b' } }] },
+			},
+		} as unknown as FieldFilter).validate({
+			links: [{ name: 'a', status: 'x' }, { name: 'y', status: 'b' }],
+		});
+
+		expect(error?.message).toBe('"links" contains an invalid value');
+	});
+
+	it(`refuses a _none an object of the array matches`, () => {
+		const { error } = generateJoi({
+			links: { _none: { name: { _eq: 'a' } } },
+		} as unknown as FieldFilter).validate({
+			links: [{ name: 'b' }, { name: 'a' }],
+		});
+
+		expect(error?.message).toBe('"links" contains an invalid value');
+	});
+
+	it(`accepts a _some an object of the array matches`, () => {
+		const { error } = generateJoi({
+			links: { _some: { name: { _eq: 'a' } } },
+		} as unknown as FieldFilter).validate({
+			links: [{ name: 'b' }, { name: 'a' }],
+		});
+
+		expect(error).toBeUndefined();
+	});
+
+	it(`accepts a _some or a _none over values naming rows it cannot read`, () => {
+		const some = generateJoi({
+			links: { _some: { name: { _eq: 'a' } } },
+		} as unknown as FieldFilter);
+
+		const none = generateJoi({
+			links: { _none: { name: { _eq: 'a' } } },
+		} as unknown as FieldFilter);
+
+		const detailedLinks = {
+			links: { create: [{ name: 'b' }], update: [], delete: [] },
+		};
+
+		expect(some.validate({ links: [5, { name: 'b' }] }).error).toBeUndefined();
+		expect(some.validate(detailedLinks).error).toBeUndefined();
+		expect(none.validate({ links: [5, { id: 6 }] }).error).toBeUndefined();
+		expect(none.validate(detailedLinks).error).toBeUndefined();
+	});
+
 	it(`returns the correct schema for an _eq match`, () => {
 		const mockFieldFilter = { field: { _eq: 'field' } } as FieldFilter;
 

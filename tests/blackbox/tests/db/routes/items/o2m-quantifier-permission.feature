@@ -1,7 +1,8 @@
 Feature: A permission rule and a user read an o2m quantifier the same way
 
   - `test_quantifier_perm_article` lists its `test_quantifier_perm_link` rows
-    through the o2m field `links`.
+    through the o2m field `links`, and a link its `test_quantifier_perm_note`
+    rows through `notes`.
   - A request authenticates as the admin, or with the token its `as` cell holds.
     `<run>` stands for a value unique to the scenario, and any other `<name>`
     for a uuid of its own. A response cell states the keys it checks.
@@ -233,3 +234,61 @@ Feature: A permission rule and a user read an o2m quantifier the same way
       |   fields: id                                |     - id: <run>-b |
       |   sort: id                                  |                   |
       |   filter: '{"links":{"_none":{"_and":[]}}}' |                   |
+
+  Scenario: a count over links reads a rule with a quantifier of its own
+    Given these requests are sent:
+      | request                                        | response  |
+      | method: POST                                   | code: 200 |+
+      | path: /items/test_quantifier_perm_article      |           |
+      | payload:                                       |           |
+      |   - id: <run>-a                                |           |
+      | method: POST                                   | code: 200 |+
+      | path: /items/test_quantifier_perm_link         |           |
+      | payload:                                       |           |
+      |   - id: <run>-a1                               |           |
+      |     article: <run>-a                           |           |
+      |   - id: <run>-a2                               |           |
+      |     article: <run>-a                           |           |
+      | method: POST                                   | code: 200 |+
+      | path: /items/test_quantifier_perm_note         |           |
+      | payload:                                       |           |
+      |   - id: <run>-n1                               |           |
+      |     link: <run>-a1                             |           |
+      |     text: granted                              |           |
+      | method: POST                                   | code: 200 |+
+      | path: /policies                                |           |
+      | payload:                                       |           |
+      |   id: <reader-policy>                          |           |
+      |   name: qp-<run>                               |           |
+      |   app_access: false                            |           |
+      |   admin_access: false                          |           |
+      |   permissions:                                 |           |
+      |     - collection: test_quantifier_perm_article |           |
+      |       action: read                             |           |
+      |       fields:                                  |           |
+      |         - '*'                                  |           |
+      |       permissions: {}                          |           |
+      |     - collection: test_quantifier_perm_link    |           |
+      |       action: read                             |           |
+      |       fields:                                  |           |
+      |         - '*'                                  |           |
+      |       permissions:                             |           |
+      |         notes:                                 |           |
+      |           _some:                               |           |
+      |             text:                              |           |
+      |               _eq: granted                     |           |
+      | method: POST                                   | code: 200 |+
+      | path: /users                                   |           |
+      | payload:                                       |           |
+      |   email: qp-<run>@example.com                  |           |
+      |   token: <reader-token>                        |           |
+      |   policies:                                    |           |
+      |     - policy: <reader-policy>                  |           |
+    Then these requests get these responses:
+      | request                                   | response                |
+      | as: <reader-token>                        | code: 200               |+
+      | method: GET                               | body:                   |
+      | path: /items/test_quantifier_perm_article |   data:                 |
+      | query:                                    |     - id: <run>-a       |
+      |   fields: id,count(links)                 |       links_count: "1"  |
+      |   filter[id][_eq]: <run>-a                |                         |

@@ -16,6 +16,8 @@ describe.each(vendors)('%s', (vendor) => {
 			'a _some over an _and needs one link matching both',
 			'a _none with two conditions excludes only a link matching both',
 			'a _none over an _or excludes a link matching either',
+			'a $FOLLOW _some reads only the mentions of its own collection',
+			'a $FOLLOW _none reads only the mentions of its own collection',
 		]) {
 			scenario(title, (steps) => {
 				defineNestedWriteSteps(steps, vendor, () => getUrl(vendor));

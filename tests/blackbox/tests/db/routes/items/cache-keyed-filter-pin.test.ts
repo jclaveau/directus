@@ -13,6 +13,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
+import { randomUUID } from 'crypto';
 import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
@@ -33,6 +34,10 @@ const JUNCTION = `${OWNED_ITEM}_${CATEGORY}_junction`;
 // and an A2O hop without changing what `fields=*` splices into the reads above.
 const PAGE = 'keyed_filter_page';
 const BLOCK_JUNCTION = `${PAGE}_blocks_junction`;
+// Rows of their own: a quantifier read writes the row its filter excludes.
+const QUANTIFIER_ARTICLE = 'keyed_filter_quantifier_article';
+const QUANTIFIER_LINK = 'keyed_filter_quantifier_link';
+const QUANTIFIER_PROJECT = 'keyed_filter_quantifier_project';
 const cacheStatusHeader = 'x-cache-status';
 const cacheTagsHeader = 'x-scoped-cache-tags';
 
@@ -89,7 +94,32 @@ describe(oneLine`
 						collection: PAGE,
 						fields: [{ field: 'title', type: 'string', meta: {} }],
 					},
+					{ collection: QUANTIFIER_ARTICLE },
+					{
+						collection: QUANTIFIER_LINK,
+						fields: [
+							{ field: 'name', type: 'string', meta: {} },
+							{ field: 'status', type: 'string', meta: {} },
+						],
+					},
+					{
+						collection: QUANTIFIER_PROJECT,
+						fields: [{ field: 'org', type: 'string', meta: {} }],
+					},
 				],
+			});
+
+			await CreateFieldO2M(vendor, {
+				collection: QUANTIFIER_ARTICLE,
+				field: 'links',
+				otherCollection: QUANTIFIER_LINK,
+				otherField: 'article',
+			});
+
+			await CreateFieldM2O(vendor, {
+				collection: QUANTIFIER_LINK,
+				field: 'project',
+				otherCollection: QUANTIFIER_PROJECT,
 			});
 
 			await CreateFieldM2O(vendor, {
@@ -219,6 +249,9 @@ describe(oneLine`
 		afterAll(async () => {
 			instance.kill();
 
+			await DeleteCollection(vendor, { collection: QUANTIFIER_LINK });
+			await DeleteCollection(vendor, { collection: QUANTIFIER_PROJECT });
+			await DeleteCollection(vendor, { collection: QUANTIFIER_ARTICLE });
 			await DeleteCollection(vendor, { collection: BLOCK_JUNCTION });
 			await DeleteCollection(vendor, { collection: PAGE });
 			await DeleteCollection(vendor, { collection: JUNCTION });
@@ -1034,6 +1067,172 @@ describe(oneLine`
 			expect(none.headers[cacheTagsHeader]).toMatch(
 				new RegExp(`(^|, )${OWNED_SUB_ITEM}:id=${filteredSubItemId}(,|$)`),
 			);
+		});
+
+		it(oneLine`
+			keys no row through two quantifiers, which each read a row of their own
+		`, async () => {
+			await clearCache();
+
+			const [article] = await CreateItem(vendor, {
+				collection: QUANTIFIER_ARTICLE,
+				item: [{}],
+			});
+
+			const [namedLink, otherLink] = await CreateItem(vendor, {
+				collection: QUANTIFIER_LINK,
+				item: [
+					{ status: 'open', article: article.id },
+					{ status: 'open', article: article.id },
+				],
+			});
+
+			const read = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${QUANTIFIER_ARTICLE}`)
+					.query({
+						'filter[id][_eq]': String(article.id),
+						'filter[links][_some][id][_eq]': String(namedLink.id),
+						'filter[links][_none][status][_eq]': 'closed',
+						fields: 'id',
+					})
+					.set('Authorization', auth);
+			};
+
+			expect((await read()).body.data).toEqual([{ id: article.id }]);
+
+			const written = await request(getUrl(vendor, env))
+				.patch(`/items/${QUANTIFIER_LINK}/${otherLink.id}`)
+				.send({ status: 'closed' })
+				.set('Authorization', auth);
+
+			expect(written.statusCode).toBe(200);
+			expect((await read()).body.data).toEqual([]);
+		});
+
+		it(oneLine`
+			keys no row through a quantifier beside a condition on another link
+		`, async () => {
+			await clearCache();
+
+			const [article] = await CreateItem(vendor, {
+				collection: QUANTIFIER_ARTICLE,
+				item: [{}],
+			});
+
+			const [namedLink, otherLink] = await CreateItem(vendor, {
+				collection: QUANTIFIER_LINK,
+				item: [
+					{ name: 'before', article: article.id },
+					{ name: 'before', article: article.id },
+				],
+			});
+
+			const read = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${QUANTIFIER_ARTICLE}`)
+					.query({
+						'filter[id][_eq]': String(article.id),
+						'filter[links][_some][id][_eq]': String(namedLink.id),
+						'filter[links][name][_eq]': 'after',
+						fields: 'id',
+					})
+					.set('Authorization', auth);
+			};
+
+			expect((await read()).body.data).toEqual([]);
+
+			const written = await request(getUrl(vendor, env))
+				.patch(`/items/${QUANTIFIER_LINK}/${otherLink.id}`)
+				.send({ name: 'after' })
+				.set('Authorization', auth);
+
+			expect(written.statusCode).toBe(200);
+			expect((await read()).body.data).toEqual([{ id: article.id }]);
+		});
+
+		it(oneLine`
+			purges a read whose quantifier goes through the rule of its related rows
+		`, async () => {
+			await clearCache();
+
+			const [project] = await CreateItem(vendor, {
+				collection: QUANTIFIER_PROJECT,
+				item: [{ org: 'granted' }],
+			});
+
+			const [article] = await CreateItem(vendor, {
+				collection: QUANTIFIER_ARTICLE,
+				item: [{}],
+			});
+
+			await CreateItem(vendor, {
+				collection: QUANTIFIER_LINK,
+				item: [{
+					name: 'ruled',
+					article: article.id,
+					project: project.id,
+				}],
+			});
+
+			const policy = await request(getUrl(vendor, env))
+				.post('/policies')
+				.send({
+					name: `quantifier-rule-${randomUUID()}`,
+					app_access: false,
+					admin_access: false,
+					permissions: [
+						{
+							collection: QUANTIFIER_ARTICLE,
+							action: 'read',
+							fields: ['*'],
+							permissions: {},
+						},
+						{
+							collection: QUANTIFIER_LINK,
+							action: 'read',
+							fields: ['*'],
+							permissions: { project: { org: { _eq: 'granted' } } },
+						},
+					],
+				})
+				.set('Authorization', auth);
+
+			expect(policy.statusCode).toBe(200);
+
+			const readerToken = randomUUID();
+
+			const reader = await request(getUrl(vendor, env))
+				.post('/users')
+				.send({
+					email: `${readerToken}@example.com`,
+					token: readerToken,
+					policies: [{ policy: policy.body.data.id }],
+				})
+				.set('Authorization', auth);
+
+			expect(reader.statusCode).toBe(200);
+
+			const read = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${QUANTIFIER_ARTICLE}`)
+					.query({
+						'filter[id][_eq]': String(article.id),
+						'filter[links][_some][name][_eq]': 'ruled',
+						fields: 'id',
+					})
+					.set('Authorization', `Bearer ${readerToken}`);
+			};
+
+			expect((await read()).body.data).toEqual([{ id: article.id }]);
+
+			const written = await request(getUrl(vendor, env))
+				.patch(`/items/${QUANTIFIER_PROJECT}/${project.id}`)
+				.send({ org: 'revoked' })
+				.set('Authorization', auth);
+
+			expect(written.statusCode).toBe(200);
+			expect((await read()).body.data).toEqual([]);
 		});
 
 		it(oneLine`
