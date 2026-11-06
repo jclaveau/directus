@@ -8,6 +8,7 @@ import { resolvedRateLimiterCharge } from './middleware/rate-limiter-ip.js';
 import {
 	validateChoiceEnv,
 	validateCountEnv,
+	validateSubscriptionsEnv,
 } from './utils/validate-env.js';
 
 vi.mock('./database', () => ({
@@ -121,6 +122,12 @@ const request = async (path: string = '', init: RequestInit = {}) => {
 };
 
 describe('createApp', async () => {
+	test('Should validate the subscriptions env at boot', async () => {
+		await createApp();
+
+		expect(validateSubscriptionsEnv).toHaveBeenCalled();
+	});
+
 	describe('Content Security Policy', () => {
 		test('Should set content-security-policy header by default', async () => {
 			const response = await request();
