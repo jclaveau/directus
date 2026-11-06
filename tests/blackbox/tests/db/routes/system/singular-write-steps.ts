@@ -268,13 +268,16 @@ function sendRequest(instanceUrl: string, requestCell: RequestCell) {
 
 	pendingRequest
 		.query(query)
-		.set(headers)
-		.set(
+		.set(headers);
+
+	if (token !== 'anonymous') {
+		pendingRequest.set(
 			'Authorization',
 			token === undefined
 				? AUTH
 				: `Bearer ${token}`,
 		);
+	}
 
 	// A multipart upload: Directus wants every form field before the file.
 	if (file !== undefined) {

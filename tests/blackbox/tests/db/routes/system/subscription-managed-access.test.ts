@@ -238,6 +238,8 @@ describe.each(vendors)('%s', (vendor) => {
 	}
 
 	function holdSubscription(rowsTable: Record<string, string>[]) {
+		expect(rowsTable).toHaveLength(1);
+
 		fakeMollie.heldSubscription = parseGherkinTable<HeldSubscription>(
 			rowsTable,
 		)[0];
@@ -256,6 +258,8 @@ describe.each(vendors)('%s', (vendor) => {
 	}
 
 	async function expectStoredAccess(rowsTable: Record<string, string>[]) {
+		expect(rowsTable).toHaveLength(1);
+
 		const storedAccess = parseGherkinTable<StoredAccess>(JSON.parse(withKeys(
 			JSON.stringify(rowsTable),
 			scenarioKeys,
@@ -276,6 +280,8 @@ describe.each(vendors)('%s', (vendor) => {
 	}
 
 	async function expectNoAccess(rowsTable: Record<string, string>[]) {
+		expect(rowsTable).toHaveLength(1);
+
 		const [{ user: grantedUser }] = parseGherkinTable<{ user: string }>(
 			JSON.parse(withKeys(JSON.stringify(rowsTable), scenarioKeys)),
 		) as [{ user: string }];

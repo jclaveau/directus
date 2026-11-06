@@ -1,8 +1,9 @@
 import http from 'node:http';
 import https from 'node:https';
 
-// The Mollie client has no setting for its host and calls node-fetch, which
-// reads `https.request` at each call: this sends its calls to the fake Mollie
+// create-providers gives the Mollie client only its key, and that client calls
+// node-fetch, which reads `https.request` at each call: this sends those to
+// the fake Mollie
 // a suite started on BLACKBOX_MOLLIE_PORT, over plain http so without its agent.
 const httpsRequest = https.request;
 

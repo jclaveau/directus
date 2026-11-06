@@ -1,6 +1,7 @@
 Feature: The access a subscription grants is the subscriptions bundle's alone
 
-  - A request authenticates as the admin unless its `as` names a token.
+  - A request authenticates as the admin unless its `as` names a token;
+    `as: anonymous` sends none, like Mollie.
   - The instance loads the real `@scalabus/subscriptions` bundle and was
     bootstrapped, which creates its tables.
   - Its Mollie client calls a fake Mollie, answering what `Mollie holds`.
@@ -33,7 +34,8 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | tr_renewal | cst_subscribed | sub_renewing | pro-plan       | active |
     When these requests get these responses:
       | request                               | response  |
-      | method: POST                          | code: 200 |+
+      | as: anonymous                         | code: 200 |+
+      | method: POST                          |           |
       | path: /subscriptions/webhooks/mollie  |           |
       | payload: id=tr_renewal                |           |
     Then this access is eventually stored:
@@ -106,7 +108,8 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | tr_renewal | cst_subscribed | sub_renewing | pro-plan       | suspended |
     And these requests get these responses:
       | request                               | response  |
-      | method: POST                          | code: 200 |+
+      | as: anonymous                         | code: 200 |+
+      | method: POST                          |           |
       | path: /subscriptions/webhooks/mollie  |           |
       | payload: id=tr_renewal                |           |
     Then this user eventually holds no access:
