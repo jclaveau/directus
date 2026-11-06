@@ -675,19 +675,41 @@ export class PayloadService {
 			}
 		}
 
-		const upsertRowIndexes = rowIndexes.filter((rowIndex) => {
-			const keyOnly = keyOnlyOf(rowIndex);
+		// a key alone names a row an earlier record of the batch writes, too
+		const upsertedKeyNames = new Set<string>();
 
-			return keyOnly === null
-				|| !existingKeyNames.has(
-					primaryKeyNameOf(keyOnly, relatedCollection, this.schema),
-				);
+		const upsertRowIndexes = rowIndexes.filter((rowIndex) => {
+			const relatedPrimaryKey =
+				rowsResult.payloads[rowIndex]![field][relatedPrimaryKeyField];
+
+			if (isMissingPrimaryKey(relatedPrimaryKey)) {
+				return true;
+			}
+
+			const keyName = primaryKeyNameOf(
+				relatedPrimaryKey,
+				relatedCollection,
+				this.schema,
+			);
+
+			if (
+				keyOnlyOf(rowIndex) !== null
+				&& (existingKeyNames.has(keyName) || upsertedKeyNames.has(keyName))
+			) {
+				return false;
+			}
+
+			upsertedKeyNames.add(keyName);
+
+			return true;
 		});
+
+		const upsertRowIndexSet = new Set(upsertRowIndexes);
 
 		for (const rowIndex of rowIndexes) {
 			const keyOnly = keyOnlyOf(rowIndex);
 
-			if (keyOnly !== null && !upsertRowIndexes.includes(rowIndex)) {
+			if (keyOnly !== null && !upsertRowIndexSet.has(rowIndex)) {
 				rowsResult.payloads[rowIndex]![field] = keyOnly;
 			}
 		}

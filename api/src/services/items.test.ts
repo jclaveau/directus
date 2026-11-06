@@ -7491,6 +7491,33 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 			{ id: 2, name: 'Italy' },
 		]);
 	});
+
+	it(oneLine`
+		creates a country two rows name by an unknown key alone once, and
+		updates it from neither
+	`, async () => {
+		const countryUpdateFilter = vi.fn((payload) => payload);
+		emitter.onFilter('country.items.update', countryUpdateFilter);
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema: rowSchema })
+				.createMany([
+					{ id: 3, country: { id: 8 } },
+					{ id: 4, country: { id: 8 } },
+				])).resolves.toStrictEqual([3, 4]);
+		}
+		finally {
+			emitter.offFilter('country.items.update', countryUpdateFilter);
+		}
+
+		expect(countryUpdateFilter).not.toHaveBeenCalled();
+
+		await expect(database('test').select('id', 'country')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 3, country: 8 },
+			{ id: 4, country: 8 },
+		]);
+	});
 });
 
 describe('updateBatch on postgres', () => {
