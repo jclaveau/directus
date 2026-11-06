@@ -178,6 +178,12 @@ export type MutationOptions = {
 	keysFromQuery?: boolean | undefined;
 
 	/**
+	 * A role delete takes the role's access rows along, those an extension manages
+	 * included, as the database's cascade does for a deleted user or policy.
+	 */
+	deletesManagedAccess?: boolean | undefined;
+
+	/**
 	 * An update refuses with a 404 a key no row holds, told off the UPDATE's
 	 * count: the filter hooks run before it, and the rollback undoes what they
 	 * wrote through the transaction. On a transaction the caller passed, that

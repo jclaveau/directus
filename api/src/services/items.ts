@@ -1622,6 +1622,16 @@ implements AbstractService<Item> {
 	): Promise<void> {}
 
 	/**
+	 * Refuses keys a delete would take. Handed them after the hooks and the access
+	 * check, inside the delete's transaction.
+	 */
+	protected async validateKeysToDelete(
+		_keys: PrimaryKey[],
+		_opts: MutationOptions,
+		_trx: Knex,
+	): Promise<void> {}
+
+	/**
 	 * What writing these groups sets off once they are written — a cache clear,
 	 * a logout. Handed the groups the hooks left.
 	 */
@@ -3984,6 +3994,8 @@ implements AbstractService<Item> {
 			if (opts.preMutationError) {
 				throw opts.preMutationError;
 			}
+
+			await this.validateKeysToDelete(keys, opts, trx);
 
 			try {
 				await this.deleteKeyRows(keys, trx, opts.keysFromQuery === true);

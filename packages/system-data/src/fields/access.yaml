@@ -28,3 +28,8 @@ fields:
   - field: sort
     hidden: true
     width: half
+
+  - field: managed_by
+    hidden: true
+    readonly: true
+    width: half
