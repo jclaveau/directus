@@ -40,6 +40,7 @@ post:
   operationId: createItem
   parameters:
     - $ref: '../../openapi.yaml#/components/parameters/Meta'
+    - $ref: '../../openapi.yaml#/components/parameters/MutationBatching'
   requestBody:
     content:
       application/json:
@@ -73,6 +74,7 @@ patch:
     - $ref: '../../openapi.yaml#/components/parameters/Filter'
     - $ref: '../../openapi.yaml#/components/parameters/Search'
     - $ref: '../../openapi.yaml#/components/parameters/OnRepeatedPk'
+    - $ref: '../../openapi.yaml#/components/parameters/MutationBatching'
 responses:
   '200':
     description: Successful request

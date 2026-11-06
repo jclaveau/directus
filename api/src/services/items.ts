@@ -61,6 +61,7 @@ import { processAst } from '../permissions/modules/process-ast/process-ast.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
+import { resolveMutationBatching } from '../utils/resolve-mutation-batching.js';
 import {
 	flushResponseCacheAfterCommit,
 	type ResponseCacheFlushDeferral,
@@ -478,6 +479,10 @@ implements AbstractService<Item> {
 
 		if (data.length === 0) {
 			return [];
+		}
+
+		if (data.length > 1 && resolveMutationBatching(opts) === 'disableBatching') {
+			return await this.createRowByRow(data, opts, opts.mutationTracker);
 		}
 
 		if (!opts.bypassLimits) {
@@ -1128,6 +1133,29 @@ implements AbstractService<Item> {
 	}
 
 	/**
+	 * `createMany` under `disableBatching`: one `createMany` per row, in one
+	 * transaction, each row with its own filter, insert and action.
+	 */
+	private async createRowByRow(
+		data: Partial<Item>[],
+		opts: MutationOptions,
+		mutationTracker: MutationTracker,
+	): Promise<(PrimaryKey | null)[]> {
+		return await transaction(this.knex, async (trx) => {
+			const service = this.fork({ knex: trx });
+			const createdKeys: (PrimaryKey | null)[] = [];
+
+			for (const row of data) {
+				for (const createdKey of await service.createMany([row], opts)) {
+					createdKeys.push(createdKey);
+				}
+			}
+
+			return createdKeys;
+		}, mutationTracker.snapshot());
+	}
+
+	/**
 	 * Get items by query.
 	 */
 	async readByQuery(query: Query, opts?: QueryOptions): Promise<WithMeta<Item[]>> {
@@ -1700,6 +1728,9 @@ implements AbstractService<Item> {
 
 		const keyNameOf = (key: PrimaryKey) => this.primaryKeyNameOf(key);
 
+		// a group written alone counts its own rows again
+		const untrackInputKeys = mutationTracker.snapshot();
+
 		// Checked before any hook runs, so a malformed or oversized update never
 		// reaches one.
 		if (!opts.bypassLimits) {
@@ -1766,6 +1797,12 @@ implements AbstractService<Item> {
 
 			return { data: group.data, keys: uniqueKeys };
 		});
+
+		if (groups.length > 1 && resolveMutationBatching(opts) === 'disableBatching') {
+			untrackInputKeys();
+
+			return await this.updateGroupByGroup(groups, opts, mutationTracker);
+		}
 
 		const groupListRefusal = () => {
 			return new InvalidPayloadError({
@@ -2432,6 +2469,29 @@ implements AbstractService<Item> {
 		// body, so dropping a no-op row would omit an item the caller named from its
 		// own PATCH response.
 		return rowKeys;
+	}
+
+	/**
+	 * `updateGroups` under `disableBatching`: one `updateGroups` per group, in
+	 * one transaction, each group with its own filter, write and action.
+	 */
+	private async updateGroupByGroup(
+		groups: UpdateGroup<Item>[],
+		opts: DeferredPurgeOptions,
+		mutationTracker: MutationTracker,
+	): Promise<(PrimaryKey | null)[]> {
+		return await transaction(this.knex, async (trx) => {
+			const service = this.fork({ knex: trx });
+			const rowKeys: (PrimaryKey | null)[] = [];
+
+			for (const group of groups) {
+				for (const rowKey of await service.updateGroups([group], opts)) {
+					rowKeys.push(rowKey);
+				}
+			}
+
+			return rowKeys;
+		}, mutationTracker.snapshot());
 	}
 
 	/**
@@ -3201,6 +3261,7 @@ implements AbstractService<Item> {
 		}
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const mutationBatching = resolveMutationBatching(opts);
 
 		// Old scope values for the update subset — any payload carrying an existing key. A
 		// pure-insert payload has no key (or points at no row yet), so it contributes nothing
@@ -3334,7 +3395,11 @@ implements AbstractService<Item> {
 					},
 				};
 
-				for (const run of service.upsertRunsOf(payloads)) {
+				const upsertRuns = mutationBatching === 'disableBatching'
+					? payloads.map((payload) => [payload])
+					: service.upsertRunsOf(payloads);
+
+				for (const run of upsertRuns) {
 					const runOffset = primaryKeys.length;
 
 					const runOpts: DeferredPurgeOptions = {
@@ -3577,6 +3642,9 @@ implements AbstractService<Item> {
 	 * A unique value an update frees can go to a create of the same run:
 	 * `[{ id: 2, code: 'A' }, { id: 1, code: 'B' }]`, row 1 holding `'A'`,
 	 * writes both, where each payload in turn would refuse the create.
+	 * `preserveMutationOrder` writes the payloads in their order instead, each
+	 * row of consecutive updates or creates in one write, and emits the run's
+	 * actions once every write is done.
 	 */
 	protected async upsertRun(
 		upsertRun: Partial<Item>[],
@@ -3613,31 +3681,33 @@ implements AbstractService<Item> {
 			}
 		}
 
-		const updateGroups: UpdateGroup<Item>[] = [];
-		const createPayloads: Partial<Item>[] = [];
-		const upsertedKeys: PrimaryKey[] = [];
-		const updateIndexes: number[] = [];
-		const createIndexes: number[] = [];
+		const preservesOrder = resolveMutationBatching(opts) === 'preserveMutationOrder';
+
+		// Payload indexes written together: every update, then every create, unless
+		// the order is preserved
+		const upsertSegments: { updating: boolean; indexes: number[] }[] = preservesOrder
+			? []
+			: [{ updating: true, indexes: [] }, { updating: false, indexes: [] }];
 
 		for (const [index, payload] of upsertRun.entries()) {
 			const primaryKey: PrimaryKey | undefined = payload[primaryKeyField];
 
-			if (
-				!isMissingPrimaryKey(primaryKey)
-				&& existingKeyNames.has(this.primaryKeyNameOf(primaryKey))
-			) {
-				updateGroups.push({
-					data: omit(payload, primaryKeyField) as Partial<Item>,
-					keys: [primaryKey],
-				});
+			const updating = !isMissingPrimaryKey(primaryKey)
+				&& existingKeyNames.has(this.primaryKeyNameOf(primaryKey));
 
-				updateIndexes.push(index);
+			const upsertSegment = preservesOrder
+				? upsertSegments.at(-1)
+				: upsertSegments.find((segment) => segment.updating === updating);
+
+			if (upsertSegment?.updating === updating) {
+				upsertSegment.indexes.push(index);
 			}
 			else {
-				createPayloads.push(payload);
-				createIndexes.push(index);
+				upsertSegments.push({ updating, indexes: [index] });
 			}
 		}
+
+		const upsertedKeys: PrimaryKey[] = [];
 
 		// Held until the run returns its keys, the created ones included: a run
 		// holds each key once, so a key tells the payload its revision is of.
@@ -3652,21 +3722,46 @@ implements AbstractService<Item> {
 			}
 			: opts;
 
-		if (updateGroups.length > 0) {
-			// one key per group, so one answer per group: null where a filter cancelled it
-			const updatedKeys = await this.updateGroups(updateGroups, writeOpts);
+		const segmentActionEvents: ActionEventParams[] = [];
 
-			for (const [updateIndex, updatedKey] of updatedKeys.entries()) {
-				upsertedKeys[updateIndexes[updateIndex]!] = updatedKey;
+		const segmentOpts: DeferredPurgeOptions = preservesOrder
+			? {
+				...writeOpts,
+				bypassEmitAction: (actionEvent) => {
+					segmentActionEvents.push(actionEvent);
+				},
+			}
+			: writeOpts;
+
+		for (const { updating, indexes } of upsertSegments) {
+			if (indexes.length === 0) {
+				continue;
+			}
+
+			// one key per group, so one answer per group: null where a filter
+			// cancelled it
+			const segmentKeys = updating
+				? await this.updateGroups(
+					indexes.map((index) => {
+						return {
+							data: omit(upsertRun[index]!, primaryKeyField) as Partial<Item>,
+							keys: [upsertRun[index]![primaryKeyField] as PrimaryKey],
+						};
+					}),
+					segmentOpts,
+				)
+				: await this.createMany(
+					indexes.map((index) => upsertRun[index]!),
+					segmentOpts,
+				);
+
+			for (const [segmentIndex, segmentKey] of segmentKeys.entries()) {
+				upsertedKeys[indexes[segmentIndex]!] = segmentKey;
 			}
 		}
 
-		if (createPayloads.length > 0) {
-			const createdKeys = await this.createMany(createPayloads, writeOpts);
-
-			for (const [createIndex, createdKey] of createdKeys.entries()) {
-				upsertedKeys[createIndexes[createIndex]!] = createdKey;
-			}
+		if (preservesOrder) {
+			await emitActionEvents(segmentActionEvents, writeOpts);
 		}
 
 		if (opts.onRevisionCreate) {

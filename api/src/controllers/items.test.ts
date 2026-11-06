@@ -163,6 +163,37 @@ describe('items controller', () => {
 			expect(next).toHaveBeenCalledWith();
 		});
 
+		test('passes mutationBatching to the create', async () => {
+			createMany.mockResolvedValueOnce([1]);
+			readMany.mockResolvedValueOnce([{ id: 1 }]);
+
+			await handler()(makeReq({
+				body: [{ a: 1 }],
+				query: { mutationBatching: 'preserveMutationOrder' },
+			}), { locals: {} } as any, vi.fn());
+
+			expect(createMany).toHaveBeenCalledWith([{ a: 1 }], {
+				allowFilterCancel: true,
+				mutationBatching: 'preserveMutationOrder',
+			});
+		});
+
+		test('refuses an unknown mutationBatching before creating', async () => {
+			const refusal = await nextError(handler(), makeReq({
+				body: [{ a: 1 }],
+				query: { mutationBatching: 'batchEverything' },
+			}));
+
+			expect(refusal).toBeInstanceOf(InvalidQueryError);
+
+			expect(refusal.message).toEqual(oneLine`
+				Invalid query. "mutationBatching" must be one of minimizeMutations,
+				preserveMutationOrder, disableBatching.
+			`);
+
+			expect(createMany).not.toHaveBeenCalled();
+		});
+
 		test('non-Forbidden read error rethrows', async () => {
 			createOne.mockResolvedValueOnce(5);
 			readOne.mockRejectedValueOnce(new Error('boom'));
@@ -346,6 +377,22 @@ describe('items controller', () => {
 			expect(updateBatch).not.toHaveBeenCalled();
 		});
 
+		test('passes mutationBatching to the update', async () => {
+			updateBatch.mockResolvedValueOnce([1]);
+			readMany.mockResolvedValueOnce([{ id: 1 }]);
+
+			await handler()(makeReq({
+				body: [{ id: 1 }],
+				query: { mutationBatching: 'disableBatching' },
+			}), { locals: {} } as any, vi.fn());
+
+			expect(updateBatch).toHaveBeenCalledWith([{ id: 1 }], {
+				allowFilterCancel: true,
+				onRepeatedPk: 'refuse',
+				mutationBatching: 'disableBatching',
+			});
+		});
+
 		test('updateMany via body.keys', async () => {
 			updateMany.mockResolvedValueOnce([2]);
 			readMany.mockResolvedValueOnce([{ id: 2 }]);
@@ -398,6 +445,21 @@ describe('items controller', () => {
 		test('throws RouteNotFoundError for singletons', async () => {
 			const req = makeReq({ singleton: true });
 			expect(await nextError(handler(), req)).toBeInstanceOf(Error);
+		});
+
+		test('passes mutationBatching to the update', async () => {
+			updateOne.mockResolvedValueOnce('1');
+			readOne.mockResolvedValueOnce({ id: 1 });
+
+			await handler()(makeReq({
+				body: { x: 1 },
+				query: { mutationBatching: 'disableBatching' },
+			}), { locals: {} } as any, vi.fn());
+
+			expect(updateOne).toHaveBeenCalledWith('1', { x: 1 }, {
+				allowFilterCancel: true,
+				mutationBatching: 'disableBatching',
+			});
 		});
 
 		test('updateOne + readOne returns payload', async () => {

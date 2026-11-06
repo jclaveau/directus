@@ -13,6 +13,7 @@ export const DEFAULTS = {
 	QUERYSTRING_MAX_PARSE_DEPTH: 10,
 	QUERY_LIMIT_DEFAULT: 100,
 	MAX_BATCH_MUTATION: Infinity,
+	DEFAULT_MUTATION_BATCHING: 'minimizeMutations',
 	ROBOTS_TXT: 'User-agent: *\nDisallow: /',
 
 	TEMP_PATH: './node_modules/.directus',

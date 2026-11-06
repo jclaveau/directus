@@ -93,6 +93,14 @@ export const RepeatedPkAnswers = ['refuse', 'lastWins'] as const;
 
 export type RepeatedPkAnswer = (typeof RepeatedPkAnswers)[number];
 
+export const MutationBatchingModes = [
+	'minimizeMutations',
+	'preserveMutationOrder',
+	'disableBatching',
+] as const;
+
+export type MutationBatchingMode = (typeof MutationBatchingModes)[number];
+
 export type MutationOptions = {
 	/**
 	 * Callback function that's fired whenever a revision is made in the mutation,
@@ -219,6 +227,24 @@ export type MutationOptions = {
 	 * `onRepeatedPk=lastWins` when unset.
 	 */
 	lastWinsSpelling?: string | undefined;
+
+	/**
+	 * How a write batches its statements, passed down to its nested writes.
+	 * Left unset, `DEFAULT_MUTATION_BATCHING` decides.
+	 *
+	 * ```
+	 * upsertMany([U1, C2, U3, C4])     U = key found, C = new row
+	 *
+	 * minimizeMutations      filters · update U1,U3 · insert C2,C4 · actions
+	 * preserveMutationOrder  update U1 · insert C2 · update U3 · insert C4,
+	 *                        each with its filters; actions at the end
+	 * disableBatching        per payload: filter · write · action
+	 * ```
+	 *
+	 * `disableBatching` also creates one row at a time in `createMany`, and
+	 * writes one group at a time in `updateGroups`.
+	 */
+	mutationBatching?: MutationBatchingMode | undefined;
 
 	/**
 	 * Shared scoped-cache hook declarations injected by a batch/upsert parent so

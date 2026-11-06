@@ -7,12 +7,15 @@ import {
 } from '@directus/errors';
 import { isSystemCollection } from '@directus/system-data';
 import {
+	MutationBatchingModes,
 	RepeatedPkAnswers,
+	type MutationBatchingMode,
 	type MutationOptions,
 	type PrimaryKey,
 	type RepeatedPkAnswer,
 } from '@directus/types';
-import express from 'express';
+import { oneLine } from '@directus/utils';
+import express, { type Request } from 'express';
 import collectionExists from '../middleware/collection-exists.js';
 import { mergeContentVersions } from '../middleware/merge-content-versions.js';
 import { respond } from '../middleware/respond.js';
@@ -24,6 +27,29 @@ import { readMeta } from '../utils/read-meta.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
 const router = express.Router();
+
+/**
+ * The `mutationBatching` query param, left unset when absent; read off the
+ * raw query, since `sanitizeQuery` keeps only the read params.
+ */
+function mutationBatchingFromQuery(
+	query: Request['query'],
+): MutationBatchingMode | undefined {
+	const mutationBatching = query['mutationBatching'];
+
+	if (
+		mutationBatching !== undefined
+		&& !MutationBatchingModes.includes(mutationBatching as MutationBatchingMode)
+	) {
+		throw new InvalidQueryError({
+			reason: oneLine`
+				"mutationBatching" must be one of ${MutationBatchingModes.join(', ')}
+			`,
+		});
+	}
+
+	return mutationBatching as MutationBatchingMode | undefined;
+}
 
 router.post(
 	'/:collection',
@@ -46,13 +72,18 @@ router.post(
 
 		const savedKeys: PrimaryKey[] = [];
 
+		const createOptions = {
+			allowFilterCancel: true,
+			mutationBatching: mutationBatchingFromQuery(req.query),
+		} as const;
+
 		if (Array.isArray(req.body)) {
-			const keys = await service.createMany(req.body, { allowFilterCancel: true });
+			const keys = await service.createMany(req.body, createOptions);
 			// Cancelled creates come back as null; drop them before reading the created items.
 			savedKeys.push(...keys.filter((key): key is PrimaryKey => key !== null));
 		}
 		else {
-			const key = await service.createOne(req.body, { allowFilterCancel: true });
+			const key = await service.createOne(req.body, createOptions);
 
 			if (key !== null) {
 				// A filter hook may cancel the creation by returning null; nothing to read back then.
@@ -218,6 +249,7 @@ router.patch(
 		const updateOptions: MutationOptions = {
 			allowFilterCancel: true,
 			onRepeatedPk: (onRepeatedPk ?? 'refuse') as RepeatedPkAnswer,
+			mutationBatching: mutationBatchingFromQuery(req.query),
 		};
 
 		let keys: (PrimaryKey | null)[] = [];
@@ -285,7 +317,10 @@ router.patch(
 			schema: req.schema,
 		});
 
-		const updatedPrimaryKey = await service.updateOne(req.params['pk']!, req.body, { allowFilterCancel: true });
+		const updatedPrimaryKey = await service.updateOne(req.params['pk']!, req.body, {
+			allowFilterCancel: true,
+			mutationBatching: mutationBatchingFromQuery(req.query),
+		});
 
 		res.locals['scopedCachePurged'] = service.scopedCachePurged;
 
