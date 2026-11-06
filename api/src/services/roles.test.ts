@@ -185,8 +185,8 @@ describe('Integration Tests', () => {
 		describe('deleteMany', () => {
 			db.isTransaction = false;
 
-			const accessDeleteByQuerySpy = vi
-				.spyOn(AccessService.prototype, 'deleteByQuery')
+			const accessDeleteRoleAccessSpy = vi
+				.spyOn(AccessService.prototype, 'deleteRoleAccess')
 				.mockResolvedValue(['access-id-1']);
 
 			const presetsDeleteByQuerySpy = vi
@@ -204,12 +204,7 @@ describe('Integration Tests', () => {
 
 				const opts: MutationOptions = { userIntegrityCheckFlags: UserIntegrityCheckFlag.All, bypassLimits: true };
 
-				expect(accessDeleteByQuerySpy).toHaveBeenCalledWith(
-					{
-						filter: { role: { _in: keys } },
-					},
-					opts,
-				);
+				expect(accessDeleteRoleAccessSpy).toHaveBeenCalledWith(keys, opts);
 
 				expect(presetsDeleteByQuerySpy).toHaveBeenCalledWith(
 					{
