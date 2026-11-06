@@ -3,6 +3,7 @@ import {
 	cellOfKnownKeys,
 	defineFeature,
 	loadFeature,
+	parseGherkinTable,
 	rememberedText,
 	responseCellOf,
 } from '@common/cucumber';
@@ -74,8 +75,9 @@ const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 /**
  * Binds every scenario of a singular-write feature: each holds an optional
- * `Given these requests are sent:` and a `Then these requests get these
- * responses:`, both a request|response table run row after row.
+ * `Given these requests are sent:` or the rows of its collections, an optional
+ * user with their read permissions, and a `Then these requests get these
+ * responses:`, the request tables run row after row.
  */
 export function defineSingularWriteFeature(
 	featurePath: string,
@@ -113,6 +115,24 @@ export function defineSingularWriteFeature(
 					given.optional('these requests are sent:', (table: Row[]) => {
 						return sendRows(sentTo, table, true);
 					});
+
+					const createRows = (
+						collection: string,
+						table: Record<string, string>[],
+					) => {
+						return createCollectionRows(sentTo, collection, table);
+					};
+
+					given.optional(/^the rows of (\S+):$/, createRows);
+					and.optional(/^their children in (\S+):$/, createRows);
+					and.optional(/^their grandchildren in (\S+):$/, createRows);
+
+					and.optional(
+						/^a user whose token is (<[\w-]+>) may read:$/,
+						(tokenCell: string, table: Record<string, string>[]) => {
+							return createReader(sentTo, tokenCell, table);
+						},
+					);
 
 					then(
 						'these requests get these responses:',
@@ -282,6 +302,65 @@ function codeBodyAndText(response: Response) {
 		body: response.body,
 		text: response.text,
 	};
+}
+
+async function createCollectionRows(
+	{ instanceUrl, scenarioKeys }: SentTo,
+	collection: string,
+	table: Record<string, string>[],
+) {
+	const response = await request(instanceUrl())
+		.post(`/items/${collection}`)
+		.send(parseGherkinTable(table.map((row) => {
+			return Object.fromEntries(Object.entries(row).map(([column, cell]) => {
+				return [column, withKeys(cell, scenarioKeys)];
+			}));
+		})))
+		.set('Authorization', AUTH);
+
+	expect(response.statusCode).toEqual(200);
+}
+
+// One policy per row: a policy's read rules on a collection are one case each,
+// which is what the rows of the table state.
+async function createReader(
+	{ instanceUrl, scenarioKeys }: SentTo,
+	tokenCell: string,
+	table: Record<string, string>[],
+) {
+	const policies = [];
+
+	for (const [rowIndex, row] of table.entries()) {
+		const response = await request(instanceUrl())
+			.post('/policies')
+			.send({
+				name: `reader-${scenarioKeys.run}-${rowIndex}`,
+				app_access: false,
+				admin_access: false,
+				permissions: [{
+					collection: loadYaml(row['collection']!),
+					action: 'read',
+					fields: String(loadYaml(row['fields']!)).split(','),
+					permissions: loadYaml(row['permissions']!),
+				}],
+			})
+			.set('Authorization', AUTH);
+
+		expect(response.statusCode).toEqual(200);
+
+		policies.push({ policy: response.body.data.id });
+	}
+
+	const response = await request(instanceUrl())
+		.post('/users')
+		.send({
+			email: `reader-${scenarioKeys.run}@example.com`,
+			token: withKeys(tokenCell, scenarioKeys),
+			policies,
+		})
+		.set('Authorization', AUTH);
+
+	expect(response.statusCode).toEqual(200);
 }
 
 // One row at a time, so a row can name the key one before it remembered. A

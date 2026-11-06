@@ -1,9 +1,11 @@
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Permission } from '@directus/types';
 import knex from 'knex';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { Client_SQLite3 } from './mock.js';
 import { applySearch } from './search.js';
+
+const aliasFn = vi.fn<() => string>();
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -31,7 +33,16 @@ for (const number of ['0x56071c902718e681e274DB0AaC9B4Ed2d027924d', '0b11111', '
 		const db = knex.default({ client: Client_SQLite3 });
 		const queryBuilder = db.queryBuilder();
 
-		applySearch(db as any, schema, queryBuilder, number, 'test', {}, permissions);
+		applySearch(
+			db as any,
+			schema,
+			queryBuilder,
+			number,
+			'test',
+			{},
+			permissions,
+			aliasFn,
+		);
 
 		const rawQuery = queryBuilder.toSQL();
 
@@ -45,7 +56,16 @@ for (const number of ['1234', '-128', '12.34']) {
 		const db = knex.default({ client: Client_SQLite3 });
 		const queryBuilder = db.queryBuilder();
 
-		applySearch(db as any, schema, queryBuilder, number, 'test', {}, permissions);
+		applySearch(
+			db as any,
+			schema,
+			queryBuilder,
+			number,
+			'test',
+			{},
+			permissions,
+			aliasFn,
+		);
 
 		const rawQuery = queryBuilder.toSQL();
 
@@ -70,7 +90,16 @@ test(`Query is falsy if no other clause is added`, async () => {
 		})
 		.build();
 
-	applySearch(db as any, schema, queryBuilder, 'searchstring', 'test', {}, permissions);
+	applySearch(
+		db as any,
+		schema,
+		queryBuilder,
+		'searchstring',
+		'test',
+		{},
+		permissions,
+		aliasFn,
+	);
 
 	const rawQuery = queryBuilder.toSQL();
 
@@ -89,7 +118,7 @@ test(`Exclude non uuid searchable field(s) when searchQuery has valid uuid value
 			fields: ['id', 'text'],
 			permissions: null,
 		} as unknown as Permission,
-	]);
+	], aliasFn);
 
 	const rawQuery = queryBuilder.toSQL();
 
@@ -110,7 +139,7 @@ test(`Remove forbidden field(s) from search`, async () => {
 				text: {},
 			},
 		} as unknown as Permission,
-	]);
+	], aliasFn);
 
 	const rawQuery = queryBuilder.toSQL();
 
@@ -129,7 +158,7 @@ test(`Add all fields for * field rule`, async () => {
 			fields: ['*'],
 			permissions: null,
 		} as unknown as Permission,
-	]);
+	], aliasFn);
 
 	const rawQuery = queryBuilder.toSQL();
 
@@ -153,7 +182,7 @@ test(`Add all fields when * is present in field rule with permission rule presen
 				text: {},
 			},
 		} as unknown as Permission,
-	]);
+	], aliasFn);
 
 	const rawQuery = queryBuilder.toSQL();
 
@@ -168,7 +197,7 @@ test(`All field(s) are searched for admin`, async () => {
 	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
-	applySearch(db as any, schema, queryBuilder, '1', 'test', {}, []);
+	applySearch(db as any, schema, queryBuilder, '1', 'test', {}, [], aliasFn);
 
 	const rawQuery = queryBuilder.toSQL();
 

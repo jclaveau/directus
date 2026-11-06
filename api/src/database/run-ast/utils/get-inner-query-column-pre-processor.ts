@@ -4,6 +4,7 @@ import type { FieldNode, FunctionFieldNode, M2ONode, O2MNode } from '../../../ty
 import type { AliasMap } from '../../../utils/get-column-path.js';
 import { applyCaseWhen } from './apply-case-when.js';
 import { getNodeAlias } from './get-field-alias.js';
+import type { AliasGenerator } from '../lib/apply-query/create-alias-generator.js';
 
 export function getInnerQueryColumnPreProcessor(
 	knex: Knex,
@@ -13,6 +14,7 @@ export function getInnerQueryColumnPreProcessor(
 	permissions: Permission[],
 	aliasMap: AliasMap,
 	aliasPrefix: string,
+	generateAlias: AliasGenerator,
 ) {
 	return function (fieldNode: FieldNode | FunctionFieldNode | M2ONode | O2MNode): Knex.Raw<string> | null {
 		const alias = getNodeAlias(fieldNode);
@@ -33,6 +35,7 @@ export function getInnerQueryColumnPreProcessor(
 					cases,
 					table,
 					permissions,
+					generateAlias,
 				},
 				{ knex, schema },
 			);

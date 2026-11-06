@@ -5,10 +5,12 @@ import { getCases } from '../../../../../permissions/modules/process-ast/lib/get
 import type { AliasMap } from '../../../../../utils/get-column-path.js';
 import { getColumnPath } from '../../../../../utils/get-column-path.js';
 import { getRelationInfo } from '../../../../../utils/get-relation-info.js';
+import { isEqual } from '../../../../../utils/lodash-es-used.js';
 import { getHelpers } from '../../../../helpers/index.js';
 import { addJoin } from '../add-join.js';
 import { getFilterPath } from '../get-filter-path.js';
 import { getOperation } from '../get-operation.js';
+import type { AliasGenerator } from '../create-alias-generator.js';
 import applyQuery from '../index.js';
 import { normalizeFilter } from '../normalize-filter.js';
 import { getFilterType } from './get-filter-type.js';
@@ -24,12 +26,19 @@ export function applyFilter(
 	aliasMap: AliasMap,
 	cases: Filter[],
 	permissions: Permission[],
+	generateAlias: AliasGenerator,
 ) {
 	const relations: Relation[] = schema.relations;
 	let hasJoins = false;
 	let hasMultiRelationalFilter = false;
 
 	const normalizedFilter = normalizeFilter(rootFilter);
+
+	// normalizeFilter copies every _or array, so the permission cases are told
+	// apart from a user filter by their content, not by identity
+	const normalizedCases = cases.map((caseFilter) => {
+		return normalizeFilter(caseFilter);
+	});
 
 	addJoins(rootQuery, normalizedFilter, collection);
 	addWhereClauses(knex, rootQuery, normalizedFilter, collection);
@@ -47,7 +56,7 @@ export function applyFilter(
 					// or the length of value is 1, ie. only the empty filter.
 					// If the length is more than one it means that some items (and fields) might now be available, so
 					// the joins are required for the case/when construction.
-					if (value !== cases || value.length === 1) {
+					if (!isEqual(value, normalizedCases) || value.length === 1) {
 						continue;
 					} else {
 						// Otherwise we can at least filter out all empty filters that would not add joins anyway
@@ -64,6 +73,12 @@ export function applyFilter(
 
 			const filterPath = getFilterPath(key, value);
 
+			// A _some/_none filter reads its relation through a subquery alone: a
+			// root join would repeat each parent once per related row
+			if (filterPath[1] === '_some' || filterPath[1] === '_none') {
+				continue;
+			}
+
 			if (
 				filterPath.length > 1 ||
 				(!(key.includes('(') && key.includes(')')) && schema.collections[collection]?.fields[key]?.type === 'alias')
@@ -75,6 +90,7 @@ export function applyFilter(
 					schema,
 					rootQuery,
 					aliasMap,
+					generateAlias,
 				});
 
 				if (!hasJoins) {
@@ -157,7 +173,16 @@ export function applyFilter(
 									.from(collection)
 									.whereNotNull(column);
 
-								applyQuery(knex, relation!.collection, subQueryKnex, { filter }, schema, cases, permissions);
+								applyQuery(
+									knex,
+									relation!.collection,
+									subQueryKnex,
+									{ filter },
+									schema,
+									cases,
+									permissions,
+									generateAlias,
+								);
 							};
 
 						const { cases: subCases } = getCases(relation!.collection, permissions, []);
@@ -206,7 +231,17 @@ export function applyFilter(
 
 				validateOperator(type, filterOperator, special);
 
-				applyOperator(knex, dbQuery, schema, columnPath, filterOperator, filterValue, logical, targetCollection);
+				applyOperator(
+					knex,
+					dbQuery,
+					schema,
+					columnPath,
+					filterOperator,
+					filterValue,
+					generateAlias,
+					logical,
+					targetCollection,
+				);
 			} else {
 				const { type, special } = getFilterType(schema.collections[collection]!.fields, filterPath[0]!, collection)!;
 
@@ -221,6 +256,7 @@ export function applyFilter(
 					`${aliasedCollection}.${filterPath[0]}`,
 					filterOperator,
 					filterValue,
+					generateAlias,
 					logical,
 					collection,
 				);

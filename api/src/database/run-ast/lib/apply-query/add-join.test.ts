@@ -2,14 +2,9 @@ import { SchemaBuilder } from '@directus/schema-builder';
 import knex from 'knex';
 import { expect, test, vi } from 'vitest';
 import { Client_SQLite3 } from './mock.js';
+import { addJoin } from './add-join.js';
 
-const aliasFn = vi.fn();
-
-vi.doMock('nanoid/non-secure', () => ({
-	customAlphabet: () => aliasFn,
-}));
-
-const { addJoin } = await import('./add-join.js');
+const aliasFn = vi.fn<() => string>();
 
 test('add join non existed relation', async () => {
 	const schema = new SchemaBuilder()
@@ -26,6 +21,7 @@ test('add join non existed relation', async () => {
 		aliasMap: {},
 		collection: 'articles',
 		knex: db,
+		generateAlias: aliasFn,
 		path: ['no_field'],
 		rootQuery: queryBuilder,
 		schema,
@@ -53,6 +49,7 @@ test('add join for m2o relation', async () => {
 		aliasMap: {},
 		collection: 'articles',
 		knex: db,
+		generateAlias: aliasFn,
 		path: ['author'],
 		rootQuery: queryBuilder,
 		schema,
@@ -80,6 +77,7 @@ test('add join for o2m relation', async () => {
 		aliasMap: {},
 		collection: 'articles',
 		knex: db,
+		generateAlias: aliasFn,
 		path: ['links'],
 		rootQuery: queryBuilder,
 		schema,
@@ -107,6 +105,7 @@ test('add join for a2o relation without collection scope', async () => {
 			aliasMap: {},
 			collection: 'articles',
 			knex: db,
+			generateAlias: aliasFn,
 			path: ['title_component'],
 			rootQuery: queryBuilder,
 			schema,
@@ -130,6 +129,7 @@ test('add join for a2o relation', async () => {
 		aliasMap: {},
 		collection: 'articles',
 		knex: db,
+		generateAlias: aliasFn,
 		path: ['title_component:images'],
 		rootQuery: queryBuilder,
 		schema,
@@ -165,6 +165,7 @@ test('add join for m2m relation', async () => {
 		aliasMap: {},
 		collection: 'articles',
 		knex: db,
+		generateAlias: aliasFn,
 		path: ['tags', 'tags_list_id'],
 		rootQuery: queryBuilder,
 		schema,
@@ -199,6 +200,7 @@ test('dont overwrite already aliased relations', async () => {
 		},
 		collection: 'articles',
 		knex: db,
+		generateAlias: aliasFn,
 		path: ['links'],
 		rootQuery: queryBuilder,
 		schema,

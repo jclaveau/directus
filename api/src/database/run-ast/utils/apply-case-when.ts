@@ -2,6 +2,7 @@ import type { Filter, Permission, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
 import { applyFilter } from '../lib/apply-query/filter/index.js';
 import type { AliasMap } from '../../../utils/get-column-path.js';
+import type { AliasGenerator } from '../lib/apply-query/create-alias-generator.js';
 
 export interface ApplyCaseWhenOptions {
 	column: Knex.Raw;
@@ -11,6 +12,8 @@ export interface ApplyCaseWhenOptions {
 	aliasMap: AliasMap;
 	alias?: string;
 	permissions: Permission[];
+	generateAlias: AliasGenerator;
+	readsCasesByKey?: boolean | undefined;
 }
 
 export interface ApplyCaseWhenContext {
@@ -19,12 +22,55 @@ export interface ApplyCaseWhenContext {
 }
 
 export function applyCaseWhen(
-	{ columnCases, table, aliasMap, cases, column, alias, permissions }: ApplyCaseWhenOptions,
+	{
+		columnCases,
+		table,
+		aliasMap,
+		cases,
+		column,
+		alias,
+		permissions,
+		generateAlias,
+		readsCasesByKey,
+	}: ApplyCaseWhenOptions,
 	{ knex, schema }: ApplyCaseWhenContext,
 ): Knex.Raw {
 	const caseQuery = knex.queryBuilder();
 
-	applyFilter(knex, schema, caseQuery, { _or: columnCases }, table, aliasMap, cases, permissions);
+	if (readsCasesByKey) {
+		// A case through an o2m joins one row per child, which the outer query
+		// must not see: the case reads the keys it matches, a parent keeping one
+		// row. Its own alias map, as each compile of this case makes its own joins
+		const keyColumn = `${table}.${schema.collections[table]!.primary}`;
+		const matchedKeys = knex.from(table).distinct(keyColumn);
+
+		applyFilter(
+			knex,
+			schema,
+			matchedKeys,
+			{ _or: columnCases },
+			table,
+			Object.create(null),
+			cases,
+			permissions,
+			generateAlias,
+		);
+
+		caseQuery.whereIn(keyColumn, matchedKeys);
+	}
+	else {
+		applyFilter(
+			knex,
+			schema,
+			caseQuery,
+			{ _or: columnCases },
+			table,
+			aliasMap,
+			cases,
+			permissions,
+			generateAlias,
+		);
+	}
 
 	const compiler = knex.client.queryCompiler(caseQuery);
 

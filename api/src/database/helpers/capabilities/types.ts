@@ -44,6 +44,15 @@ export class CapabilitiesHelper extends DatabaseHelper {
 	}
 
 	/**
+	 * Whether `SELECT … FOR UPDATE` locks the rows it reads until the
+	 * transaction ends. SQLite has no row locks: a transaction writing holds the
+	 * whole database.
+	 */
+	supportsRowLocks(): boolean {
+		return true;
+	}
+
+	/**
 	 * The field types a json batch row stores as a bound update value would.
 	 * Empty where `supportsJsonBatchUpdate` is false.
 	 */

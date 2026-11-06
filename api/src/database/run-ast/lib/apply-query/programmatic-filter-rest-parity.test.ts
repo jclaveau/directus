@@ -15,14 +15,9 @@ import { parseFilter } from '@directus/utils';
 import knex from 'knex';
 import { expect, test, vi } from 'vitest';
 import { Client_SQLite3 } from './mock.js';
+import { applyFilter } from './filter/index.js';
 
 const aliasFn = vi.fn(() => 'alias1');
-
-vi.doMock('nanoid/non-secure', () => {
-	return { customAlphabet: () => aliasFn };
-});
-
-const { applyFilter } = await import('./filter/index.js');
 
 const schema = new SchemaBuilder()
 	.collection('article', (c) => {
@@ -51,7 +46,19 @@ const schema = new SchemaBuilder()
 function sqlFor(filter: any) {
 	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
-	applyFilter(db, schema, queryBuilder, filter, 'article', {}, [], []);
+
+	applyFilter(
+		db,
+		schema,
+		queryBuilder,
+		filter,
+		'article',
+		{},
+		[],
+		[],
+		aliasFn,
+	);
+
 	const raw = queryBuilder.toSQL();
 	return `${raw.sql} -- ${JSON.stringify(raw.bindings)}`;
 }
