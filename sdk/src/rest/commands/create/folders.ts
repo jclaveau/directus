@@ -1,5 +1,9 @@
 import type { DirectusFolder } from '../../../schema/folder.js';
-import type { ApplyQueryFields, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import type { RestCommand } from '../../types.js';
 
 export type CreateFolderOutput<
@@ -17,7 +21,7 @@ export type CreateFolderOutput<
  * @returns Returns the folder object of the folder that was created.
  */
 export const createFolders =
-	<Schema, const TQuery extends Query<Schema, DirectusFolder<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusFolder<Schema>>>(
 		items: Partial<DirectusFolder<Schema>>[],
 		query?: TQuery,
 	): RestCommand<CreateFolderOutput<Schema, TQuery>[], Schema> =>
@@ -37,7 +41,7 @@ export const createFolders =
  * @returns Returns the folder object of the folder that was created.
  */
 export const createFolder =
-	<Schema, const TQuery extends Query<Schema, DirectusFolder<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusFolder<Schema>>>(
 		item: Partial<DirectusFolder<Schema>>,
 		query?: TQuery,
 	): RestCommand<CreateFolderOutput<Schema, TQuery>, Schema> =>

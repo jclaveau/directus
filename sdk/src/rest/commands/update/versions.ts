@@ -1,5 +1,10 @@
 import type { DirectusVersion } from '../../../schema/version.js';
-import type { ApplyQueryFields, NestedPartial, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	NestedPartial,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import type { RestCommand } from '../../types.js';
 import { throwIfEmpty } from '../../utils/index.js';
 
@@ -18,7 +23,7 @@ export type UpdateContentVersionOutput<
  * @throws Will throw if keys is empty
  */
 export const updateContentVersions =
-	<Schema, const TQuery extends Query<Schema, DirectusVersion<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusVersion<Schema>>>(
 		keys: DirectusVersion<Schema>['id'][],
 		item: Partial<DirectusVersion<Schema>>,
 		query?: TQuery,
@@ -41,7 +46,7 @@ export const updateContentVersions =
  * @returns Returns the Content Version objects for the updated Content Versions.
  */
 export const updateContentVersionsBatch =
-	<Schema, const TQuery extends Query<Schema, DirectusVersion<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusVersion<Schema>>>(
 		items: NestedPartial<DirectusVersion<Schema>>[],
 		query?: TQuery,
 	): RestCommand<UpdateContentVersionOutput<Schema, TQuery>[], Schema> =>
@@ -61,7 +66,7 @@ export const updateContentVersionsBatch =
  * @throws Will throw if key is empty
  */
 export const updateContentVersion =
-	<Schema, const TQuery extends Query<Schema, DirectusVersion<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusVersion<Schema>>>(
 		key: DirectusVersion<Schema>['id'],
 		item: Partial<DirectusVersion<Schema>>,
 		query?: TQuery,

@@ -1,5 +1,9 @@
 import type { DirectusComment } from '../../../schema/comment.js';
-import type { ApplyQueryFields, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import type { RestCommand } from '../../types.js';
 import { throwIfEmpty } from '../../utils/index.js';
 
@@ -18,7 +22,7 @@ export type UpdateCommentOutput<
  * @throws Will throw if keys is empty
  */
 export const updateComments =
-	<Schema, const TQuery extends Query<Schema, DirectusComment<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusComment<Schema>>>(
 		keysOrQuery: DirectusComment<Schema>['id'][] | Query<Schema, DirectusComment<Schema>>,
 		item: Partial<DirectusComment<Schema>>,
 		query?: TQuery,
@@ -53,7 +57,7 @@ export const updateComments =
  * @throws Will throw if key is empty
  */
 export const updateComment =
-	<Schema, const TQuery extends Query<Schema, DirectusComment<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusComment<Schema>>>(
 		key: DirectusComment<Schema>['id'],
 		item: Partial<DirectusComment<Schema>>,
 		query?: TQuery,

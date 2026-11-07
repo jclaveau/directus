@@ -759,6 +759,7 @@ export class PayloadService {
 				},
 				emitEvents: opts?.emitEvents,
 				mutationTracker: opts?.mutationTracker,
+				mutationBatching: opts?.mutationBatching,
 			},
 		);
 
@@ -804,6 +805,7 @@ export class PayloadService {
 			},
 			emitEvents: opts?.emitEvents,
 			mutationTracker: opts?.mutationTracker,
+			mutationBatching: opts?.mutationBatching,
 		};
 
 		const relations = this.schema.relations.filter((relation) => {
@@ -924,6 +926,7 @@ export class PayloadService {
 							opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
 						emitEvents: opts?.emitEvents,
 						mutationTracker: opts?.mutationTracker,
+						mutationBatching: opts?.mutationBatching,
 					});
 				}
 
@@ -948,6 +951,7 @@ export class PayloadService {
 								opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
 							emitEvents: opts?.emitEvents,
 							mutationTracker: opts?.mutationTracker,
+							mutationBatching: opts?.mutationBatching,
 						});
 					}
 				}
@@ -978,6 +982,7 @@ export class PayloadService {
 								opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
 							emitEvents: opts?.emitEvents,
 							mutationTracker: opts?.mutationTracker,
+							mutationBatching: opts?.mutationBatching,
 						});
 					} else {
 						await service.updateByQuery(
@@ -990,6 +995,7 @@ export class PayloadService {
 									opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
 								emitEvents: opts?.emitEvents,
 								mutationTracker: opts?.mutationTracker,
+								mutationBatching: opts?.mutationBatching,
 							},
 						);
 					}

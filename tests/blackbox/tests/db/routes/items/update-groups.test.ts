@@ -538,6 +538,7 @@ describe.each(vendors)('%s', (vendor) => {
 						{ $ref: '#/components/parameters/Filter' },
 						{ $ref: '#/components/parameters/Search' },
 						{ $ref: '#/components/parameters/OnRepeatedPk' },
+						{ $ref: '#/components/parameters/MutationBatching' },
 					]);
 			},
 		);

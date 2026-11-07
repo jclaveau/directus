@@ -5,6 +5,7 @@ import { respond } from '../middleware/respond.js';
 import useCollection from '../middleware/use-collection.js';
 import { SettingsService } from '../services/settings.js';
 import asyncHandler from '../utils/async-handler.js';
+import { mutationBatchingFromQuery } from '../utils/mutation-batching-from-query.js';
 
 const router = express.Router();
 
@@ -33,7 +34,9 @@ router.patch(
 			schema: req.schema,
 		});
 
-		await service.upsertSingleton(req.body);
+		await service.upsertSingleton(req.body, {
+			mutationBatching: mutationBatchingFromQuery(req.query),
+		});
 
 		try {
 			const record = await service.readSingleton(req.sanitizedQuery);

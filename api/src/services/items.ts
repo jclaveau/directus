@@ -61,6 +61,7 @@ import { processAst } from '../permissions/modules/process-ast/process-ast.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
+import { resolveMutationBatching } from '../utils/resolve-mutation-batching.js';
 import {
 	flushResponseCacheAfterCommit,
 	type ResponseCacheFlushDeferral,
@@ -480,8 +481,17 @@ implements AbstractService<Item> {
 			return [];
 		}
 
+		// a row written alone counts itself again
+		const untrackRows = opts.mutationTracker.snapshot();
+
 		if (!opts.bypassLimits) {
 			opts.mutationTracker.trackMutations(data.length);
+		}
+
+		if (resolveMutationBatching(opts) === 'disableBatching' && data.length > 1) {
+			untrackRows();
+
+			return await this.createRowByRow(data, opts, opts.mutationTracker);
 		}
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -1129,6 +1139,87 @@ implements AbstractService<Item> {
 	}
 
 	/**
+	 * `createMany` under `disableBatching`: one `createMany` per row, in one
+	 * transaction, each row with its own filter and insert. As before batching,
+	 * the actions fire once the transaction commits and the user count is checked
+	 * once. Each row takes `ItemsService`'s `createMany`: a subclass override
+	 * already ran for the whole batch, and its side effects (a notification's
+	 * email) would repeat.
+	 */
+	private async createRowByRow(
+		data: Partial<Item>[],
+		opts: MutationOptions,
+		mutationTracker: MutationTracker,
+	): Promise<(PrimaryKey | null)[]> {
+		// TODO(#610): a retried attempt keeps the events of the aborted one
+		const rowActionEvents: ActionEventParams[] = [];
+
+		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
+			?? createScopedCacheHookDeclarations(this.schema);
+
+		const createdKeys = await transaction(this.knex, async (trx) => {
+			const service = this.fork({ knex: trx });
+			const rowKeys: (PrimaryKey | null)[] = [];
+			let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
+
+			const rowOpts: MutationOptions = {
+				...opts,
+				scopedCacheHookDeclarations,
+				bypassEmitAction: (actionEvent) => {
+					rowActionEvents.push(actionEvent);
+				},
+				onRequireUserIntegrityCheck: (flags) => {
+					userIntegrityCheckFlags |= flags;
+				},
+			};
+
+			for (const row of data) {
+				const createRow = ItemsService.prototype.createMany;
+
+				for (const rowKey of await createRow.call(service, [row], rowOpts)) {
+					rowKeys.push(rowKey);
+				}
+			}
+
+			await this.checkUserIntegrityOnce(userIntegrityCheckFlags, trx, opts);
+
+			return rowKeys;
+		}, mutationTracker.snapshot()).catch(async (error) => {
+			await this.purgeRolledBackHookWrites(scopedCacheHookDeclarations, opts);
+
+			throw error;
+		});
+
+		await emitActionEvents(rowActionEvents, opts);
+
+		return createdKeys;
+	}
+
+	/**
+	 * Report the user-count flags a row-by-row write collected to the caller, or
+	 * validate them on its transaction when no caller collects them.
+	 */
+	private async checkUserIntegrityOnce(
+		userIntegrityCheckFlags: UserIntegrityCheckFlag,
+		trx: Knex,
+		opts: MutationOptions,
+	): Promise<void> {
+		if (!userIntegrityCheckFlags) {
+			return;
+		}
+
+		if (opts.onRequireUserIntegrityCheck) {
+			opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
+		}
+		else {
+			await validateUserCountIntegrity({
+				flags: userIntegrityCheckFlags,
+				knex: trx,
+			});
+		}
+	}
+
+	/**
 	 * Get items by query.
 	 */
 	async readByQuery(query: Query, opts?: QueryOptions): Promise<WithMeta<Item[]>> {
@@ -1711,6 +1802,9 @@ implements AbstractService<Item> {
 
 		const keyNameOf = (key: PrimaryKey) => this.primaryKeyNameOf(key);
 
+		// a group written alone counts its own rows again
+		const untrackInputKeys = mutationTracker.snapshot();
+
 		// Checked before any hook runs, so a malformed or oversized update never
 		// reaches one.
 		if (!opts.bypassLimits) {
@@ -1777,6 +1871,12 @@ implements AbstractService<Item> {
 
 			return { data: group.data, keys: uniqueKeys };
 		});
+
+		if (resolveMutationBatching(opts) === 'disableBatching' && groups.length > 1) {
+			untrackInputKeys();
+
+			return await this.updateGroupByGroup(groups, opts, mutationTracker);
+		}
 
 		const groupListRefusal = () => {
 			return new InvalidPayloadError({
@@ -2443,6 +2543,109 @@ implements AbstractService<Item> {
 		// body, so dropping a no-op row would omit an item the caller named from its
 		// own PATCH response.
 		return rowKeys;
+	}
+
+	/**
+	 * `updateGroups` under `disableBatching`: one `updateGroups` per group, in
+	 * one transaction, each group with its own filter, write and action, and the
+	 * user count checked once, as `updateBatch` did before batching. The actions
+	 * wait for the commit: none for a group rolled back, and a hook writing the row
+	 * through its own connection would wait on the row lock this transaction holds
+	 * while it awaits that hook. Each group takes `ItemsService`'s `updateGroups`,
+	 * for the reason `createRowByRow` gives.
+	 */
+	private async updateGroupByGroup(
+		groups: UpdateGroup<Item>[],
+		opts: DeferredPurgeOptions,
+		mutationTracker: MutationTracker,
+	): Promise<(PrimaryKey | null)[]> {
+		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
+			?? createScopedCacheHookDeclarations(this.schema);
+
+		const { rowKeys, groupEvents } = await transaction(this.knex, async (trx) => {
+			const service = this.fork({ knex: trx });
+			const rowKeys: (PrimaryKey | null)[] = [];
+			const groupEvents: ActionEventParams[] = [];
+			let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
+
+			const groupOpts: DeferredPurgeOptions = {
+				...opts,
+				scopedCacheHookDeclarations,
+				bypassEmitAction: (actionEvent) => {
+					groupEvents.push(actionEvent);
+				},
+				onRequireUserIntegrityCheck: (flags) => {
+					userIntegrityCheckFlags |= flags;
+				},
+			};
+
+			for (const group of groups) {
+				const updateGroup = ItemsService.prototype.updateGroups;
+
+				for (const rowKey of await updateGroup.call(service, [group], groupOpts)) {
+					rowKeys.push(rowKey);
+				}
+			}
+
+			await this.checkUserIntegrityOnce(userIntegrityCheckFlags, trx, opts);
+
+			return { rowKeys, groupEvents };
+		}, mutationTracker.snapshot()).catch(async (error) => {
+			await this.purgeRolledBackHookWrites(scopedCacheHookDeclarations, opts);
+
+			throw error;
+		});
+
+		await emitActionEvents(groupEvents, opts);
+
+		return rowKeys;
+	}
+
+	/**
+	 * Purge what the hooks of a row-by-row write wrote through a connection of their
+	 * own. The purge of each row that succeeded waits on the shared transaction, so
+	 * its rollback drops them, while those writes have landed.
+	 */
+	private async purgeRolledBackHookWrites(
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+		opts: MutationOptions,
+	): Promise<void> {
+		if (!shouldClearCache(this.cache, opts, this.collection)) {
+			return;
+		}
+
+		const takenOverKeys = this.changedTakenOverKeys(declarations);
+
+		if (this.knex.isTransaction) {
+			await this.purgeHookWrittenScopedCache(takenOverKeys, declarations, opts);
+		}
+		else {
+			await this.purgeCreatedScopedCache(
+				takenOverKeys,
+				takenOverKeys,
+				declarations,
+				0,
+				opts,
+			);
+		}
+	}
+
+	/**
+	 * The rows of this collection a hook took over, written by the hook itself;
+	 * one it declared inert wrote nothing.
+	 */
+	private changedTakenOverKeys(
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+	): PrimaryKey[] {
+		const takenOverPrefix = takenOverScopedCacheKey(this.collection, '');
+		const skippedKeyNames = this.purgeSkippedKeyNames(declarations);
+
+		return [...declarations.takenOverKeys]
+			.filter((takenOverName) => takenOverName.startsWith(takenOverPrefix))
+			.map((takenOverName) => takenOverName.slice(takenOverPrefix.length))
+			.filter((takenOverKey) => {
+				return !skippedKeyNames.has(this.primaryKeyNameOf(takenOverKey));
+			});
 	}
 
 	/**
@@ -3216,6 +3419,14 @@ implements AbstractService<Item> {
 		}
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const mutationBatching = resolveMutationBatching(opts);
+
+		// Written one at a time, each payload counts itself: checked here too, so
+		// an oversized upsert never reaches a hook.
+		if (mutationBatching === 'disableBatching' && !opts.bypassLimits) {
+			this.createMutationTracker(opts.mutationTracker.getCount())
+				.trackMutations(payloads.length);
+		}
 
 		// Old scope values for the update subset — any payload carrying an existing key. A
 		// pure-insert payload has no key (or points at no row yet), so it contributes nothing
@@ -3254,21 +3465,8 @@ implements AbstractService<Item> {
 			return this.primaryKeyNameOf(key);
 		}));
 
-		const takenOverPrefix = takenOverScopedCacheKey(this.collection, '');
-
-		// The rows of this collection a hook took over, written by the hook itself;
-		// one it declared inert wrote nothing.
 		const changedTakenOverKeys = (): PrimaryKey[] => {
-			const skippedKeyNames = this.purgeSkippedKeyNames(
-				scopedCacheHookDeclarations,
-			);
-
-			return [...scopedCacheHookDeclarations.takenOverKeys]
-				.filter((takenOverName) => takenOverName.startsWith(takenOverPrefix))
-				.map((takenOverName) => takenOverName.slice(takenOverPrefix.length))
-				.filter((takenOverKey) => {
-					return !skippedKeyNames.has(this.primaryKeyNameOf(takenOverKey));
-				});
+			return this.changedTakenOverKeys(scopedCacheHookDeclarations);
 		};
 
 		// An insert-shaped payload routes to createOne, where a filter hook can take
@@ -3315,7 +3513,12 @@ implements AbstractService<Item> {
 
 		// Per attempt, like the keys: sqlite and cockroach re-run the handler after a
 		// retryable error.
-		const { primaryKeys, hookAddedKeys, hookAddedSnapshots } = await transaction(
+		const {
+			primaryKeys,
+			hookAddedKeys,
+			hookAddedSnapshots,
+			payloadActionEvents,
+		} = await transaction(
 			this.knex,
 			async (knex) => {
 				const service = this.fork({ knex });
@@ -3323,11 +3526,18 @@ implements AbstractService<Item> {
 				const primaryKeys: PrimaryKey[] = [];
 				const hookAddedKeys: PrimaryKey[] = [];
 				const hookAddedSnapshots: ScopedCacheSnapshot[] = [];
+				const payloadActionEvents: ActionEventParams[] = [];
 				let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
 
 				const childOpts: DeferredPurgeOptions = {
 					...(opts || {}),
 					autoPurgeCache: false,
+					// held until the commit, for the reasons `updateGroupByGroup` gives
+					...(mutationBatching === 'disableBatching' && {
+						bypassEmitAction: (actionEvent: ActionEventParams) => {
+							payloadActionEvents.push(actionEvent);
+						},
+					}),
 					// upsertMany takes the rows its update hook adds (onHookAddedRows);
 					// upsertOne refuses them, like updateOne.
 					refuseHookAddedRows: opts.refuseHookAddedRows ?? false,
@@ -3349,7 +3559,11 @@ implements AbstractService<Item> {
 					},
 				};
 
-				for (const run of service.upsertRunsOf(payloads)) {
+				const upsertRuns = mutationBatching === 'disableBatching'
+					? payloads.map((payload) => [payload])
+					: service.upsertRunsOf(payloads);
+
+				for (const run of upsertRuns) {
 					const runOffset = primaryKeys.length;
 
 					const runOpts: DeferredPurgeOptions = {
@@ -3383,7 +3597,12 @@ implements AbstractService<Item> {
 					}
 				}
 
-				return { primaryKeys, hookAddedKeys, hookAddedSnapshots };
+				return {
+					primaryKeys,
+					hookAddedKeys,
+					hookAddedSnapshots,
+					payloadActionEvents,
+				};
 			},
 			opts.mutationTracker.snapshot(),
 		).catch(async (error) => {
@@ -3423,6 +3642,7 @@ implements AbstractService<Item> {
 		});
 
 		await flushDeferredResponseCache();
+		await emitActionEvents(payloadActionEvents, opts);
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			const takenOverKeys = changedTakenOverKeys();
@@ -3592,6 +3812,9 @@ implements AbstractService<Item> {
 	 * A unique value an update frees can go to a create of the same run:
 	 * `[{ id: 2, code: 'A' }, { id: 1, code: 'B' }]`, row 1 holding `'A'`,
 	 * writes both, where each payload in turn would refuse the create.
+	 * `preserveMutationOrder` writes the payloads in their order instead, each
+	 * row of consecutive updates or creates in one write, and emits the run's
+	 * actions once every write is done.
 	 */
 	protected async upsertRun(
 		upsertRun: Partial<Item>[],
@@ -3628,31 +3851,33 @@ implements AbstractService<Item> {
 			}
 		}
 
-		const updateGroups: UpdateGroup<Item>[] = [];
-		const createPayloads: Partial<Item>[] = [];
-		const upsertedKeys: PrimaryKey[] = [];
-		const updateIndexes: number[] = [];
-		const createIndexes: number[] = [];
+		const preservesOrder = resolveMutationBatching(opts) === 'preserveMutationOrder';
+
+		// Payload indexes written together: every update, then every create, unless
+		// the order is preserved
+		const upsertSegments: { updating: boolean; indexes: number[] }[] = preservesOrder
+			? []
+			: [{ updating: true, indexes: [] }, { updating: false, indexes: [] }];
 
 		for (const [index, payload] of upsertRun.entries()) {
 			const primaryKey: PrimaryKey | undefined = payload[primaryKeyField];
 
-			if (
-				!isMissingPrimaryKey(primaryKey)
-				&& existingKeyNames.has(this.primaryKeyNameOf(primaryKey))
-			) {
-				updateGroups.push({
-					data: omit(payload, primaryKeyField) as Partial<Item>,
-					keys: [primaryKey],
-				});
+			const updating = !isMissingPrimaryKey(primaryKey)
+				&& existingKeyNames.has(this.primaryKeyNameOf(primaryKey));
 
-				updateIndexes.push(index);
+			const upsertSegment = preservesOrder
+				? upsertSegments.at(-1)
+				: upsertSegments.find((segment) => segment.updating === updating);
+
+			if (upsertSegment?.updating === updating) {
+				upsertSegment.indexes.push(index);
 			}
 			else {
-				createPayloads.push(payload);
-				createIndexes.push(index);
+				upsertSegments.push({ updating, indexes: [index] });
 			}
 		}
+
+		const upsertedKeys: PrimaryKey[] = [];
 
 		// Held until the run returns its keys, the created ones included: a run
 		// holds each key once, so a key tells the payload its revision is of.
@@ -3667,21 +3892,46 @@ implements AbstractService<Item> {
 			}
 			: opts;
 
-		if (updateGroups.length > 0) {
-			// one key per group, so one answer per group: null where a filter cancelled it
-			const updatedKeys = await this.updateGroups(updateGroups, writeOpts);
+		const segmentActionEvents: ActionEventParams[] = [];
 
-			for (const [updateIndex, updatedKey] of updatedKeys.entries()) {
-				upsertedKeys[updateIndexes[updateIndex]!] = updatedKey;
+		const segmentOpts: DeferredPurgeOptions = preservesOrder
+			? {
+				...writeOpts,
+				bypassEmitAction: (actionEvent) => {
+					segmentActionEvents.push(actionEvent);
+				},
+			}
+			: writeOpts;
+
+		for (const { updating, indexes } of upsertSegments) {
+			if (indexes.length === 0) {
+				continue;
+			}
+
+			// one key per group, so one answer per group: null where a filter
+			// cancelled it
+			const segmentKeys = updating
+				? await this.updateGroups(
+					indexes.map((index) => {
+						return {
+							data: omit(upsertRun[index]!, primaryKeyField) as Partial<Item>,
+							keys: [upsertRun[index]![primaryKeyField] as PrimaryKey],
+						};
+					}),
+					segmentOpts,
+				)
+				: await this.createMany(
+					indexes.map((index) => upsertRun[index]!),
+					segmentOpts,
+				);
+
+			for (const [segmentIndex, segmentKey] of segmentKeys.entries()) {
+				upsertedKeys[indexes[segmentIndex]!] = segmentKey;
 			}
 		}
 
-		if (createPayloads.length > 0) {
-			const createdKeys = await this.createMany(createPayloads, writeOpts);
-
-			for (const [createIndex, createdKey] of createdKeys.entries()) {
-				upsertedKeys[createIndexes[createIndex]!] = createdKey;
-			}
+		if (preservesOrder) {
+			await emitActionEvents(segmentActionEvents, writeOpts);
 		}
 
 		if (opts.onRevisionCreate) {

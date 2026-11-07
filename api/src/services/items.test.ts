@@ -8,7 +8,11 @@ import {
 } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import {
+	type AbstractServiceOptions,
 	type CreateEntry,
+	type Item,
+	type MutationOptions,
+	type PrimaryKey,
 	type UpdateGroup,
 	UserIntegrityCheckFlag,
 } from '@directus/types';
@@ -5399,6 +5403,79 @@ describe('Services / Items / a failed mutation on the caller\'s transaction', ()
 	});
 
 	it(oneLine`
+		disableBatching purges the collection whole when a later row fails after a
+		hook took an earlier row over
+	`, async () => {
+		const takeOverFirst = (entries: (CreateEntry | null)[]) => {
+			return mapCreateRows(entries, (payload) => {
+				if (payload['name'] !== 'take-over') {
+					return payload;
+				}
+
+				return 1;
+			});
+		};
+
+		tracker.on.insert('test').simulateError('duplicate key');
+		emitter.onFilter('items.create', takeOverFirst);
+
+		try {
+			await expect(new ItemsService('test', { knex: db, schema }).createMany([
+				{ name: 'take-over' },
+				{ id: 1, name: 'copy' },
+			], { mutationBatching: 'disableBatching' })).rejects.toThrow(new Error(
+				`insert into "test" ("id", "name") values (1, 'copy') - duplicate key`,
+			));
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				null,
+				expect.anything(),
+				{ scopedCachePurgeId: expect.any(String) },
+			);
+		}
+		finally {
+			emitter.offFilter('items.create', takeOverFirst);
+		}
+	});
+
+	it(oneLine`
+		disableBatching purges the collection whole when a later group fails after a
+		hook took a row over in an earlier group
+	`, async () => {
+		const takeOverThird = (groups: UpdateGroup[]) => {
+			return groups[0]?.keys?.[0] === 1
+				? [...groups, { key: 3 }]
+				: groups;
+		};
+
+		tracker.on.update('test').responseOnce(1);
+		tracker.on.update('test').simulateError('write refused');
+		emitter.onFilter('items.update', takeOverThird);
+
+		try {
+			await expect(new ItemsService('test', { knex: db, schema }).updateBatch([
+				{ id: 1, name: 'uno' },
+				{ id: 2, name: 'dos' },
+			], { mutationBatching: 'disableBatching' })).rejects.toThrow(new Error(
+				`update "test" set "name" = 'dos' where "id" in (2) - write refused`,
+			));
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				null,
+				expect.anything(),
+				{ scopedCachePurgeId: expect.any(String) },
+			);
+		}
+		finally {
+			emitter.offFilter('items.update', takeOverThird);
+		}
+	});
+
+	it(oneLine`
 		purges nothing when a failed create's only takeover was declared inert
 	`, async () => {
 		const takeOverInert = (
@@ -7906,5 +7983,611 @@ describe('upsertMany on postgres', () => {
 			sql: 'select "id" from "posts" where "id" in ($1, $2) for update',
 			bindings: [1, 2],
 		});
+	});
+});
+
+describe('Services / Items / mutationBatching', () => {
+	let database: Knex;
+	let sqlStatements: string[];
+	let hookCalls: unknown[];
+
+	const recordCreateFilter = (entries: CreateEntry[]) => {
+		hookCalls.push(['create filter', entries]);
+
+		return entries;
+	};
+
+	const recordUpdateFilter = (groups: UpdateGroup[]) => {
+		hookCalls.push(['update filter', groups]);
+
+		return groups;
+	};
+
+	const recordCreateAction = (meta: Record<string, unknown>) => {
+		hookCalls.push(['create action', meta['keys']]);
+	};
+
+	const recordUpdateAction = (meta: Record<string, unknown>) => {
+		hookCalls.push(['update action', meta['payload']]);
+	};
+
+	// the nested write loads PayloadService's lazy `get-service.js` graph
+	beforeAll(async () => {
+		await import('../utils/get-service.js');
+	}, 120_000);
+
+	beforeEach(async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+		database = knex.default({
+			client: 'sqlite3',
+			connection: { filename: ':memory:' },
+			useNullAsDefault: true,
+			pool: { min: 1, max: 1 },
+		});
+
+		await database.schema.createTable('test', (table) => {
+			table.increments('id');
+			table.string('name').unique();
+		});
+
+		await database('test').insert([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+
+		sqlStatements = [];
+		hookCalls = [];
+
+		database.on('query', (query: { sql: string }) => {
+			sqlStatements.push(query.sql);
+		});
+
+		emitter.onFilter('test.items.create', recordCreateFilter);
+		emitter.onFilter('test.items.update', recordUpdateFilter);
+		emitter.onAction('test.items.create', recordCreateAction);
+		emitter.onAction('test.items.update', recordUpdateAction);
+	});
+
+	afterEach(async () => {
+		emitter.offFilter('test.items.create', recordCreateFilter);
+		emitter.offFilter('test.items.update', recordUpdateFilter);
+		emitter.offAction('test.items.create', recordCreateAction);
+		emitter.offAction('test.items.update', recordUpdateAction);
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+		await database.destroy();
+	});
+
+	it('minimizeMutations writes every update, then every create', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.upsertMany([
+			{ id: 1, name: 'uno' },
+			{ id: 3, name: 'three' },
+			{ id: 2, name: 'dos' },
+			{ id: 4, name: 'four' },
+		], { mutationBatching: 'minimizeMutations' }))
+			.resolves.toStrictEqual([1, 3, 2, 4]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `test` where `id` in (?, ?, ?, ?)',
+			'update `test` set `name` = ? where `id` in (?)',
+			'update `test` set `name` = ? where `id` in (?)',
+			'select sqlite_version() as version limit ?',
+			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
+			'insert into `test` (`id`, `name`) select ? as `id`, ? as `name` '
+			+ 'union all select ? as `id`, ? as `name` returning `id`',
+			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
+			'COMMIT;',
+		]);
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [
+				{ data: { name: 'uno' }, keys: [1] },
+				{ data: { name: 'dos' }, keys: [2] },
+			]],
+			['update action', [
+				{ data: { name: 'uno' }, keys: [1] },
+				{ data: { name: 'dos' }, keys: [2] },
+			]],
+			['create filter', [
+				{ data: { id: 3, name: 'three' } },
+				{ data: { id: 4, name: 'four' } },
+			]],
+			['create action', [3, 4]],
+		]);
+	});
+
+	it('preserveMutationOrder writes in payload order, actions last', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.upsertMany([
+			{ id: 1, name: 'uno' },
+			{ id: 3, name: 'three' },
+			{ id: 2, name: 'dos' },
+			{ id: 4, name: 'four' },
+		], { mutationBatching: 'preserveMutationOrder' }))
+			.resolves.toStrictEqual([1, 3, 2, 4]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `test` where `id` in (?, ?, ?, ?)',
+			'update `test` set `name` = ? where `id` in (?)',
+			'insert into `test` (`id`, `name`) values (?, ?) returning `id`',
+			'update `test` set `name` = ? where `id` in (?)',
+			'insert into `test` (`id`, `name`) values (?, ?) returning `id`',
+			'COMMIT;',
+		]);
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
+			['create filter', [{ data: { id: 3, name: 'three' } }]],
+			['update filter', [{ data: { name: 'dos' }, keys: [2] }]],
+			['create filter', [{ data: { id: 4, name: 'four' } }]],
+			['update action', [{ data: { name: 'uno' }, keys: [1] }]],
+			['create action', [3]],
+			['update action', [{ data: { name: 'dos' }, keys: [2] }]],
+			['create action', [4]],
+		]);
+	});
+
+	it('preserveMutationOrder writes same-kind neighbours together', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.upsertMany([
+			{ id: 1, name: 'uno' },
+			{ id: 2, name: 'dos' },
+			{ id: 3, name: 'three' },
+		], { mutationBatching: 'preserveMutationOrder' }))
+			.resolves.toStrictEqual([1, 2, 3]);
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [
+				{ data: { name: 'uno' }, keys: [1] },
+				{ data: { name: 'dos' }, keys: [2] },
+			]],
+			['create filter', [{ data: { id: 3, name: 'three' } }]],
+			['update action', [
+				{ data: { name: 'uno' }, keys: [1] },
+				{ data: { name: 'dos' }, keys: [2] },
+			]],
+			['create action', [3]],
+		]);
+	});
+
+	it('disableBatching upserts one payload at a time, hooks included', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.upsertMany([
+			{ id: 1, name: 'uno' },
+			{ id: 3, name: 'three' },
+			{ id: 2, name: 'dos' },
+			{ id: 4, name: 'four' },
+		], { mutationBatching: 'disableBatching' }))
+			.resolves.toStrictEqual([1, 3, 2, 4]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `test` where `id` in (?)',
+			'update `test` set `name` = ? where `id` in (?)',
+			'select `id` from `test` where `id` in (?)',
+			'insert into `test` (`id`, `name`) values (?, ?) returning `id`',
+			'select `id` from `test` where `id` in (?)',
+			'update `test` set `name` = ? where `id` in (?)',
+			'select `id` from `test` where `id` in (?)',
+			'insert into `test` (`id`, `name`) values (?, ?) returning `id`',
+			'COMMIT;',
+		]);
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
+			['create filter', [{ data: { id: 3, name: 'three' } }]],
+			['update filter', [{ data: { name: 'dos' }, keys: [2] }]],
+			['create filter', [{ data: { id: 4, name: 'four' } }]],
+			['update action', [{ data: { name: 'uno' }, keys: [1] }]],
+			['create action', [3]],
+			['update action', [{ data: { name: 'dos' }, keys: [2] }]],
+			['create action', [4]],
+		]);
+	});
+
+	it('minimizeMutations frees a unique value before creating it', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.upsertMany([
+			{ id: 3, name: 'one' },
+			{ id: 1, name: 'uno' },
+		], { mutationBatching: 'minimizeMutations' }))
+			.resolves.toStrictEqual([3, 1]);
+
+		await expect(database('test').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'uno' },
+			{ id: 2, name: 'two' },
+			{ id: 3, name: 'one' },
+		]);
+	});
+
+	it.each(['preserveMutationOrder', 'disableBatching'] as const)(
+		'%s refuses a create taking a unique value a later update frees',
+		async (mutationBatching) => {
+			const service = new ItemsService('test', { knex: database, schema });
+
+			await expect(service.upsertMany([
+				{ id: 3, name: 'one' },
+				{ id: 1, name: 'uno' },
+			], { mutationBatching })).rejects.toStrictEqual(new RecordNotUniqueError({
+				collection: 'test',
+				field: 'name',
+				value: 'one',
+			}));
+
+			await expect(database('test').orderBy('id')).resolves.toStrictEqual([
+				{ id: 1, name: 'one' },
+				{ id: 2, name: 'two' },
+			]);
+		},
+	);
+
+	it('passes preserveMutationOrder down to a nested O2M upsert', async () => {
+		await database.schema.createTable('children', (table) => {
+			table.increments('id');
+			table.string('name').unique();
+			table.integer('parent_id');
+		});
+
+		await database('children').insert({ id: 6, name: 'six', parent_id: 1 });
+
+		await expect(new ItemsService('test', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('test', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('children').o2m('children', 'parent_id');
+				})
+				.collection('children', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('parent_id').m2o('test');
+				})
+				.build(),
+		})
+			.updateOne(1, {
+				children: [{ id: 9, name: 'six' }, { id: 6, name: 'sixty' }],
+			}, { mutationBatching: 'preserveMutationOrder' }))
+			.rejects.toStrictEqual(new RecordNotUniqueError({
+				collection: 'children',
+				field: 'name',
+				value: 'six',
+			}));
+
+		await expect(database('children')).resolves.toStrictEqual([
+			{ id: 6, name: 'six', parent_id: 1 },
+		]);
+	});
+
+	it('disableBatching creates one row at a time', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.createMany([
+			{ id: 3, name: 'three' },
+			{ id: 4, name: 'four' },
+		], { mutationBatching: 'disableBatching' }))
+			.resolves.toStrictEqual([3, 4]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'insert into `test` (`id`, `name`) values (?, ?) returning `id`',
+			'insert into `test` (`id`, `name`) values (?, ?) returning `id`',
+			'COMMIT;',
+		]);
+
+		expect(hookCalls).toStrictEqual([
+			['create filter', [{ data: { id: 3, name: 'three' } }]],
+			['create filter', [{ data: { id: 4, name: 'four' } }]],
+			['create action', [3]],
+			['create action', [4]],
+		]);
+	});
+
+	it('disableBatching fires no create action for a rolled-back row', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.createMany([
+			{ id: 3, name: 'three' },
+			{ id: 4, name: 'one' },
+		], { mutationBatching: 'disableBatching' }))
+			.rejects.toStrictEqual(new RecordNotUniqueError({
+				collection: 'test',
+				field: 'name',
+				value: 'one',
+			}));
+
+		expect(hookCalls).toStrictEqual([
+			['create filter', [{ data: { id: 3, name: 'three' } }]],
+			['create filter', [{ data: { id: 4, name: 'one' } }]],
+		]);
+	});
+
+	it('disableBatching fires no action of a rolled-back group', async () => {
+		await expect(new ItemsService('test', { knex: database, schema }).updateBatch([
+			{ id: 1, name: 'uno' },
+			{ id: 2, name: 'uno' },
+		], { mutationBatching: 'disableBatching' }))
+			.rejects.toStrictEqual(new RecordNotUniqueError({
+				collection: 'test',
+				field: 'name',
+				value: 'uno',
+			}));
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
+			['update filter', [{ data: { name: 'uno' }, keys: [2] }]],
+		]);
+	});
+
+	it('disableBatching fires no action of a rolled-back payload', async () => {
+		await expect(new ItemsService('test', { knex: database, schema }).upsertMany([
+			{ id: 10, name: 'ten' },
+			{ id: 11, name: 'one' },
+		], { mutationBatching: 'disableBatching' }))
+			.rejects.toStrictEqual(new RecordNotUniqueError({
+				collection: 'test',
+				field: 'name',
+				value: 'one',
+			}));
+
+		expect(hookCalls).toStrictEqual([
+			['create filter', [{ data: { id: 10, name: 'ten' } }]],
+			['create filter', [{ data: { id: 11, name: 'one' } }]],
+		]);
+	});
+
+	it('disableBatching refuses an oversized createMany before any hook', async () => {
+		env['MAX_BATCH_MUTATION'] = 2;
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema }).createMany([
+				{ id: 3, name: 'three' },
+				{ id: 4, name: 'four' },
+				{ id: 5, name: 'five' },
+			], { mutationBatching: 'disableBatching' }))
+				.rejects.toStrictEqual(new InvalidPayloadError({
+					reason: 'Exceeded max batch mutation limit of 2',
+				}));
+
+			expect(hookCalls).toStrictEqual([]);
+		}
+		finally {
+			env['MAX_BATCH_MUTATION'] = 100000;
+		}
+	});
+
+	it('disableBatching refuses an oversized upsertMany before any hook', async () => {
+		env['MAX_BATCH_MUTATION'] = 2;
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema }).upsertMany([
+				{ id: 3, name: 'three' },
+				{ id: 4, name: 'four' },
+				{ id: 5, name: 'five' },
+			], { mutationBatching: 'disableBatching' }))
+				.rejects.toStrictEqual(new InvalidPayloadError({
+					reason: 'Exceeded max batch mutation limit of 2',
+				}));
+
+			expect(hookCalls).toStrictEqual([]);
+		}
+		finally {
+			env['MAX_BATCH_MUTATION'] = 100000;
+		}
+	});
+
+	it('disableBatching runs a subclass createMany once', async () => {
+		const overrideCalls: unknown[] = [];
+
+		class RecordingService extends ItemsService {
+			constructor(options: AbstractServiceOptions) {
+				super('test', options);
+			}
+
+			override async createMany(
+				data: Partial<Item>[],
+				opts?: MutationOptions,
+			): Promise<PrimaryKey[]> {
+				overrideCalls.push(data);
+
+				return await super.createMany(data, opts);
+			}
+		}
+
+		await expect(new RecordingService({ knex: database, schema })
+			.createMany([
+				{ id: 3, name: 'three' },
+				{ id: 4, name: 'four' },
+			], { mutationBatching: 'disableBatching' }))
+			.resolves.toStrictEqual([3, 4]);
+
+		expect(overrideCalls).toStrictEqual([
+			[{ id: 3, name: 'three' }, { id: 4, name: 'four' }],
+		]);
+	});
+
+	it('disableBatching runs a subclass updateGroups once', async () => {
+		const overrideCalls: unknown[] = [];
+
+		class RecordingService extends ItemsService {
+			constructor(options: AbstractServiceOptions) {
+				super('test', options);
+			}
+
+			override async updateGroups(
+				groups: UpdateGroup<Item>[],
+				opts?: MutationOptions,
+			): Promise<PrimaryKey[]> {
+				overrideCalls.push(groups);
+
+				return await super.updateGroups(groups, opts);
+			}
+		}
+
+		await expect(new RecordingService({ knex: database, schema })
+			.updateBatch([
+				{ id: 1, name: 'uno' },
+				{ id: 2, name: 'dos' },
+			], { mutationBatching: 'disableBatching' }))
+			.resolves.toStrictEqual([1, 2]);
+
+		expect(overrideCalls).toStrictEqual([[
+			{ data: { name: 'uno' }, keys: [1] },
+			{ data: { name: 'dos' }, keys: [2] },
+		]]);
+	});
+
+	it('disableBatching checks the user count once per createMany', async () => {
+		vi.mocked(validateUserCountIntegrity).mockClear();
+
+		await new ItemsService('test', { knex: database, schema }).createMany([
+			{ id: 3, name: 'three' },
+			{ id: 4, name: 'four' },
+		], {
+			mutationBatching: 'disableBatching',
+			userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+		});
+
+		expect(validateUserCountIntegrity).toHaveBeenCalledTimes(1);
+	});
+
+	it('disableBatching checks the user count once per updateBatch', async () => {
+		vi.mocked(validateUserCountIntegrity).mockClear();
+
+		await new ItemsService('test', { knex: database, schema }).updateBatch([
+			{ id: 1, name: 'uno' },
+			{ id: 2, name: 'dos' },
+		], {
+			mutationBatching: 'disableBatching',
+			userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+		});
+
+		expect(validateUserCountIntegrity).toHaveBeenCalledTimes(1);
+	});
+
+	it('disableBatching defers the user check on createMany', async () => {
+		vi.mocked(validateUserCountIntegrity).mockClear();
+
+		const onRequireUserIntegrityCheck = vi.fn();
+
+		await new ItemsService('test', { knex: database, schema }).createMany([
+			{ id: 3, name: 'three' },
+			{ id: 4, name: 'four' },
+		], {
+			mutationBatching: 'disableBatching',
+			userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+			onRequireUserIntegrityCheck,
+		});
+
+		expect(onRequireUserIntegrityCheck).toHaveBeenCalledTimes(1);
+
+		expect(onRequireUserIntegrityCheck).toHaveBeenCalledWith(
+			UserIntegrityCheckFlag.All,
+		);
+
+		expect(validateUserCountIntegrity).not.toHaveBeenCalled();
+	});
+
+	it('disableBatching defers the user check on updateBatch', async () => {
+		vi.mocked(validateUserCountIntegrity).mockClear();
+
+		const onRequireUserIntegrityCheck = vi.fn();
+
+		await new ItemsService('test', { knex: database, schema }).updateBatch([
+			{ id: 1, name: 'uno' },
+			{ id: 2, name: 'dos' },
+		], {
+			mutationBatching: 'disableBatching',
+			userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+			onRequireUserIntegrityCheck,
+		});
+
+		expect(onRequireUserIntegrityCheck).toHaveBeenCalledTimes(1);
+
+		expect(onRequireUserIntegrityCheck).toHaveBeenCalledWith(
+			UserIntegrityCheckFlag.All,
+		);
+
+		expect(validateUserCountIntegrity).not.toHaveBeenCalled();
+	});
+
+	it('disableBatching updates one group at a time', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.updateBatch([
+			{ id: 1, name: 'uno' },
+			{ id: 2, name: 'dos' },
+		], { mutationBatching: 'disableBatching' }))
+			.resolves.toStrictEqual([1, 2]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'update `test` set `name` = ? where `id` in (?)',
+			'update `test` set `name` = ? where `id` in (?)',
+			'COMMIT;',
+		]);
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
+			['update filter', [{ data: { name: 'dos' }, keys: [2] }]],
+			['update action', [{ data: { name: 'uno' }, keys: [1] }]],
+			['update action', [{ data: { name: 'dos' }, keys: [2] }]],
+		]);
+	});
+
+	it('no refuseChildJoiningSeveralRows under disableBatching: create', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.createMany([{ id: 3, name: 'three' }], {
+			mutationBatching: 'disableBatching',
+			refuseChildJoiningSeveralRows: true,
+		})).rejects.toStrictEqual(new Error(
+			'"refuseChildJoiningSeveralRows" cannot run under disableBatching '
+			+ '(from "mutationBatching")',
+		));
+
+		expect(sqlStatements).toStrictEqual([]);
+		expect(hookCalls).toStrictEqual([]);
+	});
+
+	it('no refuseChildJoiningSeveralRows under disableBatching: update', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.updateBatch([{ id: 1, name: 'uno' }], {
+			mutationBatching: 'disableBatching',
+			refuseChildJoiningSeveralRows: true,
+		})).rejects.toStrictEqual(new Error(
+			'"refuseChildJoiningSeveralRows" cannot run under disableBatching '
+			+ '(from "mutationBatching")',
+		));
+
+		expect(sqlStatements).toStrictEqual([]);
+		expect(hookCalls).toStrictEqual([]);
+	});
+
+	it('no refuseChildJoiningSeveralRows under disableBatching: upsert', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.upsertMany([
+			{ id: 1, name: 'uno' },
+			{ id: 3, name: 'three' },
+		], {
+			mutationBatching: 'disableBatching',
+			refuseChildJoiningSeveralRows: true,
+		})).rejects.toStrictEqual(new Error(
+			'"refuseChildJoiningSeveralRows" cannot run under disableBatching '
+			+ '(from "mutationBatching")',
+		));
+
+		expect(sqlStatements).toStrictEqual([]);
+		expect(hookCalls).toStrictEqual([]);
 	});
 });

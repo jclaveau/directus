@@ -1,5 +1,9 @@
 import type { DirectusShare } from '../../../schema/share.js';
-import type { ApplyQueryFields, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import type { RestCommand } from '../../types.js';
 
 export type CreateShareOutput<
@@ -17,7 +21,7 @@ export type CreateShareOutput<
  * @returns Returns the share objects for the created shares.
  */
 export const createShares =
-	<Schema, const TQuery extends Query<Schema, DirectusShare<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusShare<Schema>>>(
 		items: Partial<DirectusShare<Schema>>[],
 		query?: TQuery,
 	): RestCommand<CreateShareOutput<Schema, TQuery>[], Schema> =>
@@ -37,7 +41,7 @@ export const createShares =
  * @returns Returns the share object for the created share.
  */
 export const createShare =
-	<Schema, const TQuery extends Query<Schema, DirectusShare<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusShare<Schema>>>(
 		item: Partial<DirectusShare<Schema>>,
 		query?: TQuery,
 	): RestCommand<CreateShareOutput<Schema, TQuery>, Schema> =>

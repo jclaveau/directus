@@ -26,6 +26,8 @@ patch:
   summary: Update Current User
   description: Update the currently authenticated user.
   operationId: updateMe
+  parameters:
+    - $ref: '../../openapi.yaml#/components/parameters/MutationBatching'
   responses:
     '200':
       description: Successful request

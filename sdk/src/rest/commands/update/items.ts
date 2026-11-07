@@ -2,6 +2,7 @@ import type {
 	ApplyQueryFields,
 	CollectionType,
 	Query,
+	QueryMutation,
 	QueryUpdate,
 	UnpackList,
 } from '../../../types/index.js';
@@ -111,7 +112,7 @@ export const updateItem =
 	<
 		Schema,
 		Collection extends keyof Schema,
-		const TQuery extends Query<Schema, Schema[Collection]>,
+		const TQuery extends QueryMutation<Schema, Schema[Collection]>,
 		Item = UnpackList<Schema[Collection]>,
 	>(
 		collection: Collection,
