@@ -30,6 +30,11 @@ const schema = new SchemaBuilder()
 	.collection('test', (c) => {
 		c.field('id').id();
 		c.field('name').string();
+		c.field('author').m2o('authors');
+	})
+	.collection('authors', (c) => {
+		c.field('id').id();
+		c.field('name').string();
 	})
 	.collection('directus_activity', (c) => {
 		c.field('id').id();
@@ -53,6 +58,7 @@ const schema = new SchemaBuilder()
 	.build();
 
 schema.collections['test']!.accountability = 'all';
+schema.collections['authors']!.accountability = 'all';
 schema.collections['directus_activity']!.accountability = null;
 schema.collections['directus_revisions']!.accountability = null;
 
@@ -79,6 +85,10 @@ describe('Services / Items / activity and revision actions', () => {
 		writeLog.push('revision action');
 	};
 
+	const recordRevisionParentAction = () => {
+		writeLog.push('revision parent action');
+	};
+
 	beforeAll(async () => {
 		await import('../utils/get-service.js');
 	}, 120_000);
@@ -94,6 +104,12 @@ describe('Services / Items / activity and revision actions', () => {
 		await database.schema.createTable('test', (table) => {
 			table.increments('id');
 			table.string('name').notNullable();
+			table.integer('author');
+		});
+
+		await database.schema.createTable('authors', (table) => {
+			table.increments('id');
+			table.string('name');
 		});
 
 		await database.schema.createTable('directus_activity', (table) => {
@@ -122,16 +138,19 @@ describe('Services / Items / activity and revision actions', () => {
 		writeLog = [];
 
 		database.on('query', (query: { sql: string }) => {
-			writeLog.push(query.sql);
+			// up to the column list: which statement ran is what these tests read
+			writeLog.push(query.sql.split(' (', 1)[0]!);
 		});
 
 		emitter.onAction('activity.create', recordActivityAction);
 		emitter.onAction('revisions.create', recordRevisionAction);
+		emitter.onAction('revisions.update', recordRevisionParentAction);
 	});
 
 	afterEach(async () => {
 		emitter.offAction('activity.create', recordActivityAction);
 		emitter.offAction('revisions.create', recordRevisionAction);
+		emitter.offAction('revisions.update', recordRevisionParentAction);
 		await database.destroy();
 	});
 
@@ -145,11 +164,23 @@ describe('Services / Items / activity and revision actions', () => {
 		await expect(service.upsertMany([
 			{ id: 1, name: 'uno' },
 			{ id: 1, name: null },
-		])).rejects.toMatchObject({ code: 'NOT_NULL_VIOLATION' });
+		])).rejects.toThrow(
+			'Value for field "name" in collection "test" can\'t be null.',
+		);
+
+		expect(writeLog).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `test` where `id` in',
+			'update `test` set `name` = ? where `id` in',
+			'insert into `directus_activity`',
+			'select `test`.`id`, `test`.`name`, `test`.`author` from `test` where',
+			'insert into `directus_revisions`',
+			'select `id` from `test` where `id` in',
+			'update `test` set `name` = ? where `id` in',
+			'ROLLBACK',
+		]);
 
 		await expect(database('directus_activity')).resolves.toStrictEqual([]);
-		expect(writeLog).not.toContain('activity action');
-		expect(writeLog).not.toContain('revision action');
 	});
 
 	it('fires both actions of a create after its commit', async () => {
@@ -161,7 +192,11 @@ describe('Services / Items / activity and revision actions', () => {
 
 		await service.createOne({ id: 2, name: 'two' });
 
-		expect(writeLog.slice(-3)).toStrictEqual([
+		expect(writeLog).toStrictEqual([
+			'BEGIN;',
+			'insert into `test`',
+			'insert into `directus_activity`',
+			'insert into `directus_revisions`',
 			'COMMIT;',
 			'activity action',
 			'revision action',
@@ -177,7 +212,12 @@ describe('Services / Items / activity and revision actions', () => {
 
 		await service.updateOne(1, { name: 'uno' });
 
-		expect(writeLog.slice(-3)).toStrictEqual([
+		expect(writeLog).toStrictEqual([
+			'BEGIN;',
+			'update `test` set `name` = ? where `id` in',
+			'insert into `directus_activity`',
+			'select `test`.`id`, `test`.`name`, `test`.`author` from `test` where',
+			'insert into `directus_revisions`',
 			'COMMIT;',
 			'activity action',
 			'revision action',
@@ -193,9 +233,90 @@ describe('Services / Items / activity and revision actions', () => {
 
 		await service.deleteOne(1);
 
-		expect(writeLog.slice(-2)).toStrictEqual([
+		expect(writeLog).toStrictEqual([
+			'BEGIN;',
+			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
+			'delete from `test` where `id` in',
+			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
+			'insert into `directus_activity`',
 			'COMMIT;',
 			'activity action',
+		]);
+	});
+
+	it('fires no action of a create whose revision write rolled it back', async () => {
+		await database.schema.dropTable('directus_revisions');
+
+		await expect(new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: admin,
+		}).createOne({ id: 2, name: 'two' })).rejects.toThrow(
+			'insert into `directus_revisions` '
+			+ '(`activity`, `collection`, `data`, `delta`, `item`) values '
+			+ '(1, \'test\', \'{"id":2,"name":"two"}\', '
+			+ '\'{"id":2,"name":"two"}\', 2) returning `id` - '
+			+ 'SQLITE_ERROR: no such table: directus_revisions',
+		);
+
+		expect(writeLog).toStrictEqual([
+			'drop table `directus_revisions`',
+			'BEGIN;',
+			'insert into `test`',
+			'insert into `directus_activity`',
+			'insert into `directus_revisions`',
+			'ROLLBACK',
+		]);
+	});
+
+	it('fires the actions of a nested create after its commit', async () => {
+		await new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: admin,
+		}).createOne({ id: 2, name: 'two', author: { name: 'ann' } });
+
+		expect(writeLog).toStrictEqual([
+			'BEGIN;',
+			'insert into `authors`',
+			'insert into `directus_activity`',
+			'insert into `directus_revisions`',
+			'insert into `test`',
+			'insert into `directus_activity`',
+			'insert into `directus_revisions`',
+			'update `directus_revisions` set `parent` = ? where `id` in',
+			'COMMIT;',
+			'activity action',
+			'revision action',
+			'activity action',
+			'revision action',
+			'revision parent action',
+		]);
+	});
+
+	it('fires the actions of a nested update after its commit', async () => {
+		await new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: admin,
+		}).updateOne(1, { author: { name: 'ann' } });
+
+		expect(writeLog).toStrictEqual([
+			'BEGIN;',
+			'insert into `authors`',
+			'insert into `directus_activity`',
+			'insert into `directus_revisions`',
+			'update `test` set `author` = ? where `id` in',
+			'insert into `directus_activity`',
+			'select `test`.`id`, `test`.`name`, `test`.`author` from `test` where',
+			'insert into `directus_revisions`',
+			'update `directus_revisions` set `parent` = ? where `id` in',
+			'COMMIT;',
+			'activity action',
+			'revision action',
+			'activity action',
+			'revision action',
+			'revision parent action',
 		]);
 	});
 });

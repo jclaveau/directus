@@ -123,6 +123,22 @@ describe('Services / Fields / createField actions', () => {
 			{ autoPurgeSystemCache: false },
 		);
 
-		expect(emitAction).toHaveBeenCalledTimes(1);
+		expect(emitAction).toHaveBeenCalledExactlyOnceWith(
+			'fields.create',
+			{
+				payload: {
+					field: 'alias_field',
+					type: 'alias',
+					meta: { special: ['no-data'] },
+				},
+				key: 'alias_field',
+				collection: 'test',
+			},
+			{
+				database: undefined,
+				schema: undefined,
+				accountability: null,
+			},
+		);
 	});
 });

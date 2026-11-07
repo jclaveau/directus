@@ -8169,7 +8169,13 @@ describe('Services / Items / mutationBatching', () => {
 			emitter.offFilter('test.items.create', busyOnSecondRow);
 		}
 
-		expect(hookCalls.slice(-3)).toStrictEqual([
+		expect(hookCalls).toStrictEqual([
+			['create filter', [{ data: { id: 3, name: 'three' } }]],
+			['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
+			['create filter', [{ data: { id: 4, name: 'four' } }]],
+			['create filter', [{ data: { id: 3, name: 'three' } }]],
+			['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
+			['create filter', [{ data: { id: 4, name: 'four' } }]],
 			['create action', [3]],
 			['update action', [{ data: { name: 'uno' }, keys: [1] }]],
 			['create action', [4]],
