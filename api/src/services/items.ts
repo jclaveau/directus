@@ -2547,8 +2547,11 @@ implements AbstractService<Item> {
 	/**
 	 * `updateGroups` under `disableBatching`: one `updateGroups` per group, in
 	 * one transaction, each group with its own filter, write and action, and the
-	 * user count checked once, as `updateBatch` did before batching. Each group
-	 * takes `ItemsService`'s `updateGroups`, for the reason `createRowByRow` gives.
+	 * user count checked once, as `updateBatch` did before batching. The actions
+	 * wait for the commit: none for a group rolled back, and a hook writing the row
+	 * through its own connection would wait on the row lock this transaction holds
+	 * while it awaits that hook. Each group takes `ItemsService`'s `updateGroups`,
+	 * for the reason `createRowByRow` gives.
 	 */
 	private async updateGroupByGroup(
 		groups: UpdateGroup<Item>[],
@@ -2558,14 +2561,18 @@ implements AbstractService<Item> {
 		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
 			?? createScopedCacheHookDeclarations(this.schema);
 
-		return await transaction(this.knex, async (trx) => {
+		const { rowKeys, groupEvents } = await transaction(this.knex, async (trx) => {
 			const service = this.fork({ knex: trx });
 			const rowKeys: (PrimaryKey | null)[] = [];
+			const groupEvents: ActionEventParams[] = [];
 			let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
 
 			const groupOpts: DeferredPurgeOptions = {
 				...opts,
 				scopedCacheHookDeclarations,
+				bypassEmitAction: (actionEvent) => {
+					groupEvents.push(actionEvent);
+				},
 				onRequireUserIntegrityCheck: (flags) => {
 					userIntegrityCheckFlags |= flags;
 				},
@@ -2581,12 +2588,16 @@ implements AbstractService<Item> {
 
 			await this.checkUserIntegrityOnce(userIntegrityCheckFlags, trx, opts);
 
-			return rowKeys;
+			return { rowKeys, groupEvents };
 		}, mutationTracker.snapshot()).catch(async (error) => {
 			await this.purgeRolledBackHookWrites(scopedCacheHookDeclarations, opts);
 
 			throw error;
 		});
+
+		await emitActionEvents(groupEvents, opts);
+
+		return rowKeys;
 	}
 
 	/**
@@ -3497,7 +3508,12 @@ implements AbstractService<Item> {
 
 		// Per attempt, like the keys: sqlite and cockroach re-run the handler after a
 		// retryable error.
-		const { primaryKeys, hookAddedKeys, hookAddedSnapshots } = await transaction(
+		const {
+			primaryKeys,
+			hookAddedKeys,
+			hookAddedSnapshots,
+			payloadActionEvents,
+		} = await transaction(
 			this.knex,
 			async (knex) => {
 				const service = this.fork({ knex });
@@ -3505,11 +3521,18 @@ implements AbstractService<Item> {
 				const primaryKeys: PrimaryKey[] = [];
 				const hookAddedKeys: PrimaryKey[] = [];
 				const hookAddedSnapshots: ScopedCacheSnapshot[] = [];
+				const payloadActionEvents: ActionEventParams[] = [];
 				let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
 
 				const childOpts: DeferredPurgeOptions = {
 					...(opts || {}),
 					autoPurgeCache: false,
+					// held until the commit, for the reasons `updateGroupByGroup` gives
+					...(mutationBatching === 'disableBatching' && {
+						bypassEmitAction: (actionEvent: ActionEventParams) => {
+							payloadActionEvents.push(actionEvent);
+						},
+					}),
 					// upsertMany takes the rows its update hook adds (onHookAddedRows);
 					// upsertOne refuses them, like updateOne.
 					refuseHookAddedRows: opts.refuseHookAddedRows ?? false,
@@ -3569,7 +3592,12 @@ implements AbstractService<Item> {
 					}
 				}
 
-				return { primaryKeys, hookAddedKeys, hookAddedSnapshots };
+				return {
+					primaryKeys,
+					hookAddedKeys,
+					hookAddedSnapshots,
+					payloadActionEvents,
+				};
 			},
 			opts.mutationTracker.snapshot(),
 		).catch(async (error) => {
@@ -3609,6 +3637,7 @@ implements AbstractService<Item> {
 		});
 
 		await flushDeferredResponseCache();
+		await emitActionEvents(payloadActionEvents, opts);
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			const takenOverKeys = changedTakenOverKeys();
