@@ -316,6 +316,107 @@ describe('read pins at the merge', () => {
 		vi.mocked(scopedCachePurgeEnabled).mockReturnValue(true);
 	});
 
+	describe('a grouped sum whose rule reads rows past its filter', () => {
+		const salaries = new SchemaBuilder()
+			.collection('person', (c) => {
+				c.field('id').id();
+				c.field('region').string();
+				c.field('status').string();
+			})
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('category').string();
+				c.field('salary').integer();
+				c.field('status').string();
+				c.field('parent').m2o('article');
+				c.field('author').m2o('person');
+				c.field('editor').m2o('person');
+			})
+			.build();
+
+		salaries.collections['person']!.scopedCacheFields = ['region'];
+
+		const asReaderOf = (salaryRule: Filter): ItemsService => {
+			vi.mocked(fetchPermissions).mockImplementation(async () => {
+				return [
+					{
+						id: 1,
+						policy: 'policy',
+						collection: 'article',
+						action: 'read' as const,
+						fields: ['id', 'author', 'category'],
+						permissions: {},
+						validation: null,
+						presets: null,
+					},
+					{
+						id: 2,
+						policy: 'policy',
+						collection: 'article',
+						action: 'read' as const,
+						fields: ['salary'],
+						permissions: salaryRule,
+						validation: null,
+						presets: null,
+					},
+					{
+						id: 3,
+						policy: 'policy',
+						collection: 'person',
+						action: 'read' as const,
+						fields: ['*'],
+						permissions: {},
+						validation: null,
+						presets: null,
+					},
+				];
+			});
+
+			return new ItemsService('article', {
+				knex: db,
+				schema: salaries,
+				accountability: {
+					user: 'u1',
+					role: 'r1',
+					roles: ['r1'],
+					admin: false,
+					app: true,
+					ip: null,
+				},
+			});
+		};
+
+		afterEach(() => {
+			vi.mocked(fetchPermissions).mockImplementation(async () => []);
+		});
+
+		test(oneLine`
+			keeps the bare pin of its own collection when the rule reads another of
+			its rows: the key the filter names does not bound that one
+		`, async () => {
+			const service = asReaderOf({ parent: { status: { _eq: 'live' } } });
+
+			expect(await pinsOf(service, {
+				aggregate: { sum: ['salary'] },
+				group: ['category'],
+				filter: { id: { _eq: 1 } },
+			})).toEqual(['article']);
+		});
+
+		test(oneLine`
+			keeps the bare pin of a collection the rule reaches by another path than
+			the slice the filter names
+		`, async () => {
+			const service = asReaderOf({ editor: { status: { _eq: 'live' } } });
+
+			expect(await pinsOf(service, {
+				aggregate: { sum: ['salary'] },
+				group: ['category'],
+				filter: { author: { region: { _eq: 'eu' } } },
+			})).toEqual(['article', 'person']);
+		});
+	});
+
 	describe('an injected ownership ancestor a filter hops through unkeyed', () => {
 		const ownership = new SchemaBuilder()
 			.collection('course', (c) => {

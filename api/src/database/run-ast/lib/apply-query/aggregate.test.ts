@@ -587,3 +587,41 @@ test('aggregate count o2m', async () => {
 	expect(rawQuery.sql).toEqual(`select count("articles"."links") as "count->links"`);
 	expect(rawQuery.bindings).toEqual([]);
 });
+
+test('a distinct count of every field takes no case', async () => {
+	const db = knex.default({ client: Client_SQLite3 });
+	const queryBuilder = db.queryBuilder();
+
+	applyAggregate(
+		schema,
+		queryBuilder,
+		{ countDistinct: ['*'] },
+		'articles',
+		false,
+		{
+			knex: db,
+			cases: [{ id: { _gt: 5 } }, { id: { _lt: 2 } }],
+			permissions: [
+				{
+					collection: 'articles',
+					permissions: { id: { _gt: 5 } },
+					fields: ['*'],
+				},
+				{
+					collection: 'articles',
+					permissions: { id: { _lt: 2 } },
+					fields: ['id'],
+				},
+			] as Permission[],
+			generateAlias: createAliasGenerator(),
+		},
+	);
+
+	const rawQuery = queryBuilder.toSQL();
+
+	expect(rawQuery.sql).toEqual(
+		'select count(distinct "articles".*) as "countDistinct->*"',
+	);
+
+	expect(rawQuery.bindings).toEqual([]);
+});

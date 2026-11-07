@@ -38,6 +38,7 @@ export const seedDBStructure = () => {
 							primaryKeyType: 'string',
 							fields: [
 								{ field: 'category', type: 'string', meta: {} },
+								{ field: 'status', type: 'string', meta: {} },
 								{ field: 'salary', type: 'integer', meta: {} },
 								{ field: 'bonus', type: 'integer', meta: {} },
 							],
@@ -58,6 +59,13 @@ export const seedDBStructure = () => {
 					field: 'author',
 					primaryKeyType: 'string',
 					otherCollection: collectionAuthor,
+				});
+
+				await CreateFieldM2O(vendor, {
+					collection: collectionArticle,
+					field: 'parent',
+					primaryKeyType: 'string',
+					otherCollection: collectionArticle,
 				});
 
 				await CreateFieldO2M(vendor, {

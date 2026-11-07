@@ -4262,6 +4262,62 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		}).get('owner')).toEqual({ kind: 'unkeyed' });
 	});
 
+	it('keys the M2O again when an aggregate rule reads past its key', () => {
+		expect(scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query: { filter: { owner: { id: { _eq: 7 } } } },
+			cases: [],
+			aggregateCases: [{ owner: { name: { _eq: 'alice' } } }],
+			children: [],
+		} as unknown as AST).get('owner')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('reports the to-many a count in an aggregate rule totals', () => {
+		expect(scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query: {},
+			cases: [],
+			aggregateCases: [{ 'count(owned_sub_items)': { _gt: 0 } }],
+			children: [],
+		} as unknown as AST).get('owned_sub_item')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('reads the aggregate rule of a nested node', () => {
+		expect(scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query: {},
+			cases: [],
+			children: [{
+				type: 'o2m',
+				name: 'owned_sub_item',
+				query: { filter: { owned_item: { id: { _eq: 7 } } } },
+				cases: [],
+				aggregateCases: [{ owned_item: { label: { _eq: 'x' } } }],
+				children: [],
+			}],
+		} as unknown as AST).get('owned_item')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('reads the aggregate rule of each collection of an A2O', () => {
+		expect(scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query: {},
+			cases: [],
+			children: [{
+				type: 'a2o',
+				names: ['owner'],
+				query: { owner: { filter: { company: { id: { _eq: 3 } } } } },
+				cases: { owner: [] },
+				aggregateCases: { owner: [{ company: { name: { _eq: 'x' } } }] },
+				children: { owner: [] },
+			}],
+		} as unknown as AST).get('company')).toEqual({ kind: 'unkeyed' });
+	});
+
 	it('keys the M2O again once the relation carries no constraint', () => {
 		// Without one the owner can be deleted behind this row's back, leaving a
 		// foreign key that no longer joins and a result that changed with

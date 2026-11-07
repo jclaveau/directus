@@ -476,3 +476,26 @@ Feature: An aggregate reads a field only on the rows granting it
       | query:                              |     - min:           |
       |   aggregate[min]: id                |         id: <run>-c  |
       |   filter[id][_starts_with]: <run>-  |                      |
+
+  Scenario: a distinct count of every field counts every row read
+    Given the rows of test_agg_field_author:
+      | id        | status |
+      | <run>-pub | live   |
+      | <run>-dft | draft  |
+    And their children in test_agg_field_article:
+      | id      | author    | category |
+      | <run>-a | <run>-dft | news     |
+      | <run>-b | <run>-dft | news     |
+      | <run>-c | <run>-pub | sport    |
+    And a user whose token is <reader-token> may read:
+      | collection             | fields | permissions                     |
+      | test_agg_field_article | *      | {category: {_eq: news}}         |
+      | test_agg_field_article | id     | {author: {status: {_eq: live}}} |
+    Then these requests get these responses:
+      | request                             | response             |
+      | as: <reader-token>                  | code: 200            |+
+      | method: GET                         | body:                |
+      | path: /items/test_agg_field_article |   data:              |
+      | query:                              |     - countDistinct: |
+      |   aggregate[countDistinct]: '*'     |         '*': "3"     |
+      |   filter[id][_starts_with]: <run>-  |                      |
