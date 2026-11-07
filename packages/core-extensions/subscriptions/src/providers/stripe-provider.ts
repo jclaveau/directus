@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import {
 	MissingProviderSubscriptionError,
+	WebhookIgnoredError,
 	WebhookRefusedError,
 } from '../errors.js';
 import type { SubscriptionProvider } from './types.js';
@@ -126,7 +127,7 @@ function readEventSubscriptionId(stripeEvent: Stripe.Event): string {
 
 		if (subscriptionReference === undefined
 			|| subscriptionReference === null) {
-			throw new WebhookRefusedError({
+			throw new WebhookIgnoredError({
 				provider: 'stripe',
 				reason: `invoice ${JSON.stringify(stripeInvoice.id)}`
 					+ ' belongs to no subscription',
@@ -138,7 +139,7 @@ function readEventSubscriptionId(stripeEvent: Stripe.Event): string {
 			: subscriptionReference.id;
 	}
 
-	throw new WebhookRefusedError({
+	throw new WebhookIgnoredError({
 		provider: 'stripe',
 		reason: `event type ${JSON.stringify(stripeEvent.type)} is not handled`,
 	});

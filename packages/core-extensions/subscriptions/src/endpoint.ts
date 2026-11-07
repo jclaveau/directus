@@ -12,7 +12,7 @@ type AccountableRequest = Request & { accountability?: Accountability | null };
 
 export const subscriptionsEndpoint = defineEndpoint(
 	'subscriptions',
-	(router, { env, database }) => {
+	(router, { env, database, logger }) => {
 		const enabledProviders = createProviders(readSubscriptionsConfig(env));
 
 		router.post('/webhooks/:provider', (request, response, next) => {
@@ -30,6 +30,7 @@ export const subscriptionsEndpoint = defineEndpoint(
 				providerName: String(request.params['provider']),
 				rawBody: request.body,
 				requestHeaders: request.headers,
+				logger,
 			})
 				.then(() => {
 					response.status(200)

@@ -20,6 +20,18 @@ export const WebhookRefusedError = createError<{
 	400,
 );
 
+/** Never reaches the provider: `receiveWebhook` logs it and answers 200. */
+export const WebhookIgnoredError = createError<{
+	provider: string;
+	reason: string;
+}>(
+	'SUBSCRIPTION_WEBHOOK_IGNORED',
+	({ provider, reason }) => {
+		return `Webhook from ${JSON.stringify(provider)} ignored: ${reason}`;
+	},
+	200,
+);
+
 /** `subscriptionId` is null when a Mollie payment led to no subscription. */
 export const MissingProviderSubscriptionError = createError<{
 	resourceId: string;

@@ -32,7 +32,7 @@ describe('subscriptionsEndpoint', () => {
 
 		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
 			subscriptionsRouter,
-			{ env: {}, database: 'database' },
+			{ env: {}, database: 'database', logger: 'logger' },
 		);
 
 		const httpServer = expressApp.listen(0);
@@ -57,6 +57,7 @@ describe('subscriptionsEndpoint', () => {
 			providerName: 'mollie',
 			rawBody: Buffer.from('id=tr_1'),
 			requestHeaders: expect.objectContaining({ 'x-mollie-test': '1' }),
+			logger: 'logger',
 		});
 	});
 
