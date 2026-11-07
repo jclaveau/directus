@@ -8100,8 +8100,28 @@ describe('upsertMany on postgres', () => {
 		expect(upsertedKeys).toEqual([1, 2]);
 
 		expect(pgTracker.history.select[0]).toMatchObject({
-			sql: 'select "id" from "posts" where "id" in ($1, $2) for update',
+			sql: 'select "id" from "posts" where "id" in ($1, $2) for no key update',
 			bindings: [1, 2],
+		});
+	});
+
+	it('locks them FOR UPDATE on a dialect without FOR NO KEY UPDATE', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('cockroachdb');
+
+		pgTracker.on.select('posts').response([{ id: 1 }]);
+		pgTracker.on.update('posts').response(1);
+		pgTracker.on.any('posts').response([]);
+
+		const upsertedKeys = await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).upsertMany([{ id: 1, title: 'uno' }]);
+
+		expect(upsertedKeys).toEqual([1]);
+
+		expect(pgTracker.history.select[0]).toMatchObject({
+			sql: 'select "id" from "posts" where "id" in ($1) for update',
+			bindings: [1],
 		});
 	});
 });
