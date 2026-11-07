@@ -1,5 +1,10 @@
 import type { DirectusNotification } from '../../../schema/notification.js';
-import type { ApplyQueryFields, NestedPartial, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	NestedPartial,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import { throwIfEmpty } from '../../utils/index.js';
 import type { RestCommand } from '../../types.js';
 
@@ -18,7 +23,7 @@ export type UpdateNotificationOutput<
  * @throws Will throw if keys is empty
  */
 export const updateNotifications =
-	<Schema, const TQuery extends Query<Schema, DirectusNotification<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusNotification<Schema>>>(
 		keys: DirectusNotification<Schema>['id'][],
 		item: Partial<DirectusNotification<Schema>>,
 		query?: TQuery,
@@ -41,7 +46,7 @@ export const updateNotifications =
  * @returns Returns the notification objects for the updated notifications.
  */
 export const updateNotificationsBatch =
-	<Schema, const TQuery extends Query<Schema, DirectusNotification<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusNotification<Schema>>>(
 		items: NestedPartial<DirectusNotification<Schema>>[],
 		query?: TQuery,
 	): RestCommand<UpdateNotificationOutput<Schema, TQuery>[], Schema> =>
@@ -61,7 +66,7 @@ export const updateNotificationsBatch =
  * @throws Will throw if key is empty
  */
 export const updateNotification =
-	<Schema, const TQuery extends Query<Schema, DirectusNotification<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusNotification<Schema>>>(
 		key: DirectusNotification<Schema>['id'],
 		item: Partial<DirectusNotification<Schema>>,
 		query?: TQuery,

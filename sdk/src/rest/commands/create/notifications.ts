@@ -1,5 +1,9 @@
 import type { DirectusNotification } from '../../../schema/notification.js';
-import type { ApplyQueryFields, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import type { RestCommand } from '../../types.js';
 
 export type CreateNotificationOutput<
@@ -17,7 +21,7 @@ export type CreateNotificationOutput<
  * @returns Returns the notification object for the created notification.
  */
 export const createNotifications =
-	<Schema, const TQuery extends Query<Schema, DirectusNotification<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusNotification<Schema>>>(
 		items: Partial<DirectusNotification<Schema>>[],
 		query?: TQuery,
 	): RestCommand<CreateNotificationOutput<Schema, TQuery>[], Schema> =>
@@ -37,7 +41,7 @@ export const createNotifications =
  * @returns Returns the notification object for the created notification.
  */
 export const createNotification =
-	<Schema, const TQuery extends Query<Schema, DirectusNotification<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusNotification<Schema>>>(
 		item: Partial<DirectusNotification<Schema>>,
 		query?: TQuery,
 	): RestCommand<CreateNotificationOutput<Schema, TQuery>, Schema> =>
