@@ -671,7 +671,7 @@ export class PayloadService {
 			this.schema,
 			relatedCollection,
 			relatedPrimaryKeyField,
-			[],
+			keyOnlyKeys,
 		);
 
 		const existingKeyNames = new Set<string>();

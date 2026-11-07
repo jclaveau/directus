@@ -707,6 +707,9 @@ implements AbstractService<Item> {
 				presetRows.push({ index, payloadAfterHooks, payloadWithPresets });
 			}
 
+			if (presetRows.length > 0 && opts.preMutationError) {
+				throw opts.preMutationError;
+			}
 
 			// We're creating new services instances so they can use the transaction
 			// as their Knex interface
@@ -725,7 +728,8 @@ implements AbstractService<Item> {
 
 			const a2o = await payloadService.processA2O(m2o.payloads, opts);
 
-			userIntegrityCheckFlags |= m2o.userIntegrityCheckFlags;
+			userIntegrityCheckFlags |=
+				m2o.userIntegrityCheckFlags | a2o.userIntegrityCheckFlags;
 
 			// every row's events: a spread could pass more arguments than allowed
 			for (const nestedActionEvent of m2o.nestedActionEvents) {
@@ -786,7 +790,7 @@ implements AbstractService<Item> {
 					revisionPayload,
 					primaryKey,
 					revisionsM2O: m2o.revisionsByParent[rowIndex]!,
-					revisionsA2O: [],
+					revisionsA2O: a2o.revisionsByParent[rowIndex]!,
 					payloadService,
 				});
 			}
