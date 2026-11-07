@@ -232,7 +232,7 @@ describe('processM2O', () => {
 		const result = await service.processM2O([
 			{ country: { id: 3, name: 'France' } },
 			{ country: { name: 'Spain' } },
-		]);
+		], { mutationBatching: 'disableBatching' });
 
 		expect(upsertManySpy).toHaveBeenCalledWith(
 			[{ id: 3, name: 'France' }, { name: 'Spain' }],
@@ -243,6 +243,7 @@ describe('processM2O', () => {
 				bypassEmitAction: expect.any(Function),
 				emitEvents: undefined,
 				mutationTracker: undefined,
+				mutationBatching: 'disableBatching',
 			},
 		);
 
