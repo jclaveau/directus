@@ -154,9 +154,9 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | path: /items/subscription_plans/10 |   errors:                                  |
       |                                    |     - message: >-                          |
       |                                    |         You don't have permission to       |
-      |                                    |         perform "delete" for collection    |
+      |                                    |         access collection                  |
       |                                    |         "subscription_plans" or it does    |
-      |                                    |         not exist.                         |
+      |                                    |         not exist. Queried in root.        |
       |                                    |       extensions:                          |
       |                                    |         code: FORBIDDEN                    |
       | as: refused-token                  | code: 403                                  |+
@@ -164,9 +164,9 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | path: /items/subscription_plans/10 |   errors:                                  |
       |                                    |     - message: >-                          |
       |                                    |         You don't have permission to       |
-      |                                    |         perform "delete" for collection    |
+      |                                    |         access collection                  |
       |                                    |         "subscription_plans" or it does    |
-      |                                    |         not exist.                         |
+      |                                    |         not exist. Queried in root.        |
       |                                    |       extensions:                          |
       |                                    |         code: FORBIDDEN                    |
       | method: DELETE                     | code: 400                                  |+
@@ -182,11 +182,10 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | method: PATCH                      | body:                                      |
       | path: /items/subscription_plans/10 |   errors:                                  |
       | payload:                           |     - message: >-                          |
-      |   status: archived                 |         You don't have permissions to      |
-      |                                    |         perform "update" for the field(s)  |
-      |                                    |         "status" in collection             |
+      |   status: archived                 |         You don't have permission to       |
+      |                                    |         access collection                  |
       |                                    |         "subscription_plans" or it does    |
-      |                                    |         not exist.                         |
+      |                                    |         not exist. Queried in root.        |
       |                                    |       extensions:                          |
       |                                    |         code: FORBIDDEN                    |
       | method: PATCH                      | code: 400                                  |+
