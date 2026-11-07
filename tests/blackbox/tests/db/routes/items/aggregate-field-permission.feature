@@ -489,7 +489,7 @@ Feature: An aggregate reads a field only on the rows granting it
       | <run>-c | <run>-pub | sport    |
     And a user whose token is <reader-token> may read:
       | collection             | fields | permissions                     |
-      | test_agg_field_article | *      | {category: {_eq: news}}         |
+      | test_agg_field_article | '*'    | {category: {_eq: news}}         |
       | test_agg_field_article | id     | {author: {status: {_eq: live}}} |
     Then these requests get these responses:
       | request                             | response             |

@@ -605,6 +605,11 @@ Feature: A cached aggregate follows the rule that decides what it reads
       |         - author                         |           |
       |         - category                       |           |
       |       permissions: {}                    |           |
+      |     - collection: test_agg_cache_author  |           |
+      |       action: read                       |           |
+      |       fields:                            |           |
+      |         - id                             |           |
+      |       permissions: {}                    |           |
       | method: POST                             | code: 200 |+
       | path: /policies                          |           |
       | payload:                                 |           |
@@ -638,7 +643,7 @@ Feature: A cached aggregate follows the rule that decides what it reads
       |   aggregate[sum]: salary                     |   data:                |
       |   groupBy: category                          |     - category: news   |
       |   filter[id][_starts_with]: <run>-           |       sum:             |
-      |   filter[author][_eq]: <run>-pub             |         salary: "100"  |
+      |   filter[author][id][_eq]: <run>-pub         |         salary: "100"  |
       | as: <reader-token>                           | code: 200              |+
       | method: GET                                  | headers:               |
       | path: /items/test_agg_cache_article          |   x-cache-status: HIT  |
@@ -646,7 +651,7 @@ Feature: A cached aggregate follows the rule that decides what it reads
       |   aggregate[sum]: salary                     |   data:                |
       |   groupBy: category                          |     - category: news   |
       |   filter[id][_starts_with]: <run>-           |       sum:             |
-      |   filter[author][_eq]: <run>-pub             |         salary: "100"  |
+      |   filter[author][id][_eq]: <run>-pub         |         salary: "100"  |
       | method: PATCH                                | code: 200              |+
       | path: /items/test_agg_cache_author/<run>-pub |                        |
       | payload:                                     |                        |
@@ -658,7 +663,7 @@ Feature: A cached aggregate follows the rule that decides what it reads
       |   aggregate[sum]: salary                     |   data:                |
       |   groupBy: category                          |     - category: news   |
       |   filter[id][_starts_with]: <run>-           |       sum:             |
-      |   filter[author][_eq]: <run>-pub             |         salary: null   |
+      |   filter[author][id][_eq]: <run>-pub         |         salary: null   |
 
   Scenario: a grouped sum follows the children a count in its rule totals
     Given these requests are sent:
