@@ -25,7 +25,7 @@ import { Parser as CSVParser, transforms as CSVTransforms } from 'json2csv';
 import type { Knex } from 'knex';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { appendFile } from 'node:fs/promises';
-import type { Readable, Stream } from 'node:stream';
+import { finished, type Readable, type Stream } from 'node:stream';
 import Papa from 'papaparse';
 import StreamArray from 'stream-json/streamers/stream-array.js';
 import getDatabase from '../database/index.js';
@@ -125,6 +125,18 @@ export class ImportService {
 			});
 
 			return new Promise<void>((resolve, reject) => {
+				finished(stream, (sourceError) => {
+					if (!sourceError) {
+						return;
+					}
+
+					destroyStream(extractJSON);
+
+					reject(new Error('Error while retrieving import data', {
+						cause: sourceError,
+					}));
+				});
+
 				stream.pipe(extractJSON);
 
 				extractJSON.on('data', ({ value }: Record<string, any>) => {
@@ -143,6 +155,10 @@ export class ImportService {
 				});
 
 				extractJSON.on('end', () => {
+					if (saveQueue.idle()) {
+						return resolve();
+					}
+
 					saveQueue.drain(() => {
 						return resolve();
 					});
@@ -252,8 +268,10 @@ export class ImportService {
 							.on('end', () => {
 								cleanup(false);
 
-								// In case of empty CSV file
-								if (!saveQueue.started) return resolve();
+								// An empty CSV file, or a queue that already drained
+								if (saveQueue.idle()) {
+									return resolve();
+								}
 
 								saveQueue.drain(() => {
 									return resolve();
@@ -263,12 +281,19 @@ export class ImportService {
 
 				streams.push(fileWriteStream);
 
-				stream
-					.on('error', (error) => {
-						cleanup();
-						reject(new Error('Error while retrieving import data', { cause: error }));
-					})
-					.pipe(fileWriteStream);
+				finished(stream, (sourceError) => {
+					if (!sourceError) {
+						return;
+					}
+
+					cleanup();
+
+					reject(new Error('Error while retrieving import data', {
+						cause: sourceError,
+					}));
+				});
+
+				stream.pipe(fileWriteStream);
 			});
 		});
 
