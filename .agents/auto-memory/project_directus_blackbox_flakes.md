@@ -220,6 +220,7 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 - Same test failed twice on one sha, #683 `8b51d69f0f`, 2026-11-06: first run and its one `--failed` rerun, while 6 sibling PRs at the same base went green. #683 only touches `api/src/cli` migrate code. One rerun does not always clear it (#367).
 - `update-batch-guards` "A batch update of a system collection is checked as a single update is" on #683, 2026-11-07: shard 5, step `on postgres the requests ran these statements:`, on 3000de077e (test files added on top of a CLI-only diff); passed on the next head a43f19bd30, no related change between them. Timing by that alone, cause not found.
 - `update-batch-guards` statement counts again on #688, 2026-11-07: shard 5 of run 42373060402 on 8490df26b7 (a tests-only head on aggregate code); passed on the next head 76a3ef9f44. Same step as the #683 line above; cause still not found.
+- `update-batch-guards` statement counts a third time on #686, 2026-11-07: shard 5 of run 42413476694 on 1df073d3a8 (4 scenarios, request 1 read `directus_users` in more rows than the one expected); its one `--failed` rerun passed. Same step as the two lines above.
 - `common/assets/concurrency` on #683, 2026-11-07: sqlite3, a43f19bd30, one `--failed` rerun cleared it (merged 05eeca0e73).
 
 ## 2026-11-03 (#673 shard 1): invite statement-count flake
