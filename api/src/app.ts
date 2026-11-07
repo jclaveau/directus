@@ -70,6 +70,7 @@ import {
 	validateHeaderNameEnv,
 	validateUnreadEnv,
 	validateAutoMigrateEnv,
+	validateSubscriptionsEnv,
 } from './utils/validate-env.js';
 import { initSharedSettings } from './processes/lib/shared-settings.js';
 import { initPoolHealthMirror } from './processes/lib/pool-health.js';
@@ -141,6 +142,7 @@ export default async function createApp(): Promise<express.Application> {
 	validateCacheSettingsEnv();
 	validateUnreadEnv();
 	validateAutoMigrateEnv();
+	validateSubscriptionsEnv();
 
 	await validateDatabaseConnection();
 

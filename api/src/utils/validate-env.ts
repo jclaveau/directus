@@ -247,3 +247,63 @@ export function validateAutoMigrateEnv(): void {
 		process.exit(1);
 	}
 }
+
+/**
+ * The subscriptions bundle reads these when it loads, where a failure only logs:
+ * webhooks would then answer 404 and a paid subscription would never be granted.
+ */
+export function validateSubscriptionsEnv(): void {
+	const env = useEnv();
+
+	const emptyVariable = SUBSCRIPTIONS_ENV.find((variableName) => {
+		return env[variableName] === '';
+	});
+
+	if (emptyVariable !== undefined) {
+		useLogger().error(
+			`${JSON.stringify(emptyVariable)} Environment Variable is empty.`,
+		);
+
+		process.exit(1);
+	}
+
+	const malformedVariable = SUBSCRIPTIONS_ENV.find((variableName) => {
+		const variableValue = env[variableName];
+
+		return variableValue !== undefined
+			&& (typeof variableValue !== 'string'
+				|| variableValue !== variableValue.trim());
+	});
+
+	// These are secrets: the message names the variable, never its value.
+	if (malformedVariable !== undefined) {
+		useLogger().error(
+			`${JSON.stringify(malformedVariable)} must be a string without`
+			+ ' surrounding whitespace.',
+		);
+
+		process.exit(1);
+	}
+
+	for (const [setVariable, requiredVariable] of SUBSCRIPTIONS_STRIPE_ENV_PAIRS) {
+		if (env[setVariable] !== undefined && env[requiredVariable] === undefined) {
+			useLogger().error(
+				`${JSON.stringify(requiredVariable)} is required when`
+				+ ` ${JSON.stringify(setVariable)} is set.`,
+			);
+
+			process.exit(1);
+		}
+	}
+}
+
+const SUBSCRIPTIONS_ENV = [
+	'SUBSCRIPTIONS_STRIPE_SECRET_KEY',
+	'SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET',
+	'SUBSCRIPTIONS_MOLLIE_API_KEY',
+];
+
+const SUBSCRIPTIONS_STRIPE_ENV_PAIRS = [
+	['SUBSCRIPTIONS_STRIPE_SECRET_KEY', 'SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET'],
+	['SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET', 'SUBSCRIPTIONS_STRIPE_SECRET_KEY'],
+] as const;

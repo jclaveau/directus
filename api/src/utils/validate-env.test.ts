@@ -18,6 +18,7 @@ import {
 	validateDurationEnv,
 	validateEnv,
 	validateHeaderNameEnv,
+	validateSubscriptionsEnv,
 	validateUnreadEnv,
 } from './validate-env.js';
 
@@ -363,5 +364,90 @@ describe('validateAutoMigrateEnv', () => {
 
 		expect(mockLogger.error).not.toHaveBeenCalled();
 		expect(process.exit).not.toHaveBeenCalled();
+	});
+});
+
+describe('validateSubscriptionsEnv', () => {
+	test('passes with no subscription variable set', () => {
+		vi.mocked(useEnv).mockReturnValueOnce({});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test('passes with both stripe variables set', () => {
+		vi.mocked(useEnv).mockReturnValueOnce({
+			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_1',
+			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: 'whsec_1',
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test('exits on a stripe key without its webhook secret', () => {
+		vi.mocked(useEnv).mockReturnValueOnce({
+			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_1',
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET" is required when'
+			+ ' "SUBSCRIPTIONS_STRIPE_SECRET_KEY" is set.',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('exits on a stripe webhook secret without its key', () => {
+		vi.mocked(useEnv).mockReturnValueOnce({
+			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: 'whsec_1',
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_STRIPE_SECRET_KEY" is required when'
+			+ ' "SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET" is set.',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test.each([
+		['whsec_1\n'],
+		[' whsec_1'],
+		['   '],
+		[1],
+	])('exits on variable value %j without logging it', (variableValue) => {
+		vi.mocked(useEnv).mockReturnValueOnce({
+			SUBSCRIPTIONS_MOLLIE_API_KEY: variableValue,
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_MOLLIE_API_KEY" must be a string without surrounding'
+			+ ' whitespace.',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('exits on an empty variable', () => {
+		vi.mocked(useEnv).mockReturnValueOnce({ SUBSCRIPTIONS_MOLLIE_API_KEY: '' });
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_MOLLIE_API_KEY" Environment Variable is empty.',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
 	});
 });

@@ -47,6 +47,9 @@ import * as services from '../services/index.js';
 import { deleteFromRequireCache } from '../utils/delete-from-require-cache.js';
 import { trackSandboxCoverage } from '../utils/dump-coverage.js';
 import getModuleDefault from '../utils/get-module-default.js';
+import {
+	validateAccess,
+} from '../permissions/modules/validate-access/validate-access.js';
 import { getSchema } from '../utils/get-schema.js';
 import { importFileUrl } from '../utils/import-file-url.js';
 import { JobQueue } from '../utils/job-queue.js';
@@ -1107,6 +1110,7 @@ export class ExtensionManager {
 			logger,
 			getSchema,
 			scopedCache: createScopedCacheExtensionHandle(getSchema),
+			validateAccess,
 		});
 
 		return unregisterFunctions;
@@ -1134,6 +1138,7 @@ export class ExtensionManager {
 			logger,
 			getSchema,
 			scopedCache: createScopedCacheExtensionHandle(getSchema),
+			validateAccess,
 		});
 
 		const unregisterFunction = () => {

@@ -1,0 +1,43 @@
+{
+	"name": "@scalabus/subscriptions",
+	"version": "0.1.0",
+	"description": "Provider-neutral subscriptions (Stripe, Mollie) granting Directus access",
+	"private": true,
+	"license": "BUSL-1.1",
+	"type": "module",
+	"directus:extension": {
+		"type": "bundle",
+		"path": {
+			"app": "dist/app.js",
+			"api": "dist/api.js"
+		},
+		"host": "^11.10.0"
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "directus-extension build --external stripe,@mollie/api-client,express",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
+	},
+	"dependencies": {
+		"@directus/errors": "workspace:*",
+		"@mollie/api-client": "catalog:",
+		"express": "catalog:",
+		"stripe": "catalog:"
+	},
+	"devDependencies": {
+		"@directus/extensions-sdk": "workspace:*",
+		"@directus/tsconfig": "catalog:",
+		"@directus/types": "workspace:*",
+		"@directus/utils": "workspace:*",
+		"@types/express": "catalog:",
+		"@types/node": "catalog:",
+		"@vitest/coverage-v8": "catalog:",
+		"knex": "catalog:",
+		"sqlite3": "catalog:",
+		"typescript": "catalog:",
+		"vitest": "catalog:"
+	}
+}

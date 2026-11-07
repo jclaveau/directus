@@ -49,9 +49,9 @@ const REQUEST_CELL_KEYS = [
 
 const RESPONSE_CELL_KEYS = ['code', 'body', 'text'] as const;
 
-type Row = { request: string; response: string };
+export type Row = { request: string; response: string };
 
-type ScenarioKeys = {
+export type ScenarioKeys = {
 	run: string;
 	keysByName: Record<string, string>;
 };
@@ -151,7 +151,7 @@ export function defineSingularWriteFeature(
 // `<run>` is unique to the scenario; a `<name>` met for the first time stands
 // for a fresh uuid, or for the key a `remember: name` row stored before.
 // `<name:upper>` spells that same value in upper case.
-function withKeys(cell: string, scenarioKeys: ScenarioKeys) {
+export function withKeys(cell: string, scenarioKeys: ScenarioKeys) {
 	return cell.replaceAll(
 		/<([\w-]+)(:upper)?>/g,
 		(_placeholder, name: string, upperSuffix?: string) => {
@@ -268,13 +268,16 @@ function sendRequest(instanceUrl: string, requestCell: RequestCell) {
 
 	pendingRequest
 		.query(query)
-		.set(headers)
-		.set(
+		.set(headers);
+
+	if (token !== 'anonymous') {
+		pendingRequest.set(
 			'Authorization',
 			token === undefined
 				? AUTH
 				: `Bearer ${token}`,
 		);
+	}
 
 	// A multipart upload: Directus wants every form field before the file.
 	if (file !== undefined) {
@@ -366,7 +369,7 @@ async function createReader(
 // One row at a time, so a row can name the key one before it remembered. A
 // response cell states the keys it checks; an array still has to hold as many
 // items as it states.
-async function sendRows(
+export async function sendRows(
 	{ vendor, instanceUrl, scenarioKeys }: SentTo,
 	table: Row[],
 	allowsBlankResponse: boolean,
