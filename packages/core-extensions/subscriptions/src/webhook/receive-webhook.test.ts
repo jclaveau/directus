@@ -1,6 +1,10 @@
 import knex, { type Knex } from 'knex';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { UnknownProviderError } from '../errors.js';
+import {
+	UnknownProviderError,
+	WebhookIgnoredError,
+	WebhookRefusedError,
+} from '../errors.js';
 import {
 	createSubscriptionTables,
 } from '../migrations/create-subscription-tables.js';
@@ -39,6 +43,7 @@ describe('receiveWebhook', () => {
 			providerName: 'mollie',
 			rawBody: Buffer.from('id=tr_1'),
 			requestHeaders: { 'content-type': 'application/x-www-form-urlencoded' },
+			logger: { warn: vi.fn() },
 		});
 
 		expect(verifyWebhook).toHaveBeenCalledWith(
@@ -63,6 +68,53 @@ describe('receiveWebhook', () => {
 			providerName: 'paypal',
 			rawBody: Buffer.from('{}'),
 			requestHeaders: {},
+			logger: { warn: vi.fn() },
 		})).rejects.toThrow(new UnknownProviderError({ provider: 'paypal' }));
+	});
+
+	test('logs an ignored webhook and queues nothing', async () => {
+		const warn = vi.fn();
+
+		const verifyWebhook = vi.fn().mockRejectedValue(new WebhookIgnoredError({
+			provider: 'stripe',
+			reason: 'event type "charge.succeeded" is not handled',
+		}));
+
+		await receiveWebhook({
+			database,
+			enabledProviders: new Map([
+				['stripe', { verifyWebhook } as unknown as SubscriptionProvider],
+			]),
+			providerName: 'stripe',
+			rawBody: Buffer.from('{}'),
+			requestHeaders: {},
+			logger: { warn },
+		});
+
+		expect(warn).toHaveBeenCalledWith(
+			'Webhook from "stripe" ignored: event type "charge.succeeded" is not handled',
+		);
+
+		expect(await database('subscription_sync_queue')).toEqual([]);
+	});
+
+	test('refuses a webhook failing its signature', async () => {
+		const refusedWebhook = new WebhookRefusedError({
+			provider: 'stripe',
+			reason: 'bad signature',
+		});
+
+		await expect(receiveWebhook({
+			database,
+			enabledProviders: new Map([
+				['stripe', {
+					verifyWebhook: vi.fn().mockRejectedValue(refusedWebhook),
+				} as unknown as SubscriptionProvider],
+			]),
+			providerName: 'stripe',
+			rawBody: Buffer.from('{}'),
+			requestHeaders: {},
+			logger: { warn: vi.fn() },
+		})).rejects.toThrow(refusedWebhook);
 	});
 });

@@ -2,6 +2,7 @@ import Stripe from 'stripe';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
 	MissingProviderSubscriptionError,
+	WebhookIgnoredError,
 	WebhookRefusedError,
 } from '../errors.js';
 import { createStripeProvider } from './stripe-provider.js';
@@ -81,7 +82,7 @@ describe('verifyWebhook', () => {
 		)).resolves.toBe('sub_2');
 	});
 
-	test('refuses an invoice without a parent', async () => {
+	test('ignores an invoice without a parent', async () => {
 		const stripeClient = new Stripe('sk_test_1');
 		const stripeProvider = createStripeProvider(stripeClient, 'whsec_1');
 
@@ -98,13 +99,13 @@ describe('verifyWebhook', () => {
 		await expect(stripeProvider.verifyWebhook(
 			Buffer.from(payload),
 			{ 'stripe-signature': signatureHeader },
-		)).rejects.toThrow(new WebhookRefusedError({
+		)).rejects.toThrow(new WebhookIgnoredError({
 			provider: 'stripe',
 			reason: 'invoice "in_1" belongs to no subscription',
 		}));
 	});
 
-	test('refuses an invoice whose parent is no subscription', async () => {
+	test('ignores an invoice whose parent is no subscription', async () => {
 		const stripeClient = new Stripe('sk_test_1');
 		const stripeProvider = createStripeProvider(stripeClient, 'whsec_1');
 
@@ -123,13 +124,13 @@ describe('verifyWebhook', () => {
 		await expect(stripeProvider.verifyWebhook(
 			Buffer.from(payload),
 			{ 'stripe-signature': signatureHeader },
-		)).rejects.toThrow(new WebhookRefusedError({
+		)).rejects.toThrow(new WebhookIgnoredError({
 			provider: 'stripe',
 			reason: 'invoice "in_1" belongs to no subscription',
 		}));
 	});
 
-	test('refuses an invoice whose subscription is null', async () => {
+	test('ignores an invoice whose subscription is null', async () => {
 		const stripeClient = new Stripe('sk_test_1');
 		const stripeProvider = createStripeProvider(stripeClient, 'whsec_1');
 
@@ -151,13 +152,13 @@ describe('verifyWebhook', () => {
 		await expect(stripeProvider.verifyWebhook(
 			Buffer.from(payload),
 			{ 'stripe-signature': signatureHeader },
-		)).rejects.toThrow(new WebhookRefusedError({
+		)).rejects.toThrow(new WebhookIgnoredError({
 			provider: 'stripe',
 			reason: 'invoice "in_1" belongs to no subscription',
 		}));
 	});
 
-	test('refuses an event type it does not handle', async () => {
+	test('ignores an event type it does not handle', async () => {
 		const stripeClient = new Stripe('sk_test_1');
 		const stripeProvider = createStripeProvider(stripeClient, 'whsec_1');
 
@@ -174,7 +175,7 @@ describe('verifyWebhook', () => {
 		await expect(stripeProvider.verifyWebhook(
 			Buffer.from(payload),
 			{ 'stripe-signature': signatureHeader },
-		)).rejects.toThrow(new WebhookRefusedError({
+		)).rejects.toThrow(new WebhookIgnoredError({
 			provider: 'stripe',
 			reason: 'event type "charge.succeeded" is not handled',
 		}));
