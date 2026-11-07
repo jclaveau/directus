@@ -17,7 +17,7 @@ export default async function migrate(
 		logger.info('Running migrations...');
 
 		if (direction === 'latest') {
-			await migrateLatest(database, options.snapshot, options.phase);
+			await migrateLatest(database, options.snapshot);
 		}
 		else {
 			await run(database, direction, true, {
