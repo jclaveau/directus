@@ -8,8 +8,14 @@ export type SyncQueueRow = {
 	next_attempt_at: Date | number;
 };
 
-/** About 2 days at the longest retry delay; the row then waits for a webhook. */
+/**
+ * About 2 days at the longest retry delay; the row then parks, until the reconcile
+ * retries it daily or a webhook re-arms it. A row whose subscription was never
+ * stored is not reconciled, so only a webhook does.
+ */
 export const MAX_SYNC_ATTEMPTS = 48;
+
+export const PARKED_RETRY_DELAY_MS = 86_400_000;
 
 export type SyncTarget = { provider: string; resourceId: string };
 

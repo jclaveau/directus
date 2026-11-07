@@ -177,7 +177,7 @@ describe('runSyncBatch', () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
@@ -255,7 +255,8 @@ describe('runSyncBatch', () => {
 
 		expect(logger.error).toHaveBeenCalledWith(
 			'Subscription sync of "stripe" "sub_1" failed, attempt 48:'
-			+ ' "Stripe is down". No more retries until a webhook',
+			+ ' "Stripe is down". Next try: the daily reconcile of a stored'
+			+ ' subscription, or a webhook',
 		);
 
 		expect(logger.warn).not.toHaveBeenCalled();
