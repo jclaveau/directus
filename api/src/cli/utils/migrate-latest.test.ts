@@ -76,6 +76,7 @@ test('--phase before-schema runs its own migrations alone', async () => {
 
 test('--phase after-schema runs its own migrations alone', async () => {
 	vi.mocked(getExtensionMigrations).mockResolvedValue([]);
+	vi.mocked(outstandingMigrations).mockResolvedValue([]);
 
 	await migrateLatest({} as Knex, undefined, 'after-schema');
 
@@ -84,6 +85,64 @@ test('--phase after-schema runs its own migrations alone', async () => {
 		'latest',
 		true,
 		{ extensionMigrations: [], phase: 'after-schema' },
+	);
+});
+
+// Run anyway, the after-schema migration is recorded and a later --phase
+// before-schema applies the pending one out of date order.
+test('--phase after-schema refused with before-schema pending', async () => {
+	vi.mocked(getExtensionMigrations).mockResolvedValue([
+		{
+			bundle: 'domain',
+			name: '20240101A-add-columns',
+			config: { up: vi.fn(), down: vi.fn() },
+		},
+		{
+			bundle: 'domain',
+			name: '20240102A-fill-columns',
+			config: { phase: 'after-schema', up: vi.fn(), down: vi.fn() },
+		},
+	]);
+
+	vi.mocked(outstandingMigrations).mockResolvedValue(['domain:20240101A']);
+
+	await expect(
+		migrateLatest({} as Knex, undefined, 'after-schema'),
+	).rejects.toThrow(
+		new Error(
+			'Migrations "domain:20240101A" run before the after-schema ones:'
+			+ ' run --phase before-schema first',
+		),
+	);
+
+	expect(vi.mocked(outstandingMigrations)).toHaveBeenCalledExactlyOnceWith([
+		{
+			bundle: 'domain',
+			name: '20240101A-add-columns',
+			config: { up: expect.any(Function), down: expect.any(Function) },
+		},
+	]);
+
+	expect(vi.mocked(runMigrations)).not.toHaveBeenCalled();
+});
+
+test('after-schema pending without --snapshot names both ways out', async () => {
+	vi.mocked(getExtensionMigrations).mockResolvedValue([
+		{
+			bundle: 'domain',
+			name: '20240102A-fill-columns',
+			config: { phase: 'after-schema', up: vi.fn(), down: vi.fn() },
+		},
+	]);
+
+	vi.mocked(outstandingMigrations).mockResolvedValue(['domain:20240102A']);
+
+	await expect(migrateLatest({} as Knex)).rejects.toThrow(
+		new Error(
+			'Migrations "domain:20240102A" run once the schema snapshot is applied:'
+			+ ' pass --snapshot <path>,'
+			+ ' or --phase after-schema once your own tool applied it',
+		),
 	);
 });
 

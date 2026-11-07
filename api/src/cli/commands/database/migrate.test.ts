@@ -10,8 +10,10 @@ vi.mock('../../../extensions/lib/get-extension-migrations.js', () => {
 	return { getExtensionMigrations: vi.fn() };
 });
 
+const mockLogger = vi.hoisted(() => ({ info: vi.fn(), error: vi.fn() }));
+
 vi.mock('../../../logger/index.js', () => {
-	return { useLogger: () => ({ info: vi.fn(), error: vi.fn() }) };
+	return { useLogger: () => mockLogger };
 });
 
 vi.mock('../../utils/migrate-latest.js', () => ({ migrateLatest: vi.fn() }));
@@ -34,4 +36,24 @@ test('migrate:latest hands its --phase to migrateLatest', async () => {
 	);
 
 	expect(exitSpy).toHaveBeenCalledExactlyOnceWith();
+});
+
+test('migrate:latest --phase logs the phase it ran', async () => {
+	vi.mocked(getDatabase).mockReturnValue({ destroy: vi.fn() } as never);
+	vi.spyOn(process, 'exit').mockReturnValue(undefined as never);
+
+	await migrate('latest', { phase: 'before-schema' });
+
+	expect(mockLogger.info).toHaveBeenLastCalledWith(
+		'Migration phase "before-schema" up to date',
+	);
+});
+
+test('migrate:latest without --phase logs the whole database', async () => {
+	vi.mocked(getDatabase).mockReturnValue({ destroy: vi.fn() } as never);
+	vi.spyOn(process, 'exit').mockReturnValue(undefined as never);
+
+	await migrate('latest');
+
+	expect(mockLogger.info).toHaveBeenLastCalledWith('Database up to date');
 });
