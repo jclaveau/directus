@@ -8146,6 +8146,32 @@ describe('upsertMany on postgres', () => {
 			bindings: [1],
 		});
 	});
+
+	it('locks them FOR NO KEY UPDATE when the key is in a unique index', async () => {
+		pgTracker.on.select('posts').response([{ id: 1 }]);
+		pgTracker.on.update('posts').response(1);
+		pgTracker.on.any('posts').response([]);
+
+		const upsertedKeys = await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: new SchemaBuilder()
+				.collection('posts', (c) => {
+					c.field('id')
+						.id()
+						.options({ inUniqueIndex: true });
+
+					c.field('title').string();
+				})
+				.build(),
+		}).upsertMany([{ id: 1, title: 'uno' }]);
+
+		expect(upsertedKeys).toEqual([1]);
+
+		expect(pgTracker.history.select[0]).toMatchObject({
+			sql: 'select "id" from "posts" where "id" in ($1) for no key update',
+			bindings: [1],
+		});
+	});
 });
 
 describe('Services / Items / mutationBatching', () => {
