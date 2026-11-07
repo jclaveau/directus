@@ -1,6 +1,6 @@
 ---
 name: project_directus_pr686_batched_m2o_a2o
-description: PR #686 batched nested M2O/A2O writes - settled review points, the open lock choice, and how a mutant can stop the blackbox seeds
+description: PR #686 batched nested M2O/A2O writes - settled review points, the lock it takes, and how a mutant can stop the blackbox seeds
 metadata:
   type: project
 ---
@@ -8,7 +8,7 @@ metadata:
 Autoreview of #686 (2026-11-07), head 28bf2f874c.
 
 - Accepted, documented in the PR risks: a key compared by its spelling (char(n), citext), payload order not kept across relations or A2O collections. MariaDB `_ci` is #610 point 20.
-- Open, jean's call: `upsertRun` takes `FOR UPDATE` where `updateOne` took `FOR NO KEY UPDATE`, so a nested full record now blocks a foreign key's `FOR KEY SHARE` (see the results comment on the PR).
+- Settled by jean (B in #686): `upsertRun` takes `FOR NO KEY UPDATE` on Postgres, `FOR UPDATE` on MariaDB and CockroachDB (`supportsNoKeyUpdateLock`). A foreign key no longer waits on a row the run updates; a delete still does. Read from the lock conflict table, tests pin the SQL only.
 
 **Why:** #694 flipped the default to `preserveMutationOrder` after this branch was written: 3 tests and the PR body stayed true only under `minimizeMutations`. A branch older than #694 reads as `update · insert`; at the default it writes `insert · update · insert`.
 

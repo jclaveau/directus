@@ -35,4 +35,4 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [PR #688 aggregate field cases](../project_directus_pr688_aggregate_field_cases.md) — merged; CASE by the granting rules, `aggregateCases` = what CASE reads; root filter and function hops pin bare; nested aggregate needs `_sort`
 - [PR #682 quantifier content](../project_directus_pr682_quantifier_content.md) — empty content must stay null (flattenFilter check); 5 predating fixes; a slice can outlive a keying fix: gate on aliases, not `unkeyed`
 - [PR #691 mutation batching](../project_directus_pr691_mutation_batching.md) — disableBatching actions after the commit (jean's choice); takeovers purged on rollback; limit before hooks
-- [PR #686 batched M2O/A2O](../project_directus_pr686_batched_m2o_a2o.md) — key by spelling and cross-relation order accepted; `FOR UPDATE` choice open; a misfiling mutant stops the bb seeds
+- [PR #686 batched M2O/A2O](../project_directus_pr686_batched_m2o_a2o.md) — key by spelling and cross-relation order accepted; `FOR NO KEY UPDATE` on Postgres, settled; a misfiling mutant stops the bb seeds
