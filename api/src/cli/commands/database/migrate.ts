@@ -27,7 +27,11 @@ export default async function migrate(
 
 		if (direction === 'down') {
 			logger.info('Downgrade successful');
-		} else {
+		}
+		else if (options.phase !== undefined) {
+			logger.info(`Migration phase ${JSON.stringify(options.phase)} up to date`);
+		}
+		else {
 			logger.info('Database up to date');
 		}
 

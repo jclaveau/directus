@@ -70,8 +70,25 @@ async function migrateOnePhase(
 		);
 	}
 
+	const extensionMigrations = await getExtensionMigrations();
+
+	if (phase === 'after-schema') {
+		const pendingVersions = await outstandingMigrations(
+			extensionMigrations.filter(({ config }) => config.phase !== 'after-schema'),
+		);
+
+		if (pendingVersions.length > 0) {
+			throw new Error(
+				`Migrations ${
+					pendingVersions.map((version) => JSON.stringify(version)).join(', ')
+				}`
+					+ ' run before the after-schema ones: run --phase before-schema first',
+			);
+		}
+	}
+
 	await runMigrations(database, 'latest', true, {
-		extensionMigrations: await getExtensionMigrations(),
+		extensionMigrations,
 		phase,
 	});
 }
@@ -129,6 +146,7 @@ async function refusePendingAfterSchema(
 		`Migrations ${
 			pendingVersions.map((version) => JSON.stringify(version)).join(', ')
 		}`
-			+ ' run once the schema snapshot is applied: pass --snapshot <path>',
+			+ ' run once the schema snapshot is applied: pass --snapshot <path>,'
+			+ ' or --phase after-schema once your own tool applied it',
 	);
 }
