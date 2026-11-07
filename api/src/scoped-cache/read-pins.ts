@@ -585,6 +585,73 @@ export function scopedCacheViewFieldsBeyondFieldMap(
 }
 
 /**
+ * The fields the aggregate rules of every node read, apart from its row cases.
+ * Those rules bound no row, so a filter's key or slice cannot answer for the
+ * rows they reach; a row case hopping out along a scope path can stay sliced.
+ */
+export function scopedCacheAggregateRuleFields(
+	schema: SchemaOverview,
+	ast: AST,
+): FieldMap {
+	const ruleFieldMap: FieldMap = { read: new Map(), other: new Map() };
+
+	const addRules = (
+		collection: CollectionKey,
+		rules: Filter[],
+		path: QueryPath,
+	): void => {
+		const rulesFilter = joinFilterWithCases(null, rules);
+
+		if (rulesFilter) {
+			extractFieldsFromQuery(
+				collection,
+				{ filter: rulesFilter },
+				ruleFieldMap,
+				schema,
+				path,
+			);
+		}
+	};
+
+	const addRulesOf = (children: AST['children'], path: QueryPath): void => {
+		for (const child of children) {
+			if (child.type === 'field' || child.type === 'functionField') {
+				continue;
+			}
+
+			const childPath = [...path, child.fieldKey];
+
+			if (child.type === 'a2o') {
+				for (const relatedCollection of child.names) {
+					const namedPath = [
+						...path,
+						formatA2oKey(child.fieldKey, relatedCollection),
+					];
+
+					addRules(
+						relatedCollection,
+						child.aggregateCases?.[relatedCollection] ?? [],
+						namedPath,
+					);
+
+					addRulesOf(child.children[relatedCollection] ?? [], namedPath);
+				}
+
+				continue;
+			}
+
+			addRules(child.name, child.aggregateCases ?? [], childPath);
+			addRulesOf(child.children, childPath);
+		}
+	};
+
+	addRules(ast.name, ast.aggregateCases ?? [], []);
+	addRulesOf(ast.children, []);
+
+	return ruleFieldMap;
+}
+
+/**
  * The purge side emits `<child>:<fk>=<value>` only when the fk is a declared
  * flat scope field; otherwise a child write emits just its pk slice, which an
  * INSERT of a new child never carries — so a pin on the parent's key would serve

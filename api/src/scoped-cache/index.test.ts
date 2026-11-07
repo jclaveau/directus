@@ -62,7 +62,10 @@ import {
 	scopedCachePinKey,
 	startScopedCachePurgeRecovery,
 } from './index.js';
-import { scopedCacheViewFieldsBeyondFieldMap } from './read-pins.js';
+import {
+	scopedCacheAggregateRuleFields,
+	scopedCacheViewFieldsBeyondFieldMap,
+} from './read-pins.js';
 import { printableScopedCachePin } from '../utils/printable-scoped-cache-pins.js';
 import {
 	flushCacheRedisDatabase,
@@ -3507,6 +3510,109 @@ describe('scopedCacheViewFieldsBeyondFieldMap', () => {
 	it('reads the columns the aggregate cases of an a2o node go through', () => {
 		expect(
 			scopedCacheViewFieldsBeyondFieldMap(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'a2o',
+						names: ['owner'],
+						fieldKey: 'item',
+						children: { owner: [] },
+						query: {},
+						cases: { owner: [] },
+						aggregateCases: { owner: [{ name: { _eq: 'alice' } }] },
+						whenCase: [],
+						relation: { meta: {} },
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['item:owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+});
+
+describe('scopedCacheAggregateRuleFields', () => {
+	const schema = new SchemaBuilder()
+		.collection('owner', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+		})
+		.collection('owned_item', (c) => {
+			c.field('id').id();
+			c.field('owner').m2o('owner');
+		})
+		.build();
+
+	it('reads the aggregate rules of the root, not its row cases', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [{ id: { _eq: 1 } }],
+				aggregateCases: [{ owner: { name: { _eq: 'alice' } } }],
+				children: [],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['', { collection: 'owned_item', fields: new Set(['owner']) }],
+			['owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads nothing of a nested node with row cases only', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+					{
+						type: 'm2o',
+						name: 'owner',
+						fieldKey: 'owner',
+						children: [],
+						query: {},
+						cases: [{ name: { _eq: 'alice' } }],
+						whenCase: [],
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map());
+	});
+
+	it('reads the aggregate rules of an m2o node', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'm2o',
+						name: 'owner',
+						fieldKey: 'owner',
+						children: [],
+						query: {},
+						cases: [],
+						aggregateCases: [{ name: { _eq: 'alice' } }],
+						whenCase: [],
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads the aggregate rules of each collection of an a2o node', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
 				type: 'root',
 				name: 'owned_item',
 				query: {},

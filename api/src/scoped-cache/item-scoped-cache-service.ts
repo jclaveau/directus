@@ -981,7 +981,7 @@ export class ItemScopedCacheService {
 
 		const {
 			fieldMap,
-			viewFieldMap,
+			aggregateRuleFieldMap,
 			filterKeying,
 			keyedFilterPins,
 			m2oParentPins,
@@ -1006,8 +1006,8 @@ export class ItemScopedCacheService {
 		for (const [path, entry] of [
 			...fieldMap.read,
 			...fieldMap.other,
-			...viewFieldMap.read,
-			...viewFieldMap.other,
+			...aggregateRuleFieldMap.read,
+			...aggregateRuleFieldMap.other,
 		]) {
 			if (entry.collection === this.collection) {
 				rootPaths.add(path);
@@ -1190,8 +1190,8 @@ export class ItemScopedCacheService {
 			const paths = pathsTo(collection, [
 				fieldMap.read,
 				fieldMap.other,
-				viewFieldMap.read,
-				viewFieldMap.other,
+				aggregateRuleFieldMap.read,
+				aggregateRuleFieldMap.other,
 			]);
 
 			if (paths.length === 0 || paths.includes('')) {
