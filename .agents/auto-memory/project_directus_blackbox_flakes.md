@@ -218,6 +218,7 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 - `singular-write-flows` "an operation is moved one by one and in batches" on #686, 2026-11-07: request 1 (first PATCH) ran 3 selects on `directus_operations`, 2 expected, on 68f48ac8d2; one `--failed` rerun passed with no change. Timing by that alone, cause not found. A statement-count table can flake: rerun once before blaming the diff; a second sighting means diagnose.
 - Same test failed twice on one sha, #683 `8b51d69f0f`, 2026-11-06: first run and its one `--failed` rerun, while 6 sibling PRs at the same base went green. #683 only touches `api/src/cli` migrate code. One rerun does not always clear it (#367).
 - `update-batch-guards` "A batch update of a system collection is checked as a single update is" on #683, 2026-11-07: shard 5, step `on postgres the requests ran these statements:`, on 3000de077e (test files added on top of a CLI-only diff); passed on the next head a43f19bd30, no related change between them. Timing by that alone, cause not found.
+- `update-batch-guards` statement counts again on #688, 2026-11-07: shard 5 of run 42373060402 on 8490df26b7 (a tests-only head on aggregate code); passed on the next head 76a3ef9f44. Same step as the #683 line above; cause still not found.
 - `common/assets/concurrency` on #683, 2026-11-07: sqlite3, a43f19bd30, one `--failed` rerun cleared it (merged 05eeca0e73).
 
 ## 2026-11-03 (#673 shard 1): invite statement-count flake

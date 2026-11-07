@@ -5,7 +5,15 @@ metadata:
   type: project
 ---
 
-Fork PR #688, branch `v11.10.1-fix/aggregate-field-cases`, fixes #687. Not approved for merge.
+Fork PR #688, branch `v11.10.1-fix/aggregate-field-cases`, fixes #687. Merged 2026-11-07 as `675e0d18ff`.
+
+What the last autoreview changed, which supersedes any older line below:
+
+- `ast.aggregateCases` holds exactly the rules the CASE reads, grouped or not: `getAggregateFieldCases` (`permissions/modules/process-ast/lib/aggregate-field-cases.ts`) builds both, so they cannot differ.
+- Its collections reach the fingerprints through the filter keying; `beyondNestedRows` is gone from `fingerprintedCollections` and `collectionsToGuard`.
+- `scopedCacheRootFilterFields` feeds the root self-reference from the root's own filter and row cases, so a plain read filtered on its key takes a bare pin when it reads another row of the root. That staleness predated #688. Nested row cases stay sliced (`cache-case-along-scope-path`).
+- A rule's function hop (`count(children)`) has to be followed by hand: `scopedCacheFunctionHops`, because `extractFieldsFromQuery` does not name the relation.
+- `sanitizeAggregate` trims fields: a spaced `aggregate[sum]= salary` read the column while the rules looked up `" salary"`, an uncased leak.
 
 Non-obvious facts it left:
 
