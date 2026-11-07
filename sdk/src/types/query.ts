@@ -30,7 +30,8 @@ export interface QueryItem<Schema, Item> extends Query<Schema, Item> {
 
 /**
  * How a create or an update batches its statements: `minimizeMutations`, the
- * server default, writes a run's updates before its creates;
+ * default unless the server's DEFAULT_MUTATION_BATCHING says otherwise, writes a
+ * run's updates before its creates;
  * `preserveMutationOrder` writes them in the order sent; `disableBatching`
  * writes one row at a time, each with its own hooks.
  */
