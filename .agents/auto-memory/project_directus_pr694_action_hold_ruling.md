@@ -43,3 +43,20 @@ select 3 vs 2 — failed 2 of 5 attempts on #694, both passed `gh run rerun --fa
 Autoreview comment: pull/694#issuecomment-6705961785 (100%, 81/81 at dd58a1bc75). CodeRabbit
 does not review this repo. Related: [[project_directus_pr686_autoreview_points]],
 [[feedback_directus_default_matches_dbms]].
+
+**Follow-up review of d002605a86 (2026-11-07, branch `v11.10.1-fix/action-hold-review`, new PR
+into hhh-dev, never merge):** #694 merged at 7.1% autoreviewed (see
+[[feedback_autoreview_percent_before_merge]]), so `dd58a1bc75..d002605a86` was reviewed after.
+Verified: activity/revision writes (`items.ts` createMany/recordUpdatedRows/deleteMany) fired
+inside the trx → now held; `fields.ts` `createField` was the one site left on plain
+`transaction` → `transactionHoldingActions`. Choices left to jean: `roles.ts` `clearCaches()`
+before emit loses held actions when Redis fails (same `finally` class in collections/fields/
+relations, predates); emit awaited before scoped purge; caller-trx failed-upsert `.catch`
+drops actions; roles cascade actions now `Promise.all` (PR-risk line).
+Dropped as not-a-bug: versions.ts/flows.ts (no trx), fields.ts:559 alterTable.
+sqlite/cockroach points → #610 from point 17 (updateBatch `['a','a','b']`, import retry over a
+consumed stream).
+
+**Result (2026-11-07):** fixes in PR #695 (`Refs #694`, not merged); full table and the open choices
+(items 7-11) in the autoreview comment on #694. Item 6 is withheld: see `~/.agents/parked/`, never
+detail it in this public repo. #610 points 17 and 18 filed.
