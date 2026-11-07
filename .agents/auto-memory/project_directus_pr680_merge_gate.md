@@ -12,7 +12,7 @@ Jean, 2026-11-07: "680 will need full bb tests including Mollie test env before 
 
 The scenarios in CI talk to a hand-written fake Mollie ([[project_directus_bb_subscriptions_bundle_scenario]]). The repo has no Mollie secret in Actions (only `CODECOV_TOKEN`, `COMPOSE_SSH_KEY`), so jean provides the `test_` key.
 
-To check on the Mollie test mode: `canceled` with the paid period still running, and whether a canceled subscription can be resumed (docs: "Canceled subscriptions cannot be updated").
+Mollie test mode: DONE 2026-11-07, box ticked. The key lives in `.env.mollie-test` of the subscriptions-bundle worktree (gitignored, never printed). Seen: cancel = DELETE 200 then `canceled` without `nextPaymentDate`; second DELETE and any PATCH answer 422 (no resume: a new subscription with `startDate`); Mollie charges a new subscription on its own ~13 min after creation in test mode (`recurring`); after a cancel the period end is paidAt + 1 month (time of day kept, vs midnight `nextPaymentDate` before). First payment has no `subscriptionId`: jean chose to keep "grants nothing / revoke at once if canceled before the first charge", documented in the code.
 
 **Why:** the fake only answers what was assumed about Mollie, so a green run proves nothing about those assumptions.
 **How to apply:** never list #680 as ready to merge on green CI; the gate is the `Before merging` section of its PR body.
