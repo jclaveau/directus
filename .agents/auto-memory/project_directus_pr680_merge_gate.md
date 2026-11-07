@@ -8,7 +8,9 @@ metadata:
 
 Jean, 2026-11-07: "680 will need full bb tests including Mollie test env before being mergeable".
 
-The scenario in CI talks to a hand-written fake Mollie ([[project_directus_bb_subscriptions_bundle_scenario]]). The repo has no Mollie secret in Actions (only `CODECOV_TOKEN`, `COMPOSE_SSH_KEY`), so jean provides the `test_` key.
+"Full bb" means scenarios for every subscription use case, not the `Run Blackbox Full` vendor matrix: done in `subscription-lifecycle.feature`, 12 scenarios each seen red. In a red run, `syncErrors` and the fakes' received writes leak between scenarios, so only the first red scenario is sure of its reason: re-prove a later one alone.
+
+The scenarios in CI talk to a hand-written fake Mollie ([[project_directus_bb_subscriptions_bundle_scenario]]). The repo has no Mollie secret in Actions (only `CODECOV_TOKEN`, `COMPOSE_SSH_KEY`), so jean provides the `test_` key.
 
 To check on the Mollie test mode: `canceled` with the paid period still running, and whether a canceled subscription can be resumed (docs: "Canceled subscriptions cannot be updated").
 
