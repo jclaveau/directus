@@ -18,9 +18,10 @@ export type OwnSubscriptionCancel = {
 
 /**
  * TODO: a user cannot undo a cancel yet. Stripe can (`cancel_at_period_end:
- * false`); Mollie documents "Canceled subscriptions cannot be updated" and no
- * reactivation, so check its test mode before designing it. A resume must refuse
- * a `plan_archived` cancel.
+ * false`). Mollie cannot: its test mode answers 422 "The subscription has been
+ * cancelled" to a PATCH, so a Mollie resume is a new subscription whose
+ * `startDate` is the old period end. A resume must refuse a `plan_archived`
+ * cancel.
  */
 export async function cancelOwnSubscription({
 	database,
