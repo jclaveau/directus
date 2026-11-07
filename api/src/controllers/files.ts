@@ -164,8 +164,8 @@ router.post(
 			keys = res.locals['savedFiles'];
 		} else {
 			keys = await service.createOne(req.body, {
-			mutationBatching: mutationBatchingFromQuery(req.query),
-		});
+				mutationBatching: mutationBatchingFromQuery(req.query),
+			});
 		}
 
 		try {
