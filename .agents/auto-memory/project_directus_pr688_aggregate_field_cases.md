@@ -18,3 +18,6 @@ Non-obvious facts it left:
 - A dependency in `viewFieldMap` or `beyondNestedRows` purges nothing unless a fingerprint names its collection: `fingerprintedCollections` and `collectionsToGuard` read only the field map and filter keying until `8823cf2d89` added `beyondNestedRows`. Helper unit tests went green while the blackbox stayed stale, so a new scoped-cache dependency needs an end-to-end purge scenario.
 - Not traced: a PATCH on an unread root column (`bonus`) also purges the grouped entry. An over-purge, disclosed in the PR body.
 - A request-table scenario stops at its first failing request, so a new witness request goes FIRST in its scenario, or it is never seen red.
+- Autoreview 2026-11-07, all green on `83b4aaa44a`. `viewFieldMap` carries row `cases` as well as aggregate rules: a pin that gives way past a rule must read `aggregateRuleFieldMap` only, or a plain read whose nested case hops back along its scope path loses its root slice (`cache-case-along-scope-path`, `csp_mr` bare).
+- `filter[author][_eq]` is the row's own column: no hop, no keying of the author. Only `filter[author][id][_eq]` hops, so a scenario on the related key must use that shape.
+- A bare `*` in a Gherkin request cell is a YAML alias (`name of an alias node must contain at least one character`): write `'*'`.
