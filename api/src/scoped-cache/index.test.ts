@@ -3539,6 +3539,8 @@ describe('scopedCacheAggregateRuleFields', () => {
 		.collection('owner', (c) => {
 			c.field('id').id();
 			c.field('name').string();
+			c.field('boss').m2o('owner');
+			c.field('items').o2m('owned_item', 'owner');
 		})
 		.collection('owned_item', (c) => {
 			c.field('id').id();
@@ -3633,6 +3635,96 @@ describe('scopedCacheAggregateRuleFields', () => {
 			} as unknown as AST).read,
 		).toEqual(new Map([
 			['item:owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads the aggregate rules of a node below an m2o', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'm2o',
+						name: 'owner',
+						fieldKey: 'owner',
+						children: [
+							{
+								type: 'm2o',
+								name: 'owner',
+								fieldKey: 'boss',
+								children: [],
+								query: {},
+								cases: [],
+								aggregateCases: [{ name: { _eq: 'alice' } }],
+								whenCase: [],
+							},
+						],
+						query: {},
+						cases: [],
+						whenCase: [],
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['owner.boss', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads the aggregate rules of a node below an a2o', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'a2o',
+						names: ['owner'],
+						fieldKey: 'item',
+						children: {
+							owner: [
+								{
+									type: 'm2o',
+									name: 'owner',
+									fieldKey: 'boss',
+									children: [],
+									query: {},
+									cases: [],
+									aggregateCases: [{ name: { _eq: 'alice' } }],
+									whenCase: [],
+								},
+							],
+						},
+						query: {},
+						cases: { owner: [] },
+						whenCase: [],
+						relation: { meta: {} },
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['item:owner.boss', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('names the rows a function of a rule reads through a relation', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				aggregateCases: [{ owner: { 'count(items)': { _gt: 1 } } }],
+				children: [],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['', { collection: 'owned_item', fields: new Set(['owner']) }],
+			['owner', { collection: 'owner', fields: new Set(['items']) }],
+			['owner.count(items)', { collection: 'owned_item', fields: new Set() }],
 		]));
 	});
 });

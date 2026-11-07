@@ -331,6 +331,13 @@ describe('read pins at the merge', () => {
 				c.field('parent').m2o('article');
 				c.field('author').m2o('person');
 				c.field('editor').m2o('person');
+				c.field('notes').o2m('note', 'article');
+				c.field('children').o2m('article', 'parent');
+			})
+			.collection('note', (c) => {
+				c.field('id').id();
+				c.field('status').string();
+				c.field('article').m2o('article');
 			})
 			.build();
 
@@ -344,7 +351,7 @@ describe('read pins at the merge', () => {
 						policy: 'policy',
 						collection: 'article',
 						action: 'read' as const,
-						fields: ['id', 'author', 'category'],
+						fields: ['id', 'author', 'category', 'notes', 'children'],
 						permissions: {},
 						validation: null,
 						presets: null,
@@ -363,6 +370,16 @@ describe('read pins at the merge', () => {
 						id: 3,
 						policy: 'policy',
 						collection: 'person',
+						action: 'read' as const,
+						fields: ['*'],
+						permissions: {},
+						validation: null,
+						presets: null,
+					},
+					{
+						id: 4,
+						policy: 'policy',
+						collection: 'note',
 						action: 'read' as const,
 						fields: ['*'],
 						permissions: {},
@@ -394,9 +411,7 @@ describe('read pins at the merge', () => {
 			keeps the bare pin of its own collection when the rule reads another of
 			its rows: the key the filter names does not bound that one
 		`, async () => {
-			const service = asReaderOf({ parent: { status: { _eq: 'live' } } });
-
-			expect(await pinsOf(service, {
+			expect(await pinsOf(asReaderOf({ parent: { status: { _eq: 'live' } } }), {
 				aggregate: { sum: ['salary'] },
 				group: ['category'],
 				filter: { id: { _eq: 1 } },
@@ -407,13 +422,96 @@ describe('read pins at the merge', () => {
 			keeps the bare pin of a collection the rule reaches by another path than
 			the slice the filter names
 		`, async () => {
-			const service = asReaderOf({ editor: { status: { _eq: 'live' } } });
-
-			expect(await pinsOf(service, {
+			expect(await pinsOf(asReaderOf({ editor: { status: { _eq: 'live' } } }), {
 				aggregate: { sum: ['salary'] },
 				group: ['category'],
 				filter: { author: { region: { _eq: 'eu' } } },
 			})).toEqual(['article', 'person']);
+		});
+
+		test(oneLine`
+			keeps the bare pin of its own collection when an ungrouped sum holds the
+			rule among its cases
+		`, async () => {
+			expect(await pinsOf(asReaderOf({ parent: { status: { _eq: 'live' } } }), {
+				aggregate: { sum: ['salary'] },
+				filter: { id: { _eq: 1 } },
+			})).toEqual(['article']);
+		});
+
+		test(oneLine`
+			keeps the bare pin of its own collection when the rule counts its rows
+		`, async () => {
+			expect(await pinsOf(asReaderOf({ 'count(children)': { _gt: 0 } }), {
+				aggregate: { sum: ['salary'] },
+				group: ['category'],
+				filter: { id: { _eq: 1 } },
+			})).toEqual(['article']);
+		});
+
+		test(oneLine`
+			keeps the bare pin of a to-many the rule reads past the key a filter names
+		`, async () => {
+			expect(await pinsOf(asReaderOf({ notes: { status: { _eq: 'live' } } }), {
+				aggregate: { sum: ['salary'] },
+				group: ['category'],
+				filter: { notes: { id: { _eq: 7 } } },
+			})).toEqual(['article', 'note']);
+		});
+
+		test(oneLine`
+			keeps the bare pin of a to-many an ungrouped sum holds the rule of among
+			its cases
+		`, async () => {
+			expect(await pinsOf(asReaderOf({ notes: { status: { _eq: 'live' } } }), {
+				aggregate: { sum: ['salary'] },
+				filter: { notes: { id: { _eq: 7 } } },
+			})).toEqual(['article', 'note']);
+		});
+
+		test(oneLine`
+			keeps the bare pin of a to-many the rule counts past the key a filter names
+		`, async () => {
+			expect(await pinsOf(asReaderOf({ 'count(notes)': { _gt: 1 } }), {
+				aggregate: { sum: ['salary'] },
+				group: ['category'],
+				filter: { notes: { id: { _eq: 7 } } },
+			})).toEqual(['article', 'note']);
+		});
+
+		test(oneLine`
+			keeps the bare pin of its own collection when the case of a plain read
+			reads another of its rows
+		`, async () => {
+			expect(await pinsOf(asReaderOf({ parent: { status: { _eq: 'live' } } }), {
+				fields: ['salary'],
+				filter: { id: { _eq: 1 } },
+			})).toEqual(['article']);
+		});
+
+		test(oneLine`
+			keeps the bare pin of its own collection when the case of a plain read
+			counts its rows
+		`, async () => {
+			expect(await pinsOf(asReaderOf({ 'count(children)': { _gt: 0 } }), {
+				fields: ['salary'],
+				filter: { id: { _eq: 1 } },
+			})).toEqual(['article']);
+		});
+
+		test(oneLine`
+			keeps the bare pin of its own collection when the filter of a plain read
+			counts its rows
+		`, async () => {
+			expect(await pinsOf(asReaderOf({}), {
+				fields: ['id'],
+				filter: {
+					_and: [
+						{ id: { _eq: 1 } },
+						{ 'count(children)': { _gt: 0 } },
+					],
+				},
+			})).toEqual(['article']);
 		});
 	});
 

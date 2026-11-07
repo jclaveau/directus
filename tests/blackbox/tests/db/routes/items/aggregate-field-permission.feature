@@ -46,6 +46,12 @@ Feature: An aggregate reads a field only on the rows granting it
       |   aggregate[sum]: salary            |       sum:            |
       |   aggregate[count]: '*'             |         salary: "100" |
       |   filter[id][_starts_with]: <run>-  |                       |
+      | as: <reader-token>                  | code: 200             |+
+      | method: GET                         | body:                 |
+      | path: /items/test_agg_field_article |   data:               |
+      | query:                              |     - sum:            |
+      |   aggregate[sum]: ' salary'         |         salary: "100" |
+      |   filter[id][_starts_with]: <run>-  |                       |
 
   Scenario: every aggregate of a field granted through a relation skips the rows hiding it
     Given the rows of test_agg_field_author:

@@ -376,7 +376,7 @@ test('Keeps the rule of an aggregated field a grouped read drops', () => {
 	expect(ast.aggregateCases).toEqual([{ bonus: { _gt: 0 } }]);
 });
 
-test('Adds no aggregate cases when the cases hold the rule of the field', () => {
+test('Keeps the rule of an aggregated field the cases hold beside another', () => {
 	const ast: DeepPartial<AST> = {
 		name: 'articles',
 		cases: [],
@@ -396,6 +396,31 @@ test('Adds no aggregate cases when the cases hold the rule of the field', () => 
 	expect(ast).toEqual({
 		name: 'articles',
 		cases: [{}, { bonus: { _gt: 0 } }],
+		aggregateCases: [{ bonus: { _gt: 0 } }],
+		query: { aggregate: { sum: ['salary'] } },
+		children: [],
+	});
+});
+
+test('Adds no aggregate cases when every row holds the field rule', () => {
+	const ast: DeepPartial<AST> = {
+		name: 'articles',
+		cases: [],
+		query: { aggregate: { sum: ['salary'] } },
+		children: [],
+	};
+
+	injectCases(ast as AST, [
+		{
+			collection: 'articles',
+			permissions: { bonus: { _gt: 0 } },
+			fields: ['id', 'salary'],
+		},
+	] as Permission[]);
+
+	expect(ast).toEqual({
+		name: 'articles',
+		cases: [{ bonus: { _gt: 0 } }],
 		query: { aggregate: { sum: ['salary'] } },
 		children: [],
 	});

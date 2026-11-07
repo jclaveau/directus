@@ -167,6 +167,24 @@ describe('aggregate', () => {
 
 		expect(sanitizedQuery.aggregate).toEqual({ count: ['*'] });
 	});
+
+	test('should trim the fields of a list', async () => {
+		const sanitizedQuery = await sanitizeQuery(
+			{ aggregate: { sum: ' salary, bonus ' } },
+			null as any,
+		);
+
+		expect(sanitizedQuery.aggregate).toEqual({ sum: ['salary', 'bonus'] });
+	});
+
+	test('should trim the fields of an array', async () => {
+		const sanitizedQuery = await sanitizeQuery(
+			{ aggregate: { sum: [' salary', 'bonus '] } },
+			null as any,
+		);
+
+		expect(sanitizedQuery.aggregate).toEqual({ sum: ['salary', 'bonus'] });
+	});
 });
 
 describe('sort', () => {
