@@ -70,3 +70,8 @@ actions silent under `emitEvents: false`, real on `POST /files`, replacement upl
 them) and 3 (revision snapshot `readMany` fires `<collection>.items.read`, also on rollback; rec
 pass `emitEvents: false`). "Only its `bypassEmitAction` can hold them" was checked and is correct.
 Item 1 is withheld: see `~/.agents/parked/`. #610 point 19 filed.
+
+**Ruled 2026-11-07 on #695's choices, applied in 26741cea0e:** activity and revision actions fire
+whatever `emitEvents` says: tooling, not business events (filter option tracked by #696). An update's
+revision snapshot reads with `emitEvents: false`; consequence: a read filter hook no longer shapes
+`directus_revisions.data`.
