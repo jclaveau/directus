@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/panels`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/panels`,params:t??{},body:JSON.stringify(e),method:`POST`});exports.createPanel=t,exports.createPanels=e;
+//# sourceMappingURL=panels.cjs.map

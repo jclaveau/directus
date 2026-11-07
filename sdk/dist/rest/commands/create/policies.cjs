@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/policies`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/policies`,params:t??{},body:JSON.stringify(e),method:`POST`});exports.createPolicies=e,exports.createPolicy=t;
+//# sourceMappingURL=policies.cjs.map

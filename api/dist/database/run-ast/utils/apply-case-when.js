@@ -1,0 +1,33 @@
+import { applyFilter } from "../lib/apply-query/filter/index.js";
+
+//#region src/database/run-ast/utils/apply-case-when.ts
+function applyCaseWhen({ columnCases, table, aliasMap, cases, column, alias, permissions, generateAlias, readsCasesByKey }, { knex, schema }) {
+	const caseQuery = knex.queryBuilder();
+	if (readsCasesByKey) {
+		const keyColumn = `${table}.${schema.collections[table].primary}`;
+		const matchedKeys = knex.from(table).distinct(keyColumn);
+		applyFilter(knex, schema, matchedKeys, { _or: columnCases }, table, Object.create(null), cases, permissions, generateAlias);
+		caseQuery.whereIn(keyColumn, matchedKeys);
+	} else applyFilter(knex, schema, caseQuery, { _or: columnCases }, table, aliasMap, cases, permissions, generateAlias);
+	const compiler = knex.client.queryCompiler(caseQuery);
+	const sqlParts = [];
+	if (!compiler.grouped.where) return column;
+	for (const statement of compiler.grouped.where) {
+		const val = compiler[statement.type](statement);
+		if (val) {
+			if (sqlParts.length > 0) sqlParts.push(statement.bool);
+			sqlParts.push(val);
+		}
+	}
+	const sql = sqlParts.length > 0 ? sqlParts.join(" ") : "1";
+	const bindings = [...caseQuery.toSQL().bindings, column];
+	let rawCase = `(CASE WHEN ${sql} THEN ?? END)`;
+	if (alias) {
+		rawCase += " AS ??";
+		bindings.push(alias);
+	}
+	return knex.raw(rawCase, bindings);
+}
+
+//#endregion
+export { applyCaseWhen };
