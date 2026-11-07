@@ -3369,7 +3369,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('stores an M2O row created inline as its key', async () => {
 			// Ahead of the owner's: the carrier's insert names an `owner` column.
 			tracker.on.insert('carrier').response([{ id: 1 }, { id: 2 }]);
-			tracker.on.select('owner').response(undefined);
+			tracker.on.select('owner').response([]);
 			tracker.on.insert('owner').response([{ id: 5 }]);
 			// A key given on a serial column resets its sequence after the insert.
 			tracker.on.any(/SETVAL/).response([]);
@@ -3398,7 +3398,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('stores an A2O row created inline as its key', async () => {
-			tracker.on.select('page').response(undefined);
+			tracker.on.select('page').response([]);
 			tracker.on.insert('page').response([{ id: 7 }]);
 			// A key given on a serial column resets its sequence after the insert.
 			tracker.on.any(/SETVAL/).response([]);
@@ -6721,7 +6721,7 @@ describe('Services / Items / a batched upsert', () => {
 			'select `id` from `test` where `id` in (?)',
 			'insert into `test` (`id`, `name`) values (?, ?) returning `id`',
 			'select `id` from `test` where `id` in (?)',
-			'select `id` from `tags` where `id` = ? limit ?',
+			'select `id` from `tags` where `id` in (?)',
 			'insert into `tags` (`id`, `name`) values (?, ?) returning `id`',
 			'update `test` set `tag` = ? where `id` in (?)',
 			'select `id` from `test` where `id` in (?, ?)',
@@ -7352,6 +7352,285 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 			.select('id')
 			.orderBy('id'))
 			.resolves.toStrictEqual([{ id: 1 }, { id: 2 }]);
+	});
+});
+
+describe('Services / Items / the nested M2O and A2O rows of several rows', () => {
+	let database: Knex;
+	let sqlStatements: string[];
+
+	const rowSchema = new SchemaBuilder()
+		.collection('test', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('country').m2o('country');
+			c.field('item').a2o(['post', 'page']);
+		})
+		.collection('country', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+		})
+		.collection('post', (c) => {
+			c.field('id').id();
+			c.field('title').string();
+		})
+		.collection('page', (c) => {
+			c.field('id').id();
+			c.field('title').string();
+		})
+		.build();
+
+	// the relational paths below load PayloadService's lazy `get-service.js` graph
+	beforeAll(async () => {
+		await import('../utils/get-service.js');
+	}, 120_000);
+
+	beforeEach(async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+		database = knex.default({
+			client: 'sqlite3',
+			connection: { filename: ':memory:' },
+			useNullAsDefault: true,
+			pool: { min: 1, max: 1 },
+		});
+
+		await database.schema.createTable('test', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('country');
+			table.string('item');
+			table.string('collection');
+		});
+
+		await database.schema.createTable('country', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		await database.schema.createTable('post', (table) => {
+			table.increments('id');
+			table.string('title');
+		});
+
+		await database.schema.createTable('page', (table) => {
+			table.increments('id');
+			table.string('title');
+		});
+
+		await database('country').insert([
+			{ id: 1, name: 'Spain' },
+			{ id: 2, name: 'Italy' },
+		]);
+
+		await database('post').insert([{ id: 1, title: 'Hello' }]);
+
+		revisionWrites.length = 0;
+		revisionParentWrites.length = 0;
+		revisionIds.issued = 0;
+		sqlStatements = [];
+
+		database.on('query', (query: { sql: string }) => {
+			sqlStatements.push(query.sql);
+		});
+	});
+
+	afterEach(async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+		await database.destroy();
+	});
+
+	it('links each created row to the country it nests', async () => {
+		await expect(new ItemsService('test', { knex: database, schema: rowSchema })
+			.createMany([
+				{ id: 3, country: { name: 'France' } },
+				{ id: 4, country: { id: 1, name: 'Spain renamed' } },
+				{ id: 5, country: { id: 2 } },
+				{ id: 6, country: { id: 8 } },
+			])).resolves.toStrictEqual([3, 4, 5, 6]);
+
+		await expect(database('test').select('id', 'country')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 3, country: 3 },
+			{ id: 4, country: 1 },
+			{ id: 5, country: 2 },
+			{ id: 6, country: 8 },
+		]);
+
+		await expect(database('country').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'Spain renamed' },
+			{ id: 2, name: 'Italy' },
+			{ id: 3, name: 'France' },
+			{ id: 8, name: null },
+		]);
+	});
+
+	it(oneLine`
+		writes the countries of every created row in one upsert, reading only
+		the countries named by their key alone
+	`, async () => {
+		await new ItemsService('test', { knex: database, schema: rowSchema })
+			.createMany([
+				{ id: 3, country: { name: 'France' } },
+				{ id: 4, country: { id: 1, name: 'Spain renamed' } },
+				{ id: 5, country: { id: 2 } },
+				{ id: 6, country: { id: 8 } },
+			]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `country` where `id` in (?, ?)',
+			'select `id` from `country` where `id` in (?, ?)',
+			'update `country` set `name` = ? where `id` in (?)',
+			'select sqlite_version() as version limit ?',
+			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
+			'insert into `country` (`id`, `name`) select ? as `id`, ? as `name`'
+				+ ' union all select ? as `id`, ? as `name` returning `id`',
+			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
+			'select sqlite_version() as version limit ?',
+			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
+			'insert into `test` (`country`, `id`) select ? as `country`, ? as `id`'
+				+ ' union all select ? as `country`, ? as `id`'
+				+ ' union all select ? as `country`, ? as `id`'
+				+ ' union all select ? as `country`, ? as `id` returning `id`',
+			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
+			'COMMIT;',
+		]);
+	});
+
+	it('upserts the items of all created rows once per collection', async () => {
+		await expect(new ItemsService('test', { knex: database, schema: rowSchema })
+			.createMany([
+				{ id: 3, collection: 'post', item: { title: 'New post' } },
+				{ id: 4, collection: 'page', item: { title: 'New page' } },
+				{ id: 5, collection: 'post', item: { id: 1, title: 'Hello renamed' } },
+			])).resolves.toStrictEqual([3, 4, 5]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `post` where `id` in (?)',
+			'update `post` set `title` = ? where `id` in (?)',
+			'insert into `post` (`title`) values (?) returning `id`',
+			'insert into `page` (`title`) values (?) returning `id`',
+			'select sqlite_version() as version limit ?',
+			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
+			'insert into `test` (`collection`, `id`, `item`)'
+				+ ' select ? as `collection`, ? as `id`, ? as `item`'
+				+ ' union all select ? as `collection`, ? as `id`, ? as `item`'
+				+ ' union all select ? as `collection`, ? as `id`, ? as `item`'
+				+ ' returning `id`',
+			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
+			'COMMIT;',
+		]);
+
+		await expect(database('test').select('id', 'collection', 'item')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 3, collection: 'post', item: '2' },
+			{ id: 4, collection: 'page', item: '1' },
+			{ id: 5, collection: 'post', item: '1' },
+		]);
+
+		await expect(database('post').select('id', 'title')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, title: 'Hello renamed' },
+			{ id: 2, title: 'New post' },
+		]);
+	});
+
+	it(oneLine`
+		files the revision of each country under the row nesting it, the
+		updated country written first
+	`, async () => {
+		await new ItemsService('test', {
+			knex: database,
+			schema: rowSchema,
+			accountability: { user: 'u1', role: 'r1', admin: true, app: true } as any,
+		}).createMany([
+			{ id: 3, name: 'three', country: { name: 'France' } },
+			{ id: 4, name: 'four', country: { id: 1, name: 'Spain of four' } },
+		]);
+
+		// revision 1 is Spain's, of row 4; revision 2 France's, of row 3; 3 and 4
+		// are the rows'
+		expect(revisionParentWrites).toStrictEqual([
+			{ keys: [2], data: { parent: 3 } },
+			{ keys: [1], data: { parent: 4 } },
+		]);
+	});
+
+	it('leaves a country two rows name with the later row\'s change', async () => {
+		await new ItemsService('test', { knex: database, schema: rowSchema })
+			.createMany([
+				{ id: 3, country: { id: 1, name: 'Spain of three' } },
+				{ id: 4, country: { id: 1, name: 'Spain of four' } },
+			]);
+
+		await expect(database('country').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'Spain of four' },
+			{ id: 2, name: 'Italy' },
+		]);
+	});
+
+	it(oneLine`
+		creates a country two rows name by an unknown key alone once, and
+		updates it from neither
+	`, async () => {
+		const countryUpdateFilter = vi.fn((payload) => payload);
+		emitter.onFilter('country.items.update', countryUpdateFilter);
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema: rowSchema })
+				.createMany([
+					{ id: 3, country: { id: 8 } },
+					{ id: 4, country: { id: 8 } },
+				])).resolves.toStrictEqual([3, 4]);
+		}
+		finally {
+			emitter.offFilter('country.items.update', countryUpdateFilter);
+		}
+
+		expect(countryUpdateFilter).not.toHaveBeenCalled();
+
+		await expect(database('test').select('id', 'country')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 3, country: 8 },
+			{ id: 4, country: 8 },
+		]);
+	});
+
+	it(oneLine`
+		links and files the country of a row behind one a filter hook
+		cancelled under that row
+	`, async () => {
+		const cancelFirstRow = () => {
+			return [null, { data: { id: 4, country: { id: 1, name: 'Spain' } } }];
+		};
+
+		emitter.onFilter('test.items.create', cancelFirstRow);
+
+		try {
+			await expect(new ItemsService('test', {
+				knex: database,
+				schema: rowSchema,
+				accountability: { user: 'u1', role: 'r1', admin: true, app: true } as any,
+			}).createMany([
+				{ id: 3, name: 'three' },
+				{ id: 4, country: { id: 1, name: 'Spain' } },
+			], { allowFilterCancel: true })).resolves.toStrictEqual([null, 4]);
+		}
+		finally {
+			emitter.offFilter('test.items.create', cancelFirstRow);
+		}
+
+		await expect(database('test').select('id', 'country')
+			.orderBy('id')).resolves.toStrictEqual([{ id: 4, country: 1 }]);
+
+		// revision 1 is Spain's, 2 the row's
+		expect(revisionParentWrites).toStrictEqual([
+			{ keys: [1], data: { parent: 2 } },
+		]);
 	});
 });
 

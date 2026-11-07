@@ -43,18 +43,18 @@ describe('processA2O', () => {
 		.build();
 
 	test('creates a nested record that has no primary key', async () => {
-		const createOneSpy = vi.fn().mockResolvedValue(11);
+		const upsertManySpy = vi.fn().mockResolvedValue([11]);
 
 		vi.mocked(getService).mockReturnValue({
-			createOne: createOneSpy,
+			upsertMany: upsertManySpy,
 		} as unknown as ItemsService);
 
 		const service = new PayloadService('comment', { knex: db, schema });
 
-		const result = await service.processA2O({
+		const result = await service.processA2O([{
 			collection: 'post',
 			item: { title: 'Hello' },
-		});
+		}]);
 
 		expect(getService).toHaveBeenCalledWith('post', {
 			accountability: null,
@@ -63,75 +63,101 @@ describe('processA2O', () => {
 			nested: ['item'],
 		});
 
-		expect(createOneSpy).toHaveBeenCalledWith(
-			{ title: 'Hello' },
+		expect(upsertManySpy).toHaveBeenCalledWith(
+			[{ title: 'Hello' }],
+			{
+				refuseHookAddedRows: true,
+				onRevisionCreate: expect.any(Function),
+				onRequireUserIntegrityCheck: expect.any(Function),
+				bypassEmitAction: expect.any(Function),
+				emitEvents: undefined,
+				mutationTracker: undefined,
+			},
+		);
+
+		expect(result.payloads).toStrictEqual([{ collection: 'post', item: 11 }]);
+	});
+
+	test('upserts a nested record that has fields beside its key', async () => {
+		const upsertManySpy = vi.fn().mockResolvedValue([5]);
+
+		vi.mocked(getService).mockReturnValue({
+			upsertMany: upsertManySpy,
+		} as unknown as ItemsService);
+
+		const service = new PayloadService('comment', { knex: db, schema });
+
+		const result = await service.processA2O([{
+			collection: 'post',
+			item: { id: 5, title: 'Hello' },
+		}]);
+
+		expect(tracker.history.select).toEqual([]);
+
+		expect(upsertManySpy).toHaveBeenCalledWith(
+			[{ id: 5, title: 'Hello' }],
 			expect.any(Object),
 		);
 
-		expect(result.payload).toEqual({ collection: 'post', item: 11 });
+		expect(result.payloads).toStrictEqual([{ collection: 'post', item: 5 }]);
 	});
 
-	test('updates a nested record whose primary key exists', async () => {
+	test('links a record holding only the key of a row, writing nothing', async () => {
 		tracker.on.select('post').response([{ id: 5 }]);
-		const updateOneSpy = vi.fn().mockResolvedValue(5);
+		const upsertManySpy = vi.fn();
 
 		vi.mocked(getService).mockReturnValue({
-			updateOne: updateOneSpy,
+			upsertMany: upsertManySpy,
 		} as unknown as ItemsService);
 
 		const service = new PayloadService('comment', { knex: db, schema });
 
-		const result = await service.processA2O({
+		const result = await service.processA2O([{
 			collection: 'post',
-			item: { id: 5, title: 'Hello' },
-		});
+			item: { id: 5 },
+		}]);
 
-		expect(updateOneSpy).toHaveBeenCalledWith(
-			5,
-			{ title: 'Hello' },
-			expect.any(Object),
-		);
-
-		expect(result.payload).toEqual({ collection: 'post', item: 5 });
+		expect(upsertManySpy).not.toHaveBeenCalled();
+		expect(result.payloads).toStrictEqual([{ collection: 'post', item: 5 }]);
 	});
 
-	test('creates a nested record whose primary key is unknown', async () => {
+	test('creates a nested record holding only a key no row has', async () => {
 		tracker.on.select('post').response([]);
-		const createOneSpy = vi.fn().mockResolvedValue(5);
+		const upsertManySpy = vi.fn().mockResolvedValue([5]);
 
 		vi.mocked(getService).mockReturnValue({
-			createOne: createOneSpy,
+			upsertMany: upsertManySpy,
 		} as unknown as ItemsService);
 
 		const service = new PayloadService('comment', { knex: db, schema });
 
-		const result = await service.processA2O({
+		const result = await service.processA2O([{
 			collection: 'post',
-			item: { id: 5, title: 'Hello' },
-		});
+			item: { id: 5 },
+		}]);
 
-		expect(createOneSpy).toHaveBeenCalledWith(
-			{ id: 5, title: 'Hello' },
+		expect(upsertManySpy).toHaveBeenCalledWith(
+			[{ id: 5 }],
 			expect.any(Object),
 		);
 
-		expect(result.payload).toEqual({ collection: 'post', item: 5 });
+		expect(result.payloads).toStrictEqual([{ collection: 'post', item: 5 }]);
 	});
 
 	test('leaves a nested m2o record to processM2O', async () => {
 		const service = new PayloadService('comment', { knex: db, schema });
 
-		const result = await service.processA2O({ author: { name: 'Ada' } });
+		const result = await service.processA2O([{ author: { name: 'Ada' } }]);
 
 		expect(getService).not.toHaveBeenCalled();
-		expect(result.payload).toEqual({ author: { name: 'Ada' } });
+		expect(result.payloads).toStrictEqual([{ author: { name: 'Ada' } }]);
 	});
 
 	test('refuses a nested record without its collection field', async () => {
 		const service = new PayloadService('comment', { knex: db, schema });
 
 		await expect(
-			service.processA2O({ item: { title: 'Hello' } }),
+			service.processA2O([{ item: { title: 'Hello' } }]),
 		).rejects.toStrictEqual(new InvalidPayloadError({
 			reason: 'Can\'t update nested record "comment.item" without'
 				+ ' field "comment.collection" being set',
@@ -142,10 +168,47 @@ describe('processA2O', () => {
 		const service = new PayloadService('comment', { knex: db, schema });
 
 		await expect(
-			service.processA2O({ collection: 'video', item: { title: 'Hello' } }),
+			service.processA2O([{ collection: 'video', item: { title: 'Hello' } }]),
 		).rejects.toStrictEqual(new InvalidPayloadError({
 			reason: '"comment.item" can\'t be linked to collection "video"',
 		}));
+	});
+
+	test('refuses a nested record naming its collection by a list', async () => {
+		const service = new PayloadService('comment', { knex: db, schema });
+
+		await expect(
+			service.processA2O([{ collection: ['post'], item: { title: 'Hello' } }]),
+		).rejects.toStrictEqual(new InvalidPayloadError({
+			reason: '"comment.item" can\'t be linked to collection ["post"]',
+		}));
+	});
+
+	test('refuses a single row passed without its array', async () => {
+		const service = new PayloadService('comment', { knex: db, schema });
+
+		await expect(
+			service.processA2O({ collection: 'post' } as never),
+		).rejects.toStrictEqual(new Error(
+			'processA2O takes the rows as an array, got {"collection":"post"}',
+		));
+	});
+
+	test('refuses a revision upsertMany files under no nested record', async () => {
+		vi.mocked(getService).mockReturnValue({
+			upsertMany: vi.fn().mockImplementation((_records, opts) => {
+				opts.onRevisionCreate(21, 7, undefined);
+			}),
+		} as unknown as ItemsService);
+
+		const service = new PayloadService('comment', { knex: db, schema });
+
+		await expect(service.processA2O([{
+			collection: 'post',
+			item: { title: 'Hello' },
+		}])).rejects.toStrictEqual(new Error(
+			'Revision 21 of 7 in "post" came from no nested record',
+		));
 	});
 });
 
@@ -157,27 +220,44 @@ describe('processM2O', () => {
 		})
 		.build();
 
-	test('updates a nested record whose primary key exists', async () => {
-		tracker.on.select('country').response([{ id: 3 }]);
-		const updateOneSpy = vi.fn().mockResolvedValue(3);
+	test('upserts the nested records of every row in one call', async () => {
+		const upsertManySpy = vi.fn().mockResolvedValue([3, 4]);
 
 		vi.mocked(getService).mockReturnValue({
-			updateOne: updateOneSpy,
+			upsertMany: upsertManySpy,
 		} as unknown as ItemsService);
 
 		const service = new PayloadService('city', { knex: db, schema });
 
-		const result = await service.processM2O({
-			country: { id: 3, name: 'France' },
-		});
+		const result = await service.processM2O([
+			{ country: { id: 3, name: 'France' } },
+			{ country: { name: 'Spain' } },
+		], { mutationBatching: 'disableBatching' });
 
-		expect(updateOneSpy).toHaveBeenCalledWith(
-			3,
-			{ name: 'France' },
-			expect.any(Object),
+		expect(upsertManySpy).toHaveBeenCalledWith(
+			[{ id: 3, name: 'France' }, { name: 'Spain' }],
+			{
+				refuseHookAddedRows: true,
+				onRevisionCreate: expect.any(Function),
+				onRequireUserIntegrityCheck: expect.any(Function),
+				bypassEmitAction: expect.any(Function),
+				emitEvents: undefined,
+				mutationTracker: undefined,
+				mutationBatching: 'disableBatching',
+			},
 		);
 
-		expect(result.payload).toEqual({ country: 3 });
+		expect(result.payloads).toStrictEqual([{ country: 3 }, { country: 4 }]);
+	});
+
+	test('refuses a single row passed without its array', async () => {
+		const service = new PayloadService('city', { knex: db, schema });
+
+		await expect(
+			service.processM2O({ country: 3 } as never),
+		).rejects.toStrictEqual(new Error(
+			'processM2O takes the rows as an array, got {"country":3}',
+		));
 	});
 });
 
