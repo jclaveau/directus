@@ -60,3 +60,7 @@ consumed stream).
 **Result (2026-11-07):** fixes in PR #695 (`Refs #694`, not merged); full table and the open choices
 (items 7-11) in the autoreview comment on #694. Item 6 is withheld: see `~/.agents/parked/`, never
 detail it in this public repo. #610 points 17 and 18 filed.
+
+**Flake again on #695 (2026-11-07):** same family, other scenario: `singular-write-flows` "A single
+flow is loaded as it is created", request 3 `directus_operations` select 4 vs 3, shard 5, run
+42372465544; passed on `gh run rerun --failed`. Still no cause.
