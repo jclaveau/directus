@@ -671,7 +671,7 @@ export class PayloadService {
 			this.schema,
 			relatedCollection,
 			relatedPrimaryKeyField,
-			[],
+			keyOnlyKeys,
 		);
 
 		const existingKeyNames = new Set<string>();
@@ -702,11 +702,15 @@ export class PayloadService {
 				return true;
 			}
 
-			const keyName = String(relatedPrimaryKey);
+			const keyName = primaryKeyNameOf(
+				relatedPrimaryKey,
+				relatedCollection,
+				this.schema,
+			);
 
 			if (
 				keyOnlyOf(rowIndex) !== null
-				&& existingKeyNames.has(keyName)
+				&& (existingKeyNames.has(keyName) || upsertedKeyNames.has(keyName))
 			) {
 				return false;
 			}
@@ -745,16 +749,20 @@ export class PayloadService {
 						);
 					}
 
-					const rowIndex = rowIndexes[recordIndex]!;
+					const rowIndex = upsertRowIndexes[recordIndex]!;
 
 					rowsResult.revisionsByParent[rowIndex]!.push(revision);
 				},
-				onRequireUserIntegrityCheck: () => undefined,
-				bypassEmitAction: (params) => {
-					return rowsResult.nestedActionEvents.push(params);
+				onRequireUserIntegrityCheck: (flags) => {
+					rowsResult.userIntegrityCheckFlags |= flags;
 				},
-				emitEvents: undefined,
-				mutationTracker: undefined,
+				bypassEmitAction: (params) => {
+					return opts?.bypassEmitAction
+						? opts.bypassEmitAction(params)
+						: rowsResult.nestedActionEvents.push(params);
+				},
+				emitEvents: opts?.emitEvents,
+				mutationTracker: opts?.mutationTracker,
 				mutationBatching: opts?.mutationBatching,
 			},
 		);

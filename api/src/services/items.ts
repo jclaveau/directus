@@ -707,7 +707,7 @@ implements AbstractService<Item> {
 				presetRows.push({ index, payloadAfterHooks, payloadWithPresets });
 			}
 
-			if (opts.preMutationError) {
+			if (presetRows.length > 0 && opts.preMutationError) {
 				throw opts.preMutationError;
 			}
 
@@ -726,15 +726,17 @@ implements AbstractService<Item> {
 				opts,
 			);
 
-			const a2o = await payloadService.processA2O(
-				presetRows.map((row) => row.payloadWithPresets),
-				opts,
-			);
+			const a2o = await payloadService.processA2O(m2o.payloads, opts);
 
-			userIntegrityCheckFlags |= m2o.userIntegrityCheckFlags;
+			userIntegrityCheckFlags |=
+				m2o.userIntegrityCheckFlags | a2o.userIntegrityCheckFlags;
 
 			// every row's events: a spread could pass more arguments than allowed
 			for (const nestedActionEvent of m2o.nestedActionEvents) {
+				nestedActionEvents.push(nestedActionEvent);
+			}
+
+			for (const nestedActionEvent of a2o.nestedActionEvents) {
 				nestedActionEvents.push(nestedActionEvent);
 			}
 
@@ -788,7 +790,7 @@ implements AbstractService<Item> {
 					revisionPayload,
 					primaryKey,
 					revisionsM2O: m2o.revisionsByParent[rowIndex]!,
-					revisionsA2O: [],
+					revisionsA2O: a2o.revisionsByParent[rowIndex]!,
 					payloadService,
 				});
 			}
