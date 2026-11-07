@@ -138,7 +138,10 @@ export class FilesService extends ItemsService<File> {
 
 		// If this is a new file upload, we need to generate a new primary key and DB record
 		if (isReplacement === false || primaryKey === undefined) {
-			primaryKey = await this.createOne(payload, { emitEvents: false });
+			primaryKey = await this.createOne(payload, {
+				emitEvents: false,
+				mutationBatching: opts?.mutationBatching,
+			});
 		}
 
 		const filenameDisk = primaryKey + (fileExtension || '');
@@ -212,7 +215,10 @@ export class FilesService extends ItemsService<File> {
 		// If the file is a replacement, we need to update the DB record with the new payload, delete the old files, and upgrade the temp file
 		if (isReplacement === true) {
 			try {
-				await this.updateOne(primaryKey, payload, { emitEvents: false });
+				await this.updateOne(primaryKey, payload, {
+					emitEvents: false,
+					mutationBatching: opts?.mutationBatching,
+				});
 
 				// delete the previously saved file and thumbnails to ensure they're generated fresh
 				if (existingFile?.['filename_disk']) {
@@ -241,7 +247,10 @@ export class FilesService extends ItemsService<File> {
 			schema: this.schema,
 		});
 
-		await sudoFilesItemsService.updateOne(primaryKey, { ...payload, ...metadata }, { emitEvents: false });
+		await sudoFilesItemsService.updateOne(primaryKey, { ...payload, ...metadata }, {
+			emitEvents: false,
+			mutationBatching: opts?.mutationBatching,
+		});
 
 		if (opts?.emitEvents !== false) {
 			emitter.emitAction(

@@ -310,19 +310,21 @@ Feature: A request reports the SQL it ran, one entry per transaction
     When an instance starts with QUERY_AUDIT_HEADER "x query audit"
     Then it exits naming QUERY_AUDIT_HEADER
 
+  # The GET leaves out the POST's titles: its row count must not depend on which
+  # of the two commits first.
   Scenario: two requests at once each report what they report alone
     When these requests run one after the other, then all at once:
-      | request                     |
-      | method: POST                |+
-      | path: /items/audit_articles |
-      | headers:                    |
-      |   x-query-audit: no-timings |
-      | payload:                    |
-      |   - title: a                |
-      | method: GET                 |+
-      | path: /items/audit_articles |
-      | headers:                    |
-      |   x-query-audit: no-timings |
+      | request                                           |
+      | method: POST                                      |+
+      | path: /items/audit_articles                       |
+      | headers:                                          |
+      |   x-query-audit: no-timings                       |
+      | payload:                                          |
+      |   - title: a                                      |
+      | method: GET                                       |+
+      | path: /items/audit_articles?filter[title][_neq]=a |
+      | headers:                                          |
+      |   x-query-audit: no-timings                       |
     Then each reports the same entries both times
 
   Scenario: an error response reports the statements it ran

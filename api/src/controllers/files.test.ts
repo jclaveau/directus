@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import FormData from 'form-data';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import { InvalidPayloadError } from '@directus/errors';
+import { InvalidPayloadError, InvalidQueryError } from '@directus/errors';
 import { multipartHandler } from './files.js';
 
 vi.mock('../../src/database');
@@ -26,6 +26,7 @@ describe('multipartHandler', () => {
 			is: vi.fn().mockReturnValue(true),
 			body: fakeForm.getBuffer(),
 			params: {},
+			query: {},
 			pipe: (input: NodeJS.WritableStream) => stream.pipe(input),
 		} as unknown as Request;
 
@@ -55,6 +56,7 @@ describe('multipartHandler', () => {
 			is: vi.fn().mockReturnValue(true),
 			body: fakeForm.getBuffer(),
 			params: {},
+			query: {},
 			pipe: (input: NodeJS.WritableStream) => stream.pipe(input),
 		} as unknown as Request;
 
@@ -67,5 +69,20 @@ describe('multipartHandler', () => {
 			expect(err.message).toBe('Invalid payload. File is missing filename.');
 			expect(err).toBeInstanceOf(InvalidPayloadError);
 		});
+	});
+
+	it('refuses an unknown mutationBatching before uploading', () => {
+		const req = {
+			headers: { 'content-type': 'multipart/form-data; boundary=x' },
+			is: vi.fn().mockReturnValue(true),
+			params: {},
+			query: { mutationBatching: 'batchEverything' },
+		} as unknown as Request;
+
+		expect(() => multipartHandler(req, {} as Response, vi.fn()))
+			.toThrowError(new InvalidQueryError({
+				reason: '"mutationBatching" must be one of minimizeMutations, '
+					+ 'preserveMutationOrder, disableBatching',
+			}));
 	});
 });

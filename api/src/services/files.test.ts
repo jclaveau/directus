@@ -560,6 +560,68 @@ describe('Integration Tests', () => {
 				);
 			});
 
+			it('hands mutationBatching to the writes of a new upload', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response(null);
+
+				await service.uploadOne(
+					new PassThrough(),
+					{
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+					},
+					undefined,
+					{ mutationBatching: 'disableBatching' },
+				);
+
+				expect(superCreateOne).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+					emitEvents: false,
+					mutationBatching: 'disableBatching',
+				});
+
+				expect(superUpdateOne).toHaveBeenCalledExactlyOnceWith(
+					sample.id,
+					expect.anything(),
+					{ emitEvents: false, mutationBatching: 'disableBatching' },
+				);
+			});
+
+			it('hands mutationBatching to the writes of a replacement', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response({ filename_disk: 'test-file-id-123.txt' });
+
+				vi.mocked(mockDriver.exists!).mockResolvedValue(true);
+
+				await service.uploadOne(
+					new PassThrough(),
+					{
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+						filename_disk: 'test-file-id-123.txt',
+					},
+					sample.id,
+					{ mutationBatching: 'disableBatching' },
+				);
+
+				expect(superUpdateOne).toHaveBeenNthCalledWith(
+					1,
+					sample.id,
+					expect.anything(),
+					{ emitEvents: false, mutationBatching: 'disableBatching' },
+				);
+
+				expect(superUpdateOne).toHaveBeenNthCalledWith(
+					2,
+					sample.id,
+					expect.anything(),
+					{ emitEvents: false, mutationBatching: 'disableBatching' },
+				);
+			});
+
 			it('replaces a file without deleting one its id prefixes', async () => {
 				tracker.on
 					.select('from "directus_files" where "id" = ?')
