@@ -1,5 +1,9 @@
 import type { DirectusTranslation } from '../../../schema/translation.js';
-import type { ApplyQueryFields, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import type { RestCommand } from '../../types.js';
 
 export type CreateTranslationOutput<
@@ -17,7 +21,7 @@ export type CreateTranslationOutput<
  * @returns Returns the translation object for the created translation.
  */
 export const createTranslations =
-	<Schema, const TQuery extends Query<Schema, DirectusTranslation<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusTranslation<Schema>>>(
 		items: Partial<DirectusTranslation<Schema>>[],
 		query?: TQuery,
 	): RestCommand<CreateTranslationOutput<Schema, TQuery>[], Schema> =>
@@ -37,7 +41,7 @@ export const createTranslations =
  * @returns Returns the translation object for the created translation.
  */
 export const createTranslation =
-	<Schema, const TQuery extends Query<Schema, DirectusTranslation<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusTranslation<Schema>>>(
 		item: Partial<DirectusTranslation<Schema>>,
 		query?: TQuery,
 	): RestCommand<CreateTranslationOutput<Schema, TQuery>, Schema> =>

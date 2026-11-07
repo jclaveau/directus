@@ -1,5 +1,9 @@
 import type { DirectusFile } from '../../../schema/file.js';
-import type { ApplyQueryFields, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import type { RestCommand } from '../../types.js';
 
 export type CreateFileOutput<
@@ -17,7 +21,7 @@ export type CreateFileOutput<
  * @returns Returns the file object for the uploaded file, or an array of file objects if multiple files were uploaded at once.
  */
 export const uploadFiles =
-	<Schema, const TQuery extends Query<Schema, DirectusFile<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusFile<Schema>>>(
 		data: FormData,
 		query?: TQuery,
 	): RestCommand<CreateFileOutput<Schema, TQuery>, Schema> =>

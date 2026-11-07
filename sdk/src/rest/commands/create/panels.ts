@@ -1,5 +1,9 @@
 import type { DirectusPanel } from '../../../schema/panel.js';
-import type { ApplyQueryFields, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import type { RestCommand } from '../../types.js';
 
 export type CreatePanelOutput<
@@ -17,7 +21,7 @@ export type CreatePanelOutput<
  * @returns Returns the panel object for the created panel.
  */
 export const createPanels =
-	<Schema, const TQuery extends Query<Schema, DirectusPanel<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPanel<Schema>>>(
 		items: Partial<DirectusPanel<Schema>>[],
 		query?: TQuery,
 	): RestCommand<CreatePanelOutput<Schema, TQuery>[], Schema> =>
@@ -37,7 +41,7 @@ export const createPanels =
  * @returns Returns the panel object for the created panel.
  */
 export const createPanel =
-	<Schema, const TQuery extends Query<Schema, DirectusPanel<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPanel<Schema>>>(
 		item: Partial<DirectusPanel<Schema>>,
 		query?: TQuery,
 	): RestCommand<CreatePanelOutput<Schema, TQuery>, Schema> =>

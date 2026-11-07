@@ -1,4 +1,10 @@
-import type { ApplyQueryFields, CollectionType, Query, SingletonCollections } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	CollectionType,
+	Query,
+	QueryMutation,
+	SingletonCollections,
+} from '../../../types/index.js';
 import type { RestCommand } from '../../types.js';
 import { throwIfCoreCollection, throwIfEmpty } from '../../utils/index.js';
 
@@ -22,7 +28,7 @@ export const updateSingleton =
 	<
 		Schema,
 		Collection extends SingletonCollections<Schema>,
-		const TQuery extends Query<Schema, Schema[Collection]>,
+		const TQuery extends QueryMutation<Schema, Schema[Collection]>,
 		Item = Schema[Collection],
 	>(
 		collection: Collection,
