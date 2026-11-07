@@ -53,6 +53,14 @@ export class CapabilitiesHelper extends DatabaseHelper {
 	}
 
 	/**
+	 * Whether `SELECT … FOR NO KEY UPDATE` exists: it stops a delete or another
+	 * write of the row, not a foreign key naming it.
+	 */
+	supportsNoKeyUpdateLock(): boolean {
+		return false;
+	}
+
+	/**
 	 * The field types a json batch row stores as a bound update value would.
 	 * Empty where `supportsJsonBatchUpdate` is false.
 	 */

@@ -3844,10 +3844,18 @@ implements AbstractService<Item> {
 				.from(this.collection)
 				.whereIn(primaryKeyField, keyChunk);
 
+			const { capabilities } = getHelpers(this.knex);
+
 			// a row found is updated: a delete committing before the update would
 			// leave it writing nothing, so the found rows stay locked until commit
-			if (getHelpers(this.knex).capabilities.supportsRowLocks()) {
-				existenceRead.forUpdate();
+			if (capabilities.supportsRowLocks()) {
+				// the update changes no key: a foreign key naming the row need not wait
+				if (capabilities.supportsNoKeyUpdateLock()) {
+					existenceRead.forNoKeyUpdate();
+				}
+				else {
+					existenceRead.forUpdate();
+				}
 			}
 
 			const existingRows = await existenceRead;
