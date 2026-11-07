@@ -37,6 +37,9 @@ beforeEach(async () => {
 		interval: 'month',
 	});
 
+	await database('subscription_plan_references')
+		.insert({ plan: 1, provider: 'stripe', reference: 'price_1' });
+
 	vi.useFakeTimers({ now: new Date('2026-11-05T00:00:00Z'), toFake: ['Date'] });
 });
 
@@ -69,7 +72,7 @@ describe('archivePlan', () => {
 			{
 				subscriber: 1,
 				customer: 1,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'stripe',
 				provider_subscription_id: 'sub_ended',
 				status: 'canceled',
@@ -80,7 +83,7 @@ describe('archivePlan', () => {
 			{
 				subscriber: 1,
 				customer: 1,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'stripe',
 				provider_subscription_id: 'sub_ending',
 				status: 'active',
@@ -102,11 +105,44 @@ describe('archivePlan', () => {
 			.toEqual([{ status: 'archived' }]);
 	});
 
+	test('leaves out the subscriptions of another plan', async () => {
+		await database('subscription_plans').insert({
+			code: 'yearly',
+			name: 'Yearly',
+			policy: 'policy-1',
+			amount: 9900,
+			currency: 'EUR',
+			interval: 'year',
+		});
+
+		await database('subscription_plan_references')
+			.insert({ plan: 2, provider: 'stripe', reference: 'price_2' });
+
+		await database('subscriptions').insert({
+			subscriber: 1,
+			customer: 1,
+			plan_reference: 2,
+			provider: 'stripe',
+			provider_subscription_id: 'sub_yearly',
+			status: 'active',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await expect(archivePlan({
+			database,
+			enabledProviders: new Map(),
+			planId: '1',
+			confirmation: undefined,
+			accountability: { admin: true } as Accountability,
+		})).resolves.toEqual({ status: 'archived', ending_subscriptions: 0 });
+	});
+
 	test('refuses without the sentence for one subscription', async () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
@@ -140,7 +176,7 @@ describe('archivePlan', () => {
 			{
 				subscriber: 1,
 				customer: 1,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'stripe',
 				provider_subscription_id: 'sub_1',
 				status: 'active',
@@ -151,7 +187,7 @@ describe('archivePlan', () => {
 			{
 				subscriber: 1,
 				customer: 2,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'mollie',
 				provider_subscription_id: 'sub_2',
 				status: 'past_due',
@@ -240,7 +276,7 @@ describe('archivePlan', () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
@@ -267,7 +303,7 @@ describe('archivePlan', () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
@@ -318,7 +354,7 @@ describe('archivePlan', () => {
 			{
 				subscriber: 1,
 				customer: 1,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'stripe',
 				provider_subscription_id: 'sub_1',
 				status: 'active',
@@ -328,7 +364,7 @@ describe('archivePlan', () => {
 			{
 				subscriber: 1,
 				customer: 2,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'mollie',
 				provider_subscription_id: 'sub_2',
 				status: 'active',

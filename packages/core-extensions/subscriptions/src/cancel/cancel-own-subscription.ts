@@ -16,6 +16,12 @@ export type OwnSubscriptionCancel = {
 	userId: string | null;
 };
 
+/**
+ * TODO: a user cannot undo a cancel yet. Stripe can (`cancel_at_period_end:
+ * false`); Mollie documents "Canceled subscriptions cannot be updated" and no
+ * reactivation, so check its test mode before designing it. A resume must refuse
+ * a `plan_archived` cancel.
+ */
 export async function cancelOwnSubscription({
 	database,
 	enabledProviders,
@@ -41,6 +47,7 @@ export async function cancelOwnSubscription({
 			'subscriber_customers.provider_customer_id',
 		)
 		.where('subscribers.user', userId)
+		.where('subscriptions.cancel_at_period_end', false)
 		.whereNotIn('subscriptions.status', TERMINAL_STATUSES);
 
 	const [ownSubscription, ...otherSubscriptions] = ongoingSubscriptions;

@@ -109,11 +109,11 @@ export const createSubscriptionTables = defineMigration(
 					.inTable('subscriber_customers')
 					.onDelete('RESTRICT');
 
-				table.integer('plan')
+				table.integer('plan_reference')
 					.unsigned()
 					.notNullable()
 					.references('id')
-					.inTable('subscription_plans')
+					.inTable('subscription_plan_references')
 					.onDelete('RESTRICT');
 
 				table.string('provider', 32)
@@ -153,7 +153,7 @@ export const createSubscriptionTables = defineMigration(
 				table.unique(['provider', 'provider_subscription_id']);
 				table.index(['subscriber']);
 				table.index(['customer']);
-				table.index(['plan']);
+				table.index(['plan_reference']);
 				table.index(['access']);
 				table.index(['user_updated']);
 			});

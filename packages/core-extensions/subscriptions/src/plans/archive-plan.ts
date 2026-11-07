@@ -61,6 +61,11 @@ export async function archivePlan({
 			'subscriber_customers.id',
 			'subscriptions.customer',
 		)
+		.join(
+			'subscription_plan_references',
+			'subscription_plan_references.id',
+			'subscriptions.plan_reference',
+		)
 		.select(
 			'subscriptions.id',
 			'subscriptions.provider',
@@ -69,7 +74,7 @@ export async function archivePlan({
 			'subscriptions.current_period_end',
 			'subscriber_customers.provider_customer_id',
 		)
-		.where('subscriptions.plan', storedPlan.id)
+		.where('subscription_plan_references.plan', storedPlan.id)
 		.where('subscriptions.cancel_at_period_end', false)
 		.whereNotIn('subscriptions.status', TERMINAL_STATUSES);
 
