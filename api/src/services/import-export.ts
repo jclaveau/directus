@@ -218,7 +218,16 @@ export class ImportService {
 			return new Promise<void>((resolve, reject) => {
 				const streams: Stream[] = [stream];
 
+				let tmpFileCleaned = false;
+
 				const cleanup = (destroy = true) => {
+					// `finished` reports the source a cleanup destroyed
+					if (tmpFileCleaned) {
+						return;
+					}
+
+					tmpFileCleaned = true;
+
 					if (destroy) {
 						for (const stream of streams) {
 							destroyStream(stream);
