@@ -109,6 +109,10 @@ function parseMollieResourceId(resourceId: string): ProviderSubscriptionIds {
 	return { customerId, subscriptionId };
 }
 
+/**
+ * The first payment, which sets up the mandate, carries no subscriptionId: its
+ * webhook grants nothing, access starts with the subscription's first charge.
+ */
 async function readPaymentSubscription(
 	mollieClient: MollieClient,
 	paymentId: string,
@@ -160,7 +164,8 @@ function mapMollieNotFound(
 
 /**
  * Mollie has no period end: the next payment date while the subscription
- * runs, else the newest paid payment plus one interval.
+ * runs, else the newest paid payment plus one interval. A subscription canceled
+ * before its first charge has none: null, so its access ends at once.
  */
 async function readPeriodEnd(
 	mollieClient: MollieClient,
