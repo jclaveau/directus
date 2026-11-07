@@ -215,3 +215,6 @@ Failed the `Blackbox Tests / common` job in 6 of 58 latest PR runs, and was the 
 
 ## Statement-count tables on shard 1 (2026-11-06, unattributed)
 Run 42220902802 (throwaway off #680): `update-batch-guards` (4) and `singular-write-users-invite` (2) went red on "on postgres the requests ran these statements:", with extra `directus_access` / `directus_sessions` rows. Same code path green on run 42222151629 and its neighbours, so not the PR; cause not investigated.
+
+## `cache-index-set-expiry` TTL read -2 (2026-11-07, 1 occurrence)
+#680 `ed6bcad6d6` (comments + subscriptions fake only), run 42416453877, postgres shard 3: `cache-index-set-expiry.test.ts:123` `expected -2 to be greater than 100` on `redisClient.ttl(slotIndexKey)` right after a `MISS`. `-2` = key absent at read time (a shard-mate's purge or flush between the fill and the read is the likely shape, not checked). Green on the `--failed` rerun. Not filed.
