@@ -789,7 +789,7 @@ implements AbstractService<Item> {
 					payloadWithoutAliases,
 					revisionPayload,
 					primaryKey,
-					revisionsM2O: m2o.revisionsByParent[rowIndex]!,
+					revisionsM2O: [],
 					revisionsA2O: a2o.revisionsByParent[rowIndex]!,
 					payloadService,
 				});
