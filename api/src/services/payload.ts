@@ -622,7 +622,11 @@ export class PayloadService {
 	/**
 	 * Upsert the records several rows nest in one field, all of one collection,
 	 * and replace each by its key in its row's payload. A record naming only
-	 * the key of a row that exists writes nothing.
+	 * the key of a row that exists writes nothing. That key is compared by its
+	 * spelling, as in `upsertRun`: under a column storing another one (char(n)
+	 * padding, citext) it reads as no row, and creating it is refused as not unique.
+	 *
+	 * TODO(#610): the same under a MariaDB `_ci` collation.
 	 */
 	private async saveNestedRecords(
 		relatedCollection: string,

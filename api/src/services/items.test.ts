@@ -7477,7 +7477,7 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 				{ id: 4, country: { id: 1, name: 'Spain renamed' } },
 				{ id: 5, country: { id: 2 } },
 				{ id: 6, country: { id: 8 } },
-			]);
+			], { mutationBatching: 'minimizeMutations' });
 
 		expect(sqlStatements).toStrictEqual([
 			'BEGIN;',
@@ -7500,13 +7500,41 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 		]);
 	});
 
+	it('writes the countries of every created row in the order sent', async () => {
+		await new ItemsService('test', { knex: database, schema: rowSchema })
+			.createMany([
+				{ id: 3, country: { name: 'France' } },
+				{ id: 4, country: { id: 1, name: 'Spain renamed' } },
+				{ id: 5, country: { id: 2 } },
+				{ id: 6, country: { id: 8 } },
+			]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `country` where `id` in (?, ?)',
+			'select `id` from `country` where `id` in (?, ?)',
+			'insert into `country` (`name`) values (?) returning `id`',
+			'update `country` set `name` = ? where `id` in (?)',
+			'insert into `country` (`id`) values (?) returning `id`',
+			'select sqlite_version() as version limit ?',
+			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
+			'insert into `test` (`country`, `id`) select ? as `country`, ? as `id`'
+				+ ' union all select ? as `country`, ? as `id`'
+				+ ' union all select ? as `country`, ? as `id`'
+				+ ' union all select ? as `country`, ? as `id` returning `id`',
+			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
+			'COMMIT;',
+		]);
+	});
+
 	it('upserts the items of all created rows once per collection', async () => {
 		await expect(new ItemsService('test', { knex: database, schema: rowSchema })
 			.createMany([
 				{ id: 3, collection: 'post', item: { title: 'New post' } },
 				{ id: 4, collection: 'page', item: { title: 'New page' } },
 				{ id: 5, collection: 'post', item: { id: 1, title: 'Hello renamed' } },
-			])).resolves.toStrictEqual([3, 4, 5]);
+			], { mutationBatching: 'minimizeMutations' }))
+			.resolves.toStrictEqual([3, 4, 5]);
 
 		expect(sqlStatements).toStrictEqual([
 			'BEGIN;',
@@ -7539,10 +7567,7 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 		]);
 	});
 
-	it(oneLine`
-		files the revision of each country under the row nesting it, the
-		updated country written first
-	`, async () => {
+	it('files the revision of each country under the row nesting it', async () => {
 		await new ItemsService('test', {
 			knex: database,
 			schema: rowSchema,
@@ -7551,6 +7576,27 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 			{ id: 3, name: 'three', country: { name: 'France' } },
 			{ id: 4, name: 'four', country: { id: 1, name: 'Spain of four' } },
 		]);
+
+		// revision 1 is France's, of row 3; revision 2 Spain's, of row 4; 3 and 4
+		// are the rows'
+		expect(revisionParentWrites).toStrictEqual([
+			{ keys: [1], data: { parent: 3 } },
+			{ keys: [2], data: { parent: 4 } },
+		]);
+	});
+
+	it(oneLine`
+		files the revision of each country under the row nesting it, the
+		updated country written first under minimizeMutations
+	`, async () => {
+		await new ItemsService('test', {
+			knex: database,
+			schema: rowSchema,
+			accountability: { user: 'u1', role: 'r1', admin: true, app: true } as any,
+		}).createMany([
+			{ id: 3, name: 'three', country: { name: 'France' } },
+			{ id: 4, name: 'four', country: { id: 1, name: 'Spain of four' } },
+		], { mutationBatching: 'minimizeMutations' });
 
 		// revision 1 is Spain's, of row 4; revision 2 France's, of row 3; 3 and 4
 		// are the rows'
@@ -7632,6 +7678,78 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 		expect(revisionParentWrites).toStrictEqual([
 			{ keys: [1], data: { parent: 2 } },
 		]);
+	});
+
+	it('links a country named by another spelling of its key', async () => {
+		await new ItemsService('test', { knex: database, schema: rowSchema })
+			.createMany([{ id: 3, country: { id: '01' } }]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `country` where `id` in (?)',
+			'insert into `test` (`country`, `id`) values (?, ?) returning `id`',
+			'COMMIT;',
+		]);
+
+		await expect(database('test').select('id', 'country'))
+			.resolves.toStrictEqual([{ id: 3, country: 1 }]);
+	});
+
+	it('writes the M2O and the A2O record a row nests together', async () => {
+		await expect(new ItemsService('test', { knex: database, schema: rowSchema })
+			.createMany([{
+				id: 3,
+				country: { name: 'France' },
+				collection: 'post',
+				item: { title: 'New post' },
+			}])).resolves.toStrictEqual([3]);
+
+		await expect(database('test').select('id', 'country', 'collection', 'item'))
+			.resolves.toStrictEqual([
+				{ id: 3, country: 3, collection: 'post', item: '2' },
+			]);
+	});
+
+	it('fires the action of the A2O record a row nests', async () => {
+		const postCreateAction = vi.fn();
+		emitter.onAction('post.items.create', postCreateAction);
+
+		try {
+			await new ItemsService('test', { knex: database, schema: rowSchema })
+				.createMany([
+					{ id: 3, collection: 'post', item: { title: 'New post' } },
+				]);
+		}
+		finally {
+			emitter.offAction('post.items.create', postCreateAction);
+		}
+
+		expect(postCreateAction).toHaveBeenCalledOnce();
+	});
+
+	it('throws the preMutationError once a row passed its filter hooks', async () => {
+		await expect(new ItemsService('test', { knex: database, schema: rowSchema })
+			.createMany([{ id: 3 }], {
+				preMutationError: new InvalidPayloadError({ reason: 'stop' }),
+			})).rejects.toStrictEqual(new InvalidPayloadError({ reason: 'stop' }));
+
+		await expect(database('test').select('id')).resolves.toStrictEqual([]);
+	});
+
+	it('skips the preMutationError when a hook cancelled every row', async () => {
+		const cancelEveryRow = () => [null];
+		emitter.onFilter('test.items.create', cancelEveryRow);
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema: rowSchema })
+				.createMany([{ id: 3 }], {
+					allowFilterCancel: true,
+					preMutationError: new InvalidPayloadError({ reason: 'stop' }),
+				})).resolves.toStrictEqual([null]);
+		}
+		finally {
+			emitter.offFilter('test.items.create', cancelEveryRow);
+		}
 	});
 });
 

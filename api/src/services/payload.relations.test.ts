@@ -1,5 +1,6 @@
 import { InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
+import { UserIntegrityCheckFlag } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import {
@@ -248,6 +249,84 @@ describe('processM2O', () => {
 		);
 
 		expect(result.payloads).toStrictEqual([{ country: 3 }, { country: 4 }]);
+	});
+
+	test('hands its write options down to the upsert', async () => {
+		const upsertManySpy = vi.fn().mockResolvedValue([3]);
+
+		vi.mocked(getService).mockReturnValue({
+			upsertMany: upsertManySpy,
+		} as unknown as ItemsService);
+
+		const mutationTracker = {
+			trackMutations: vi.fn(),
+			getCount: vi.fn(),
+			snapshot: vi.fn(),
+		};
+
+		await new PayloadService('city', { knex: db, schema })
+			.processM2O([{ country: { name: 'France' } }], {
+				emitEvents: false,
+				mutationTracker,
+			});
+
+		expect(upsertManySpy).toHaveBeenCalledWith(
+			[{ name: 'France' }],
+			{
+				refuseHookAddedRows: true,
+				onRevisionCreate: expect.any(Function),
+				onRequireUserIntegrityCheck: expect.any(Function),
+				bypassEmitAction: expect.any(Function),
+				emitEvents: false,
+				mutationTracker,
+				mutationBatching: undefined,
+			},
+		);
+	});
+
+	test('sorts what the upsert reports by the row nesting each record', async () => {
+		vi.mocked(getService).mockReturnValue({
+			upsertMany: vi.fn().mockImplementation((_records, opts) => {
+				opts.onRevisionCreate(21, 3, 0);
+				opts.onRevisionCreate(22, 4, 1);
+				opts.onRequireUserIntegrityCheck(UserIntegrityCheckFlag.All);
+				opts.bypassEmitAction({ event: 'country.items.create' });
+
+				return [3, 4];
+			}),
+		} as unknown as ItemsService);
+
+		await expect(new PayloadService('city', { knex: db, schema }).processM2O([
+			{ country: { name: 'France' } },
+			{},
+			{ country: { name: 'Spain' } },
+		])).resolves.toStrictEqual({
+			payloads: [{ country: 3 }, {}, { country: 4 }],
+			revisionsByParent: [[21], [], [22]],
+			nestedActionEvents: [{ event: 'country.items.create' }],
+			userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+		});
+	});
+
+	test('leaves the nested action to a bypassEmitAction it was given', async () => {
+		vi.mocked(getService).mockReturnValue({
+			upsertMany: vi.fn().mockImplementation((_records, opts) => {
+				opts.bypassEmitAction({ event: 'country.items.create' });
+
+				return [3];
+			}),
+		} as unknown as ItemsService);
+
+		const bypassEmitAction = vi.fn();
+
+		await expect(new PayloadService('city', { knex: db, schema }).processM2O(
+			[{ country: { name: 'France' } }],
+			{ bypassEmitAction },
+		)).resolves.toMatchObject({ nestedActionEvents: [] });
+
+		expect(bypassEmitAction).toHaveBeenCalledWith({
+			event: 'country.items.create',
+		});
 	});
 
 	test('refuses a single row passed without its array', async () => {
