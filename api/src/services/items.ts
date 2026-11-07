@@ -3547,8 +3547,8 @@ implements AbstractService<Item> {
 					onResponseCacheFlushDeferred: () => {
 						responseCacheFlushDeferred = true;
 					},
-					// counted once every run wrote: a run's updates go before its
-					// creates, so a new admin is created after the old one is demoted
+					// counted once every run wrote: a new admin may be created after
+					// the old one is demoted
 					onRequireUserIntegrityCheck: (flags) => {
 						userIntegrityCheckFlags |= flags;
 					},
@@ -3700,12 +3700,12 @@ implements AbstractService<Item> {
 	 *
 	 * A payload nesting rows, naming a row through a self relation (its key
 	 * alone included), or setting an o2m alias in any form, upserts in a run of
-	 * its own, in payload order: under `minimizeMutations` a run writes its
-	 * updates before its creates, so a row it names, or a row its nested rows
-	 * point back at through any number of collections, may not exist yet, a row
-	 * a nested write creates would be created again, and of two payloads naming
-	 * one child by key the first would keep it, where the last does in payload
-	 * order.
+	 * its own, in payload order: a run writes its rows of one kind together,
+	 * under `minimizeMutations` its updates before its creates, so a row it
+	 * names, or a row its nested rows point back at through any number of
+	 * collections, may not exist yet, a row a nested write creates would be
+	 * created again, and of two payloads naming one child by key the first would
+	 * keep it, where the last does in payload order.
 	 */
 	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
