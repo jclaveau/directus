@@ -248,13 +248,7 @@ describe('Services / Fields / createField actions', () => {
 				{ autoPurgeSystemCache: false },
 			)).rejects.toEqual(new Error('commit failed'));
 
-			// `deleteByQuery` keeps the read of its keys out of `emitEvents`, which
-			// predates this hold.
-			expect(emitAction).not.toHaveBeenCalledWith(
-				'activity.create',
-				expect.anything(),
-				expect.anything(),
-			);
+			expect(emitAction).not.toHaveBeenCalled();
 		},
 	);
 
