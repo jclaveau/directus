@@ -13,6 +13,7 @@ vi.mock('../utils/transaction.js', () => ({
 
 vi.mock('../utils/get-service.js', () => ({ getService: vi.fn(() => ({ upsertOne })) }));
 
+import emitter from '../emitter.js';
 import { ImportService } from './import-export.js';
 
 // Contract test for the stream-json bump: importJSON must still parse a JSON array
@@ -39,5 +40,71 @@ describe('ImportService.importJSON (stream-json contract)', () => {
 		expect(upsertOne).toHaveBeenNthCalledWith(1, { name: 'a' }, expect.anything());
 		expect(upsertOne).toHaveBeenNthCalledWith(2, { name: 'b' }, expect.anything());
 		expect(upsertOne).toHaveBeenNthCalledWith(3, { name: 'c' }, expect.anything());
+	});
+});
+
+describe.each([
+	'importJSON',
+	'importCSV',
+] as const)('ImportService.%s', (importMethod) => {
+	const importBodies = {
+		importJSON: JSON.stringify([{ name: 'a' }, { name: 'b' }]),
+		importCSV: 'name\na\nb\n',
+	};
+
+	test('fires the action of every row once the import committed', async () => {
+		vi.mocked(emitter.emitAction).mockClear();
+		upsertOne.mockReset();
+
+		upsertOne.mockImplementation(async (_row, opts) => {
+			opts.bypassEmitAction({ event: 'test.items.create', meta: {}, context: {} });
+
+			// a row outlasts the end of the stream, where `drain` is registered
+			await new Promise((resolve) => setTimeout(resolve, 50));
+
+			return 1;
+		});
+
+		const service = new ImportService({
+			knex: {},
+			schema: {},
+			accountability: null,
+		} as unknown as AbstractServiceOptions);
+
+		await service[importMethod]('test', Readable.from(importBodies[importMethod]));
+
+		expect(emitter.emitAction).toHaveBeenCalledTimes(2);
+	});
+
+	test('fires no action when a later row rolls the import back', async () => {
+		vi.mocked(emitter.emitAction).mockClear();
+		upsertOne.mockReset();
+
+		upsertOne
+			.mockImplementationOnce(async (_row, opts) => {
+				opts.bypassEmitAction({ event: 'test.items.create', meta: {}, context: {} });
+
+				return 1;
+			})
+			.mockImplementationOnce(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 50));
+
+				throw new Error('row refused');
+			});
+
+		const service = new ImportService({
+			knex: {},
+			schema: {},
+			accountability: null,
+		} as unknown as AbstractServiceOptions);
+
+		await expect(
+			service[importMethod]('test', Readable.from(importBodies[importMethod])),
+		).rejects.toEqual(new Error('row refused'));
+
+		// the queue reports drained after the failed row
+		await new Promise((resolve) => setTimeout(resolve, 50));
+
+		expect(emitter.emitAction).not.toHaveBeenCalled();
 	});
 });

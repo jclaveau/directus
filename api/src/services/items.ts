@@ -67,6 +67,7 @@ import {
 	type ResponseCacheFlushDeferral,
 } from '../utils/clear-caches-after-commit.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { transaction } from '../utils/transaction.js';
 import {
 	isMissingPrimaryKey,
@@ -110,7 +111,10 @@ export type DeferredPurgeOptions = MutationOptions & ResponseCacheFlushDeferral 
  * mutation read-back sees rows its action hooks create (e.g. the notifying fan-out).
  * Pass `awaitActionHooks: false` for the historical fire-and-forget behaviour.
  */
-async function emitActionEvents(actionEvents: ActionEventParams[], opts: MutationOptions): Promise<void> {
+export async function emitActionEvents(
+	actionEvents: ActionEventParams[],
+	opts: MutationOptions,
+): Promise<void> {
 	const emitting = Promise.all(
 		actionEvents.map((actionEvent) =>
 			opts.bypassEmitAction
@@ -1150,40 +1154,44 @@ implements AbstractService<Item> {
 		opts: MutationOptions,
 		mutationTracker: MutationTracker,
 	): Promise<(PrimaryKey | null)[]> {
-		// TODO(#610): a retried attempt keeps the events of the aborted one
 		const rowActionEvents: ActionEventParams[] = [];
 
 		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
 			?? createScopedCacheHookDeclarations(this.schema);
 
-		const createdKeys = await transaction(this.knex, async (trx) => {
-			const service = this.fork({ knex: trx });
-			const rowKeys: (PrimaryKey | null)[] = [];
-			let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
+		const createdKeys = await transactionHoldingActions(
+			this.knex,
+			rowActionEvents,
+			async (trx) => {
+				const service = this.fork({ knex: trx });
+				const rowKeys: (PrimaryKey | null)[] = [];
+				let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
 
-			const rowOpts: MutationOptions = {
-				...opts,
-				scopedCacheHookDeclarations,
-				bypassEmitAction: (actionEvent) => {
-					rowActionEvents.push(actionEvent);
-				},
-				onRequireUserIntegrityCheck: (flags) => {
-					userIntegrityCheckFlags |= flags;
-				},
-			};
+				const rowOpts: MutationOptions = {
+					...opts,
+					scopedCacheHookDeclarations,
+					bypassEmitAction: (actionEvent) => {
+						rowActionEvents.push(actionEvent);
+					},
+					onRequireUserIntegrityCheck: (flags) => {
+						userIntegrityCheckFlags |= flags;
+					},
+				};
 
-			for (const row of data) {
-				const createRow = ItemsService.prototype.createMany;
+				for (const row of data) {
+					const createRow = ItemsService.prototype.createMany;
 
-				for (const rowKey of await createRow.call(service, [row], rowOpts)) {
-					rowKeys.push(rowKey);
+					for (const rowKey of await createRow.call(service, [row], rowOpts)) {
+						rowKeys.push(rowKey);
+					}
 				}
-			}
 
-			await this.checkUserIntegrityOnce(userIntegrityCheckFlags, trx, opts);
+				await this.checkUserIntegrityOnce(userIntegrityCheckFlags, trx, opts);
 
-			return rowKeys;
-		}, mutationTracker.snapshot()).catch(async (error) => {
+				return rowKeys;
+			},
+			mutationTracker.snapshot(),
+		).catch(async (error) => {
 			await this.purgeRolledBackHookWrites(scopedCacheHookDeclarations, opts);
 
 			throw error;
@@ -3528,11 +3536,9 @@ implements AbstractService<Item> {
 					...(opts || {}),
 					autoPurgeCache: false,
 					// held until the commit, for the reasons `updateGroupByGroup` gives
-					...(mutationBatching === 'disableBatching' && {
-						bypassEmitAction: (actionEvent: ActionEventParams) => {
-							payloadActionEvents.push(actionEvent);
-						},
-					}),
+					bypassEmitAction: (actionEvent: ActionEventParams) => {
+						payloadActionEvents.push(actionEvent);
+					},
 					// upsertMany takes the rows its update hook adds (onHookAddedRows);
 					// upsertOne refuses them, like updateOne.
 					refuseHookAddedRows: opts.refuseHookAddedRows ?? false,
@@ -3806,10 +3812,9 @@ implements AbstractService<Item> {
 	 * hook seeing the whole run could allow it.
 	 *
 	 * `preserveMutationOrder`, the default, writes the payloads in their order,
-	 * each row of consecutive updates or creates in one write, and emits the
-	 * run's actions once every write is done. `minimizeMutations` writes every
-	 * update, then every create, so a unique value an update frees can go to a
-	 * create of the same run: `[{ id: 2, code: 'A' }, { id: 1, code: 'B' }]`,
+	 * each row of consecutive updates or creates in one write. `minimizeMutations`
+	 * writes every update, then every create, so a unique value an update frees can
+	 * go to a create of the same run: `[{ id: 2, code: 'A' }, { id: 1, code: 'B' }]`,
 	 * row 1 holding `'A'`, writes both, where the order sent refuses the create.
 	 */
 	protected async upsertRun(
@@ -3888,17 +3893,6 @@ implements AbstractService<Item> {
 			}
 			: opts;
 
-		const segmentActionEvents: ActionEventParams[] = [];
-
-		const segmentOpts: DeferredPurgeOptions = preservesOrder
-			? {
-				...writeOpts,
-				bypassEmitAction: (actionEvent) => {
-					segmentActionEvents.push(actionEvent);
-				},
-			}
-			: writeOpts;
-
 		for (const { updating, indexes } of upsertSegments) {
 			if (indexes.length === 0) {
 				continue;
@@ -3914,20 +3908,16 @@ implements AbstractService<Item> {
 							keys: [upsertRun[index]![primaryKeyField] as PrimaryKey],
 						};
 					}),
-					segmentOpts,
+					writeOpts,
 				)
 				: await this.createMany(
 					indexes.map((index) => upsertRun[index]!),
-					segmentOpts,
+					writeOpts,
 				);
 
 			for (const [segmentIndex, segmentKey] of segmentKeys.entries()) {
 				upsertedKeys[indexes[segmentIndex]!] = segmentKey;
 			}
-		}
-
-		if (preservesOrder) {
-			await emitActionEvents(segmentActionEvents, writeOpts);
 		}
 
 		if (opts.onRevisionCreate) {

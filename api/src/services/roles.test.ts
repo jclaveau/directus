@@ -202,7 +202,11 @@ describe('Integration Tests', () => {
 
 				await service.deleteMany(keys);
 
-				const opts: MutationOptions = { userIntegrityCheckFlags: UserIntegrityCheckFlag.All, bypassLimits: true };
+				const opts: MutationOptions = {
+					userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+					bypassLimits: true,
+					bypassEmitAction: expect.any(Function),
+				};
 
 				expect(accessDeleteRoleAccessSpy).toHaveBeenCalledWith(keys, opts);
 
@@ -236,9 +240,78 @@ describe('Integration Tests', () => {
 						filter: { parent: { _in: keys } },
 					},
 					{ parent: null },
+					{ bypassEmitAction: expect.any(Function) },
 				);
 
-				expect(itemsDeleteManySpy).toHaveBeenCalledWith(keys, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
+				expect(itemsDeleteManySpy).toHaveBeenCalledWith(keys, {
+					userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+					bypassEmitAction: expect.any(Function),
+				});
+			});
+
+			it('fires no action of a delete that rolled back', async () => {
+				const emitActionSpy = vi
+					.spyOn(emitter, 'emitAction')
+					.mockResolvedValue(undefined);
+
+				accessDeleteRoleAccessSpy.mockImplementationOnce(async (_keys, opts) => {
+					const actionEvent = {
+						event: 'access.delete',
+						meta: {},
+						context: {},
+					} as any;
+
+					if (opts?.bypassEmitAction) {
+						opts.bypassEmitAction(actionEvent);
+					}
+					else {
+						await emitter.emitAction('access.delete', {}, {} as any);
+					}
+
+					return ['access-id-1'];
+				});
+
+				itemsDeleteManySpy.mockRejectedValueOnce(new Error('role refused'));
+
+				await expect(service.deleteMany(['role-id-10']))
+					.rejects.toEqual(new Error('role refused'));
+
+				expect(emitActionSpy).not.toHaveBeenCalled();
+			});
+
+			it('fires the actions of its cascade once it committed', async () => {
+				const database = knex.default({ client: MockClient });
+				const databaseTracker = createTracker(database);
+				const emittedActions: unknown[] = [];
+
+				vi.spyOn(emitter, 'emitAction').mockImplementation(async (event) => {
+					emittedActions.push([
+						event,
+						databaseTracker.history.transactions.map((trx) => trx.state),
+					]);
+				});
+
+				accessDeleteRoleAccessSpy.mockImplementationOnce(async (_keys, opts) => {
+					const actionEvent = {
+						event: 'access.delete',
+						meta: {},
+						context: {},
+					} as any;
+
+					if (opts?.bypassEmitAction) {
+						opts.bypassEmitAction(actionEvent);
+					}
+					else {
+						await emitter.emitAction('access.delete', {}, {} as any);
+					}
+
+					return ['access-id-1'];
+				});
+
+				await new RolesService({ knex: database, schema })
+					.deleteMany(['role-id-11']);
+
+				expect(emittedActions).toEqual([['access.delete', ['committed']]]);
 			});
 
 			it('clears the caches once the parent transaction has committed', async () => {

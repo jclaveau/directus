@@ -30,7 +30,7 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import { getDefaultIndexName } from '../utils/get-default-index-name.js';
 import { getSchema } from '../utils/get-schema.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
-import { transaction } from '../utils/transaction.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { ItemsService } from './items.js';
 
 const env = useEnv();
@@ -271,7 +271,7 @@ export class RelationsService {
 				one_collection: relation.related_collection || null,
 			};
 
-			await transaction(this.knex, async (trx) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
 				if (relation.related_collection) {
 					await trx.schema.alterTable(relation.collection!, (table) => {
 						this.alterType(table, relation, fieldSchema.nullable);
@@ -389,7 +389,7 @@ export class RelationsService {
 		const nestedActionEvents: ActionEventParams[] = [];
 
 		try {
-			await transaction(this.knex, async (trx) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
 				// A payload without `schema` leaves the FK as it is: re-creating it
 				// would drop its on_delete and on_update.
 				if (
@@ -520,7 +520,7 @@ export class RelationsService {
 		const nestedActionEvents: ActionEventParams[] = [];
 
 		try {
-			await transaction(this.knex, async (trx) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
 				const existingConstraints = await this.foreignKeys();
 				const constraintNames = existingConstraints.map((key) => key.constraint_name);
 

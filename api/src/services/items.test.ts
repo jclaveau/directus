@@ -7809,13 +7809,13 @@ describe('Services / Items / mutationBatching', () => {
 				{ data: { name: 'uno' }, keys: [1] },
 				{ data: { name: 'dos' }, keys: [2] },
 			]],
-			['update action', [
-				{ data: { name: 'uno' }, keys: [1] },
-				{ data: { name: 'dos' }, keys: [2] },
-			]],
 			['create filter', [
 				{ data: { id: 3, name: 'three' } },
 				{ data: { id: 4, name: 'four' } },
+			]],
+			['update action', [
+				{ data: { name: 'uno' }, keys: [1] },
+				{ data: { name: 'dos' }, keys: [2] },
 			]],
 			['create action', [3, 4]],
 		]);
@@ -8078,6 +8078,84 @@ describe('Services / Items / mutationBatching', () => {
 		expect(hookCalls).toStrictEqual([
 			['create filter', [{ data: { id: 10, name: 'ten' } }]],
 			['create filter', [{ data: { id: 11, name: 'one' } }]],
+		]);
+	});
+
+	it.each(['preserveMutationOrder', 'minimizeMutations'] as const)(
+		'%s fires no action of a rolled-back payload',
+		async (mutationBatching) => {
+			await expect(new ItemsService('test', { knex: database, schema }).upsertMany([
+				{ id: 1, name: 'uno' },
+				{ id: 3, name: 'two' },
+			], { mutationBatching }))
+				.rejects.toStrictEqual(new RecordNotUniqueError({
+					collection: 'test',
+					field: 'name',
+					value: 'two',
+				}));
+
+			await expect(database('test').orderBy('id')).resolves.toStrictEqual([
+				{ id: 1, name: 'one' },
+				{ id: 2, name: 'two' },
+			]);
+
+			expect(hookCalls).toStrictEqual([
+				['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
+				['create filter', [{ data: { id: 3, name: 'two' } }]],
+			]);
+		},
+	);
+
+	it.each(['preserveMutationOrder', 'minimizeMutations'] as const)(
+		'%s fires no action of a run that a later run rolled back',
+		async (mutationBatching) => {
+			await expect(new ItemsService('test', { knex: database, schema }).upsertMany([
+				{ id: 1, name: 'uno' },
+				{ id: 1, name: 'two' },
+			], { mutationBatching }))
+				.rejects.toStrictEqual(new RecordNotUniqueError({
+					collection: 'test',
+					field: 'name',
+					value: 'two',
+				}));
+
+			expect(hookCalls).toStrictEqual([
+				['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
+				['update filter', [{ data: { name: 'two' }, keys: [1] }]],
+			]);
+		},
+	);
+
+	it('disableBatching fires the actions of the attempt that committed', async () => {
+		const busyOnSecondRow = vi.fn()
+			.mockImplementationOnce((payload) => payload)
+			.mockImplementationOnce(() => {
+				throw Object.assign(new Error('database is locked'), {
+					code: 'SQLITE_BUSY',
+				});
+			})
+			.mockImplementation((payload) => payload);
+
+		emitter.onFilter('test.items.create', busyOnSecondRow);
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema }).createMany([
+				{ id: 3, name: 'three' },
+				{ id: 4, name: 'four' },
+			], { mutationBatching: 'disableBatching' }))
+				.resolves.toStrictEqual([3, 4]);
+		}
+		finally {
+			emitter.offFilter('test.items.create', busyOnSecondRow);
+		}
+
+		expect(hookCalls).toStrictEqual([
+			['create filter', [{ data: { id: 3, name: 'three' } }]],
+			['create filter', [{ data: { id: 4, name: 'four' } }]],
+			['create filter', [{ data: { id: 3, name: 'three' } }]],
+			['create filter', [{ data: { id: 4, name: 'four' } }]],
+			['create action', [3]],
+			['create action', [4]],
 		]);
 	});
 

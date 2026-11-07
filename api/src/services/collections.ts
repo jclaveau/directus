@@ -30,7 +30,7 @@ import type { Collection } from '../types/index.js';
 import { getSchema } from '../utils/get-schema.js';
 import { chunk, groupBy, merge, omit } from '../utils/lodash-es-used.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
-import { transaction } from '../utils/transaction.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { FieldsService } from './fields.js';
 import { buildCollectionAndFieldRelations } from './fields/build-collection-and-field-relations.js';
 import { getCollectionMetaUpdates } from './fields/get-collection-meta-updates.js';
@@ -94,7 +94,7 @@ export class CollectionsService {
 			// Create the collection/fields in a transaction so it'll be reverted in case of errors or
 			// permission problems. This might not work reliably in MySQL, as it doesn't support DDL in
 			// transactions.
-			await transaction(this.knex, async (trx) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
 				if (payload.schema) {
 					if ('fields' in payload && !Array.isArray(payload.fields)) {
 						throw new InvalidPayloadError({ reason: `"fields" must be an array` });
@@ -246,27 +246,31 @@ export class CollectionsService {
 		const nestedActionEvents: ActionEventParams[] = [];
 
 		try {
-			const collections = await transaction(this.knex, async (trx) => {
-				const service = new CollectionsService({
-					schema: this.schema,
-					accountability: this.accountability,
-					knex: trx,
-				});
-
-				const collectionNames: string[] = [];
-
-				for (const payload of payloads) {
-					const name = await service.createOne(payload, {
-						autoPurgeCache: false,
-						autoPurgeSystemCache: false,
-						bypassEmitAction: (params) => nestedActionEvents.push(params),
+			const collections = await transactionHoldingActions(
+				this.knex,
+				nestedActionEvents,
+				async (trx) => {
+					const service = new CollectionsService({
+						schema: this.schema,
+						accountability: this.accountability,
+						knex: trx,
 					});
 
-					collectionNames.push(name);
-				}
+					const collectionNames: string[] = [];
 
-				return collectionNames;
-			});
+					for (const payload of payloads) {
+						const name = await service.createOne(payload, {
+							autoPurgeCache: false,
+							autoPurgeSystemCache: false,
+							bypassEmitAction: (params) => nestedActionEvents.push(params),
+						});
+
+						collectionNames.push(name);
+					}
+
+					return collectionNames;
+				},
+			);
 
 			return collections;
 		} finally {
@@ -509,7 +513,7 @@ export class CollectionsService {
 		const nestedActionEvents: ActionEventParams[] = [];
 
 		try {
-			await transaction(this.knex, async (trx) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
 				const collectionItemsService = new CollectionsService({
 					knex: trx,
 					accountability: this.accountability,
@@ -566,7 +570,7 @@ export class CollectionsService {
 		const nestedActionEvents: ActionEventParams[] = [];
 
 		try {
-			await transaction(this.knex, async (trx) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
 				const service = new CollectionsService({
 					schema: this.schema,
 					accountability: this.accountability,
@@ -627,7 +631,7 @@ export class CollectionsService {
 				});
 			}
 
-			await transaction(this.knex, async (trx) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
 				if (collectionToBeDeleted!.schema) {
 					await trx.schema.dropTable(collectionKey);
 				}
@@ -804,7 +808,7 @@ export class CollectionsService {
 		const nestedActionEvents: ActionEventParams[] = [];
 
 		try {
-			await transaction(this.knex, async (trx) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
 				const service = new CollectionsService({
 					schema: this.schema,
 					accountability: this.accountability,
