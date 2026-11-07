@@ -3,7 +3,6 @@ import { ErrorCode, InvalidPayloadError, isDirectusError } from '@directus/error
 import formatTitle from '@directus/format-title';
 import type { BusboyFileStream, PrimaryKey } from '@directus/types';
 import { toArray } from '@directus/utils';
-import Busboy from 'busboy';
 import bytes from 'bytes';
 import type { RequestHandler } from 'express';
 import express from 'express';
@@ -16,6 +15,7 @@ import { validateBatch } from '../middleware/validate-batch.js';
 import { FilesService } from '../services/files.js';
 import { MetaService } from '../services/meta.js';
 import asyncHandler from '../utils/async-handler.js';
+import { createBusboy } from '../utils/create-busboy.js';
 import { mutationBatchingFromQuery } from '../utils/mutation-batching-from-query.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
@@ -38,7 +38,7 @@ export const multipartHandler: RequestHandler = (req, res, next) => {
 		};
 	}
 
-	const busboy = Busboy({
+	const busboy = createBusboy(req, {
 		headers,
 		defParamCharset: 'utf8',
 		limits: {

@@ -7,7 +7,6 @@ import {
 import type { CacheFlushTarget } from '@directus/types';
 import { oneLine } from '@directus/utils';
 import argon2 from 'argon2';
-import Busboy from 'busboy';
 import { Router } from 'express';
 import Joi from 'joi';
 import { autoscaleDrillEnabled } from '../processes/autoscale/lib/drill.js';
@@ -32,6 +31,7 @@ import { UtilsService } from '../services/utils.js';
 import asyncHandler from '../utils/async-handler.js';
 import { cacheAuditEnabled } from '../utils/cache-audit-enabled.js';
 import { CacheAuditOptionsSchema } from '../utils/cache-audit-options.js';
+import { createBusboy } from '../utils/create-busboy.js';
 import { generateHash } from '../utils/generate-hash.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
@@ -148,7 +148,7 @@ router.post(
 			};
 		}
 
-		const busboy = Busboy({ headers });
+		const busboy = createBusboy(req, { headers });
 
 		busboy.on('file', async (_fieldname, fileStream, { mimeType }) => {
 			try {

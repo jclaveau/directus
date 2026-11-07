@@ -1,4 +1,5 @@
 import { oneLine } from '@directus/utils';
+import { PassThrough } from 'node:stream';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const cacheAuditEnabled = vi.fn(() => true);
@@ -82,6 +83,7 @@ vi.mock('../middleware/respond.js', () => ({ respond: vi.fn() }));
 vi.mock('../middleware/collection-exists.js', () => ({ default: vi.fn() }));
 
 const { default: router } = await import('./utils.js');
+const { ImportService } = await import('../services/import-export.js');
 
 // router.get(path, asyncHandler(fn), respond) registers one Route layer whose own
 // stack holds [handler, respond]; drive the bare handler, as server.test.ts does.
@@ -93,6 +95,43 @@ function handlerFor(path: string, method = 'get') {
 
 	return layer!.route!.stack[0]!.handle;
 }
+
+describe('utils controller /import/:collection', () => {
+	test('answers the error of a body cut inside a part it never read', async () => {
+		vi.mocked(ImportService).mockImplementationOnce(function () {
+			return { import: vi.fn().mockRejectedValue(new Error('refused')) };
+		} as any);
+
+		const importRoute = router.stack.find((layer: any) => {
+			return layer.route?.path === '/import/:collection';
+		})!;
+
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		await importRoute.route!.stack[1]!.handle(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: { collection: 'articles' },
+			}) as any,
+			{} as any,
+			next,
+		);
+
+		requestBody.end([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"a"',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalledWith(new Error('Unexpected end of form'));
+		});
+	});
+});
 
 describe('utils controller /cache/latencies', () => {
 	beforeEach(() => vi.clearAllMocks());

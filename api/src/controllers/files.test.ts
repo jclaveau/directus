@@ -16,6 +16,34 @@ vi.mock('../services', () => {
 });
 
 describe('multipartHandler', () => {
+	it('answers the error of a body cut inside a part', async () => {
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		multipartHandler(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: {},
+				query: {},
+			}) as unknown as Request,
+			{} as Response,
+			next,
+		);
+
+		requestBody.end([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.txt"',
+			'Content-Type: text/plain',
+			'',
+			'abc',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalledWith(new Error('Unexpected end of form'));
+		});
+	});
+
 	it(`Errors out if request doesn't contain any files to upload`, () => {
 		const fakeForm = new FormData();
 
@@ -24,6 +52,7 @@ describe('multipartHandler', () => {
 		const req = {
 			headers: fakeForm.getHeaders(),
 			is: vi.fn().mockReturnValue(true),
+			once: vi.fn(),
 			body: fakeForm.getBuffer(),
 			params: {},
 			query: {},
@@ -54,6 +83,7 @@ describe('multipartHandler', () => {
 		const req = {
 			headers: fakeForm.getHeaders(),
 			is: vi.fn().mockReturnValue(true),
+			once: vi.fn(),
 			body: fakeForm.getBuffer(),
 			params: {},
 			query: {},
@@ -75,6 +105,7 @@ describe('multipartHandler', () => {
 		const req = {
 			headers: { 'content-type': 'multipart/form-data; boundary=x' },
 			is: vi.fn().mockReturnValue(true),
+			once: vi.fn(),
 			params: {},
 			query: { mutationBatching: 'batchEverything' },
 		} as unknown as Request;
