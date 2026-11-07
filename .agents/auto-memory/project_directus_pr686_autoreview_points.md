@@ -14,17 +14,23 @@ JSON.stringify in A2O reasons, cancelled-row `[rowIndex]` vs `[index]` alignment
 (`Refs #689`). The flip alone settles nothing in #686: `saveNestedRecords` walks relation by
 relation and ignores `mutationBatching`, so A, B and Q probe identically in both modes.
 
-**Open — jean must rule, no #686 code until then** (outcomes probed 2026-11-07 on #686's
-`40f04fc3bd`, real sqlite with `PRAGMA foreign_keys=ON`; Postgres not run):
-- Q2: under `preserveMutationOrder`, walk per related collection (cut when a record flips
-  between data and key-only) vs strict payload order. Row 1 `board`, row 2 `owner` naming that
-  board: now 400 INVALID_FOREIGN_KEY, per collection 400, strict 200 but one `upsertMany` per
-  nested record (100 rows, 2 relations: 200 vs 2). Rec: per collection.
-- Q3: A and B stay documented limits of `minimizeMutations`, or generate two groups there too.
-  A (key named alone by row 2's `owner`, written by row 1's `reviewer`): now 400
-  NOT_NULL_VIOLATION. B (hook takes row 0's `{id:7,name}` over as 9, row 1's key-only `{id:7}`):
-  now 400 INVALID_FOREIGN_KEY once an FK is enforced, dangling only without one. Rec: drop two
-  groups; the default fixes both through the walk.
+**Q2 went further (2026-11-07):** jean's point: the question is which collection goes first.
+Design = merge relations by target collection, write referenced collections first (FK graph
+from `schema.relations`, not the query tree: a scalar FK is invisible there, and an O2M leaf
+goes after its root), field order inside a cycle, cut on data/key-only flips under preserve.
+Prototype probed on `40f04fc3bd`, sqlite + FKs on, not on the branch; patch was throwaway. All
+432 of items + payload suites green, once duplicate relation entries of one field were deduped
+(a test schema has them; a merged walk would upsert one record twice).
+
+Outcomes with the prototype, both modes unless noted: Q 200 (was 400); S board, person, card;
+A 200 (was 400); key-only named BEFORE its data, across rows or in one row, 400 NOT_NULL like
+raw SQL; same key with data twice, last wins; B minimize 400 FK, preserve 200 (`b-1`→held,
+`b-2`→created with null name); schema FK cycle 400.
+
+**Open — jean must rule, no #686 code until then:**
+- FK order itself: not yet ruled after the probe.
+- Q3 redone: A stops being a limit. Two groups in minimize now only changes B (400→200,
+  predicted) and key-only-before-data (400→200, predicted, looser than raw SQL). Rec: drop.
 - D: `sameRowAs` twin files the nested revision under the last row, whose own record was
   dropped; fix = set the payload index only if absent. Rec: first row.
 
