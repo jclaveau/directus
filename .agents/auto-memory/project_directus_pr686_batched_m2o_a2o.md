@@ -9,7 +9,7 @@ Autoreview of #686 (2026-11-07), head 28bf2f874c.
 
 - Accepted, documented in the PR risks: a key compared by its spelling (char(n), citext), payload order not kept across relations or A2O collections. MariaDB `_ci` is #610 point 20.
 - Settled by jean (B in #686): `upsertRun` takes `FOR NO KEY UPDATE` on Postgres, `FOR UPDATE` on MariaDB and CockroachDB (`supportsNoKeyUpdateLock`). A foreign key no longer waits on a row the run updates; a delete still does. Read from the lock conflict table, tests pin the SQL only.
-- Open, jean's call (2nd autoreview, f9821747e3): an upsert changing a unique column upgrades to `FOR UPDATE` at its update and can deadlock with a transaction that inserted a row naming it, then writes it. Recommended: keep B, noted in the PR risks.
+- Settled by jean (C in #686, b11ece8dc5): a run whose payloads write a field with `inUniqueIndex` (flag added to the Postgres schema overview, `in_unique_index`; unique, non-primary, non-partial, non-expression indexes) reads `FOR UPDATE`, else `FOR NO KEY UPDATE`. Avoids the lock upgrade deadlock against a `FOR KEY SHARE`. A filter hook adding a unique column after the read keeps that window: accepted, in the PR risks.
 
 **Why:** #694 flipped the default to `preserveMutationOrder` after this branch was written: 3 tests and the PR body stayed true only under `minimizeMutations`. A branch older than #694 reads as `update · insert`; at the default it writes `insert · update · insert`.
 
