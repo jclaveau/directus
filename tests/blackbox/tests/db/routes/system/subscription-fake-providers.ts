@@ -39,6 +39,17 @@ const MOLLIE_NOT_FOUND: FakeAnswer = {
 	},
 };
 
+// What Mollie's test mode answers a DELETE on a canceled subscription.
+const MOLLIE_ALREADY_CANCELED: FakeAnswer = {
+	code: 422,
+	body: {
+		status: 422,
+		title: 'Unprocessable Entity',
+		detail: 'The subscription has been cancelled',
+		_links: {},
+	},
+};
+
 const STRIPE_NOT_FOUND: FakeAnswer = {
 	code: 404,
 	body: {
@@ -138,6 +149,10 @@ export async function startFakeProviders() {
 		}
 
 		if (requestMethod === 'DELETE') {
+			if (mollieHolding.status === 'canceled') {
+				return MOLLIE_ALREADY_CANCELED;
+			}
+
 			mollieHolding.status = 'canceled';
 		}
 
