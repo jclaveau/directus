@@ -1,5 +1,9 @@
 import type { DirectusPolicy } from '../../../schema/policy.js';
-import type { ApplyQueryFields, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import type { RestCommand } from '../../types.js';
 
 export type CreatePolicyOutput<
@@ -17,7 +21,7 @@ export type CreatePolicyOutput<
  * @returns Returns the policy objects for the created policies.
  */
 export const createPolicies =
-	<Schema, const TQuery extends Query<Schema, DirectusPolicy<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPolicy<Schema>>>(
 		items: Partial<DirectusPolicy<Schema>>[],
 		query?: TQuery,
 	): RestCommand<CreatePolicyOutput<Schema, TQuery>[], Schema> =>
@@ -37,7 +41,7 @@ export const createPolicies =
  * @returns Returns the policy object for the created policy.
  */
 export const createPolicy =
-	<Schema, const TQuery extends Query<Schema, DirectusPolicy<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPolicy<Schema>>>(
 		item: Partial<DirectusPolicy<Schema>>,
 		query?: TQuery,
 	): RestCommand<CreatePolicyOutput<Schema, TQuery>, Schema> =>

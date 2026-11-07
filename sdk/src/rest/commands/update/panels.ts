@@ -1,5 +1,10 @@
 import type { DirectusPanel } from '../../../schema/panel.js';
-import type { ApplyQueryFields, NestedPartial, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	NestedPartial,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import { throwIfEmpty } from '../../utils/index.js';
 import type { RestCommand } from '../../types.js';
 
@@ -18,7 +23,7 @@ export type UpdatePanelOutput<
  * @throws Will throw if keys is empty
  */
 export const updatePanels =
-	<Schema, const TQuery extends Query<Schema, DirectusPanel<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPanel<Schema>>>(
 		keys: DirectusPanel<Schema>['id'][],
 		item: Partial<DirectusPanel<Schema>>,
 		query?: TQuery,
@@ -41,7 +46,7 @@ export const updatePanels =
  * @returns Returns the panel objects for the updated panels.
  */
 export const updatePanelsBatch =
-	<Schema, const TQuery extends Query<Schema, DirectusPanel<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPanel<Schema>>>(
 		items: NestedPartial<DirectusPanel<Schema>>[],
 		query?: TQuery,
 	): RestCommand<UpdatePanelOutput<Schema, TQuery>[], Schema> =>
@@ -61,7 +66,7 @@ export const updatePanelsBatch =
  * @throws Will throw if key is empty
  */
 export const updatePanel =
-	<Schema, const TQuery extends Query<Schema, DirectusPanel<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPanel<Schema>>>(
 		key: DirectusPanel<Schema>['id'],
 		item: Partial<DirectusPanel<Schema>>,
 		query?: TQuery,

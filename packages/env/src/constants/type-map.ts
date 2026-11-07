@@ -119,6 +119,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	GRAPHQL_QUERY_TOKEN_LIMIT: 'number',
 
 	MAX_BATCH_MUTATION: 'number',
+	DEFAULT_MUTATION_BATCHING: 'string',
 
 	SERVER_SHUTDOWN_TIMEOUT: 'number',
 

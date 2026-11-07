@@ -1,5 +1,10 @@
 import type { DirectusRole } from '../../../schema/role.js';
-import type { ApplyQueryFields, NestedPartial, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	NestedPartial,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import { throwIfEmpty } from '../../utils/index.js';
 import type { RestCommand } from '../../types.js';
 
@@ -18,7 +23,7 @@ export type UpdateRoleOutput<
  * @throws Will throw if keys is empty
  */
 export const updateRoles =
-	<Schema, const TQuery extends Query<Schema, DirectusRole<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusRole<Schema>>>(
 		keys: DirectusRole<Schema>['id'][],
 		item: NestedPartial<DirectusRole<Schema>>,
 		query?: TQuery,
@@ -41,7 +46,7 @@ export const updateRoles =
  * @returns Returns the role objects for the updated roles.
  */
 export const updateRolesBatch =
-	<Schema, const TQuery extends Query<Schema, DirectusRole<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusRole<Schema>>>(
 		items: NestedPartial<DirectusRole<Schema>>[],
 		query?: TQuery,
 	): RestCommand<UpdateRoleOutput<Schema, TQuery>[], Schema> =>
@@ -61,7 +66,7 @@ export const updateRolesBatch =
  * @throws Will throw if key is empty
  */
 export const updateRole =
-	<Schema, const TQuery extends Query<Schema, DirectusRole<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusRole<Schema>>>(
 		key: DirectusRole<Schema>['id'],
 		item: NestedPartial<DirectusRole<Schema>>,
 		query?: TQuery,

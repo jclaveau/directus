@@ -93,6 +93,14 @@ export const RepeatedPkAnswers = ['refuse', 'lastWins'] as const;
 
 export type RepeatedPkAnswer = (typeof RepeatedPkAnswers)[number];
 
+export const MutationBatchingModes = [
+	'minimizeMutations',
+	'preserveMutationOrder',
+	'disableBatching',
+] as const;
+
+export type MutationBatchingMode = (typeof MutationBatchingModes)[number];
+
 export type MutationOptions = {
 	/**
 	 * Callback function that's fired whenever a revision is made in the mutation,
@@ -151,6 +159,7 @@ export type MutationOptions = {
 	 * `true` refuses a create or update naming one existing o2m child for several
 	 * rows, with a 400. Off by default: each row takes the child in turn and the
 	 * last one keeps it, as the database would; a unique index refuses it there.
+	 * Refused under `disableBatching`, where each row is written on its own.
 	 */
 	refuseChildJoiningSeveralRows?: boolean | undefined;
 
@@ -225,6 +234,28 @@ export type MutationOptions = {
 	 * `onRepeatedPk=lastWins` when unset.
 	 */
 	lastWinsSpelling?: string | undefined;
+
+	/**
+	 * How a write batches its statements, passed down to its nested writes.
+	 * Left unset, `DEFAULT_MUTATION_BATCHING` decides.
+	 *
+	 * ```
+	 * upsertMany([U1, C2, U3, C4])     U = key found, C = new row
+	 *
+	 * minimizeMutations      update U1,U3 · insert C2,C4, each with its
+	 *                        filters before it and its actions after it
+	 * preserveMutationOrder  update U1 · insert C2 · update U3 · insert C4,
+	 *                        each with its filters; actions at the end of
+	 *                        the run
+	 * disableBatching        per payload: filter · write · action
+	 * ```
+	 *
+	 * A run ends before a key it already holds, or around a payload nesting
+	 * rows. `disableBatching` also creates one row at a time in `createMany`,
+	 * firing the actions once the transaction commits, and writes one group at
+	 * a time in `updateGroups`.
+	 */
+	mutationBatching?: MutationBatchingMode | undefined;
 
 	/**
 	 * Shared scoped-cache hook declarations injected by a batch/upsert parent so
