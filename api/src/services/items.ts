@@ -481,12 +481,17 @@ implements AbstractService<Item> {
 			return [];
 		}
 
-		if (resolveMutationBatching(opts) === 'disableBatching' && data.length > 1) {
-			return await this.createRowByRow(data, opts, opts.mutationTracker);
-		}
+		// a row written alone counts itself again
+		const untrackRows = opts.mutationTracker.snapshot();
 
 		if (!opts.bypassLimits) {
 			opts.mutationTracker.trackMutations(data.length);
+		}
+
+		if (resolveMutationBatching(opts) === 'disableBatching' && data.length > 1) {
+			untrackRows();
+
+			return await this.createRowByRow(data, opts, opts.mutationTracker);
 		}
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -1145,7 +1150,11 @@ implements AbstractService<Item> {
 		opts: MutationOptions,
 		mutationTracker: MutationTracker,
 	): Promise<(PrimaryKey | null)[]> {
+		// TODO(#610): a retried attempt keeps the events of the aborted one
 		const rowActionEvents: ActionEventParams[] = [];
+
+		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
+			?? createScopedCacheHookDeclarations(this.schema);
 
 		const createdKeys = await transaction(this.knex, async (trx) => {
 			const service = this.fork({ knex: trx });
@@ -1154,6 +1163,7 @@ implements AbstractService<Item> {
 
 			const rowOpts: MutationOptions = {
 				...opts,
+				scopedCacheHookDeclarations,
 				bypassEmitAction: (actionEvent) => {
 					rowActionEvents.push(actionEvent);
 				},
@@ -1173,7 +1183,11 @@ implements AbstractService<Item> {
 			await this.checkUserIntegrityOnce(userIntegrityCheckFlags, trx, opts);
 
 			return rowKeys;
-		}, mutationTracker.snapshot());
+		}, mutationTracker.snapshot()).catch(async (error) => {
+			await this.purgeRolledBackHookWrites(scopedCacheHookDeclarations, opts);
+
+			throw error;
+		});
 
 		await emitActionEvents(rowActionEvents, opts);
 
@@ -2541,6 +2555,9 @@ implements AbstractService<Item> {
 		opts: DeferredPurgeOptions,
 		mutationTracker: MutationTracker,
 	): Promise<(PrimaryKey | null)[]> {
+		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
+			?? createScopedCacheHookDeclarations(this.schema);
+
 		return await transaction(this.knex, async (trx) => {
 			const service = this.fork({ knex: trx });
 			const rowKeys: (PrimaryKey | null)[] = [];
@@ -2548,6 +2565,7 @@ implements AbstractService<Item> {
 
 			const groupOpts: DeferredPurgeOptions = {
 				...opts,
+				scopedCacheHookDeclarations,
 				onRequireUserIntegrityCheck: (flags) => {
 					userIntegrityCheckFlags |= flags;
 				},
@@ -2564,7 +2582,58 @@ implements AbstractService<Item> {
 			await this.checkUserIntegrityOnce(userIntegrityCheckFlags, trx, opts);
 
 			return rowKeys;
-		}, mutationTracker.snapshot());
+		}, mutationTracker.snapshot()).catch(async (error) => {
+			await this.purgeRolledBackHookWrites(scopedCacheHookDeclarations, opts);
+
+			throw error;
+		});
+	}
+
+	/**
+	 * Purge what the hooks of a row-by-row write wrote through a connection of their
+	 * own. The purge of each row that succeeded waits on the shared transaction, so
+	 * its rollback drops them, while those writes have landed.
+	 */
+	private async purgeRolledBackHookWrites(
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+		opts: MutationOptions,
+	): Promise<void> {
+		if (!shouldClearCache(this.cache, opts, this.collection)) {
+			return;
+		}
+
+		const takenOverKeys = this.changedTakenOverKeys(declarations);
+
+		if (this.knex.isTransaction) {
+			await this.purgeHookWrittenScopedCache(takenOverKeys, declarations, opts);
+		}
+		else {
+			await this.purgeCreatedScopedCache(
+				takenOverKeys,
+				takenOverKeys,
+				declarations,
+				0,
+				opts,
+			);
+		}
+	}
+
+	/**
+	 * The rows of this collection a hook took over, written by the hook itself;
+	 * one it declared inert wrote nothing.
+	 */
+	private changedTakenOverKeys(
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+	): PrimaryKey[] {
+		const takenOverPrefix = takenOverScopedCacheKey(this.collection, '');
+		const skippedKeyNames = this.purgeSkippedKeyNames(declarations);
+
+		return [...declarations.takenOverKeys]
+			.filter((takenOverName) => takenOverName.startsWith(takenOverPrefix))
+			.map((takenOverName) => takenOverName.slice(takenOverPrefix.length))
+			.filter((takenOverKey) => {
+				return !skippedKeyNames.has(this.primaryKeyNameOf(takenOverKey));
+			});
 	}
 
 	/**
@@ -3336,6 +3405,13 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const mutationBatching = resolveMutationBatching(opts);
 
+		// Written one at a time, each payload counts itself: checked here too, so
+		// an oversized upsert never reaches a hook.
+		if (mutationBatching === 'disableBatching' && !opts.bypassLimits) {
+			this.createMutationTracker(opts.mutationTracker.getCount())
+				.trackMutations(payloads.length);
+		}
+
 		// Old scope values for the update subset — any payload carrying an existing key. A
 		// pure-insert payload has no key (or points at no row yet), so it contributes nothing
 		// here; its new slice is picked up from the committed rows below (old ∪ new).
@@ -3373,21 +3449,8 @@ implements AbstractService<Item> {
 			return this.primaryKeyNameOf(key);
 		}));
 
-		const takenOverPrefix = takenOverScopedCacheKey(this.collection, '');
-
-		// The rows of this collection a hook took over, written by the hook itself;
-		// one it declared inert wrote nothing.
 		const changedTakenOverKeys = (): PrimaryKey[] => {
-			const skippedKeyNames = this.purgeSkippedKeyNames(
-				scopedCacheHookDeclarations,
-			);
-
-			return [...scopedCacheHookDeclarations.takenOverKeys]
-				.filter((takenOverName) => takenOverName.startsWith(takenOverPrefix))
-				.map((takenOverName) => takenOverName.slice(takenOverPrefix.length))
-				.filter((takenOverKey) => {
-					return !skippedKeyNames.has(this.primaryKeyNameOf(takenOverKey));
-				});
+			return this.changedTakenOverKeys(scopedCacheHookDeclarations);
 		};
 
 		// An insert-shaped payload routes to createOne, where a filter hook can take
