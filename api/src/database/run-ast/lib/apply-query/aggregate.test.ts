@@ -612,7 +612,7 @@ test('a distinct count of every field takes no case', async () => {
 					permissions: { id: { _lt: 2 } },
 					fields: ['id'],
 				},
-			] as Permission[],
+			] as unknown as Permission[],
 			generateAlias: createAliasGenerator(),
 		},
 	);
