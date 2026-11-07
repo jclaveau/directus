@@ -1,9 +1,12 @@
+import { ForbiddenError } from '@directus/errors';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { subscriptionsHook } from './hook.js';
 import {
-	refusePlanArchiveByUpdate,
 	refusePlanDelete,
+	refusePlanStatusUpdate,
 	refuseSubscriptionEventWrite,
+	refuseSubscriptionStateUpdate,
+	refuseUsedReferenceUpdate,
 } from './plans/refuse-direct-writes.js';
 import { enqueueReconcile } from './sync/enqueue-reconcile.js';
 import { runSyncBatch } from './sync/run-sync-batch.js';
@@ -72,7 +75,7 @@ describe('subscriptionsHook', () => {
 		expect(AccessService).toHaveBeenCalledWith({ knex: 'trx', schema: 'schema' });
 	});
 
-	test('refuses writes around the plans and their history', async () => {
+	test('filters the writes around the plans and their history', () => {
 		const filter = vi.fn();
 
 		(subscriptionsHook.config as (...args: unknown[]) => void)(
@@ -82,21 +85,166 @@ describe('subscriptionsHook', () => {
 
 		expect(filter.mock.calls).toEqual([
 			['subscription_plans.items.delete', expect.any(Function)],
-			['subscription_plans.items.update', refusePlanArchiveByUpdate],
-			['subscription_events.items.create', refuseSubscriptionEventWrite],
-			['subscription_events.items.update', refuseSubscriptionEventWrite],
-			['subscription_events.items.delete', refuseSubscriptionEventWrite],
+			['subscription_plans.items.update', expect.any(Function)],
+			['subscription_plan_references.items.update', expect.any(Function)],
+			['subscriptions.items.update', expect.any(Function)],
+			['subscription_events.items.create', expect.any(Function)],
+			['subscription_events.items.update', expect.any(Function)],
+			['subscription_events.items.delete', expect.any(Function)],
 		]);
+	});
 
-		vi.mocked(refusePlanDelete).mockResolvedValue([1]);
-
-		await expect(filter.mock.calls[0]?.[1](
+	const WRITE_FILTERS = [
+		[
+			'subscription_plans.items.delete',
+			0,
 			[1],
-			{},
-			{ database: 'filter database' },
-		)).resolves.toEqual([1]);
+			{ action: 'delete', collection: 'subscription_plans', primaryKeys: [1] },
+			refusePlanDelete,
+			[[1], 'filter database'],
+		],
+		[
+			'subscription_plans.items.update',
+			1,
+			[{ data: { status: 'archived' }, keys: [1] }],
+			{
+				action: 'update',
+				collection: 'subscription_plans',
+				primaryKeys: [1],
+				fields: ['status'],
+			},
+			refusePlanStatusUpdate,
+			[[{ data: { status: 'archived' }, keys: [1] }], 'filter database'],
+		],
+		[
+			'subscription_plan_references.items.update',
+			2,
+			[{ data: { reference: 'other' }, keys: [1] }],
+			{
+				action: 'update',
+				collection: 'subscription_plan_references',
+				primaryKeys: [1],
+				fields: ['reference'],
+			},
+			refuseUsedReferenceUpdate,
+			[[{ data: { reference: 'other' }, keys: [1] }], 'filter database'],
+		],
+		[
+			'subscriptions.items.update',
+			3,
+			[{ data: { status: 'canceled' }, keys: [1] }],
+			{
+				action: 'update',
+				collection: 'subscriptions',
+				primaryKeys: [1],
+				fields: ['status'],
+			},
+			refuseSubscriptionStateUpdate,
+			[[{ data: { status: 'canceled' }, keys: [1] }]],
+		],
+		[
+			'subscription_events.items.create',
+			4,
+			{ source: 'sync' },
+			{ action: 'create', collection: 'subscription_events' },
+			refuseSubscriptionEventWrite,
+			[],
+		],
+		[
+			'subscription_events.items.update',
+			5,
+			[{ data: { source: 'sync' }, keys: [1] }],
+			{ action: 'update', collection: 'subscription_events' },
+			refuseSubscriptionEventWrite,
+			[],
+		],
+		[
+			'subscription_events.items.delete',
+			6,
+			[1],
+			{ action: 'delete', collection: 'subscription_events' },
+			refuseSubscriptionEventWrite,
+			[],
+		],
+	] as const;
 
-		expect(refusePlanDelete).toHaveBeenCalledWith([1], 'filter database');
+	test.each(WRITE_FILTERS)('%s checks the access, then refuses', async (
+		_eventName,
+		filterIndex,
+		eventPayload,
+		accessCheck,
+		refuseWrite,
+		refuseArguments,
+	) => {
+		const filter = vi.fn();
+		const validateAccess = vi.fn();
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter, init: vi.fn(), schedule: vi.fn() },
+			{ env: { MAX_PAYLOAD_SIZE: '1mb' }, database: 'database', validateAccess },
+		);
+
+		await filter.mock.calls[filterIndex]?.[1](eventPayload, {}, {
+			database: 'filter database',
+			schema: 'schema',
+			accountability: { user: 'user-1' },
+		});
+
+		expect(validateAccess).toHaveBeenCalledWith(
+			{ ...accessCheck, accountability: { user: 'user-1' } },
+			{ knex: 'filter database', schema: 'schema' },
+		);
+
+		expect(refuseWrite).toHaveBeenCalledWith(...refuseArguments);
+	});
+
+	test.each(WRITE_FILTERS)('%s answers 403 before any refusal', async (
+		_eventName,
+		filterIndex,
+		eventPayload,
+		_accessCheck,
+		refuseWrite,
+	) => {
+		const filter = vi.fn();
+		const validateAccess = vi.fn().mockRejectedValue(new ForbiddenError());
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter, init: vi.fn(), schedule: vi.fn() },
+			{ env: { MAX_PAYLOAD_SIZE: '1mb' }, database: 'database', validateAccess },
+		);
+
+		await expect(filter.mock.calls[filterIndex]?.[1](eventPayload, {}, {
+			database: 'filter database',
+			schema: 'schema',
+			accountability: { user: 'user-1' },
+		})).rejects.toThrow(new ForbiddenError());
+
+		expect(refuseWrite).not.toHaveBeenCalled();
+	});
+
+	test.each(WRITE_FILTERS)('%s checks no access for an internal call', async (
+		_eventName,
+		filterIndex,
+		eventPayload,
+		_accessCheck,
+		refuseWrite,
+	) => {
+		const filter = vi.fn();
+		const validateAccess = vi.fn();
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter, init: vi.fn(), schedule: vi.fn() },
+			{ env: { MAX_PAYLOAD_SIZE: '1mb' }, database: 'database', validateAccess },
+		);
+
+		await filter.mock.calls[filterIndex]?.[1](eventPayload, {}, {
+			database: 'filter database',
+			schema: 'schema',
+			accountability: null,
+		});
+
+		expect(validateAccess).not.toHaveBeenCalled();
+		expect(refuseWrite).toHaveBeenCalled();
 	});
 
 	test('queues a reconcile every hour', async () => {

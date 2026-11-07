@@ -99,7 +99,7 @@ describe('syncSubscription', () => {
 			id: 1,
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
@@ -136,7 +136,7 @@ describe('syncSubscription', () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'trialing',
@@ -172,7 +172,7 @@ describe('syncSubscription', () => {
 			id: 1,
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'past_due',
@@ -210,8 +210,10 @@ describe('syncSubscription', () => {
 			},
 		]);
 
-		await database('subscription_plan_references')
-			.insert({ plan: 2, provider: 'stripe', reference: 'price_2' });
+		await database('subscription_plan_references').insert([
+			{ plan: 1, provider: 'stripe', reference: 'price_1' },
+			{ plan: 2, provider: 'stripe', reference: 'price_2' },
+		]);
 
 		await database('directus_access')
 			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
@@ -219,7 +221,7 @@ describe('syncSubscription', () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
@@ -259,7 +261,8 @@ describe('syncSubscription', () => {
 		});
 
 		expect(await database('subscriptions')
-			.select('plan', 'access')).toEqual([{ plan: 2, access: 'access-2' }]);
+			.select('plan_reference', 'access'))
+			.toEqual([{ plan_reference: 2, access: 'access-2' }]);
 	});
 
 	test('regrants access when the subscriber changed user', async () => {
@@ -286,7 +289,7 @@ describe('syncSubscription', () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
@@ -347,7 +350,7 @@ describe('syncSubscription', () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'mollie',
 			provider_subscription_id: 'sub_1',
 			status: 'canceled',
@@ -498,7 +501,7 @@ describe('syncSubscription', () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
@@ -557,7 +560,7 @@ describe('syncSubscription', () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
@@ -606,10 +609,12 @@ describe('syncSubscription', () => {
 	});
 
 	test('revokes without the customer and plan reference', async () => {
+		await database('subscribers').insert({ user: 'user-1' });
+
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
@@ -640,8 +645,107 @@ describe('syncSubscription', () => {
 		expect(accessService.deleteOne).toHaveBeenCalledWith('access-1');
 
 		expect(await database('subscriptions')
-			.select('status', 'plan', 'access'))
-			.toEqual([{ status: 'unpaid', plan: 1, access: null }]);
+			.select('status', 'plan_reference', 'access'))
+			.toEqual([{ status: 'unpaid', plan_reference: 1, access: null }]);
+	});
+
+	test('cancels the revoked subscription of a deleted user', async () => {
+		await database('subscribers').insert({ user: null });
+
+		await database('subscriptions').insert({
+			subscriber: 1,
+			customer: 1,
+			plan_reference: 1,
+			provider: 'stripe',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			access: 'access-1',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		const stripeProvider = {
+			cancelAtPeriodEnd: vi.fn(),
+			composeResourceId: vi.fn().mockReturnValue('sub_1'),
+		};
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: stripeProvider as unknown as SubscriptionProvider,
+			logger: { warn: vi.fn() },
+			accessService: {
+				createOne: vi.fn(),
+				deleteOne: vi.fn(),
+			} as unknown as AbstractService,
+			providerName: 'stripe',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				status: 'unpaid',
+				currentPeriodEnd: null,
+				cancelAtPeriodEnd: false,
+				planReference: 'price_1',
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(stripeProvider.cancelAtPeriodEnd).toHaveBeenCalledWith('sub_1');
+
+		expect(await database('subscriptions')
+			.select('status', 'cancel_at_period_end', 'access'))
+			.toEqual([{ status: 'unpaid', cancel_at_period_end: 1, access: null }]);
+
+		expect(await database('subscription_events')
+			.select('source', 'cancel_at_period_end'))
+			.toEqual([{ source: 'user_deleted', cancel_at_period_end: 1 }]);
+	});
+
+	test.each([
+		['canceled', false],
+		['unpaid', true],
+	])('does not cancel a %s subscription, cancelling: %s', async (
+		providerStatus,
+		isCancelling,
+	) => {
+		await database('subscribers').insert({ user: null });
+
+		await database('subscriptions').insert({
+			subscriber: 1,
+			customer: 1,
+			plan_reference: 1,
+			provider: 'stripe',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		const stripeProvider = {
+			cancelAtPeriodEnd: vi.fn(),
+			composeResourceId: vi.fn(),
+		};
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: stripeProvider as unknown as SubscriptionProvider,
+			logger: { warn: vi.fn() },
+			accessService: {} as AbstractService,
+			providerName: 'stripe',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				status: providerStatus,
+				currentPeriodEnd: null,
+				cancelAtPeriodEnd: isCancelling,
+				planReference: 'price_1',
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(stripeProvider.cancelAtPeriodEnd).not.toHaveBeenCalled();
+
+		expect(await database('subscription_events').select('source'))
+			.toEqual([{ source: 'sync' }]);
 	});
 
 	test('grants a paid subscription on a locked plan and warns', async () => {
@@ -717,7 +821,7 @@ describe('syncSubscription', () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
@@ -795,7 +899,7 @@ describe('syncSubscription', () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
@@ -885,7 +989,7 @@ describe('closeMissingSubscription', () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',

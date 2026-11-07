@@ -1,6 +1,6 @@
 import type { AbstractService } from '@directus/types';
 import type { Knex } from 'knex';
-import { MANAGED_BY_SUBSCRIPTIONS } from '../constants.js';
+import { MANAGED_BY_SUBSCRIPTIONS, TERMINAL_STATUSES } from '../constants.js';
 import {
 	recordSubscriptionEvent,
 	type SubscriptionEventSource,
@@ -25,7 +25,7 @@ type StoredSubscription = {
 	id: number;
 	subscriber: number;
 	customer: number;
-	plan: number;
+	plan_reference: number;
 	status: string;
 	current_period_end: Date | number | string | null;
 	cancel_at_period_end: boolean | number;
@@ -35,7 +35,7 @@ type StoredSubscription = {
 type SubscriptionState = {
 	subscriber?: number;
 	customer?: number;
-	plan?: number;
+	plan_reference?: number;
 	status: string;
 	current_period_end: Date | number | string | null;
 	cancel_at_period_end: boolean;
@@ -74,14 +74,32 @@ export async function syncSubscription({
 	// Revoking needs the stored row alone: a plan reference removed since, or a
 	// customer gone, must not keep a paid product granted.
 	if (accessDecision === 'revoke' && storedSubscription !== undefined) {
+		const storedSubscriber = await trx('subscribers')
+			.select('user')
+			.where('id', storedSubscription.subscriber)
+			.first();
+
+		// `unpaid` or `suspended` can still charge again once paid.
+		const isCancelRequested = storedSubscriber.user === null
+			&& !TERMINAL_STATUSES.includes(providerSubscription.status)
+			&& !providerSubscription.cancelAtPeriodEnd;
+
+		if (isCancelRequested) {
+			await requestProviderCancel(subscriptionProvider, providerSubscription);
+		}
+
 		await writeSubscriptionState({
 			trx,
 			storedSubscription,
 			subscriptionState: {
 				...providerState,
+				cancel_at_period_end: isCancelRequested
+					|| providerState.cancel_at_period_end,
 				access: await revokeAccess(accessService, storedAccess),
 			},
-			eventSource: 'sync',
+			eventSource: isCancelRequested
+				? 'user_deleted'
+				: 'sync',
 			writtenAt: syncedAt,
 		});
 
@@ -110,6 +128,7 @@ export async function syncSubscription({
 			'subscription_plan_references.plan',
 		)
 		.select(
+			'subscription_plan_references.id as reference_id',
 			'subscription_plans.id',
 			'subscription_plans.policy',
 			'subscription_plans.status',
@@ -150,16 +169,8 @@ export async function syncSubscription({
 	const isCancelRequested = isUserDeleted
 		&& !providerSubscription.cancelAtPeriodEnd;
 
-	// Outside the transaction: after a rollback the retry finds the provider
-	// already cancelling and records `sync`. A stored cancel the provider no
-	// longer holds cancels again with no event.
 	if (isCancelRequested) {
-		await subscriptionProvider.cancelAtPeriodEnd(
-			subscriptionProvider.composeResourceId({
-				subscriptionId: providerSubscription.subscriptionId,
-				customerId: providerSubscription.customerId,
-			}),
-		);
+		await requestProviderCancel(subscriptionProvider, providerSubscription);
 	}
 
 	const grantedAccess = isKept && !isUserDeleted
@@ -176,7 +187,7 @@ export async function syncSubscription({
 		...providerState,
 		subscriber: subscriberCustomer.subscriber,
 		customer: subscriberCustomer.id,
-		plan: subscribedPlan.id,
+		plan_reference: subscribedPlan.reference_id,
 		cancel_at_period_end: isUserDeleted || providerState.cancel_at_period_end,
 		access: grantedAccess,
 	};
@@ -220,6 +231,23 @@ export async function syncSubscription({
 		userId: null,
 		recordedAt: syncedAt,
 	});
+}
+
+/**
+ * Outside the transaction: after a rollback the retry finds the provider already
+ * cancelling and records `sync`. A stored cancel the provider no longer holds
+ * cancels again with no event.
+ */
+async function requestProviderCancel(
+	subscriptionProvider: SubscriptionProvider,
+	providerSubscription: ProviderSubscription,
+): Promise<void> {
+	await subscriptionProvider.cancelAtPeriodEnd(
+		subscriptionProvider.composeResourceId({
+			subscriptionId: providerSubscription.subscriptionId,
+			customerId: providerSubscription.customerId,
+		}),
+	);
 }
 
 export type MissingSubscriptionClose = {
@@ -281,7 +309,7 @@ export function selectStoredSubscription(
 			'id',
 			'subscriber',
 			'customer',
-			'plan',
+			'plan_reference',
 			'status',
 			'current_period_end',
 			'cancel_at_period_end',
