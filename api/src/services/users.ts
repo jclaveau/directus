@@ -28,7 +28,7 @@ import isUrlAllowed from '../utils/is-url-allowed.js';
 import { verifyJWT } from '../utils/jwt.js';
 import { chunk, isEmpty } from '../utils/lodash-es-used.js';
 import { stall } from '../utils/stall.js';
-import { transaction } from '../utils/transaction.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { Url } from '../utils/url.js';
 import { ItemsService } from './items.js';
 import { MailService } from './mail/index.js';
@@ -392,7 +392,7 @@ export class UsersService extends ItemsService {
 		] as const;
 
 		// In the delete's transaction: a delete refused there rolls it back.
-		await transaction(this.knex, async (trx) => {
+		await transactionHoldingActions(this.knex, heldActionEvents, async (trx) => {
 			// Through ItemsService so the cache purges the nulled rows, without the
 			// hooks, activity and revisions the raw update never had.
 			if (!opts.preMutationError) {

@@ -6,16 +6,25 @@ import {
 	ServiceUnavailableError,
 	UnprocessableContentError,
 } from '@directus/errors';
-import type { ApiOutput, BundleExtension, ExtensionSettings, ExtensionManager } from '@directus/types';
+import type {
+	AbstractServiceOptions,
+	Accountability,
+	ActionEventParams,
+	ApiOutput,
+	BundleExtension,
+	DeepPartial,
+	ExtensionManager,
+	ExtensionSettings,
+	SchemaOverview,
+} from '@directus/types';
 import { describe, type DescribeOptions } from '@directus/extensions-registry';
-import type { AbstractServiceOptions, Accountability, DeepPartial, SchemaOverview } from '@directus/types';
 import { isObject, oneLine } from '@directus/utils';
 import type { Knex } from 'knex';
 import getDatabase from '../database/index.js';
 import { getExtensionManager } from '../extensions/index.js';
 import { useLogger } from '../logger/index.js';
-import { transaction } from '../utils/transaction.js';
-import { ItemsService } from './items.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
+import { emitActionEvents, ItemsService } from './items.js';
 
 export class ExtensionReadError extends Error {
 	originalError: unknown;
@@ -211,30 +220,42 @@ export class ExtensionsService {
 		}
 
 		const updatedMeta = data.meta;
+		const heldActionEvents: ActionEventParams[] = [];
 
-		const result = await transaction(this.knex, async (trx) => {
-			const service = new ExtensionsService({
-				knex: trx,
-				accountability: this.accountability,
-				schema: this.schema,
-			});
+		const result = await transactionHoldingActions(
+			this.knex,
+			heldActionEvents,
+			async (trx) => {
+				const service = new ExtensionsService({
+					knex: trx,
+					accountability: this.accountability,
+					schema: this.schema,
+				});
 
-			await service.extensionsItemService.updateOne(id, updatedMeta);
+				await service.extensionsItemService.updateOne(id, updatedMeta, {
+					bypassEmitAction: (actionEvent) => {
+						heldActionEvents.push(actionEvent);
+					},
+				});
 
-			let extension;
+				let extension;
 
-			try {
-				extension = await service.readOne(id);
-			} catch (error) {
-				throw new ExtensionReadError(error);
-			}
+				try {
+					extension = await service.readOne(id);
+				}
+				catch (error) {
+					throw new ExtensionReadError(error);
+				}
 
-			if ('enabled' in updatedMeta) {
-				await service.checkBundleAndSyncStatus(trx, id, extension);
-			}
+				if ('enabled' in updatedMeta) {
+					await service.checkBundleAndSyncStatus(trx, id, extension);
+				}
 
-			return extension;
-		});
+				return extension;
+			},
+		);
+
+		await emitActionEvents(heldActionEvents, {});
 
 		const reloadOutcome = await this.extensionsManager.reload().then(
 			() => ({ hasFailed: false, failure: undefined }),

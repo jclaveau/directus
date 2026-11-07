@@ -35,6 +35,7 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import type { FunctionFieldNode, FieldNode, NestedCollectionNode } from '../types/index.js';
 import { getDateFormatted } from '../utils/get-date-formatted.js';
 import { getService } from '../utils/get-service.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { transaction } from '../utils/transaction.js';
 import { Url } from '../utils/url.js';
 import { userName } from '../utils/user-name.js';
@@ -112,7 +113,7 @@ export class ImportService {
 		const extractJSON = StreamArray.withParserAsStream();
 		const nestedActionEvents: ActionEventParams[] = [];
 
-		return transaction(this.knex, (trx) => {
+		await transactionHoldingActions(this.knex, nestedActionEvents, (trx) => {
 			const service = getService(collection, {
 				knex: trx,
 				schema: this.schema,
@@ -143,15 +144,19 @@ export class ImportService {
 
 				extractJSON.on('end', () => {
 					saveQueue.drain(() => {
-						for (const nestedActionEvent of nestedActionEvents) {
-							emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-						}
-
 						return resolve();
 					});
 				});
 			});
 		});
+
+		for (const nestedActionEvent of nestedActionEvents) {
+			emitter.emitAction(
+				nestedActionEvent.event,
+				nestedActionEvent.meta,
+				nestedActionEvent.context,
+			);
+		}
 	}
 
 	async importCSV(collection: string, stream: Readable): Promise<void> {
@@ -160,7 +165,7 @@ export class ImportService {
 
 		const nestedActionEvents: ActionEventParams[] = [];
 
-		return transaction(this.knex, (trx) => {
+		await transactionHoldingActions(this.knex, nestedActionEvents, (trx) => {
 			const service = getService(collection, {
 				knex: trx,
 				schema: this.schema,
@@ -251,10 +256,6 @@ export class ImportService {
 								if (!saveQueue.started) return resolve();
 
 								saveQueue.drain(() => {
-									for (const nestedActionEvent of nestedActionEvents) {
-										emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-									}
-
 									return resolve();
 								});
 							});
@@ -270,6 +271,14 @@ export class ImportService {
 					.pipe(fileWriteStream);
 			});
 		});
+
+		for (const nestedActionEvent of nestedActionEvents) {
+			emitter.emitAction(
+				nestedActionEvent.event,
+				nestedActionEvent.meta,
+				nestedActionEvent.context,
+			);
+		}
 	}
 }
 

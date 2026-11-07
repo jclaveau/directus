@@ -6245,7 +6245,8 @@ describe('Services / Items / a batched upsert', () => {
 			{ id: 1, name: 'uno' },
 			{ id: 4, name: 'four' },
 			{ id: 2, name: 'dos' },
-		])).resolves.toStrictEqual([3, 1, 4, 2]);
+		], { mutationBatching: 'minimizeMutations' }))
+			.resolves.toStrictEqual([3, 1, 4, 2]);
 
 		// sqlite writes one statement per update group (#610), postgres one batch
 		expect(sqlStatements).toStrictEqual([
@@ -6282,8 +6283,8 @@ describe('Services / Items / a batched upsert', () => {
 		expect(sqlStatements).toStrictEqual([
 			'BEGIN;',
 			'select `id` from `test` where `id` in (?, ?)',
-			'update `test` set `name` = ? where `id` in (?)',
 			'insert into `test` (`id`, `name`) values (?, ?) returning `id`',
+			'update `test` set `name` = ? where `id` in (?)',
 			'select `id` from `test` where `id` in (?)',
 			'update `test` set `name` = ? where `id` in (?)',
 			'COMMIT;',
@@ -6413,8 +6414,8 @@ describe('Services / Items / a batched upsert', () => {
 		try {
 			await expect(new ItemsService('test', { knex: database, schema })
 				.upsertMany([
-					{ name: 'boom' },
 					{ id: 1, name: 'uno' },
+					{ name: 'boom' },
 				])).rejects.toStrictEqual(new Error('boom refused'));
 		}
 		finally {
@@ -6725,8 +6726,8 @@ describe('Services / Items / a batched upsert', () => {
 			'insert into `tags` (`id`, `name`) values (?, ?) returning `id`',
 			'update `test` set `tag` = ? where `id` in (?)',
 			'select `id` from `test` where `id` in (?, ?)',
-			'update `test` set `name` = ? where `id` in (?)',
 			'insert into `test` (`id`, `tag`) values (?, ?) returning `id`',
+			'update `test` set `name` = ? where `id` in (?)',
 			'COMMIT;',
 		]);
 
@@ -7082,9 +7083,9 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 			'select `id`, `parent_id` from `children` where `id` in (?, ?, ?)',
 			'select `id` from `children` where `id` in (?, ?, ?)',
 			'update `children` set `parent_id` = ? where `id` in (?)',
+			'insert into `children` (`name`, `parent_id`) values (?, ?) returning `id`',
 			'update `children` set `parent_id` = ? where `id` in (?)',
 			'update `children` set `name` = ?, `parent_id` = ? where `id` in (?)',
-			'insert into `children` (`name`, `parent_id`) values (?, ?) returning `id`',
 			'select `id`, `parent_id` from `children` where `parent_id` in (?, ?)',
 			'COMMIT;',
 		]);
@@ -7242,16 +7243,16 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 			[{
 				activity: 1,
 				collection: 'children',
-				item: 7,
-				data: '{"id":7,"name":"seven","parent_id":4}',
-				delta: '{"parent_id":4}',
+				item: 9,
+				data: '{"name":"new of three","parent_id":3}',
+				delta: '{"name":"new of three","parent_id":3}',
 			}],
 			[{
 				activity: 1,
 				collection: 'children',
-				item: 9,
-				data: '{"name":"new of three","parent_id":3}',
-				delta: '{"name":"new of three","parent_id":3}',
+				item: 7,
+				data: '{"id":7,"name":"seven","parent_id":4}',
+				delta: '{"parent_id":4}',
 			}],
 			[
 				{
@@ -7271,10 +7272,10 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 			],
 		]);
 
-		// revisions 1 and 3 are the children of 3, revision 2 the child of 4
+		// revisions 1 and 2 are the children of 3, revision 3 the child of 4
 		expect(revisionParentWrites).toStrictEqual([
-			{ keys: [1, 3], data: { parent: 4 } },
-			{ keys: [2], data: { parent: 5 } },
+			{ keys: [1, 2], data: { parent: 4 } },
+			{ keys: [3], data: { parent: 5 } },
 		]);
 	});
 
@@ -8087,13 +8088,13 @@ describe('Services / Items / mutationBatching', () => {
 				{ data: { name: 'uno' }, keys: [1] },
 				{ data: { name: 'dos' }, keys: [2] },
 			]],
-			['update action', [
-				{ data: { name: 'uno' }, keys: [1] },
-				{ data: { name: 'dos' }, keys: [2] },
-			]],
 			['create filter', [
 				{ data: { id: 3, name: 'three' } },
 				{ data: { id: 4, name: 'four' } },
+			]],
+			['update action', [
+				{ data: { name: 'uno' }, keys: [1] },
+				{ data: { name: 'dos' }, keys: [2] },
 			]],
 			['create action', [3, 4]],
 		]);
@@ -8229,7 +8230,25 @@ describe('Services / Items / mutationBatching', () => {
 		},
 	);
 
-	it('passes preserveMutationOrder down to a nested O2M upsert', async () => {
+	it('refuses a create taking a value a later update frees by default', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.upsertMany([
+			{ id: 3, name: 'one' },
+			{ id: 1, name: 'uno' },
+		])).rejects.toStrictEqual(new RecordNotUniqueError({
+			collection: 'test',
+			field: 'name',
+			value: 'one',
+		}));
+
+		await expect(database('test').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+	});
+
+	it('passes minimizeMutations down to a nested O2M upsert', async () => {
 		await database.schema.createTable('children', (table) => {
 			table.increments('id');
 			table.string('name').unique();
@@ -8255,15 +8274,12 @@ describe('Services / Items / mutationBatching', () => {
 		})
 			.updateOne(1, {
 				children: [{ id: 9, name: 'six' }, { id: 6, name: 'sixty' }],
-			}, { mutationBatching: 'preserveMutationOrder' }))
-			.rejects.toStrictEqual(new RecordNotUniqueError({
-				collection: 'children',
-				field: 'name',
-				value: 'six',
-			}));
+			}, { mutationBatching: 'minimizeMutations' }))
+			.resolves.toBe(1);
 
-		await expect(database('children')).resolves.toStrictEqual([
-			{ id: 6, name: 'six', parent_id: 1 },
+		await expect(database('children').orderBy('id')).resolves.toStrictEqual([
+			{ id: 6, name: 'sixty', parent_id: 1 },
+			{ id: 9, name: 'six', parent_id: 1 },
 		]);
 	});
 
@@ -8341,6 +8357,84 @@ describe('Services / Items / mutationBatching', () => {
 		expect(hookCalls).toStrictEqual([
 			['create filter', [{ data: { id: 10, name: 'ten' } }]],
 			['create filter', [{ data: { id: 11, name: 'one' } }]],
+		]);
+	});
+
+	it.each(['preserveMutationOrder', 'minimizeMutations'] as const)(
+		'%s fires no action of a rolled-back payload',
+		async (mutationBatching) => {
+			await expect(new ItemsService('test', { knex: database, schema }).upsertMany([
+				{ id: 1, name: 'uno' },
+				{ id: 3, name: 'two' },
+			], { mutationBatching }))
+				.rejects.toStrictEqual(new RecordNotUniqueError({
+					collection: 'test',
+					field: 'name',
+					value: 'two',
+				}));
+
+			await expect(database('test').orderBy('id')).resolves.toStrictEqual([
+				{ id: 1, name: 'one' },
+				{ id: 2, name: 'two' },
+			]);
+
+			expect(hookCalls).toStrictEqual([
+				['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
+				['create filter', [{ data: { id: 3, name: 'two' } }]],
+			]);
+		},
+	);
+
+	it.each(['preserveMutationOrder', 'minimizeMutations'] as const)(
+		'%s fires no action of a run that a later run rolled back',
+		async (mutationBatching) => {
+			await expect(new ItemsService('test', { knex: database, schema }).upsertMany([
+				{ id: 1, name: 'uno' },
+				{ id: 1, name: 'two' },
+			], { mutationBatching }))
+				.rejects.toStrictEqual(new RecordNotUniqueError({
+					collection: 'test',
+					field: 'name',
+					value: 'two',
+				}));
+
+			expect(hookCalls).toStrictEqual([
+				['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
+				['update filter', [{ data: { name: 'two' }, keys: [1] }]],
+			]);
+		},
+	);
+
+	it('disableBatching fires the actions of the attempt that committed', async () => {
+		const busyOnSecondRow = vi.fn()
+			.mockImplementationOnce((payload) => payload)
+			.mockImplementationOnce(() => {
+				throw Object.assign(new Error('database is locked'), {
+					code: 'SQLITE_BUSY',
+				});
+			})
+			.mockImplementation((payload) => payload);
+
+		emitter.onFilter('test.items.create', busyOnSecondRow);
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema }).createMany([
+				{ id: 3, name: 'three' },
+				{ id: 4, name: 'four' },
+			], { mutationBatching: 'disableBatching' }))
+				.resolves.toStrictEqual([3, 4]);
+		}
+		finally {
+			emitter.offFilter('test.items.create', busyOnSecondRow);
+		}
+
+		expect(hookCalls).toStrictEqual([
+			['create filter', [{ data: { id: 3, name: 'three' } }]],
+			['create filter', [{ data: { id: 4, name: 'four' } }]],
+			['create filter', [{ data: { id: 3, name: 'three' } }]],
+			['create filter', [{ data: { id: 4, name: 'four' } }]],
+			['create action', [3]],
+			['create action', [4]],
 		]);
 	});
 

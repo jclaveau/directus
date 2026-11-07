@@ -1185,3 +1185,215 @@ describe('Services / Collections / deleteOne of a table without meta', () => {
 		);
 	});
 });
+
+describe('Services / Collections / a rollback fires no action', () => {
+	it('createMany', async () => {
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
+
+		vi.spyOn(CollectionsService.prototype, 'createOne')
+			.mockImplementationOnce(async (payload, opts) => {
+				opts!.bypassEmitAction!({
+					event: 'collections.create',
+					meta: {},
+					context: {},
+				} as any);
+
+				return payload.collection;
+			})
+			.mockRejectedValueOnce(new Error('second refused'));
+
+		const service = new CollectionsService({
+			knex: db,
+			schema,
+			accountability: admin,
+		});
+
+		await expect(service.createMany(
+			[{ collection: 'articles' }, { collection: 'authors' }] as any,
+		)).rejects.toEqual(new Error('second refused'));
+
+		expect(emitActionSpy).not.toHaveBeenCalled();
+	});
+
+	it('updateBatch', async () => {
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
+
+		vi.spyOn(CollectionsService.prototype, 'updateOne')
+			.mockImplementationOnce(async (collectionKey, _data, opts) => {
+				opts!.bypassEmitAction!({
+					event: 'collections.update',
+					meta: {},
+					context: {},
+				} as any);
+
+				return collectionKey;
+			})
+			.mockRejectedValueOnce(new Error('second refused'));
+
+		const service = new CollectionsService({
+			knex: db,
+			schema,
+			accountability: admin,
+		});
+
+		await expect(service.updateBatch([
+			{ collection: 'articles', meta: {} },
+			{ collection: 'authors', meta: {} },
+		] as any)).rejects.toEqual(new Error('second refused'));
+
+		expect(emitActionSpy).not.toHaveBeenCalled();
+	});
+
+	it('updateMany', async () => {
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
+
+		vi.spyOn(CollectionsService.prototype, 'updateOne')
+			.mockImplementationOnce(async (collectionKey, _data, opts) => {
+				opts!.bypassEmitAction!({
+					event: 'collections.update',
+					meta: {},
+					context: {},
+				} as any);
+
+				return collectionKey;
+			})
+			.mockRejectedValueOnce(new Error('second refused'));
+
+		const service = new CollectionsService({
+			knex: db,
+			schema,
+			accountability: admin,
+		});
+
+		await expect(service.updateMany(
+			['articles', 'authors'],
+			{ meta: { hidden: true } } as any,
+		)).rejects.toEqual(new Error('second refused'));
+
+		expect(emitActionSpy).not.toHaveBeenCalled();
+	});
+
+	it('deleteMany', async () => {
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
+
+		vi.spyOn(CollectionsService.prototype, 'deleteOne')
+			.mockImplementationOnce(async (collectionKey, opts) => {
+				opts!.bypassEmitAction!({
+					event: 'collections.delete',
+					meta: {},
+					context: {},
+				} as any);
+
+				return collectionKey;
+			})
+			.mockRejectedValueOnce(new Error('second refused'));
+
+		const service = new CollectionsService({
+			knex: db,
+			schema,
+			accountability: admin,
+		});
+
+		await expect(service.deleteMany(['articles', 'authors']))
+			.rejects.toEqual(new Error('second refused'));
+
+		expect(emitActionSpy).not.toHaveBeenCalled();
+	});
+
+	it('createOne', async () => {
+		const pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+		const pgTracker = createTracker(pgDatabase);
+
+		pgTracker.on.select('directus_collections').response([]);
+		pgTracker.on.any('create table').response(undefined);
+
+		vi.mocked(getHelpers).mockReturnValueOnce({
+			date: { fieldFlagForField: vi.fn(() => '') },
+		} as any);
+
+		vi.spyOn(FieldsService.prototype, 'addColumnToTable')
+			.mockReturnValue(undefined as any);
+
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
+
+		vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockImplementationOnce(async (_rows, opts) => {
+				opts!.bypassEmitAction!({
+					event: 'fields.create',
+					meta: {},
+					context: {},
+				} as any);
+
+				return [];
+			});
+
+		vi.spyOn(ItemsService.prototype, 'createOne')
+			.mockRejectedValueOnce(new Error('meta refused'));
+
+		const service = new CollectionsService({
+			knex: pgDatabase,
+			schema,
+			accountability: admin,
+		});
+
+		await expect(service.createOne({
+			collection: 'articles',
+			schema: {},
+			meta: {},
+			fields: [
+				{ field: 'uuid', type: 'uuid', schema: { is_primary_key: true } },
+				{ field: 'title', type: 'string', meta: { hidden: false } },
+			],
+		} as any)).rejects.toEqual(new Error('meta refused'));
+
+		expect(emitActionSpy).not.toHaveBeenCalled();
+	});
+
+	it('deleteOne', async () => {
+		const pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+		const pgTracker = createTracker(pgDatabase);
+
+		pgTracker.on.any('drop table').response(undefined);
+		pgTracker.on.update('directus_collections').response(1);
+		pgTracker.on.delete('directus_presets').simulateError('presets refused');
+
+		vi.spyOn(CollectionsService.prototype, 'readByQuery').mockResolvedValue([
+			{ collection: 'legacy', meta: null, schema: { name: 'legacy' } },
+		] as any);
+
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
+
+		vi.spyOn(ItemsService.prototype, 'deleteByQuery')
+			.mockImplementationOnce(async (_query, opts) => {
+				opts!.bypassEmitAction!({
+					event: 'fields.delete',
+					meta: {},
+					context: {},
+				} as any);
+
+				return [];
+			});
+
+		const service = new CollectionsService({
+			knex: pgDatabase,
+			schema: { collections: {}, relations: [] } as any,
+			accountability: admin,
+		});
+
+		await expect(service.deleteOne('legacy')).rejects.toThrow('presets refused');
+
+		expect(emitActionSpy).not.toHaveBeenCalled();
+	});
+});

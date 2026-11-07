@@ -5,3 +5,8 @@ import { DEFAULTS } from './defaults.js';
 test('telemetry is off by default', () => {
 	expect(DEFAULTS.TELEMETRY).toBe(false);
 });
+
+// Raw SQL runs statements in order, so the default does too.
+test('a batched write preserves the mutation order by default', () => {
+	expect(DEFAULTS.DEFAULT_MUTATION_BATCHING).toBe('preserveMutationOrder');
+});

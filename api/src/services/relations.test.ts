@@ -6,6 +6,7 @@ import knex from 'knex';
 import type { Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import emitter from '../emitter.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
@@ -39,6 +40,8 @@ vi.mock('../scoped-cache/index.js', async (importOriginal) => {
 vi.mock('../utils/should-clear-cache.js', () => {
 	return { shouldClearCache: vi.fn(() => true) };
 });
+
+vi.mock('../utils/get-schema.js', () => ({ getSchema: vi.fn() }));
 
 vi.mock('../utils/transaction.js', () => {
 	return {
@@ -278,6 +281,127 @@ describe('Services / Relations', () => {
 			await expect(service.deleteOne('test', 'related')).rejects.toThrowError(
 				`'test-user' is not allowed to delete a relation`,
 			);
+		});
+	});
+
+	describe('a change that rolled back fires no action', () => {
+		it('createOne', async () => {
+			const emitActionSpy = vi
+				.spyOn(emitter, 'emitAction')
+				.mockResolvedValue(undefined);
+
+			vi.spyOn(ItemsService.prototype, 'createOne')
+				.mockImplementationOnce(async (_row, opts) => {
+					opts!.bypassEmitAction!({
+						event: 'relations.create',
+						meta: {},
+						context: {},
+					} as any);
+
+					return 1;
+				});
+
+			vi.mocked(transaction)
+				.mockImplementationOnce(async (trxKnex, runInTransaction) => {
+					await runInTransaction(trxKnex);
+
+					throw new Error('commit failed');
+				});
+
+			const service = new RelationsService({
+				knex: db,
+				schema,
+				accountability: admin,
+			});
+
+			await expect(service.createOne(
+				{ collection: 'test', field: 'owner' },
+				{ autoPurgeSystemCache: false },
+			)).rejects.toEqual(new Error('commit failed'));
+
+			expect(emitActionSpy).not.toHaveBeenCalled();
+		});
+
+		it('updateOne', async () => {
+			const emitActionSpy = vi
+				.spyOn(emitter, 'emitAction')
+				.mockResolvedValue(undefined);
+
+			const holdEvent = async (_row: unknown, _rowData: unknown, opts: any) => {
+				opts.bypassEmitAction({
+					event: 'relations.update',
+					meta: {},
+					context: {},
+				});
+
+				return 1;
+			};
+
+			vi.spyOn(ItemsService.prototype, 'updateOne')
+				.mockImplementationOnce(holdEvent as any);
+
+			vi.spyOn(ItemsService.prototype, 'createOne')
+				.mockImplementationOnce(async (_row, opts) => {
+					opts!.bypassEmitAction!({
+						event: 'relations.update',
+						meta: {},
+						context: {},
+					} as any);
+
+					return 1;
+				});
+
+			vi.mocked(transaction)
+				.mockImplementationOnce(async (trxKnex, runInTransaction) => {
+					await runInTransaction(trxKnex);
+
+					throw new Error('commit failed');
+				});
+
+			const service = new RelationsService({
+				knex: db,
+				schema,
+				accountability: admin,
+			});
+
+			await expect(service.updateOne(
+				'test',
+				'related',
+				{ meta: { sort_field: 'owner' } } as Partial<Relation>,
+				{ autoPurgeSystemCache: false },
+			)).rejects.toEqual(new Error('commit failed'));
+
+			expect(emitActionSpy).not.toHaveBeenCalled();
+		});
+
+		it('deleteOne', async () => {
+			const emitActionSpy = vi
+				.spyOn(emitter, 'emitAction')
+				.mockResolvedValue(undefined);
+
+			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([]);
+			tracker.on.delete('directus_relations').response(1);
+
+			vi.mocked(transaction)
+				.mockImplementationOnce(async (trxKnex, runInTransaction) => {
+					await runInTransaction(trxKnex);
+
+					throw new Error('commit failed');
+				});
+
+			const service = new RelationsService({
+				knex: db,
+				schema,
+				accountability: admin,
+			});
+
+			await expect(service.deleteOne(
+				'test',
+				'related',
+				{ autoPurgeSystemCache: false },
+			)).rejects.toEqual(new Error('commit failed'));
+
+			expect(emitActionSpy).not.toHaveBeenCalled();
 		});
 	});
 
