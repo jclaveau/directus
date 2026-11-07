@@ -1106,6 +1106,24 @@ implements AbstractService<Item> {
 			throw error;
 		});
 
+		// Before the actions: a reader would get the old rows from the cache for as
+		// long as an awaited hook runs.
+		if (shouldClearCache(this.cache, opts, this.collection)) {
+			// A `sameRowAs` position repeats its row's key; counted twice it would read
+			// as a takeover.
+			const liveKeys = [
+				...new Set(results.filter((key): key is PrimaryKey => key !== null)),
+			];
+
+			await this.purgeCreatedScopedCache(
+				liveKeys,
+				takenOverRowKeys,
+				scopedCacheHookDeclarations,
+				declaredPurgesAtStart,
+				opts,
+			);
+		}
+
 		if (opts.emitEvents !== false && actionPayloads.length > 0) {
 			const actionContext = {
 				database: getDatabase(),
@@ -1138,22 +1156,6 @@ implements AbstractService<Item> {
 			// are held here: tooling rather than business events. They fire until #696
 			// lets a caller filter them.
 			await emitActionEvents(nestedActionEvents, opts);
-		}
-
-		if (shouldClearCache(this.cache, opts, this.collection)) {
-			// A `sameRowAs` position repeats its row's key; counted twice it would read
-			// as a takeover.
-			const liveKeys = [
-				...new Set(results.filter((key): key is PrimaryKey => key !== null)),
-			];
-
-			await this.purgeCreatedScopedCache(
-				liveKeys,
-				takenOverRowKeys,
-				scopedCacheHookDeclarations,
-				declaredPurgesAtStart,
-				opts,
-			);
 		}
 
 		return results;
@@ -3679,7 +3681,6 @@ implements AbstractService<Item> {
 		});
 
 		await flushDeferredResponseCache();
-		await emitActionEvents(payloadActionEvents, opts);
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			const takenOverKeys = changedTakenOverKeys();
@@ -3732,6 +3733,9 @@ implements AbstractService<Item> {
 				},
 			);
 		}
+
+		// After the purge, as on a create.
+		await emitActionEvents(payloadActionEvents, opts);
 
 		return primaryKeys;
 	}
