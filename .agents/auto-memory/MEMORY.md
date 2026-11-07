@@ -19,7 +19,7 @@ line appended below.
 - [The admin preview is not a CI check](feedback_directus_ci_watch_skip_preview.md) — never wait on it, never mention it in a CI report
 - [New bb files are Gherkin](feedback_directus_blackbox_gherkin_standard.md) — `.feature` + step `.test.ts`
 
-## settled (29) — per-PR accepted exceptions; read before reviewing that PR
+## settled (30) — per-PR accepted exceptions; read before reviewing that PR
 `.agents/auto-memory/index/settled.md`
 
 - [PR #607 accepted exceptions](project_directus_pr607_accepted_exceptions.md) — context.transaction on mutation filters; non-PG → #610
