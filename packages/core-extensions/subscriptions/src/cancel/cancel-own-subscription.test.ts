@@ -193,6 +193,9 @@ describe('cancelOwnSubscription', () => {
 	test('refuses a subscription already cancelling', async () => {
 		await database('subscribers').insert({ user: 'user-1' });
 
+		await database('subscriber_customers')
+			.insert({ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' });
+
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
@@ -220,6 +223,9 @@ describe('cancelOwnSubscription', () => {
 
 	test('cancels the new subscription of a user with one cancelling', async () => {
 		await database('subscribers').insert({ user: 'user-1' });
+
+		await database('subscriber_customers')
+			.insert({ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' });
 
 		await database('subscriptions').insert([
 			{
