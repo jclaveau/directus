@@ -30,5 +30,11 @@ node scripts/lint-style-changes.mjs origin/v11.10.1-hhh-dev  # THE style gate, a
 `lint:style:changes` prints `no base ref, skipping` **and exits 0** when given no argument —
 a skip that reads as a pass. Always pass the base ref explicitly.
 
+**Stale branch + style gate (2026-11-06, #686):** when the branch is behind base, the diff
+counts old upstream lines of a rewritten function as "added" (local flagged 3: two brace-less
+`if … continue;`, one 100-col line). Local was dismissed as noise because CI Style had been
+green — but after the next push CI flagged the same 3. Wrap them (braces + width) rather than
+dismissing; sync with base first to shrink the diff.
+
 **Why:** I re-derived the stylelint verdict twice in one session before concluding it was
 pre-existing. Related: [[feedback_eslint_style_first_pass]], [[feedback_gate_before_commit_chain]].
