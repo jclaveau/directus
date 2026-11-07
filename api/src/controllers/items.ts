@@ -20,6 +20,7 @@ import { validateBatch } from '../middleware/validate-batch.js';
 import { ItemsService } from '../services/items.js';
 import { MetaService } from '../services/meta.js';
 import asyncHandler from '../utils/async-handler.js';
+import { mutationBatchingFromQuery } from '../utils/mutation-batching-from-query.js';
 import { readMeta } from '../utils/read-meta.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
@@ -46,13 +47,18 @@ router.post(
 
 		const savedKeys: PrimaryKey[] = [];
 
+		const createOptions = {
+			allowFilterCancel: true,
+			mutationBatching: mutationBatchingFromQuery(req.query),
+		} as const;
+
 		if (Array.isArray(req.body)) {
-			const keys = await service.createMany(req.body, { allowFilterCancel: true });
+			const keys = await service.createMany(req.body, createOptions);
 			// Cancelled creates come back as null; drop them before reading the created items.
 			savedKeys.push(...keys.filter((key): key is PrimaryKey => key !== null));
 		}
 		else {
-			const key = await service.createOne(req.body, { allowFilterCancel: true });
+			const key = await service.createOne(req.body, createOptions);
 
 			if (key !== null) {
 				// A filter hook may cancel the creation by returning null; nothing to read back then.
@@ -195,7 +201,10 @@ router.patch(
 		});
 
 		if (req.singleton === true) {
-			await service.upsertSingleton(req.body);
+			await service.upsertSingleton(req.body, {
+				mutationBatching: mutationBatchingFromQuery(req.query),
+			});
+
 			const item = await service.readSingleton(req.sanitizedQuery);
 
 			res.locals['payload'] = { data: item || null };
@@ -218,6 +227,7 @@ router.patch(
 		const updateOptions: MutationOptions = {
 			allowFilterCancel: true,
 			onRepeatedPk: (onRepeatedPk ?? 'refuse') as RepeatedPkAnswer,
+			mutationBatching: mutationBatchingFromQuery(req.query),
 		};
 
 		let keys: (PrimaryKey | null)[] = [];
@@ -285,7 +295,10 @@ router.patch(
 			schema: req.schema,
 		});
 
-		const updatedPrimaryKey = await service.updateOne(req.params['pk']!, req.body, { allowFilterCancel: true });
+		const updatedPrimaryKey = await service.updateOne(req.params['pk']!, req.body, {
+			allowFilterCancel: true,
+			mutationBatching: mutationBatchingFromQuery(req.query),
+		});
 
 		res.locals['scopedCachePurged'] = service.scopedCachePurged;
 

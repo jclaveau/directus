@@ -1,5 +1,10 @@
 import type { DirectusOperation } from '../../../schema/operation.js';
-import type { ApplyQueryFields, NestedPartial, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	NestedPartial,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import { throwIfEmpty } from '../../utils/index.js';
 import type { RestCommand } from '../../types.js';
 
@@ -18,7 +23,7 @@ export type UpdateOperationOutput<
  * @throws Will throw if keys is empty
  */
 export const updateOperations =
-	<Schema, const TQuery extends Query<Schema, DirectusOperation<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusOperation<Schema>>>(
 		keys: DirectusOperation<Schema>['id'][],
 		item: Partial<DirectusOperation<Schema>>,
 		query?: TQuery,
@@ -41,7 +46,7 @@ export const updateOperations =
  * @returns Returns the operation objects for the updated operations.
  */
 export const updateOperationsBatch =
-	<Schema, const TQuery extends Query<Schema, DirectusOperation<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusOperation<Schema>>>(
 		items: NestedPartial<DirectusOperation<Schema>>[],
 		query?: TQuery,
 	): RestCommand<UpdateOperationOutput<Schema, TQuery>[], Schema> =>
@@ -61,7 +66,7 @@ export const updateOperationsBatch =
  * @throws Will throw if key is empty
  */
 export const updateOperation =
-	<Schema, const TQuery extends Query<Schema, DirectusOperation<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusOperation<Schema>>>(
 		key: DirectusOperation<Schema>['id'],
 		item: Partial<DirectusOperation<Schema>>,
 		query?: TQuery,

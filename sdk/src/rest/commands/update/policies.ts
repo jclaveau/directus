@@ -1,4 +1,9 @@
-import type { ApplyQueryFields, NestedPartial, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	NestedPartial,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import { throwIfEmpty } from '../../utils/index.js';
 import type { RestCommand } from '../../types.js';
 import type { DirectusPolicy } from '../../../schema/policy.js';
@@ -18,7 +23,7 @@ export type UpdatePolicyOutput<
  * @throws Will throw if keys is empty
  */
 export const updatePolicies =
-	<Schema, const TQuery extends Query<Schema, DirectusPolicy<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPolicy<Schema>>>(
 		keys: DirectusPolicy<Schema>['id'][],
 		item: Partial<DirectusPolicy<Schema>>,
 		query?: TQuery,
@@ -41,7 +46,7 @@ export const updatePolicies =
  * @returns Returns the policies object for the updated policies.
  */
 export const updatePoliciesBatch =
-	<Schema, const TQuery extends Query<Schema, DirectusPolicy<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPolicy<Schema>>>(
 		items: NestedPartial<DirectusPolicy<Schema>>[],
 		query?: TQuery,
 	): RestCommand<UpdatePolicyOutput<Schema, TQuery>[], Schema> =>
@@ -61,7 +66,7 @@ export const updatePoliciesBatch =
  * @throws Will throw if key is empty
  */
 export const updatePolicy =
-	<Schema, const TQuery extends Query<Schema, DirectusPolicy<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPolicy<Schema>>>(
 		key: DirectusPolicy<Schema>['id'],
 		item: Partial<DirectusPolicy<Schema>>,
 		query?: TQuery,
