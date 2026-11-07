@@ -143,7 +143,10 @@ async function syncNextRow({
 			+ ` ${JSON.stringify(readErrorMessage(error))}`;
 
 		if (isParked) {
-			logger.error(`${failureMessage}. No more retries until a webhook`);
+			logger.error(
+				`${failureMessage}. Next try: the daily reconcile of a stored`
+				+ ' subscription, or a webhook',
+			);
 		}
 		else {
 			logger.warn(failureMessage);

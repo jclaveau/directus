@@ -51,7 +51,7 @@ describe('enqueueReconcile', () => {
 			{
 				subscriber: 1,
 				customer: 1,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'stripe',
 				provider_subscription_id: 'sub_active',
 				status: 'active',
@@ -62,7 +62,7 @@ describe('enqueueReconcile', () => {
 			{
 				subscriber: 1,
 				customer: 1,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'stripe',
 				provider_subscription_id: 'sub_ended',
 				status: 'canceled',
@@ -73,7 +73,7 @@ describe('enqueueReconcile', () => {
 			{
 				subscriber: 1,
 				customer: 2,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'mollie',
 				provider_subscription_id: 'sub_expired',
 				status: 'expired',
@@ -125,7 +125,7 @@ describe('enqueueReconcile', () => {
 			{
 				subscriber: 1,
 				customer: 1,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'stripe',
 				provider_subscription_id: 'sub_parked',
 				status: 'active',
@@ -135,7 +135,7 @@ describe('enqueueReconcile', () => {
 			{
 				subscriber: 1,
 				customer: 1,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'stripe',
 				provider_subscription_id: 'sub_retrying',
 				status: 'active',
@@ -150,7 +150,7 @@ describe('enqueueReconcile', () => {
 				resource_id: 'sub_parked',
 				pending: false,
 				attempts: 48,
-				next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+				next_attempt_at: new Date('2026-11-04T00:30:00Z'),
 				last_error: 'Stripe is down',
 			},
 			{
@@ -175,6 +175,43 @@ describe('enqueueReconcile', () => {
 			]);
 	});
 
+	test('queues a sync parked for a day, keeping its attempts', async () => {
+		await database('subscribers').insert({ user: 'user-1' });
+
+		await database('subscriptions').insert({
+			subscriber: 1,
+			customer: 1,
+			plan_reference: 1,
+			provider: 'stripe',
+			provider_subscription_id: 'sub_parked',
+			status: 'active',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_parked',
+			pending: false,
+			attempts: 48,
+			next_attempt_at: new Date('2026-11-03T23:30:00Z'),
+			last_error: 'Stripe is down',
+		});
+
+		await enqueueReconcile(database, new Map([
+			['stripe', createStripeProvider(new Stripe('sk_test_1'), 'whsec_1')],
+		]));
+
+		expect(await database('subscription_sync_queue')
+			.select('resource_id', 'pending', 'attempts', 'last_error'))
+			.toEqual([{
+				resource_id: 'sub_parked',
+				pending: 1,
+				attempts: 48,
+				last_error: 'Stripe is down',
+			}]);
+	});
+
 	test('refuses subscriptions of disabled providers after the others', async () => {
 		await database('subscribers').insert({ user: 'user-1' });
 
@@ -196,7 +233,7 @@ describe('enqueueReconcile', () => {
 			{
 				subscriber: 1,
 				customer: 1,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'mollie',
 				provider_subscription_id: 'sub_1',
 				status: 'active',
@@ -206,7 +243,7 @@ describe('enqueueReconcile', () => {
 			{
 				subscriber: 1,
 				customer: 2,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'stripe',
 				provider_subscription_id: 'sub_2',
 				status: 'active',

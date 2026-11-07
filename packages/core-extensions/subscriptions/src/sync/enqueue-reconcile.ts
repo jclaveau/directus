@@ -1,7 +1,11 @@
 import type { Knex } from 'knex';
 import { TERMINAL_STATUSES } from '../constants.js';
 import type { SubscriptionProviders } from '../providers/types.js';
-import { enqueueSync, MAX_SYNC_ATTEMPTS } from '../queue/sync-queue.js';
+import {
+	enqueueSync,
+	MAX_SYNC_ATTEMPTS,
+	PARKED_RETRY_DELAY_MS,
+} from '../queue/sync-queue.js';
 
 /**
  * Re-syncs every subscription a provider may still change, and every one
@@ -28,11 +32,17 @@ export async function enqueueReconcile(
 		})
 		.orderBy('subscriptions.id');
 
-	// Without this the hourly run would undo the attempt ceiling; a webhook, news
-	// about the subscription, still re-arms a row parked there.
+	// Without this the hourly run would undo the attempt ceiling. A row parked for
+	// a day retries, as what failed may be fixed by now and a provider may never
+	// send a webhook; a webhook, news about the subscription, re-arms it at once.
 	const parkedRows = await database('subscription_sync_queue')
 		.select('provider', 'resource_id')
-		.where('attempts', '>=', MAX_SYNC_ATTEMPTS);
+		.where('attempts', '>=', MAX_SYNC_ATTEMPTS)
+		.where(
+			'next_attempt_at',
+			'>',
+			new Date(Date.now() - PARKED_RETRY_DELAY_MS),
+		);
 
 	const parkedResources = new Set(parkedRows.map((parkedRow) => {
 		return `${parkedRow.provider} ${parkedRow.resource_id}`;
