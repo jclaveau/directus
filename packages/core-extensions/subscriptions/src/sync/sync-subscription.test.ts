@@ -1054,7 +1054,8 @@ describe('selectStoredSubscription', () => {
 			.toSQL()
 			.toNative())
 			.toEqual({
-				sql: 'select "id", "subscriber", "customer", "plan", "status",'
+				sql: 'select "id", "subscriber", "customer", "plan_reference",'
+					+ ' "status",'
 					+ ' "current_period_end", "cancel_at_period_end", "access"'
 					+ ' from "subscriptions"'
 					+ ' where "provider" = $1 and "provider_subscription_id" = $2'

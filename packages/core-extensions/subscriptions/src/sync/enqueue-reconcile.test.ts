@@ -178,6 +178,9 @@ describe('enqueueReconcile', () => {
 	test('queues a sync parked for a day, keeping its attempts', async () => {
 		await database('subscribers').insert({ user: 'user-1' });
 
+		await database('subscriber_customers')
+			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
+
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
