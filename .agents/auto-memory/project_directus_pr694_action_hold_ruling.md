@@ -93,3 +93,7 @@ and past `apply-diff`'s hold → fixed: those sub-calls pass a `bypassEmitAction
 caller's or to `nestedActionEvents`. Any new `emitEvents: false` sub-write under accountability
 needs the same. Left as a choice: `deleteByQuery`'s `getKeysByQuery` ignores `emitEvents` (mutation
 read hook fires; rec A = pass the caller's flag, not always-false, which would change deleted rows).
+
+**Ruled 2026-11-08:** `deleteByQuery` key read → A (pass the caller's `emitEvents`, default true),
+applied in 28e0aa6d92. `updateByQuery` has the same unflagged `getKeysByQuery` call: not ruled.
+#686 merges after #695.
