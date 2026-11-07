@@ -1133,6 +1133,12 @@ implements AbstractService<Item> {
 				opts,
 			);
 		}
+		else {
+			// `payload.ts` forwards `emitEvents`, so only activity and revision actions
+			// are held here: tooling rather than business events. They fire until #696
+			// lets a caller filter them.
+			await emitActionEvents(nestedActionEvents, opts);
+		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			// A `sameRowAs` position repeats its row's key; counted twice it would read
@@ -2554,6 +2560,12 @@ implements AbstractService<Item> {
 				opts,
 			);
 		}
+		else {
+			// `payload.ts` forwards `emitEvents`, so only activity and revision actions
+			// are held here: tooling rather than business events. They fire until #696
+			// lets a caller filter them.
+			await emitActionEvents(nestedActionEvents, opts);
+		}
 
 		await this.applyUpdateSideEffects(writingGroups, opts);
 
@@ -3339,6 +3351,8 @@ implements AbstractService<Item> {
 					schema: this.schema,
 				}).readMany(
 					updatedRows.map(({ key }) => key),
+					{},
+					{ emitEvents: false },
 				);
 
 				// `readMany` applies no ordering, so pairing its rows
@@ -4421,6 +4435,11 @@ implements AbstractService<Item> {
 				[actionEvent, ...deletion.activityActionEvents],
 				opts,
 			);
+		}
+		else {
+			// Tooling rather than a business event: it fires until #696 lets a caller
+			// filter it.
+			await emitActionEvents(deletion.activityActionEvents, opts);
 		}
 
 		return keys;

@@ -4931,10 +4931,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			);
 		});
 
-		it(oneLine`
-			refuses the update whose read hook answers its snapshot with an
-			object, before any revision is filed
-		`, async () => {
+		it('refuses a read whose hook answers with an object', async () => {
 			const trackedSchema = new SchemaBuilder()
 				.collection('tracked', (c) => {
 					c.field('id').id();
@@ -4942,11 +4939,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				})
 				.build();
 
-			trackedSchema.collections['tracked']!.accountability = 'all';
-
 			const answerAnObject = () => ({ id: 1, name: 'hooked' });
 
-			tracker.on.update('tracked').response(2);
 			tracker.on.select('tracked').response([{ id: 1, name: 'after' }]);
 			emitter.onFilter('tracked.items.read', answerAnObject);
 
@@ -4954,20 +4948,10 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				await expect(new ItemsService('tracked', {
 					knex: db,
 					schema: trackedSchema,
-					accountability: {
-						user: 'u1',
-						role: 'r1',
-						admin: true,
-						app: true,
-					} as any,
-				}).updateMany([1, 2], { name: 'after' })).rejects.toStrictEqual(
-					new Error(
-						'A read filter on "tracked" answered with object instead of'
-						+ ' the list of items it was given.',
-					),
-				);
-
-				expect(revisionWrites).toEqual([]);
+				}).readByQuery({})).rejects.toStrictEqual(new Error(
+					'A read filter on "tracked" answered with object instead of the'
+					+ ' list of items it was given.',
+				));
 			}
 			finally {
 				emitter.offFilter('tracked.items.read', answerAnObject);

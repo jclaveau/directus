@@ -1,5 +1,6 @@
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import emitter from '../emitter.js';
@@ -89,6 +90,19 @@ describe('Services / Items / activity and revision actions', () => {
 		writeLog.push('revision parent action');
 	};
 
+	const recordItemAction = () => {
+		writeLog.push('item action');
+	};
+
+	const recordReadFilter = (payload: unknown) => {
+		writeLog.push('read filter');
+		return payload;
+	};
+
+	const recordReadAction = () => {
+		writeLog.push('read action');
+	};
+
 	beforeAll(async () => {
 		await import('../utils/get-service.js');
 	}, 120_000);
@@ -145,12 +159,26 @@ describe('Services / Items / activity and revision actions', () => {
 		emitter.onAction('activity.create', recordActivityAction);
 		emitter.onAction('revisions.create', recordRevisionAction);
 		emitter.onAction('revisions.update', recordRevisionParentAction);
+
+		for (const itemEvent of ['items.create', 'items.update', 'items.delete']) {
+			emitter.onAction(itemEvent, recordItemAction);
+		}
+
+		emitter.onFilter('test.items.read', recordReadFilter);
+		emitter.onAction('test.items.read', recordReadAction);
 	});
 
 	afterEach(async () => {
 		emitter.offAction('activity.create', recordActivityAction);
 		emitter.offAction('revisions.create', recordRevisionAction);
 		emitter.offAction('revisions.update', recordRevisionParentAction);
+
+		for (const itemEvent of ['items.create', 'items.update', 'items.delete']) {
+			emitter.offAction(itemEvent, recordItemAction);
+		}
+
+		emitter.offFilter('test.items.read', recordReadFilter);
+		emitter.offAction('test.items.read', recordReadAction);
 		await database.destroy();
 	});
 
@@ -198,6 +226,7 @@ describe('Services / Items / activity and revision actions', () => {
 			'insert into `directus_activity`',
 			'insert into `directus_revisions`',
 			'COMMIT;',
+			'item action',
 			'activity action',
 			'revision action',
 		]);
@@ -219,6 +248,7 @@ describe('Services / Items / activity and revision actions', () => {
 			'select `test`.`id`, `test`.`name`, `test`.`author` from `test` where',
 			'insert into `directus_revisions`',
 			'COMMIT;',
+			'item action',
 			'activity action',
 			'revision action',
 		]);
@@ -240,6 +270,7 @@ describe('Services / Items / activity and revision actions', () => {
 			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'insert into `directus_activity`',
 			'COMMIT;',
+			'item action',
 			'activity action',
 		]);
 	});
@@ -286,6 +317,8 @@ describe('Services / Items / activity and revision actions', () => {
 			'insert into `directus_revisions`',
 			'update `directus_revisions` set `parent` = ? where `id` in',
 			'COMMIT;',
+			'item action',
+			'item action',
 			'activity action',
 			'revision action',
 			'activity action',
@@ -312,11 +345,154 @@ describe('Services / Items / activity and revision actions', () => {
 			'insert into `directus_revisions`',
 			'update `directus_revisions` set `parent` = ? where `id` in',
 			'COMMIT;',
+			'item action',
+			'item action',
 			'activity action',
 			'revision action',
 			'activity action',
 			'revision action',
 			'revision parent action',
+		]);
+	});
+
+	it(oneLine`
+		fires the activity and revision actions of a create under emitEvents false
+	`, async () => {
+		await new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: admin,
+		}).createOne({ id: 2, name: 'two' }, { emitEvents: false });
+
+		expect(writeLog).toStrictEqual([
+			'BEGIN;',
+			'insert into `test`',
+			'insert into `directus_activity`',
+			'insert into `directus_revisions`',
+			'COMMIT;',
+			'activity action',
+			'revision action',
+		]);
+	});
+
+	it(oneLine`
+		fires the activity and revision actions of an update under emitEvents false
+	`, async () => {
+		await new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: admin,
+		}).updateOne(1, { name: 'uno' }, { emitEvents: false });
+
+		expect(writeLog).toStrictEqual([
+			'BEGIN;',
+			'update `test` set `name` = ? where `id` in',
+			'insert into `directus_activity`',
+			'select `test`.`id`, `test`.`name`, `test`.`author` from `test` where',
+			'insert into `directus_revisions`',
+			'COMMIT;',
+			'activity action',
+			'revision action',
+		]);
+	});
+
+	it('fires the activity action of a delete under emitEvents false', async () => {
+		await new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: admin,
+		}).deleteOne(1, { emitEvents: false });
+
+		expect(writeLog).toStrictEqual([
+			'BEGIN;',
+			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
+			'delete from `test` where `id` in',
+			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
+			'insert into `directus_activity`',
+			'COMMIT;',
+			'activity action',
+		]);
+	});
+
+	it(oneLine`
+		fires the held actions of a nested create under emitEvents false
+	`, async () => {
+		await new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: admin,
+		}).createOne(
+			{ id: 2, name: 'two', author: { name: 'ann' } },
+			{ emitEvents: false },
+		);
+
+		expect(writeLog).toStrictEqual([
+			'BEGIN;',
+			'insert into `authors`',
+			'insert into `directus_activity`',
+			'insert into `directus_revisions`',
+			'insert into `test`',
+			'insert into `directus_activity`',
+			'insert into `directus_revisions`',
+			'update `directus_revisions` set `parent` = ? where `id` in',
+			'COMMIT;',
+			'activity action',
+			'revision action',
+			'activity action',
+			'revision action',
+			'revision parent action',
+		]);
+	});
+
+	it(oneLine`
+		fires neither held action of an upsert rolled back under emitEvents false
+	`, async () => {
+		await expect(new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: admin,
+		}).upsertMany([
+			{ id: 1, name: 'uno' },
+			{ id: 1, name: null },
+		], { emitEvents: false })).rejects.toThrow(
+			'Value for field "name" in collection "test" can\'t be null.',
+		);
+
+		expect(writeLog).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `test` where `id` in',
+			'update `test` set `name` = ? where `id` in',
+			'insert into `directus_activity`',
+			'select `test`.`id`, `test`.`name`, `test`.`author` from `test` where',
+			'insert into `directus_revisions`',
+			'select `id` from `test` where `id` in',
+			'update `test` set `name` = ? where `id` in',
+			'ROLLBACK',
+		]);
+	});
+
+	it(oneLine`
+		files an update revision from the row, whatever a read hook answers
+	`, async () => {
+		const answerAnotherName = () => [{ id: 1, name: 'hooked' }];
+
+		emitter.onFilter('test.items.read', answerAnotherName);
+
+		try {
+			await new ItemsService('test', {
+				knex: database,
+				schema,
+				accountability: admin,
+			}).updateOne(1, { name: 'uno' });
+		}
+		finally {
+			emitter.offFilter('test.items.read', answerAnotherName);
+		}
+
+		await expect(
+			database('directus_revisions').select('data'),
+		).resolves.toStrictEqual([
+			{ data: '{"id":1,"name":"uno","author":null}' },
 		]);
 	});
 });
