@@ -6414,8 +6414,8 @@ describe('Services / Items / a batched upsert', () => {
 		try {
 			await expect(new ItemsService('test', { knex: database, schema })
 				.upsertMany([
-					{ name: 'boom' },
 					{ id: 1, name: 'uno' },
+					{ name: 'boom' },
 				])).rejects.toStrictEqual(new Error('boom refused'));
 		}
 		finally {
@@ -7969,7 +7969,7 @@ describe('Services / Items / mutationBatching', () => {
 		]);
 	});
 
-	it('passes preserveMutationOrder down to a nested O2M upsert', async () => {
+	it('passes minimizeMutations down to a nested O2M upsert', async () => {
 		await database.schema.createTable('children', (table) => {
 			table.increments('id');
 			table.string('name').unique();
@@ -7995,15 +7995,12 @@ describe('Services / Items / mutationBatching', () => {
 		})
 			.updateOne(1, {
 				children: [{ id: 9, name: 'six' }, { id: 6, name: 'sixty' }],
-			}, { mutationBatching: 'preserveMutationOrder' }))
-			.rejects.toStrictEqual(new RecordNotUniqueError({
-				collection: 'children',
-				field: 'name',
-				value: 'six',
-			}));
+			}, { mutationBatching: 'minimizeMutations' }))
+			.resolves.toBe(1);
 
-		await expect(database('children')).resolves.toStrictEqual([
-			{ id: 6, name: 'six', parent_id: 1 },
+		await expect(database('children').orderBy('id')).resolves.toStrictEqual([
+			{ id: 6, name: 'sixty', parent_id: 1 },
+			{ id: 9, name: 'six', parent_id: 1 },
 		]);
 	});
 
