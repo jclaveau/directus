@@ -981,6 +981,7 @@ export class ItemScopedCacheService {
 
 		const {
 			fieldMap,
+			viewFieldMap,
 			filterKeying,
 			keyedFilterPins,
 			m2oParentPins,
@@ -1002,7 +1003,12 @@ export class ItemScopedCacheService {
 		// the `<pk>._eq 1` filter never bounded.
 		const rootPaths = new Set<string>();
 
-		for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
+		for (const [path, entry] of [
+			...fieldMap.read,
+			...fieldMap.other,
+			...viewFieldMap.read,
+			...viewFieldMap.other,
+		]) {
 			if (entry.collection === this.collection) {
 				rootPaths.add(path);
 			}
@@ -1181,7 +1187,12 @@ export class ItemScopedCacheService {
 				return [];
 			}
 
-			const paths = pathsTo(collection);
+			const paths = pathsTo(collection, [
+				fieldMap.read,
+				fieldMap.other,
+				viewFieldMap.read,
+				viewFieldMap.other,
+			]);
 
 			if (paths.length === 0 || paths.includes('')) {
 				return [];
