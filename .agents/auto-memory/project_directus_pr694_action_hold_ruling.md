@@ -86,7 +86,7 @@ never protected revisions; `conceal` (`processValues('read')`) masks both. A res
 answering `null` now gives a 500 on a committed write (was ROLLBACK): only a hook already failing
 every GET hits it; pinned by blackbox `read-hook-null.test.ts` (ef802be6c3).
 
-**Autoreview rerun of #695 after 3A (2026-11-07, b3d6e16a53):** "activity actions fire whatever
+**Autoreview rerun of #695 after 3A (2026-11-07, 8839c4f97c, 100% autoreviewed, comment issuecomment-6713825761):** "activity actions fire whatever
 `emitEvents` says" made the `directus_fields` row's `activity.create` (sub-calls with
 `emitEvents: false` in `createField`/`updateField`/`deleteField`) fire before the field's commit
 and past `apply-diff`'s hold → fixed: those sub-calls pass a `bypassEmitAction` forwarding to the
