@@ -85,3 +85,11 @@ hook** (controller `readOne`, after COMMIT). Choice 3A removes only the mutation
 never protected revisions; `conceal` (`processValues('read')`) masks both. A response read hook
 answering `null` now gives a 500 on a committed write (was ROLLBACK): only a hook already failing
 every GET hits it; pinned by blackbox `read-hook-null.test.ts` (ef802be6c3).
+
+**Autoreview rerun of #695 after 3A (2026-11-07, b3d6e16a53):** "activity actions fire whatever
+`emitEvents` says" made the `directus_fields` row's `activity.create` (sub-calls with
+`emitEvents: false` in `createField`/`updateField`/`deleteField`) fire before the field's commit
+and past `apply-diff`'s hold → fixed: those sub-calls pass a `bypassEmitAction` forwarding to the
+caller's or to `nestedActionEvents`. Any new `emitEvents: false` sub-write under accountability
+needs the same. Left as a choice: `deleteByQuery`'s `getKeysByQuery` ignores `emitEvents` (mutation
+read hook fires; rec A = pass the caller's flag, not always-false, which would change deleted rows).
