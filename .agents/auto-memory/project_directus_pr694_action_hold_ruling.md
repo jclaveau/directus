@@ -64,3 +64,9 @@ detail it in this public repo. #610 points 17 and 18 filed.
 **Flake again on #695 (2026-11-07):** same family, other scenario: `singular-write-flows` "A single
 flow is loaded as it is created", request 3 `directus_operations` select 4 vs 3, shard 5, run
 42372465544; passed on `gh run rerun --failed`. Still no cause.
+
+**Autoreview of #695 (2026-11-07, head 68975afab6, not merged):** open choices 2 (activity/revision
+actions silent under `emitEvents: false`, real on `POST /files`, replacement upload, TUS; rec fire
+them) and 3 (revision snapshot `readMany` fires `<collection>.items.read`, also on rollback; rec
+pass `emitEvents: false`). "Only its `bypassEmitAction` can hold them" was checked and is correct.
+Item 1 is withheld: see `~/.agents/parked/`. #610 point 19 filed.
