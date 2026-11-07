@@ -3836,6 +3836,13 @@ implements AbstractService<Item> {
 				: [primaryKey];
 		});
 
+		const { fields } = this.schema.collections[this.collection]!;
+
+		const writesUniqueColumn = upsertRun.some((payload) => {
+			return Object.keys(payload)
+				.some((field) => fields[field]?.inUniqueIndex);
+		});
+
 		const existingKeyNames = new Set<string>();
 
 		for (const keyChunk of chunk(sentKeys, UPSERT_PROBE_CHUNK_SIZE)) {
@@ -3849,9 +3856,11 @@ implements AbstractService<Item> {
 			// a row found is updated: a delete committing before the update would
 			// leave it writing nothing, so the found rows stay locked until commit
 			if (capabilities.supportsRowLocks()) {
-				// the update keeps the primary key: a foreign key naming the row need not
-				// wait, unless the update changes a unique column
-				if (capabilities.supportsNoKeyUpdateLock()) {
+				// an update writing no unique column keeps every key a foreign key can
+				// name, so that foreign key need not wait. One writing it takes FOR
+				// UPDATE: taken here, it is not upgraded at the update while a foreign
+				// key holds the row, which could deadlock
+				if (capabilities.supportsNoKeyUpdateLock() && !writesUniqueColumn) {
 					existenceRead.forNoKeyUpdate();
 				}
 				else {
