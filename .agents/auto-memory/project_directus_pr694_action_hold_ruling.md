@@ -75,3 +75,13 @@ Item 1 is withheld: see `~/.agents/parked/`. #610 point 19 filed.
 whatever `emitEvents` says: tooling, not business events (filter option tracked by #696). An update's
 revision snapshot reads with `emitEvents: false`; consequence: a read filter hook no longer shapes
 `directus_revisions.data`.
+
+**Vocabulary (jean):** one `<collection>.items.read` listener fires twice on a PATCH: the
+**mutation read hook** (revision snapshot `readMany`, inside the trx) and the **response read
+hook** (controller `readOne`, after COMMIT). Choice 3A removes only the mutation read hook.
+
+**3A confirmed 2026-11-07 after these points (do not re-raise):** not a leak: `delta` (update) and
+`data`+`delta` (create) come from `prepareDelta(payload)`, never a read hook, so a masking read hook
+never protected revisions; `conceal` (`processValues('read')`) masks both. A response read hook
+answering `null` now gives a 500 on a committed write (was ROLLBACK): only a hook already failing
+every GET hits it; pinned by blackbox `read-hook-null.test.ts` (ef802be6c3).
