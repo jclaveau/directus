@@ -7903,12 +7903,12 @@ describe('Services / Items / mutationBatching', () => {
 
 		expect(hookCalls).toStrictEqual([
 			['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
-			['update action', [{ data: { name: 'uno' }, keys: [1] }]],
 			['create filter', [{ data: { id: 3, name: 'three' } }]],
-			['create action', [3]],
 			['update filter', [{ data: { name: 'dos' }, keys: [2] }]],
-			['update action', [{ data: { name: 'dos' }, keys: [2] }]],
 			['create filter', [{ data: { id: 4, name: 'four' } }]],
+			['update action', [{ data: { name: 'uno' }, keys: [1] }]],
+			['create action', [3]],
+			['update action', [{ data: { name: 'dos' }, keys: [2] }]],
 			['create action', [4]],
 		]);
 	});
@@ -8031,7 +8031,7 @@ describe('Services / Items / mutationBatching', () => {
 		]);
 	});
 
-	it('PROBE update action of a rolled-back group', async () => {
+	it('disableBatching fires no action of a rolled-back group', async () => {
 		await expect(new ItemsService('test', { knex: database, schema }).updateBatch([
 			{ id: 1, name: 'uno' },
 			{ id: 2, name: 'uno' },
@@ -8044,12 +8044,11 @@ describe('Services / Items / mutationBatching', () => {
 
 		expect(hookCalls).toStrictEqual([
 			['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
-			['update action', [{ data: { name: 'uno' }, keys: [1] }]],
 			['update filter', [{ data: { name: 'uno' }, keys: [2] }]],
 		]);
 	});
 
-	it('PROBE upsert action of a rolled-back row', async () => {
+	it('disableBatching fires no action of a rolled-back payload', async () => {
 		await expect(new ItemsService('test', { knex: database, schema }).upsertMany([
 			{ id: 10, name: 'ten' },
 			{ id: 11, name: 'one' },
@@ -8062,7 +8061,6 @@ describe('Services / Items / mutationBatching', () => {
 
 		expect(hookCalls).toStrictEqual([
 			['create filter', [{ data: { id: 10, name: 'ten' } }]],
-			['create action', [10]],
 			['create filter', [{ data: { id: 11, name: 'one' } }]],
 		]);
 	});
@@ -8260,8 +8258,8 @@ describe('Services / Items / mutationBatching', () => {
 
 		expect(hookCalls).toStrictEqual([
 			['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
-			['update action', [{ data: { name: 'uno' }, keys: [1] }]],
 			['update filter', [{ data: { name: 'dos' }, keys: [2] }]],
+			['update action', [{ data: { name: 'uno' }, keys: [1] }]],
 			['update action', [{ data: { name: 'dos' }, keys: [2] }]],
 		]);
 	});
