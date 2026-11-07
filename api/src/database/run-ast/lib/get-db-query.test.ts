@@ -1,4 +1,5 @@
 import { SchemaBuilder } from '@directus/schema-builder';
+import type { Permission } from '@directus/types';
 import knex from 'knex';
 import { expect, test, vi } from 'vitest';
 import { Client_SQLite3 } from './apply-query/mock.js';
@@ -298,4 +299,51 @@ test('a grouped case through an o2m reads the keys it matches', () => {
 	);
 
 	expect(query.bindings).toEqual(['im', 'im', 'im', 10]);
+});
+
+test('an aggregate reads a field through the rule granting it', () => {
+	const query = getDBQuery(
+		{
+			table: 'articles',
+			fieldNodes: [],
+			o2mNodes: [],
+			query: {
+				aggregate: { sum: ['salary'] },
+				limit: 10,
+			},
+			cases: [{ id: { _lt: 2 } }, { id: { _gt: 5 } }],
+			permissions: [
+				{
+					collection: 'articles',
+					permissions: { id: { _lt: 2 } },
+					fields: ['id'],
+				},
+				{
+					collection: 'articles',
+					permissions: { id: { _gt: 5 } },
+					fields: ['salary'],
+				},
+			] as unknown as Permission[],
+		},
+		{
+			knex: knex.default({ client: Client_SQLite3 }),
+			schema: new SchemaBuilder()
+				.collection('articles', (c) => {
+					c.field('id').id();
+					c.field('salary').integer();
+				})
+				.build(),
+		},
+	).toSQL();
+
+	expect(query.sql).toEqual(
+		'select sum((CASE WHEN "articles"."id" in'
+		+ ' (select distinct "articles"."id" from "articles"'
+		+ ' where ("articles"."id" > ?))'
+		+ ' THEN "articles"."salary" END)) as "sum->salary"'
+		+ ' from "articles"'
+		+ ' where ("articles"."id" < ? or "articles"."id" > ?) limit ?',
+	);
+
+	expect(query.bindings).toEqual([5, 2, 5, 10]);
 });

@@ -981,6 +981,8 @@ export class ItemScopedCacheService {
 
 		const {
 			fieldMap,
+			aggregateRuleFieldMap,
+			rootFilterFieldMap,
 			filterKeying,
 			keyedFilterPins,
 			m2oParentPins,
@@ -1002,7 +1004,12 @@ export class ItemScopedCacheService {
 		// the `<pk>._eq 1` filter never bounded.
 		const rootPaths = new Set<string>();
 
-		for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
+		for (const [path, entry] of [
+			...fieldMap.read,
+			...fieldMap.other,
+			...aggregateRuleFieldMap.read,
+			...rootFilterFieldMap.read,
+		]) {
 			if (entry.collection === this.collection) {
 				rootPaths.add(path);
 			}
@@ -1180,16 +1187,23 @@ export class ItemScopedCacheService {
 				return [];
 			}
 
-			const paths = pathsTo(collection);
+			const paths = pathsTo(collection, [
+				fieldMap.read,
+				fieldMap.other,
+				aggregateRuleFieldMap.read,
+			]);
 
 			if (paths.length === 0 || paths.includes('')) {
 				return [];
 			}
 
 			const nestedRowsBounded =
-				m2oParentPins.has(collection) ||
-				o2mChildPins.has(collection) ||
-				pathsTo(collection, [fieldMap.other]).every(isToOnePath);
+				pathsTo(collection, [aggregateRuleFieldMap.read]).every(isToOnePath)
+				&& (
+					m2oParentPins.has(collection) ||
+					o2mChildPins.has(collection) ||
+					pathsTo(collection, [fieldMap.other]).every(isToOnePath)
+				);
 
 			const fieldTypes = this.schema.collections[collection]?.fields ?? {};
 

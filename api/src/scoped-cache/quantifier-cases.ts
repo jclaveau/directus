@@ -69,12 +69,18 @@ export function scopedCacheAstWithQuantifierCases(
 		collection: string,
 		query: NodeQuery,
 		cases: Filter[],
+		aggregateCases?: Filter[],
 	) => {
+		const quantifyCase = (ruleCase: Filter): Filter => {
+			return quantifyFilter(collection, ruleCase);
+		};
+
 		return {
 			query: query.filter
 				? { ...query, filter: quantifyFilter(collection, query.filter) }
 				: query,
-			cases: cases.map((ruleCase) => quantifyFilter(collection, ruleCase)),
+			cases: cases.map(quantifyCase),
+			...(aggregateCases && { aggregateCases: aggregateCases.map(quantifyCase) }),
 		};
 	};
 
@@ -102,14 +108,22 @@ export function scopedCacheAstWithQuantifierCases(
 				};
 
 				for (const name of child.names) {
-					const { query, cases } = quantifyNode(
+					const { query, cases, aggregateCases } = quantifyNode(
 						name,
 						child.query[name] ?? {},
 						child.cases[name] ?? [],
+						child.aggregateCases?.[name],
 					);
 
 					quantifiedChild.query[name] = query;
 					quantifiedChild.cases[name] = cases;
+
+					if (aggregateCases) {
+						quantifiedChild.aggregateCases = {
+							...quantifiedChild.aggregateCases,
+							[name]: aggregateCases,
+						};
+					}
 
 					quantifiedChild.children[name] = quantifyChildren(
 						child.children[name] ?? [],
@@ -121,7 +135,12 @@ export function scopedCacheAstWithQuantifierCases(
 
 			return {
 				...child,
-				...quantifyNode(child.name, child.query, child.cases),
+				...quantifyNode(
+					child.name,
+					child.query,
+					child.cases,
+					child.aggregateCases,
+				),
 				children: quantifyChildren(child.children),
 			};
 		});
@@ -129,7 +148,7 @@ export function scopedCacheAstWithQuantifierCases(
 
 	return {
 		...ast,
-		...quantifyNode(ast.name, ast.query, ast.cases),
+		...quantifyNode(ast.name, ast.query, ast.cases, ast.aggregateCases),
 		children: quantifyChildren(ast.children),
 	};
 }

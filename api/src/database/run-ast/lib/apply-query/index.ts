@@ -168,7 +168,12 @@ export default function applyQuery(
 	}
 
 	if (query.aggregate) {
-		applyAggregate(schema, dbQuery, query.aggregate, collection, hasJoins);
+		applyAggregate(schema, dbQuery, query.aggregate, collection, hasJoins, {
+			knex,
+			cases,
+			permissions,
+			generateAlias,
+		});
 	}
 
 	return { query: dbQuery, hasJoins, hasMultiRelationalFilter };

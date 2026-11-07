@@ -62,6 +62,10 @@ import {
 	scopedCachePinKey,
 	startScopedCachePurgeRecovery,
 } from './index.js';
+import {
+	scopedCacheAggregateRuleFields,
+	scopedCacheViewFieldsBeyondFieldMap,
+} from './read-pins.js';
 import { printableScopedCachePin } from '../utils/printable-scoped-cache-pins.js';
 import {
 	flushCacheRedisDatabase,
@@ -3450,6 +3454,281 @@ describe('resolveScopedCacheM2oJoinChainFromPath', () => {
 	});
 });
 
+describe('scopedCacheViewFieldsBeyondFieldMap', () => {
+	const schema = new SchemaBuilder()
+		.collection('owner', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+		})
+		.collection('owned_item', (c) => {
+			c.field('id').id();
+			c.field('owner').m2o('owner');
+		})
+		.build();
+
+	it('reads the columns the root aggregate cases go through', () => {
+		expect(
+			scopedCacheViewFieldsBeyondFieldMap(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				aggregateCases: [{ owner: { name: { _eq: 'alice' } } }],
+				children: [],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['', { collection: 'owned_item', fields: new Set(['owner']) }],
+			['owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads the columns the aggregate cases of an m2o node go through', () => {
+		expect(
+			scopedCacheViewFieldsBeyondFieldMap(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'm2o',
+						name: 'owner',
+						fieldKey: 'owner',
+						children: [],
+						query: {},
+						cases: [],
+						aggregateCases: [{ name: { _eq: 'alice' } }],
+						whenCase: [],
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads the columns the aggregate cases of an a2o node go through', () => {
+		expect(
+			scopedCacheViewFieldsBeyondFieldMap(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'a2o',
+						names: ['owner'],
+						fieldKey: 'item',
+						children: { owner: [] },
+						query: {},
+						cases: { owner: [] },
+						aggregateCases: { owner: [{ name: { _eq: 'alice' } }] },
+						whenCase: [],
+						relation: { meta: {} },
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['item:owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+});
+
+describe('scopedCacheAggregateRuleFields', () => {
+	const schema = new SchemaBuilder()
+		.collection('owner', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('boss').m2o('owner');
+			c.field('items').o2m('owned_item', 'owner');
+		})
+		.collection('owned_item', (c) => {
+			c.field('id').id();
+			c.field('owner').m2o('owner');
+		})
+		.build();
+
+	it('reads the aggregate rules of the root, not its row cases', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [{ id: { _eq: 1 } }],
+				aggregateCases: [{ owner: { name: { _eq: 'alice' } } }],
+				children: [],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['', { collection: 'owned_item', fields: new Set(['owner']) }],
+			['owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads nothing of a nested node with row cases only', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+					{
+						type: 'm2o',
+						name: 'owner',
+						fieldKey: 'owner',
+						children: [],
+						query: {},
+						cases: [{ name: { _eq: 'alice' } }],
+						whenCase: [],
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map());
+	});
+
+	it('reads the aggregate rules of an m2o node', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'm2o',
+						name: 'owner',
+						fieldKey: 'owner',
+						children: [],
+						query: {},
+						cases: [],
+						aggregateCases: [{ name: { _eq: 'alice' } }],
+						whenCase: [],
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads the aggregate rules of each collection of an a2o node', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'a2o',
+						names: ['owner'],
+						fieldKey: 'item',
+						children: { owner: [] },
+						query: {},
+						cases: { owner: [] },
+						aggregateCases: { owner: [{ name: { _eq: 'alice' } }] },
+						whenCase: [],
+						relation: { meta: {} },
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['item:owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads the aggregate rules of a node below an m2o', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'm2o',
+						name: 'owner',
+						fieldKey: 'owner',
+						children: [
+							{
+								type: 'm2o',
+								name: 'owner',
+								fieldKey: 'boss',
+								children: [],
+								query: {},
+								cases: [],
+								aggregateCases: [{ name: { _eq: 'alice' } }],
+								whenCase: [],
+							},
+						],
+						query: {},
+						cases: [],
+						whenCase: [],
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['owner.boss', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads the aggregate rules of a node below an a2o', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'a2o',
+						names: ['owner'],
+						fieldKey: 'item',
+						children: {
+							owner: [
+								{
+									type: 'm2o',
+									name: 'owner',
+									fieldKey: 'boss',
+									children: [],
+									query: {},
+									cases: [],
+									aggregateCases: [{ name: { _eq: 'alice' } }],
+									whenCase: [],
+								},
+							],
+						},
+						query: {},
+						cases: { owner: [] },
+						whenCase: [],
+						relation: { meta: {} },
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['item:owner.boss', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('names the rows a function of a rule reads through a relation', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				aggregateCases: [{ owner: { 'count(items)': { _gt: 1 } } }],
+				children: [],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['', { collection: 'owned_item', fields: new Set(['owner']) }],
+			['owner', { collection: 'owner', fields: new Set(['items']) }],
+			['owner.count(items)', { collection: 'owned_item', fields: new Set() }],
+		]));
+	});
+});
+
 describe('scopedCacheCollectionsBeyondNestedRows', () => {
 	const schema = new SchemaBuilder()
 		.collection('company', (c) => {
@@ -3506,6 +3785,85 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 			],
 		} as AST;
 	}
+
+	it('names a collection only the root aggregate cases reach', () => {
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				{
+					...astOf({}),
+					aggregateCases: [{ owner: { name: { _eq: 'alice' } } }],
+				},
+			),
+		]).toContain('owner');
+	});
+
+	it('names a collection only the aggregate cases of an m2o node reach', () => {
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({}, {
+					aggregateCases: [{ company: { name: { _eq: 'acme' } } }],
+				}),
+			),
+		]).toContain('company');
+	});
+
+	it('names a collection only the aggregate cases of an o2m node reach', () => {
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				{
+					type: 'root',
+					name: 'company',
+					query: {},
+					cases: [],
+					children: [
+						{
+							type: 'o2m',
+							name: 'owner',
+							fieldKey: 'owners',
+							children: [],
+							query: {},
+							cases: [],
+							aggregateCases: [{ company: { name: { _eq: 'acme' } } }],
+							whenCase: [],
+							relation: { collection: 'owner', field: 'company' },
+						},
+					],
+				} as unknown as AST,
+			),
+		]).toContain('company');
+	});
+
+	it('names a collection only the aggregate cases of an a2o node reach', () => {
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				{
+					type: 'root',
+					name: 'owned_item',
+					query: {},
+					cases: [],
+					children: [
+						{
+							type: 'a2o',
+							names: ['owner'],
+							fieldKey: 'item',
+							children: { owner: [] },
+							query: {},
+							cases: { owner: [] },
+							aggregateCases: {
+								owner: [{ company: { name: { _eq: 'acme' } } }],
+							},
+							whenCase: [],
+							relation: {},
+						},
+					],
+				} as unknown as AST,
+			),
+		]).toContain('company');
+	});
 
 	it('names a collection the root query filters on', () => {
 		// Renaming a row this read never nested moves its item INTO the filtered
@@ -4100,6 +4458,62 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		expect(keyingOf({
 			filter: { owner: { company: { id: { _eq: 3 } } } },
 		}).get('owner')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('keys the M2O again when an aggregate rule reads past its key', () => {
+		expect(scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query: { filter: { owner: { id: { _eq: 7 } } } },
+			cases: [],
+			aggregateCases: [{ owner: { name: { _eq: 'alice' } } }],
+			children: [],
+		} as unknown as AST).get('owner')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('reports the to-many a count in an aggregate rule totals', () => {
+		expect(scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query: {},
+			cases: [],
+			aggregateCases: [{ 'count(owned_sub_items)': { _gt: 0 } }],
+			children: [],
+		} as unknown as AST).get('owned_sub_item')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('reads the aggregate rule of a nested node', () => {
+		expect(scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query: {},
+			cases: [],
+			children: [{
+				type: 'o2m',
+				name: 'owned_sub_item',
+				query: { filter: { owned_item: { id: { _eq: 7 } } } },
+				cases: [],
+				aggregateCases: [{ owned_item: { label: { _eq: 'x' } } }],
+				children: [],
+			}],
+		} as unknown as AST).get('owned_item')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('reads the aggregate rule of each collection of an A2O', () => {
+		expect(scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query: {},
+			cases: [],
+			children: [{
+				type: 'a2o',
+				names: ['owner'],
+				query: { owner: { filter: { company: { id: { _eq: 3 } } } } },
+				cases: { owner: [] },
+				aggregateCases: { owner: [{ company: { name: { _eq: 'x' } } }] },
+				children: { owner: [] },
+			}],
+		} as unknown as AST).get('company')).toEqual({ kind: 'unkeyed' });
 	});
 
 	it('keys the M2O again once the relation carries no constraint', () => {
@@ -5728,6 +6142,37 @@ describe('the canonical scope value', () => {
 			expect(isPinnableScopeType(type)).toBe(true);
 		},
 	);
+});
+
+describe('ScopedCacheReadPlan.collectionsToGuard', () => {
+	it('names a collection only the aggregate cases reach', () => {
+		expect(new ScopedCacheReadPlan(
+			'article',
+			new SchemaBuilder()
+				.collection('author', (c) => {
+					c.field('id').id();
+					c.field('status').string();
+				})
+				.collection('article', (c) => {
+					c.field('id').id();
+					c.field('category').string();
+					c.field('salary').integer();
+					c.field('author').m2o('author');
+				})
+				.build(),
+			{
+				type: 'root',
+				name: 'article',
+				query: { aggregate: { sum: ['salary'] }, group: ['category'] },
+				cases: [{}],
+				aggregateCases: [{ author: { status: { _eq: 'live' } } }],
+				children: [
+					{ type: 'field', name: 'category', fieldKey: 'category', whenCase: [] },
+				],
+			} as unknown as AST,
+			[],
+		).collectionsToGuard()).toContain('author');
+	});
 });
 
 // The view a fingerprint narrows to: a write rewriting none of these fields is

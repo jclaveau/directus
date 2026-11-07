@@ -289,6 +289,7 @@ test('Processes a2o children recursively', () => {
 				type: 'a2o',
 				fieldKey: 'test-field-b',
 				names: ['test-collection-b', 'test-collection-c'],
+				query: {},
 				cases: {},
 				children: {
 					'test-collection-b': [
@@ -332,6 +333,7 @@ test('Processes a2o children recursively', () => {
 			type: 'a2o',
 			fieldKey: 'test-field-b',
 			names: ['test-collection-b', 'test-collection-c'],
+			query: {},
 			cases: {
 				'test-collection-b': [{ status: { _eq: 'draft' } }, { status: { _eq: 'under-review' } }],
 				'test-collection-c': [{}],
@@ -343,6 +345,233 @@ test('Processes a2o children recursively', () => {
 					{ fieldKey: 'test-field-related-b', whenCase: [1] },
 				],
 				'test-collection-c': [],
+			},
+		},
+	]);
+});
+
+test('Keeps the rule of an aggregated field a grouped read drops', () => {
+	const ast: DeepPartial<AST> = {
+		name: 'articles',
+		cases: [],
+		query: { aggregate: { sum: ['salary'] }, group: ['category'] },
+		children: [{ fieldKey: 'category' }],
+	};
+
+	injectCases(ast as AST, [
+		{ collection: 'articles', permissions: {}, fields: ['category'] },
+		{
+			collection: 'articles',
+			permissions: { bonus: { _gt: 0 } },
+			fields: ['salary'],
+		},
+		{
+			collection: 'articles',
+			permissions: { bonus: { _lt: 0 } },
+			fields: ['title'],
+		},
+	] as Permission[]);
+
+	expect(ast.cases).toEqual([{}]);
+	expect(ast.aggregateCases).toEqual([{ bonus: { _gt: 0 } }]);
+});
+
+test('Keeps the rule of an aggregated field the cases hold beside another', () => {
+	const ast: DeepPartial<AST> = {
+		name: 'articles',
+		cases: [],
+		query: { aggregate: { sum: ['salary'] } },
+		children: [],
+	};
+
+	injectCases(ast as AST, [
+		{ collection: 'articles', permissions: {}, fields: ['category'] },
+		{
+			collection: 'articles',
+			permissions: { bonus: { _gt: 0 } },
+			fields: ['salary'],
+		},
+	] as Permission[]);
+
+	expect(ast).toEqual({
+		name: 'articles',
+		cases: [{}, { bonus: { _gt: 0 } }],
+		aggregateCases: [{ bonus: { _gt: 0 } }],
+		query: { aggregate: { sum: ['salary'] } },
+		children: [],
+	});
+});
+
+test('Adds no aggregate cases when every row holds the field rule', () => {
+	const ast: DeepPartial<AST> = {
+		name: 'articles',
+		cases: [],
+		query: { aggregate: { sum: ['salary'] } },
+		children: [],
+	};
+
+	injectCases(ast as AST, [
+		{
+			collection: 'articles',
+			permissions: { bonus: { _gt: 0 } },
+			fields: ['id', 'salary'],
+		},
+	] as unknown as Permission[]);
+
+	expect(ast).toEqual({
+		name: 'articles',
+		cases: [{ bonus: { _gt: 0 } }],
+		query: { aggregate: { sum: ['salary'] } },
+		children: [],
+	});
+});
+
+test('Adds no aggregate cases for a count of every row', () => {
+	const ast: DeepPartial<AST> = {
+		name: 'articles',
+		cases: [],
+		query: { aggregate: { count: ['*'] }, group: ['category'] },
+		children: [{ fieldKey: 'category' }],
+	};
+
+	injectCases(ast as AST, [
+		{ collection: 'articles', permissions: {}, fields: ['category'] },
+		{
+			collection: 'articles',
+			permissions: { bonus: { _gt: 0 } },
+			fields: ['salary'],
+		},
+	] as Permission[]);
+
+	expect(ast).toEqual({
+		name: 'articles',
+		cases: [{}],
+		query: { aggregate: { count: ['*'] }, group: ['category'] },
+		children: [{ fieldKey: 'category' }],
+	});
+});
+
+test('Keeps the rule of a field an m2o child aggregates', () => {
+	const ast: DeepPartial<AST> = {
+		name: 'articles',
+		cases: [],
+		children: [
+			{
+				type: 'm2o',
+				fieldKey: 'author',
+				relation: { related_collection: 'authors' },
+				query: { aggregate: { sum: ['salary'] }, group: ['category'] },
+				children: [{ fieldKey: 'category' }],
+			},
+		],
+	};
+
+	injectCases(ast as AST, [
+		{ collection: 'articles', permissions: {}, fields: ['*'] },
+		{ collection: 'authors', permissions: {}, fields: ['category'] },
+		{
+			collection: 'authors',
+			permissions: { bonus: { _gt: 0 } },
+			fields: ['salary'],
+		},
+	] as Permission[]);
+
+	expect(ast.children).toEqual([
+		{
+			type: 'm2o',
+			fieldKey: 'author',
+			relation: { related_collection: 'authors' },
+			query: { aggregate: { sum: ['salary'] }, group: ['category'] },
+			cases: [{}],
+			aggregateCases: [{ bonus: { _gt: 0 } }],
+			children: [{ fieldKey: 'category' }],
+		},
+	]);
+});
+
+test('Keeps the rule of a field an o2m child aggregates', () => {
+	const ast: DeepPartial<AST> = {
+		name: 'articles',
+		cases: [],
+		children: [
+			{
+				type: 'o2m',
+				fieldKey: 'links',
+				relation: { collection: 'links' },
+				query: { aggregate: { sum: ['weight'] }, group: ['article'] },
+				children: [{ fieldKey: 'article' }],
+			},
+		],
+	};
+
+	injectCases(ast as AST, [
+		{ collection: 'articles', permissions: {}, fields: ['*'] },
+		{ collection: 'links', permissions: {}, fields: ['article'] },
+		{
+			collection: 'links',
+			permissions: { name: { _eq: 'pm' } },
+			fields: ['weight'],
+		},
+	] as Permission[]);
+
+	expect(ast.children).toEqual([
+		{
+			type: 'o2m',
+			fieldKey: 'links',
+			relation: { collection: 'links' },
+			query: { aggregate: { sum: ['weight'] }, group: ['article'] },
+			cases: [{}],
+			aggregateCases: [{ name: { _eq: 'pm' } }],
+			children: [{ fieldKey: 'article' }],
+		},
+	]);
+});
+
+test('Keeps the rule of a field an a2o child aggregates, per collection', () => {
+	const ast: DeepPartial<AST> = {
+		name: 'articles',
+		cases: [],
+		children: [
+			{
+				type: 'a2o',
+				fieldKey: 'item',
+				names: ['links', 'authors'],
+				query: {
+					links: { aggregate: { sum: ['weight'] }, group: ['article'] },
+				},
+				cases: {},
+				children: {
+					links: [{ fieldKey: 'article' }],
+					authors: [],
+				},
+			},
+		],
+	};
+
+	injectCases(ast as AST, [
+		{ collection: 'articles', permissions: {}, fields: ['*'] },
+		{ collection: 'authors', permissions: {}, fields: ['*'] },
+		{ collection: 'links', permissions: {}, fields: ['article'] },
+		{
+			collection: 'links',
+			permissions: { name: { _eq: 'pm' } },
+			fields: ['weight'],
+		},
+	] as Permission[]);
+
+	expect(ast.children).toEqual([
+		{
+			type: 'a2o',
+			fieldKey: 'item',
+			names: ['links', 'authors'],
+			query: {
+				links: { aggregate: { sum: ['weight'] }, group: ['article'] },
+			},
+			cases: { links: [{}], authors: [{}] },
+			aggregateCases: { links: [{ name: { _eq: 'pm' } }] },
+			children: {
+				links: [{ fieldKey: 'article' }],
+				authors: [],
 			},
 		},
 	]);

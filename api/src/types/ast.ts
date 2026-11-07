@@ -19,6 +19,12 @@ export type M2ONode = {
 	 * Permissions rules for the item access of the children of this item.
 	 */
 	cases: Filter[];
+
+	/**
+	 * Rules an aggregated field reads beyond `cases`: a grouped read keeps only the
+	 * rules granting a group field, and the aggregate's CASE reads the others.
+	 */
+	aggregateCases?: Filter[];
 };
 
 export type A2MNode = {
@@ -49,6 +55,14 @@ export type A2MNode = {
 	cases: {
 		[collection: string]: Filter[];
 	};
+
+	/**
+	 * Rules an aggregated field reads beyond `cases`: a grouped read keeps only the
+	 * rules granting a group field, and the aggregate's CASE reads the others.
+	 */
+	aggregateCases?: {
+		[collection: string]: Filter[];
+	};
 };
 
 export type O2MNode = {
@@ -70,6 +84,12 @@ export type O2MNode = {
 	 * Permissions rules for the item access of the children of this item.
 	 */
 	cases: Filter[];
+
+	/**
+	 * Rules an aggregated field reads beyond `cases`: a grouped read keeps only the
+	 * rules granting a group field, and the aggregate's CASE reads the others.
+	 */
+	aggregateCases?: Filter[];
 };
 
 export type NestedCollectionNode = M2ONode | O2MNode | A2MNode;
@@ -114,4 +134,10 @@ export type AST = {
 	 * Permissions rules for the item access of the children of this item.
 	 */
 	cases: Filter[];
+
+	/**
+	 * Rules an aggregated field reads beyond `cases`: a grouped read keeps only the
+	 * rules granting a group field, and the aggregate's CASE reads the others.
+	 */
+	aggregateCases?: Filter[];
 };
