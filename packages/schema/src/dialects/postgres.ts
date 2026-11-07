@@ -148,7 +148,9 @@ export default class Postgres implements SchemaInspector {
 			),
 
 			// a unique index a foreign key can name: an update writing its column
-			// locks the row FOR UPDATE
+			// locks the row FOR UPDATE. Its INCLUDE columns are flagged too, where
+			// Postgres would not; a unique index of one partition only is not
+			// flagged on the partitioned table
 			this.knex.raw(
 				`
         SELECT DISTINCT c.relname AS table_name

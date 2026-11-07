@@ -3840,7 +3840,9 @@ implements AbstractService<Item> {
 
 		const writesUniqueColumn = upsertRun.some((payload) => {
 			return Object.keys(payload)
-				.some((field) => fields[field]?.inUniqueIndex);
+				.some((field) => {
+					return field !== primaryKeyField && fields[field]?.inUniqueIndex;
+				});
 		});
 
 		const existingKeyNames = new Set<string>();
