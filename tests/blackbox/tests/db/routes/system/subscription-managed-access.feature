@@ -138,7 +138,7 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | 10 | 10   | mollie   | direct-plan |
     And this row of subscriptions:
       | column                   | value      |
-      | id                       | 10         |
+      | id                       | 900        |
       | subscriber               | 10         |
       | customer                 | 10         |
       | plan_reference           | 10         |
@@ -226,7 +226,7 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       |                                    |       extensions:                          |
       |                                    |         code: INVALID_PAYLOAD              |
       | method: PATCH                      | code: 400                                  |+
-      | path: /items/subscriptions/10      | body:                                      |
+      | path: /items/subscriptions/900     | body:                                      |
       | payload:                           |   errors:                                  |
       |   status: canceled                 |     - message: >-                          |
       |                                    |         Invalid payload. "status" and      |
