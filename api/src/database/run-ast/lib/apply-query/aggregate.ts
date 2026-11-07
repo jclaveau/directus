@@ -52,9 +52,10 @@ export function applyAggregate(
 				continue;
 			}
 
-			// A primary key is never null: this counts the rows read, as count(*) does
+			// A primary key is never null: this counts the rows read, as count(*) does.
+			// `*` names no column a case could return.
 			const countsRowsRead = ['count', 'countDistinct'].includes(operation)
-				&& schema.collections[collection]?.primary === field;
+				&& (field === '*' || schema.collections[collection]?.primary === field);
 
 			const fieldCases = caseOptions && !countsRowsRead
 				? getAggregateFieldCases(collection, field, caseOptions)
