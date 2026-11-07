@@ -115,3 +115,147 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
     Then this user eventually holds no access:
       | user           |
       | <granted_user> |
+
+  Scenario: a request cannot write around the bundle
+    Given the rows of directus_policies:
+      | id              | name          |
+      | <direct_policy> | Direct policy |
+    And the rows of directus_users:
+      | id             | email               | token         |
+      | <refused_user> | refused@example.com | refused-token |
+    And the rows of subscribers:
+      | id | user |
+      | 10 |      |
+    And the rows of subscriber_customers:
+      | id | subscriber | provider | provider_customer_id |
+      | 10 | 10         | mollie   | cst_direct           |
+    And the rows of subscription_plans:
+      | id | code   | name   | policy          | amount | currency | interval | status   |
+      | 10 | direct | Direct | <direct_policy> | 1000   | EUR      | month    | active   |
+      | 11 | gone   | Gone   | <direct_policy> | 1000   | EUR      | month    | archived |
+    And the rows of subscription_plan_references:
+      | id | plan | provider | reference   |
+      | 10 | 10   | mollie   | direct-plan |
+    And this row of subscriptions:
+      | column                   | value      |
+      | id                       | 10         |
+      | subscriber               | 10         |
+      | customer                 | 10         |
+      | plan_reference           | 10         |
+      | provider                 | mollie     |
+      | provider_subscription_id | sub_direct |
+      | status                   | expired    |
+      | date_created             | 2026-01-01 |
+      | date_updated             | 2026-01-01 |
+    Then these requests get these responses:
+      | request                            | response                                   |
+      | as: anonymous                      | code: 403                                  |+
+      | method: DELETE                     | body:                                      |
+      | path: /items/subscription_plans/10 |   errors:                                  |
+      |                                    |     - message: >-                          |
+      |                                    |         You don't have permission to       |
+      |                                    |         perform "delete" for collection    |
+      |                                    |         "subscription_plans" or it does    |
+      |                                    |         not exist.                         |
+      |                                    |       extensions:                          |
+      |                                    |         code: FORBIDDEN                    |
+      | as: refused-token                  | code: 403                                  |+
+      | method: DELETE                     | body:                                      |
+      | path: /items/subscription_plans/10 |   errors:                                  |
+      |                                    |     - message: >-                          |
+      |                                    |         You don't have permission to       |
+      |                                    |         perform "delete" for collection    |
+      |                                    |         "subscription_plans" or it does    |
+      |                                    |         not exist.                         |
+      |                                    |       extensions:                          |
+      |                                    |         code: FORBIDDEN                    |
+      | method: DELETE                     | code: 400                                  |+
+      | path: /items/subscription_plans/10 | body:                                      |
+      |                                    |   errors:                                  |
+      |                                    |     - message: >-                          |
+      |                                    |         Invalid payload. Plan "direct"     |
+      |                                    |         cannot be deleted, archive it      |
+      |                                    |         instead.                           |
+      |                                    |       extensions:                          |
+      |                                    |         code: INVALID_PAYLOAD              |
+      | as: anonymous                      | code: 403                                  |+
+      | method: PATCH                      | body:                                      |
+      | path: /items/subscription_plans/10 |   errors:                                  |
+      | payload:                           |     - message: >-                          |
+      |   status: archived                 |         You don't have permissions to      |
+      |                                    |         perform "update" for the field(s)  |
+      |                                    |         "status" in collection             |
+      |                                    |         "subscription_plans" or it does    |
+      |                                    |         not exist.                         |
+      |                                    |       extensions:                          |
+      |                                    |         code: FORBIDDEN                    |
+      | method: PATCH                      | code: 400                                  |+
+      | path: /items/subscription_plans/10 | body:                                      |
+      | payload:                           |   errors:                                  |
+      |   status: archived                 |     - message: >-                          |
+      |                                    |         Invalid payload. A plan is         |
+      |                                    |         archived through "POST             |
+      |                                    |         /subscriptions/plans/:id/archive". |
+      |                                    |       extensions:                          |
+      |                                    |         code: INVALID_PAYLOAD              |
+      | method: PATCH                      | code: 400                                  |+
+      | path: /items/subscription_plans/11 | body:                                      |
+      | payload:                           |   errors:                                  |
+      |   status: active                   |     - message: >-                          |
+      |                                    |         Invalid payload. Plan "gone" is    |
+      |                                    |         archived, its status cannot        |
+      |                                    |         change.                            |
+      |                                    |       extensions:                          |
+      |                                    |         code: INVALID_PAYLOAD              |
+      | method: DELETE                     | code: 400                                  |+
+      | path: "/items/subscription_plan_\  | body:                                      |
+      |   references/10"                   |   errors:                                  |
+      |                                    |     - message: >-                          |
+      |                                    |         Cannot delete                      |
+      |                                    |         "subscription_plan_references:10": |
+      |                                    |         it is still referenced by          |
+      |                                    |         collection "subscriptions".        |
+      |                                    |       extensions:                          |
+      |                                    |         code: INVALID_FOREIGN_KEY          |
+      | method: PATCH                      | code: 400                                  |+
+      | path: "/items/subscription_plan_\  | body:                                      |
+      |   references/10"                   |   errors:                                  |
+      | payload:                           |     - message: >-                          |
+      |   reference: other                 |         Invalid payload. Plan reference    |
+      |                                    |         "direct-plan" is used by a         |
+      |                                    |         subscription, it cannot change.    |
+      |                                    |       extensions:                          |
+      |                                    |         code: INVALID_PAYLOAD              |
+      | method: PATCH                      | code: 400                                  |+
+      | path: /items/subscriptions/10      | body:                                      |
+      | payload:                           |   errors:                                  |
+      |   status: canceled                 |     - message: >-                          |
+      |                                    |         Invalid payload. "status" and      |
+      |                                    |         "cancel_at_period_end" of a        |
+      |                                    |         subscription follow its provider.  |
+      |                                    |       extensions:                          |
+      |                                    |         code: INVALID_PAYLOAD              |
+      | as: anonymous                      | code: 403                                  |+
+      | method: POST                       | body:                                      |
+      | path: /items/subscription_events   |   errors:                                  |
+      | payload:                           |     - message: >-                          |
+      |   source: sync                     |         You don't have permission to       |
+      |                                    |         perform "create" for collection    |
+      |                                    |         "subscription_events" or it does   |
+      |                                    |         not exist.                         |
+      |                                    |       extensions:                          |
+      |                                    |         code: FORBIDDEN                    |
+      | method: POST                       | code: 400                                  |+
+      | path: /items/subscription_events   | body:                                      |
+      | payload:                           |   errors:                                  |
+      |   source: sync                     |     - message: >-                          |
+      |                                    |         Invalid payload.                   |
+      |                                    |         "subscription_events" only records |
+      |                                    |         what the subscriptions bundle did. |
+      |                                    |       extensions:                          |
+      |                                    |         code: INVALID_PAYLOAD              |
+      | method: GET                        | code: 200                                  |+
+      | path: /presets                     | body:                                      |
+      | query:                             |   data:                                    |
+      |   filter[bookmark][_eq]: >-        |     - bookmark: Parked syncs               |
+      |     Parked syncs                   |       collection: subscription_sync_queue  |

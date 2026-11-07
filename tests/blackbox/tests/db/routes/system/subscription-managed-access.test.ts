@@ -207,16 +207,31 @@ describe.each(vendors)('%s', (vendor) => {
 		}
 
 		await database('directus_migrations')
-			.where('version', '@scalabus/subscriptions:20261105A')
+			.whereIn('version', [
+				'@scalabus/subscriptions:20261105A',
+				'@scalabus/subscriptions:20261107A',
+			])
+			.delete();
+
+		await database('directus_presets')
+			.where('collection', 'subscription_sync_queue')
+			.delete();
+
+		await database('directus_collections')
+			.where('collection', 'subscription_sync_queue')
 			.delete();
 
 		// Deleting a user or a policy takes its access rows along.
 		await database('directus_users')
-			.whereIn('email', ['subscribed@example.com', 'no-access@example.com'])
+			.whereIn('email', [
+				'subscribed@example.com',
+				'no-access@example.com',
+				'refused@example.com',
+			])
 			.delete();
 
 		await database('directus_policies')
-			.whereIn('name', ['Pro plan', 'Other policy'])
+			.whereIn('name', ['Pro plan', 'Other policy', 'Direct policy'])
 			.delete();
 
 		await database.destroy();
@@ -235,6 +250,18 @@ describe.each(vendors)('%s', (vendor) => {
 				scenarioKeys,
 			))),
 		);
+	}
+
+	// A table too wide for a row per line.
+	function seedColumnRow(
+		tableName: string,
+		columnsTable: { column: string; value: string }[],
+	) {
+		return seedRows(tableName, [
+			Object.fromEntries(columnsTable.map(({ column, value }) => {
+				return [column, value];
+			})),
+		]);
 	}
 
 	function holdSubscription(rowsTable: Record<string, string>[]) {
@@ -291,22 +318,31 @@ describe.each(vendors)('%s', (vendor) => {
 	}
 
 	defineFeature(accessFeature, (scenario) => {
-		for (const { title } of accessFeature.scenarios) {
-			scenario(title, ({ given, when, then, and }) => {
-				given(/^the rows of (\w+):$/, seedRows);
-				and(/^the rows of (\w+):$/, seedRows);
-				and(/^the rows of (\w+):$/, seedRows);
-				and(/^the rows of (\w+):$/, seedRows);
-				and(/^the rows of (\w+):$/, seedRows);
-				and(/^the rows of (\w+):$/, seedRows);
-				and('Mollie holds this subscription:', holdSubscription);
-				when('these requests get these responses:', sendRequestRows);
-				then('this access is eventually stored:', expectStoredAccess);
-				and('these requests get these responses:', sendRequestRows);
-				when('Mollie holds this subscription:', holdSubscription);
-				and('these requests get these responses:', sendRequestRows);
-				then('this user eventually holds no access:', expectNoAccess);
-			}, 180_000);
-		}
+		scenario(accessFeature.scenarios[0]!.title, ({ given, when, then, and }) => {
+			given(/^the rows of (\w+):$/, seedRows);
+			and(/^the rows of (\w+):$/, seedRows);
+			and(/^the rows of (\w+):$/, seedRows);
+			and(/^the rows of (\w+):$/, seedRows);
+			and(/^the rows of (\w+):$/, seedRows);
+			and(/^the rows of (\w+):$/, seedRows);
+			and('Mollie holds this subscription:', holdSubscription);
+			when('these requests get these responses:', sendRequestRows);
+			then('this access is eventually stored:', expectStoredAccess);
+			and('these requests get these responses:', sendRequestRows);
+			when('Mollie holds this subscription:', holdSubscription);
+			and('these requests get these responses:', sendRequestRows);
+			then('this user eventually holds no access:', expectNoAccess);
+		}, 180_000);
+
+		scenario(accessFeature.scenarios[1]!.title, ({ given, then, and }) => {
+			given(/^the rows of (\w+):$/, seedRows);
+			and(/^the rows of (\w+):$/, seedRows);
+			and(/^the rows of (\w+):$/, seedRows);
+			and(/^the rows of (\w+):$/, seedRows);
+			and(/^the rows of (\w+):$/, seedRows);
+			and(/^the rows of (\w+):$/, seedRows);
+			and(/^this row of (\w+):$/, seedColumnRow);
+			then('these requests get these responses:', sendRequestRows);
+		}, 60_000);
 	});
 });

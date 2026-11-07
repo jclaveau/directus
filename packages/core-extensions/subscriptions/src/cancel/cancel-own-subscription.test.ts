@@ -55,7 +55,7 @@ describe('cancelOwnSubscription', () => {
 			{
 				subscriber: 1,
 				customer: 1,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'mollie',
 				provider_subscription_id: 'sub_old',
 				status: 'expired',
@@ -65,7 +65,7 @@ describe('cancelOwnSubscription', () => {
 			{
 				subscriber: 1,
 				customer: 1,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'mollie',
 				provider_subscription_id: 'sub_1',
 				status: 'active',
@@ -140,7 +140,7 @@ describe('cancelOwnSubscription', () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
@@ -190,6 +190,79 @@ describe('cancelOwnSubscription', () => {
 		})).rejects.toThrow(new NoSubscriptionToCancelError());
 	});
 
+	test('refuses a subscription already cancelling', async () => {
+		await database('subscribers').insert({ user: 'user-1' });
+
+		await database('subscriptions').insert({
+			subscriber: 1,
+			customer: 1,
+			plan_reference: 1,
+			provider: 'mollie',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			cancel_at_period_end: true,
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		const cancelAtPeriodEnd = vi.fn();
+
+		await expect(cancelOwnSubscription({
+			database,
+			enabledProviders: new Map([
+				['mollie', { cancelAtPeriodEnd } as unknown as SubscriptionProvider],
+			]),
+			userId: 'user-1',
+		})).rejects.toThrow(new NoSubscriptionToCancelError());
+
+		expect(cancelAtPeriodEnd).not.toHaveBeenCalled();
+	});
+
+	test('cancels the new subscription of a user with one cancelling', async () => {
+		await database('subscribers').insert({ user: 'user-1' });
+
+		await database('subscriptions').insert([
+			{
+				subscriber: 1,
+				customer: 1,
+				plan_reference: 1,
+				provider: 'mollie',
+				provider_subscription_id: 'sub_cancelling',
+				status: 'active',
+				cancel_at_period_end: true,
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+			{
+				subscriber: 1,
+				customer: 1,
+				plan_reference: 1,
+				provider: 'mollie',
+				provider_subscription_id: 'sub_new',
+				status: 'active',
+				cancel_at_period_end: false,
+				date_created: new Date('2026-10-02T00:00:00Z'),
+				date_updated: new Date('2026-10-02T00:00:00Z'),
+			},
+		]);
+
+		const mollieProvider = {
+			composeResourceId: vi.fn().mockReturnValue('cst_1/sub_new'),
+			cancelAtPeriodEnd: vi.fn(),
+		};
+
+		await cancelOwnSubscription({
+			database,
+			enabledProviders: new Map([
+				['mollie', mollieProvider as unknown as SubscriptionProvider],
+			]),
+			userId: 'user-1',
+		});
+
+		expect(mollieProvider.cancelAtPeriodEnd)
+			.toHaveBeenCalledExactlyOnceWith('cst_1/sub_new');
+	});
+
 	test('refuses a user with several ongoing subscriptions', async () => {
 		await database('subscribers').insert({ user: 'user-1' });
 
@@ -209,7 +282,7 @@ describe('cancelOwnSubscription', () => {
 			{
 				subscriber: 1,
 				customer: 1,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'stripe',
 				provider_subscription_id: 'sub_1',
 				status: 'active',
@@ -219,7 +292,7 @@ describe('cancelOwnSubscription', () => {
 			{
 				subscriber: 1,
 				customer: 1,
-				plan: 1,
+				plan_reference: 1,
 				provider: 'stripe',
 				provider_subscription_id: 'sub_2',
 				status: 'past_due',
@@ -255,7 +328,7 @@ describe('cancelOwnSubscription', () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
-			plan: 1,
+			plan_reference: 1,
 			provider: 'stripe',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
