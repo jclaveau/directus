@@ -11,8 +11,15 @@ empty `items.update` filter), unbounded `push(...)` (#397) + A2O quadratic copy,
 JSON.stringify in A2O reasons, cancelled-row `[rowIndex]` vs `[index]` alignment test.
 
 **Ruled 2026-11-07:** the default flips to `preserveMutationOrder`, own PR before #686: #694
-(`Refs #689`). The flip alone settles nothing in #686: `saveNestedRecords` walks relation by
-relation and ignores `mutationBatching`, so A, B and Q probe identically in both modes.
+(`Refs #689`), merged d2a0022175. `saveNestedRecords` walks relation by relation and ignores
+`mutationBatching`, so A, B and Q probe identically in both modes. But the nested upserts it
+calls take the new default, so statement order DOES change.
+
+**Merging #694 into #686 (2026-11-07), 3 red in `items.test.ts`:** local unpushed ef469620df in
+the batched-m2o-a2o worktree. "writes the countries of every created row in one upsert" goes
+from one batched insert to insert/update/insert; "upserts the items..." update after insert;
+"files the revision of each country..." parents now keys 1→3, 2→4. Awaiting jean: accept the
+payload order, or have nested writes pass `minimizeMutations`.
 
 **Q2 went further (2026-11-07):** jean's point: the question is which collection goes first.
 Design = merge relations by target collection, write referenced collections first (FK graph
