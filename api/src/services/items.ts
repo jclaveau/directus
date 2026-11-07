@@ -3700,11 +3700,12 @@ implements AbstractService<Item> {
 	 *
 	 * A payload nesting rows, naming a row through a self relation (its key
 	 * alone included), or setting an o2m alias in any form, upserts in a run of
-	 * its own, in payload order: a run writes its updates before its creates,
-	 * so a row it names, or a row its nested rows point back at through any
-	 * number of collections, may not exist yet, a row a nested write creates
-	 * would be created again, and of two payloads naming one child by key the
-	 * first would keep it, where the last does in payload order.
+	 * its own, in payload order: under `minimizeMutations` a run writes its
+	 * updates before its creates, so a row it names, or a row its nested rows
+	 * point back at through any number of collections, may not exist yet, a row
+	 * a nested write creates would be created again, and of two payloads naming
+	 * one child by key the first would keep it, where the last does in payload
+	 * order.
 	 */
 	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -3804,12 +3805,12 @@ implements AbstractService<Item> {
 	 * the hook sees the found keys, never the ones the run creates. An upsert
 	 * hook seeing the whole run could allow it.
 	 *
-	 * A unique value an update frees can go to a create of the same run:
-	 * `[{ id: 2, code: 'A' }, { id: 1, code: 'B' }]`, row 1 holding `'A'`,
-	 * writes both, where each payload in turn would refuse the create.
-	 * `preserveMutationOrder` writes the payloads in their order instead, each
-	 * row of consecutive updates or creates in one write, and emits the run's
-	 * actions once every write is done.
+	 * `preserveMutationOrder`, the default, writes the payloads in their order,
+	 * each row of consecutive updates or creates in one write, and emits the
+	 * run's actions once every write is done. `minimizeMutations` writes every
+	 * update, then every create, so a unique value an update frees can go to a
+	 * create of the same run: `[{ id: 2, code: 'A' }, { id: 1, code: 'B' }]`,
+	 * row 1 holding `'A'`, writes both, where the order sent refuses the create.
 	 */
 	protected async upsertRun(
 		upsertRun: Partial<Item>[],
@@ -3848,8 +3849,8 @@ implements AbstractService<Item> {
 
 		const preservesOrder = resolveMutationBatching(opts) === 'preserveMutationOrder';
 
-		// Payload indexes written together: every update, then every create, unless
-		// the order is preserved
+		// Payload indexes written together: consecutive payloads of one kind when
+		// the order is preserved, else every update, then every create
 		const upsertSegments: { updating: boolean; indexes: number[] }[] = preservesOrder
 			? []
 			: [{ updating: true, indexes: [] }, { updating: false, indexes: [] }];

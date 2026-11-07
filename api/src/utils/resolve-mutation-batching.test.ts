@@ -23,10 +23,10 @@ test('DEFAULT_MUTATION_BATCHING decides when the caller passes nothing', () => {
 	expect(resolveMutationBatching({})).toBe('disableBatching');
 });
 
-test('an env without DEFAULT_MUTATION_BATCHING minimizes mutations', () => {
+test('an env without DEFAULT_MUTATION_BATCHING preserves the order', () => {
 	vi.mocked(useEnv).mockReturnValue({});
 
-	expect(resolveMutationBatching({})).toBe('minimizeMutations');
+	expect(resolveMutationBatching({})).toBe('preserveMutationOrder');
 });
 
 test('an unknown DEFAULT_MUTATION_BATCHING is refused', () => {

@@ -4,7 +4,7 @@ description: >
   its creates, in as few statements as it can. `preserveMutationOrder` writes them in the order sent, consecutive
   rows of one kind in one statement, with each write's filter hooks before it and their action hooks after those writes.
   `disableBatching` writes one row at a time, each with its own filter and action hooks. Left out, the
-  `DEFAULT_MUTATION_BATCHING` env var decides.
+  `DEFAULT_MUTATION_BATCHING` env var decides, `preserveMutationOrder` by default.
 in: query
 required: false
 schema:

@@ -237,7 +237,8 @@ export type MutationOptions = {
 
 	/**
 	 * How a write batches its statements, passed down to its nested writes.
-	 * Left unset, `DEFAULT_MUTATION_BATCHING` decides.
+	 * Left unset, `DEFAULT_MUTATION_BATCHING` decides, `preserveMutationOrder`
+	 * by default.
 	 *
 	 * ```
 	 * upsertMany([U1, C2, U3, C4])     U = key found, C = new row
