@@ -210,5 +210,8 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 
 - `query-audit-header.test.ts` "each reports the same entries both times": `rows: 7` expected vs `rows: 8` on the `audit_articles` GET. The scenario fires its POST (inserts a row) and GET together; the GET sees the new row or not depending on commit order. Not caused by the PR (seen on #679, which only touches `directus_access` + list-m2m). Rerun `--failed` once, until PR #692 lands: its GET filters out the POST's title. Recurred 2026-11-06 on #679 `7dd1b748ad`, shard 1, same `rows: 7` vs `8`.
 
+## `common/assets/concurrency.test.ts` is hot (2026-11-07, #367 still open)
+Failed the `Blackbox Tests / common` job in 6 of 58 latest PR runs, and was the failing test in all 6, across 3 branches. On #680 `bc21b3cac0` it went green, then red, then red on `--failed`, so red-then-red does NOT clear it of being this flake: survey the job first. Whether it was `timeouts` or `non2xx` is unknown, the test still discards the result.
+
 ## Statement-count tables on shard 1 (2026-11-06, unattributed)
 Run 42220902802 (throwaway off #680): `update-batch-guards` (4) and `singular-write-users-invite` (2) went red on "on postgres the requests ran these statements:", with extra `directus_access` / `directus_sessions` rows. Same code path green on run 42222151629 and its neighbours, so not the PR; cause not investigated.
