@@ -1,5 +1,6 @@
 import {
 	ForbiddenError,
+	InvalidCredentialsError,
 	InvalidForeignKeyError,
 	InvalidPayloadError,
 	ItemNotFoundError,
@@ -7730,8 +7731,8 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 	it('throws the preMutationError once a row passed its filter hooks', async () => {
 		await expect(new ItemsService('test', { knex: database, schema: rowSchema })
 			.createMany([{ id: 3 }], {
-				preMutationError: new ForbiddenError(),
-			})).rejects.toStrictEqual(new ForbiddenError());
+				preMutationError: new InvalidCredentialsError(),
+			})).rejects.toStrictEqual(new InvalidCredentialsError());
 
 		await expect(database('test').select('id')).resolves.toStrictEqual([]);
 	});
@@ -7744,7 +7745,7 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 			await expect(new ItemsService('test', { knex: database, schema: rowSchema })
 				.createMany([{ id: 3 }], {
 					allowFilterCancel: true,
-					preMutationError: new ForbiddenError(),
+					preMutationError: new InvalidCredentialsError(),
 				})).resolves.toStrictEqual([null]);
 		}
 		finally {
