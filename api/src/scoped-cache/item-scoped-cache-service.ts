@@ -981,6 +981,7 @@ export class ItemScopedCacheService {
 
 		const {
 			fieldMap,
+			aggregateRuleFieldMap,
 			filterKeying,
 			keyedFilterPins,
 			m2oParentPins,
@@ -1002,7 +1003,12 @@ export class ItemScopedCacheService {
 		// the `<pk>._eq 1` filter never bounded.
 		const rootPaths = new Set<string>();
 
-		for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
+		for (const [path, entry] of [
+			...fieldMap.read,
+			...fieldMap.other,
+			...aggregateRuleFieldMap.read,
+			...aggregateRuleFieldMap.other,
+		]) {
 			if (entry.collection === this.collection) {
 				rootPaths.add(path);
 			}
@@ -1047,6 +1053,7 @@ export class ItemScopedCacheService {
 		const fingerprintedCollections = new Set([
 			...collectionsInFieldMap(fieldMap),
 			...filterKeying.keys(),
+			...beyondNestedRows,
 		]);
 
 		// Every field-map path reaching a collection, deduped: the read and the other
@@ -1180,7 +1187,12 @@ export class ItemScopedCacheService {
 				return [];
 			}
 
-			const paths = pathsTo(collection);
+			const paths = pathsTo(collection, [
+				fieldMap.read,
+				fieldMap.other,
+				aggregateRuleFieldMap.read,
+				aggregateRuleFieldMap.other,
+			]);
 
 			if (paths.length === 0 || paths.includes('')) {
 				return [];
