@@ -234,6 +234,28 @@ describe('foreign key violation (23503)', () => {
 		});
 	});
 
+	it('maps the restrict_violation of a RESTRICT constraint likewise', () => {
+		const error = pgError({
+			code: '23001',
+			table: 'student_enrollment',
+			constraint: 'student_enrollment_enrollment_foreign',
+			detail: 'Key (id)=(5) is still referenced from table "student_enrollment".',
+		});
+
+		expect((extractError(error, {}, {
+			collection: 'enrollment',
+			operation: 'delete',
+		}) as any).extensions).toEqual({
+			collection: 'enrollment',
+			field: 'id',
+			value: '5',
+			constraint: 'student_enrollment_enrollment_foreign',
+			relatedCollection: 'student_enrollment',
+			reason: 'still_referenced',
+			operation: 'delete',
+		});
+	});
+
 	it('resolves the direction from the operation, not the localized detail', () => {
 		// A create whose detail text (misleadingly) says "still referenced" must
 		// still resolve to invalid_reference — the operation is authoritative and
