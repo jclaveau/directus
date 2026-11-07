@@ -2,9 +2,10 @@ Feature: A nested write reaching back into the collection it starts from
 
   - A parent's o2m array upserts its children in one batch. A child nesting
     rows, pointing a self relation at a row, or setting an o2m alias, is
-    written on its own, in array order: a batch writes its updates before its
-    creates, so the row it or its nested rows point at would not exist yet,
-    and of two children naming one row by key the first would keep it.
+    written on its own, in array order: a batch writes its rows of one kind
+    together, under `minimizeMutations` its updates before its creates, so the
+    row it or its nested rows point at would not exist yet, and of two children
+    naming one row by key the first would keep it.
   - Every key is a string the scenario chooses, all of one scenario's keys
     sharing a prefix of its own.
   - A Given creates its table's rows in one request; an empty cell is null.

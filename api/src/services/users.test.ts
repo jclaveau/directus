@@ -13,6 +13,7 @@ import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
+import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import { verifyJWT } from '../utils/jwt.js';
@@ -1249,6 +1250,43 @@ describe('Integration Tests', () => {
 				await service.deleteMany(['8e2b4c10-5d3a-4f6e-9a7b-000000000047']);
 
 				expect(emittedActions).toEqual([['users.delete', ['committed']]]);
+			});
+		});
+
+		describe('deleteMany retried', () => {
+			it('fires only the action of the attempt that committed', async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+				const emitActionSpy = vi
+					.spyOn(emitter, 'emitAction')
+					.mockResolvedValue(undefined);
+
+				vi.mocked(ItemsService.prototype.deleteMany)
+					.mockImplementationOnce(async (_keys, opts) => {
+						opts!.bypassEmitAction!({ event: 'aborted attempt' } as any);
+
+						throw Object.assign(new Error('database is locked'), {
+							code: 'SQLITE_BUSY',
+						});
+					})
+					.mockImplementationOnce(async (keys, opts) => {
+						opts!.bypassEmitAction!({ event: 'committed attempt' } as any);
+
+						return keys;
+					});
+
+				tracker.on.select('directus_comments').response([]);
+				tracker.on.select('directus_notifications').response([]);
+				tracker.on.select('directus_versions').response([]);
+
+				await service.deleteMany(['8e2b4c10-5d3a-4f6e-9a7b-000000000048']);
+
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+				expect(emitActionSpy).toHaveBeenCalledOnce();
+
+				expect(emitActionSpy)
+					.toHaveBeenCalledWith('committed attempt', undefined, undefined);
 			});
 		});
 

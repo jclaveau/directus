@@ -42,6 +42,7 @@ import { isEqual, isNil, merge } from '../utils/lodash-es-used.js';
 import { withMeta } from '../utils/read-meta.js';
 import { sanitizeColumn } from '../utils/sanitize-schema.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { transaction } from '../utils/transaction.js';
 import { buildCollectionAndFieldRelations } from './fields/build-collection-and-field-relations.js';
 import { getCollectionMetaUpdates } from './fields/get-collection-meta-updates.js';
@@ -712,7 +713,7 @@ export class FieldsService {
 				);
 			}
 
-			await transaction(this.knex, async (trx) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
 				const relations = getRelations(this.schema.relations, collection, field);
 
 				const relationsService = new RelationsService({

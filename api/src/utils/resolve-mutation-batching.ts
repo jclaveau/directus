@@ -8,7 +8,7 @@ import { oneLine } from '@directus/utils';
 
 /**
  * The batching a write runs with: the caller's `mutationBatching`, else
- * `DEFAULT_MUTATION_BATCHING`, else `minimizeMutations` (an env missing the
+ * `DEFAULT_MUTATION_BATCHING`, else `preserveMutationOrder` (an env missing the
  * var, which `useEnv`'s defaults never leave out). A value outside
  * `MutationBatchingModes` is refused, never read as the default. So is
  * `refuseChildJoiningSeveralRows` under `disableBatching`: each row is written
@@ -26,7 +26,7 @@ export function resolveMutationBatching(
 
 	const mutationBatching = opts.mutationBatching
 		?? useEnv()['DEFAULT_MUTATION_BATCHING']
-		?? 'minimizeMutations';
+		?? 'preserveMutationOrder';
 
 	if (!MutationBatchingModes.includes(mutationBatching as MutationBatchingMode)) {
 		throw new Error(oneLine`
