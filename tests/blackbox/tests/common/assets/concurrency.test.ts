@@ -22,14 +22,15 @@ describe('/assets', () => {
 						// Setup
 						const spawnCountTarget = 5;
 						let spawnCount = 0;
-						let hasErrors = false;
+						let failedRound: Record<string, unknown> | null = null;
 						let isSpawnRunning = false;
 
 						const insertResponse = await request(getUrl(vendor))
 							.post('/files')
 							.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
 							.field('storage', storage)
-							.attach('file', createReadStream(imageFilePath));
+							.attach('file', createReadStream(imageFilePath))
+							.expect(200);
 
 						// Action
 						spawnAutoCannon();
@@ -53,9 +54,20 @@ describe('/assets', () => {
 
 								const result = JSON.parse(log);
 
-								if (result.timeouts > 0 || result.non2xx > 0) hasErrors = true;
+								if (result.timeouts > 0 || result.non2xx > 0) {
+									failedRound = {
+										round: spawnCount,
+										requests: result.requests.total,
+										errors: result.errors,
+										timeouts: result.timeouts,
+										non2xx: result.non2xx,
+										'4xx': result['4xx'],
+										'5xx': result['5xx'],
+										statusCodeStats: result.statusCodeStats,
+									};
+								}
 
-								if (spawnCount < spawnCountTarget && !hasErrors) {
+								if (spawnCount < spawnCountTarget && failedRound === null) {
 									spawnAutoCannon();
 								} else {
 									isSpawnRunning = false;
@@ -68,7 +80,9 @@ describe('/assets', () => {
 						}
 
 						// Assert
-						expect(hasErrors).toBe(false);
+						// The autocannon numbers of the round that failed, so a red run
+						// says whether it timed out or answered non-2xx.
+						expect(failedRound).toBeNull();
 					},
 					600_000,
 				);
