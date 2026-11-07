@@ -416,7 +416,7 @@ test('Adds no aggregate cases when every row holds the field rule', () => {
 			permissions: { bonus: { _gt: 0 } },
 			fields: ['id', 'salary'],
 		},
-	] as Permission[]);
+	] as unknown as Permission[]);
 
 	expect(ast).toEqual({
 		name: 'articles',

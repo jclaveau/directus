@@ -6,9 +6,8 @@ import type {
 } from '@directus/types';
 import type { Knex } from 'knex';
 import {
-	getCases,
-} from '../../../../permissions/modules/process-ast/lib/get-cases.js';
-import { isEqual } from '../../../../utils/lodash-es-used.js';
+	getAggregateFieldCases,
+} from '../../../../permissions/modules/process-ast/lib/aggregate-field-cases.js';
 import { applyCaseWhen } from '../../utils/apply-case-when.js';
 import type { AliasGenerator } from './create-alias-generator.js';
 
@@ -101,36 +100,4 @@ export function applyAggregate(
 			}
 		}
 	}
-}
-
-function getAggregateFieldCases(
-	collection: string,
-	field: string,
-	{ cases, permissions }: AggregateCaseOptions,
-) {
-	const {
-		cases: ruleCases,
-		caseMap,
-		allowedFields,
-	} = getCases(collection, permissions, []);
-
-	if (allowedFields.has('*') || allowedFields.has(field)) {
-		return [];
-	}
-
-	const fieldCases = [
-		...(caseMap['*'] ?? []),
-		...(caseMap[field] ?? []),
-	].map((caseIndex) => ruleCases[caseIndex]!);
-
-	// Every row read already goes through a rule granting the field
-	const everyRowGrantsField = cases.length > 0 && cases.every((rowCase) => {
-		return fieldCases.some((fieldCase) => isEqual(fieldCase, rowCase));
-	});
-
-	if (everyRowGrantsField) {
-		return [];
-	}
-
-	return fieldCases;
 }

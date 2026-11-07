@@ -7,8 +7,9 @@ import type {
 	NestedCollectionNode,
 	O2MNode,
 } from '../../../../types/ast.js';
-import { isEqual, uniq } from '../../../../utils/lodash-es-used.js';
+import { isEqual, uniq, uniqWith } from '../../../../utils/lodash-es-used.js';
 import { getUnaliasedFieldKey } from '../../../utils/get-unaliased-field-key.js';
+import { getAggregateFieldCases } from './aggregate-field-cases.js';
 import { getCases } from './get-cases.js';
 
 /**
@@ -48,15 +49,12 @@ function aggregateCasesOf(
 	const aggregatedFields = uniq(Object.values(query?.aggregate ?? {}).flat())
 		.filter((field) => field !== '*');
 
-	if (aggregatedFields.length === 0) {
-		return [];
-	}
-
-	const { cases: ruleCases } = getCases(collection, permissions, aggregatedFields);
-
-	return ruleCases.filter((ruleCase) => {
-		return !cases.some((rowCase) => isEqual(rowCase, ruleCase));
-	});
+	return uniqWith(
+		aggregatedFields.flatMap((field) => {
+			return getAggregateFieldCases(collection, field, { cases, permissions });
+		}),
+		isEqual,
+	);
 }
 
 function processChildren(

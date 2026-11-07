@@ -982,6 +982,7 @@ export class ItemScopedCacheService {
 		const {
 			fieldMap,
 			aggregateRuleFieldMap,
+			rootFilterFieldMap,
 			filterKeying,
 			keyedFilterPins,
 			m2oParentPins,
@@ -1007,7 +1008,7 @@ export class ItemScopedCacheService {
 			...fieldMap.read,
 			...fieldMap.other,
 			...aggregateRuleFieldMap.read,
-			...aggregateRuleFieldMap.other,
+			...rootFilterFieldMap.read,
 		]) {
 			if (entry.collection === this.collection) {
 				rootPaths.add(path);
@@ -1053,7 +1054,6 @@ export class ItemScopedCacheService {
 		const fingerprintedCollections = new Set([
 			...collectionsInFieldMap(fieldMap),
 			...filterKeying.keys(),
-			...beyondNestedRows,
 		]);
 
 		// Every field-map path reaching a collection, deduped: the read and the other
@@ -1191,7 +1191,6 @@ export class ItemScopedCacheService {
 				fieldMap.read,
 				fieldMap.other,
 				aggregateRuleFieldMap.read,
-				aggregateRuleFieldMap.other,
 			]);
 
 			if (paths.length === 0 || paths.includes('')) {
@@ -1199,9 +1198,12 @@ export class ItemScopedCacheService {
 			}
 
 			const nestedRowsBounded =
-				m2oParentPins.has(collection) ||
-				o2mChildPins.has(collection) ||
-				pathsTo(collection, [fieldMap.other]).every(isToOnePath);
+				pathsTo(collection, [aggregateRuleFieldMap.read]).every(isToOnePath)
+				&& (
+					m2oParentPins.has(collection) ||
+					o2mChildPins.has(collection) ||
+					pathsTo(collection, [fieldMap.other]).every(isToOnePath)
+				);
 
 			const fieldTypes = this.schema.collections[collection]?.fields ?? {};
 

@@ -946,6 +946,29 @@ export function scopedCacheFilterKeyingByCollection(
 }
 
 /**
+ * The collection behind each function hop of a filter: `extractFieldsFromQuery`
+ * files `count(children)` as a field of its node, with no path to the rows it
+ * totals.
+ */
+export function scopedCacheFunctionHops(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	filter: Filter,
+): Map<string, CollectionKey> {
+	const collectionByAlias = new Map<string, CollectionKey>();
+
+	scopedCacheFilterKeyingByAlias(
+		schema,
+		collection,
+		expandRelatedKeyFilters(schema, collection, filter),
+		'',
+		collectionByAlias,
+	);
+
+	return new Map([...collectionByAlias].filter(([alias]) => alias.includes('(')));
+}
+
+/**
  * The collections a read's root filter reaches through a `_some`/`_none` row and
  * through another row besides. No conjunct's key or value bounds such a collection:
  * each one describes its own row.

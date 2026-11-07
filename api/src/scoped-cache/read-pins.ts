@@ -35,6 +35,7 @@ import {
 	m2oParentRowsAtPathEnd,
 	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheFilterKeyingByCollection,
+	scopedCacheFunctionHops,
 	scopedCacheKeyedFieldType,
 } from './paths.js';
 import { SCOPED_CACHE_ANY_FIELD } from './fingerprint.js';
@@ -584,6 +585,42 @@ export function scopedCacheViewFieldsBeyondFieldMap(
 	return viewFieldMap;
 }
 
+function addFilterFields(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	filter: Filter,
+	fieldMap: FieldMap,
+	path: QueryPath,
+): void {
+	extractFieldsFromQuery(collection, { filter }, fieldMap, schema, path);
+
+	for (const [alias, hopCollection] of scopedCacheFunctionHops(
+		schema,
+		collection,
+		filter,
+	)) {
+		getInfoForPath(fieldMap, 'read', [...path, alias], hopCollection);
+	}
+}
+
+/**
+ * The fields the root's own filter and row cases read, function hops included: a
+ * hop back to the root reaches rows no key of the root bounds.
+ */
+export function scopedCacheRootFilterFields(
+	schema: SchemaOverview,
+	ast: AST,
+): FieldMap {
+	const rootFilterFields: FieldMap = { read: new Map(), other: new Map() };
+	const rootFilter = joinFilterWithCases(ast.query.filter, ast.cases);
+
+	if (rootFilter) {
+		addFilterFields(schema, ast.name, rootFilter, rootFilterFields, []);
+	}
+
+	return rootFilterFields;
+}
+
 /**
  * The fields the aggregate rules of every node read, apart from its row cases.
  * Those rules bound no row, so a filter's key or slice cannot answer for the
@@ -603,13 +640,7 @@ export function scopedCacheAggregateRuleFields(
 		const rulesFilter = joinFilterWithCases(null, rules);
 
 		if (rulesFilter) {
-			extractFieldsFromQuery(
-				collection,
-				{ filter: rulesFilter },
-				ruleFieldMap,
-				schema,
-				path,
-			);
+			addFilterFields(schema, collection, rulesFilter, ruleFieldMap, path);
 		}
 	};
 
