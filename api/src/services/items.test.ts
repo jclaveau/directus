@@ -8126,6 +8126,56 @@ describe('Services / Items / mutationBatching', () => {
 		},
 	);
 
+	it('upsertMany hands its actions to the bypass of the caller', async () => {
+		const heldEvents: unknown[] = [];
+
+		await new ItemsService('test', { knex: database, schema }).upsertMany(
+			[{ id: 1, name: 'uno' }],
+			{
+				bypassEmitAction: ({ event }) => {
+					heldEvents.push(event);
+				},
+			},
+		);
+
+		expect(heldEvents).toStrictEqual([['items.update', 'test.items.update']]);
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
+		]);
+	});
+
+	it('upsertMany fires the actions of the attempt that committed', async () => {
+		const busyOnSecondRow = vi.fn()
+			.mockImplementationOnce((payload) => payload)
+			.mockImplementationOnce(() => {
+				throw Object.assign(new Error('database is locked'), {
+					code: 'SQLITE_BUSY',
+				});
+			})
+			.mockImplementation((payload) => payload);
+
+		emitter.onFilter('test.items.create', busyOnSecondRow);
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema }).upsertMany([
+				{ id: 3, name: 'three' },
+				{ id: 1, name: 'uno' },
+				{ id: 4, name: 'four' },
+			]))
+				.resolves.toStrictEqual([3, 1, 4]);
+		}
+		finally {
+			emitter.offFilter('test.items.create', busyOnSecondRow);
+		}
+
+		expect(hookCalls.slice(-3)).toStrictEqual([
+			['create action', [3]],
+			['update action', [{ data: { name: 'uno' }, keys: [1] }]],
+			['create action', [4]],
+		]);
+	});
+
 	it('disableBatching fires the actions of the attempt that committed', async () => {
 		const busyOnSecondRow = vi.fn()
 			.mockImplementationOnce((payload) => payload)

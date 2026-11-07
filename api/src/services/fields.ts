@@ -398,7 +398,7 @@ export class FieldsService {
 				addFieldFlag(field, flagToAdd);
 			}
 
-			await transaction(this.knex, async (trx) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
 				const itemsService = new ItemsService('directus_fields', {
 					knex: trx,
 					accountability: this.accountability,

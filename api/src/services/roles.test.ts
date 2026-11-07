@@ -279,6 +279,31 @@ describe('Integration Tests', () => {
 				expect(emitActionSpy).not.toHaveBeenCalled();
 			});
 
+			it('hands its cascade to the bypassEmitAction of the caller', async () => {
+				const emitActionSpy = vi
+					.spyOn(emitter, 'emitAction')
+					.mockResolvedValue(undefined);
+
+				const accessEvent = {
+					event: 'access.delete',
+					meta: {},
+					context: {},
+				} as any;
+
+				accessDeleteRoleAccessSpy.mockImplementationOnce(async (_keys, opts) => {
+					opts!.bypassEmitAction!(accessEvent);
+
+					return ['access-id-1'];
+				});
+
+				const bypassEmitAction = vi.fn();
+
+				await service.deleteMany(['role-id-11'], { bypassEmitAction });
+
+				expect(bypassEmitAction).toHaveBeenCalledExactlyOnceWith(accessEvent);
+				expect(emitActionSpy).not.toHaveBeenCalled();
+			});
+
 			it('fires the actions of its cascade once it committed', async () => {
 				const database = knex.default({ client: MockClient });
 				const databaseTracker = createTracker(database);
