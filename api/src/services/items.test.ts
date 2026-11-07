@@ -5403,6 +5403,79 @@ describe('Services / Items / a failed mutation on the caller\'s transaction', ()
 	});
 
 	it(oneLine`
+		disableBatching purges the collection whole when a later row fails after a
+		hook took an earlier row over
+	`, async () => {
+		const takeOverFirst = (entries: (CreateEntry | null)[]) => {
+			return mapCreateRows(entries, (payload) => {
+				if (payload['name'] !== 'take-over') {
+					return payload;
+				}
+
+				return 1;
+			});
+		};
+
+		tracker.on.insert('test').simulateError('duplicate key');
+		emitter.onFilter('items.create', takeOverFirst);
+
+		try {
+			await expect(new ItemsService('test', { knex: db, schema }).createMany([
+				{ name: 'take-over' },
+				{ id: 1, name: 'copy' },
+			], { mutationBatching: 'disableBatching' })).rejects.toThrow(new Error(
+				`insert into "test" ("id", "name") values (1, 'copy') - duplicate key`,
+			));
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				null,
+				expect.anything(),
+				{ scopedCachePurgeId: expect.any(String) },
+			);
+		}
+		finally {
+			emitter.offFilter('items.create', takeOverFirst);
+		}
+	});
+
+	it(oneLine`
+		disableBatching purges the collection whole when a later group fails after a
+		hook took a row over in an earlier group
+	`, async () => {
+		const takeOverThird = (groups: UpdateGroup[]) => {
+			return groups[0]?.keys?.[0] === 1
+				? [...groups, { key: 3 }]
+				: groups;
+		};
+
+		tracker.on.update('test').responseOnce(1);
+		tracker.on.update('test').simulateError('write refused');
+		emitter.onFilter('items.update', takeOverThird);
+
+		try {
+			await expect(new ItemsService('test', { knex: db, schema }).updateBatch([
+				{ id: 1, name: 'uno' },
+				{ id: 2, name: 'dos' },
+			], { mutationBatching: 'disableBatching' })).rejects.toThrow(new Error(
+				`update "test" set "name" = 'dos' where "id" in (2) - write refused`,
+			));
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				null,
+				expect.anything(),
+				{ scopedCachePurgeId: expect.any(String) },
+			);
+		}
+		finally {
+			emitter.offFilter('items.update', takeOverThird);
+		}
+	});
+
+	it(oneLine`
 		purges nothing when a failed create's only takeover was declared inert
 	`, async () => {
 		const takeOverInert = (
@@ -7956,6 +8029,82 @@ describe('Services / Items / mutationBatching', () => {
 			['create filter', [{ data: { id: 3, name: 'three' } }]],
 			['create filter', [{ data: { id: 4, name: 'one' } }]],
 		]);
+	});
+
+	it('PROBE update action of a rolled-back group', async () => {
+		await expect(new ItemsService('test', { knex: database, schema }).updateBatch([
+			{ id: 1, name: 'uno' },
+			{ id: 2, name: 'uno' },
+		], { mutationBatching: 'disableBatching' }))
+			.rejects.toStrictEqual(new RecordNotUniqueError({
+				collection: 'test',
+				field: 'name',
+				value: 'uno',
+			}));
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [{ data: { name: 'uno' }, keys: [1] }]],
+			['update action', [{ data: { name: 'uno' }, keys: [1] }]],
+			['update filter', [{ data: { name: 'uno' }, keys: [2] }]],
+		]);
+	});
+
+	it('PROBE upsert action of a rolled-back row', async () => {
+		await expect(new ItemsService('test', { knex: database, schema }).upsertMany([
+			{ id: 10, name: 'ten' },
+			{ id: 11, name: 'one' },
+		], { mutationBatching: 'disableBatching' }))
+			.rejects.toStrictEqual(new RecordNotUniqueError({
+				collection: 'test',
+				field: 'name',
+				value: 'one',
+			}));
+
+		expect(hookCalls).toStrictEqual([
+			['create filter', [{ data: { id: 10, name: 'ten' } }]],
+			['create action', [10]],
+			['create filter', [{ data: { id: 11, name: 'one' } }]],
+		]);
+	});
+
+	it('disableBatching refuses an oversized createMany before any hook', async () => {
+		env['MAX_BATCH_MUTATION'] = 2;
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema }).createMany([
+				{ id: 3, name: 'three' },
+				{ id: 4, name: 'four' },
+				{ id: 5, name: 'five' },
+			], { mutationBatching: 'disableBatching' }))
+				.rejects.toStrictEqual(new InvalidPayloadError({
+					reason: 'Exceeded max batch mutation limit of 2',
+				}));
+
+			expect(hookCalls).toStrictEqual([]);
+		}
+		finally {
+			env['MAX_BATCH_MUTATION'] = 100000;
+		}
+	});
+
+	it('disableBatching refuses an oversized upsertMany before any hook', async () => {
+		env['MAX_BATCH_MUTATION'] = 2;
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema }).upsertMany([
+				{ id: 3, name: 'three' },
+				{ id: 4, name: 'four' },
+				{ id: 5, name: 'five' },
+			], { mutationBatching: 'disableBatching' }))
+				.rejects.toStrictEqual(new InvalidPayloadError({
+					reason: 'Exceeded max batch mutation limit of 2',
+				}));
+
+			expect(hookCalls).toStrictEqual([]);
+		}
+		finally {
+			env['MAX_BATCH_MUTATION'] = 100000;
+		}
 	});
 
 	it('disableBatching runs a subclass createMany once', async () => {

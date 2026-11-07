@@ -137,7 +137,6 @@ export default async function createApp(): Promise<express.Application> {
 	// Ending the process after the listen would pass the deployment's healthcheck
 	// and crash-loop behind it.
 	validateDurationEnv(['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX']);
-	validateChoiceEnv('DEFAULT_MUTATION_BATCHING', MutationBatchingModes);
 	validateCacheSettingsEnv();
 	validateUnreadEnv();
 	validateAutoMigrateEnv();

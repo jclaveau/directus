@@ -9,6 +9,7 @@ import {
 	updateItems,
 	updateItemsBatch,
 	updateSettings,
+	updateSingleton,
 } from '../src/index.js';
 import type { TestSchema } from './schema.js';
 
@@ -56,6 +57,18 @@ describe('mutationBatching on a create or an update', () => {
 					mutationBatching: 'preserveMutationOrder',
 				}),
 			),
+		);
+	});
+
+	test('updateSingleton takes it', () => {
+		assertType(
+			createDirectus<{ home_page: { id: number } }>('https://directus.example.com')
+				.with(rest())
+				.request(
+					updateSingleton('home_page', { id: 1 }, {
+						mutationBatching: 'disableBatching',
+					}),
+				),
 		);
 	});
 
