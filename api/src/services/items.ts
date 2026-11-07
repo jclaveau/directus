@@ -3849,7 +3849,8 @@ implements AbstractService<Item> {
 			// a row found is updated: a delete committing before the update would
 			// leave it writing nothing, so the found rows stay locked until commit
 			if (capabilities.supportsRowLocks()) {
-				// the update changes no key: a foreign key naming the row need not wait
+				// the update keeps the primary key: a foreign key naming the row need not
+				// wait, unless the update changes a unique column
 				if (capabilities.supportsNoKeyUpdateLock()) {
 					existenceRead.forNoKeyUpdate();
 				}

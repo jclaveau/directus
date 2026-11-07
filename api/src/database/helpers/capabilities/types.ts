@@ -53,8 +53,9 @@ export class CapabilitiesHelper extends DatabaseHelper {
 	}
 
 	/**
-	 * Whether `SELECT … FOR NO KEY UPDATE` exists: it stops a delete or another
-	 * write of the row, not a foreign key naming it.
+	 * Whether a row read before its update takes `FOR NO KEY UPDATE`: it stops a
+	 * delete or another write of the row, not a foreign key naming it, until
+	 * the update changes a unique column.
 	 */
 	supportsNoKeyUpdateLock(): boolean {
 		return false;

@@ -8105,7 +8105,7 @@ describe('upsertMany on postgres', () => {
 		});
 	});
 
-	it('locks them FOR UPDATE on a dialect without FOR NO KEY UPDATE', async () => {
+	it('locks them FOR UPDATE where FOR NO KEY UPDATE is not taken', async () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('cockroachdb');
 
 		pgTracker.on.select('posts').response([{ id: 1 }]);
