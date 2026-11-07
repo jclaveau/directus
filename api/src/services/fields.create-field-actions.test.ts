@@ -48,7 +48,28 @@ const schema = new SchemaBuilder()
 		c.field('sort').integer();
 		c.field('group').string();
 	})
+	.collection('directus_activity', (c) => {
+		c.field('id').id();
+		c.field('action').string();
+		c.field('user').string();
+		c.field('collection').string();
+		c.field('item').string();
+		c.field('ip').string();
+		c.field('user_agent').string();
+		c.field('origin').string();
+	})
 	.build();
+
+schema.collections['directus_fields']!.accountability = 'activity';
+
+const adminAccountability = {
+	user: 'u1',
+	role: null,
+	roles: [],
+	admin: true,
+	app: true,
+	ip: null,
+} as any;
 
 describe('Services / Fields / createField actions', () => {
 	let database: Knex;
@@ -68,6 +89,25 @@ describe('Services / Fields / createField actions', () => {
 			table.string('special');
 			table.integer('sort');
 			table.string('group');
+		});
+
+		await database.schema.createTable('directus_activity', (table) => {
+			table.increments('id');
+			table.string('action');
+			table.string('user');
+			table.string('collection');
+			table.string('item');
+			table.string('ip');
+			table.string('user_agent');
+			table.string('origin');
+			table.timestamp('timestamp');
+		});
+
+		await database.schema.createTable('directus_collections', (table) => {
+			table.string('collection');
+			table.string('archive_field');
+			table.string('sort_field');
+			table.string('item_duplication_fields');
 		});
 	});
 
@@ -100,6 +140,123 @@ describe('Services / Fields / createField actions', () => {
 
 		expect(emitAction).not.toHaveBeenCalled();
 	});
+
+	it('fires no activity action of its field row when the commit fails', async () => {
+		const emitAction = vi.spyOn(emitter, 'emitAction').mockResolvedValue(undefined);
+
+		vi.mocked(transaction).mockImplementationOnce(async (trxKnex, runHandler) => {
+			await runHandler(trxKnex);
+
+			throw new Error('commit failed');
+		});
+
+		const service = new FieldsService({
+			knex: database,
+			schema,
+			accountability: adminAccountability,
+		});
+
+		await expect(service.createField(
+			'test',
+			{ field: 'alias_field', type: 'alias', meta: { special: ['no-data'] } } as any,
+			undefined,
+			{ autoPurgeSystemCache: false },
+		)).rejects.toEqual(new Error('commit failed'));
+
+		expect(emitAction).not.toHaveBeenCalled();
+	});
+
+	it(
+		'hands the activity action of its field row to the caller holding them',
+		async () => {
+			const emitAction = vi.spyOn(emitter, 'emitAction')
+				.mockResolvedValue(undefined);
+
+			const service = new FieldsService({
+				knex: database,
+				schema,
+				accountability: adminAccountability,
+			});
+
+			await service.updateField(
+				'test',
+				{
+					field: 'alias_field',
+					type: 'alias',
+					meta: { special: ['no-data'] },
+				} as any,
+				{ autoPurgeSystemCache: false, bypassEmitAction: vi.fn() },
+			);
+
+			expect(emitAction).not.toHaveBeenCalled();
+		},
+	);
+
+	it(
+		'hands the activity action of its updated field row to the caller holding them',
+		async () => {
+			await database('directus_fields')
+				.insert({ collection: 'test', field: 'alias_field' });
+
+			const emitAction = vi.spyOn(emitter, 'emitAction')
+				.mockResolvedValue(undefined);
+
+			const service = new FieldsService({
+				knex: database,
+				schema,
+				accountability: adminAccountability,
+			});
+
+			await service.updateField(
+				'test',
+				{
+					field: 'alias_field',
+					type: 'alias',
+					meta: { special: ['no-data'] },
+				} as any,
+				{ autoPurgeSystemCache: false, bypassEmitAction: vi.fn() },
+			);
+
+			expect(emitAction).not.toHaveBeenCalled();
+		},
+	);
+
+	it(
+		'fires no activity action of its deleted field row when the commit fails',
+		async () => {
+			await database('directus_fields')
+				.insert({ collection: 'test', field: 'alias_field' });
+
+			const emitAction = vi.spyOn(emitter, 'emitAction')
+				.mockResolvedValue(undefined);
+
+			vi.mocked(transaction).mockImplementationOnce(async (trxKnex, runHandler) => {
+				await runHandler(trxKnex);
+
+				throw new Error('commit failed');
+			});
+
+			const service = new FieldsService({
+				knex: database,
+				schema,
+				accountability: adminAccountability,
+			});
+
+			await expect(service.deleteField(
+				'test',
+				'alias_field',
+				{ autoPurgeSystemCache: false },
+			)).rejects.toEqual(new Error('commit failed'));
+
+			// `deleteByQuery` keeps the read of its keys out of `emitEvents`, which
+			// predates this hold.
+			expect(emitAction).not.toHaveBeenCalledWith(
+				'activity.create',
+				expect.anything(),
+				expect.anything(),
+			);
+		},
+	);
 
 	it('fires the action of the attempt that committed, once', async () => {
 		const emitAction = vi.spyOn(emitter, 'emitAction').mockResolvedValue(undefined);

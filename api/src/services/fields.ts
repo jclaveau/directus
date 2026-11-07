@@ -54,6 +54,19 @@ import { RelationsService } from './relations.js';
 const systemFieldRows = getSystemFieldRowsWithAuthProviders();
 const env = useEnv();
 
+// `emitEvents: false` still writes an activity row, whose action has to wait for
+// the field's commit, or for the caller's own hold.
+function holdActionEventIn(
+	nestedActionEvents: ActionEventParams[],
+	opts: MutationOptions | undefined,
+) {
+	return (actionEvent: ActionEventParams) => {
+		return opts?.bypassEmitAction
+			? opts.bypassEmitAction(actionEvent)
+			: nestedActionEvents.push(actionEvent);
+	};
+}
+
 export class FieldsService {
 	knex: Knex;
 	helpers: Helpers;
@@ -446,7 +459,10 @@ export class FieldsService {
 							collection: collection,
 							field: hookAdjustedField.field,
 						},
-						{ emitEvents: false },
+						{
+							emitEvents: false,
+							bypassEmitAction: holdActionEventIn(nestedActionEvents, opts),
+						},
 					);
 				}
 
@@ -503,6 +519,8 @@ export class FieldsService {
 
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
 		const nestedActionEvents: ActionEventParams[] = [];
+
+		const holdActionEvent = holdActionEventIn(nestedActionEvents, opts);
 
 		// 'type' is required for further checks on schema update
 		if (field.schema && !field.type) {
@@ -591,7 +609,7 @@ export class FieldsService {
 							collection: collection,
 							field: hookAdjustedField.field,
 						},
-						{ emitEvents: false },
+						{ emitEvents: false, bypassEmitAction: holdActionEvent },
 					);
 				} else {
 					await this.itemsService.createOne(
@@ -600,7 +618,7 @@ export class FieldsService {
 							collection: collection,
 							field: hookAdjustedField.field,
 						},
-						{ emitEvents: false },
+						{ emitEvents: false, bypassEmitAction: holdActionEvent },
 					);
 				}
 			}
@@ -832,7 +850,10 @@ export class FieldsService {
 							field: { _eq: field },
 						},
 					},
-					{ emitEvents: false },
+					{
+						emitEvents: false,
+						bypassEmitAction: holdActionEventIn(nestedActionEvents, opts),
+					},
 				);
 			});
 
