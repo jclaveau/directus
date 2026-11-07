@@ -1,5 +1,33 @@
-import type { Aggregate, SchemaOverview } from '@directus/types';
+import type {
+	Aggregate,
+	Filter,
+	Permission,
+	SchemaOverview,
+} from '@directus/types';
 import type { Knex } from 'knex';
+import {
+	getAggregateFieldCases,
+} from '../../../../permissions/modules/process-ast/lib/aggregate-field-cases.js';
+import { applyCaseWhen } from '../../utils/apply-case-when.js';
+import type { AliasGenerator } from './create-alias-generator.js';
+
+export type AggregateCaseOptions = {
+	knex: Knex;
+	cases: Filter[];
+	permissions: Permission[];
+	generateAlias: AliasGenerator;
+};
+
+const aggregateSqlByOperation = new Map([
+	['count', 'count(?)'],
+	['countDistinct', 'count(distinct ?)'],
+	['avg', 'avg(?)'],
+	['avgDistinct', 'avg(distinct ?)'],
+	['sum', 'sum(?)'],
+	['sumDistinct', 'sum(distinct ?)'],
+	['min', 'min(?)'],
+	['max', 'max(?)'],
+]);
 
 export function applyAggregate(
 	schema: SchemaOverview,
@@ -7,6 +35,7 @@ export function applyAggregate(
 	aggregate: Aggregate,
 	collection: string,
 	hasJoins: boolean,
+	caseOptions?: AggregateCaseOptions,
 ): void {
 	for (const [operation, fields] of Object.entries(aggregate)) {
 		if (!fields) continue;
@@ -19,6 +48,44 @@ export function applyAggregate(
 
 			if (operation === 'count' && field === '*') {
 				dbQuery.count('*', { as: 'count' });
+				continue;
+			}
+
+			// A primary key is never null: this counts the rows read, as count(*) does.
+			// `*` names no column a case could return.
+			const countsRowsRead = ['count', 'countDistinct'].includes(operation)
+				&& (field === '*' || schema.collections[collection]?.primary === field);
+
+			const fieldCases = caseOptions && !countsRowsRead
+				? getAggregateFieldCases(collection, field, caseOptions)
+				: [];
+
+			const aggregateSql = aggregateSqlByOperation.get(operation);
+
+			if (caseOptions && aggregateSql && fieldCases.length > 0) {
+				const { knex, cases, permissions, generateAlias } = caseOptions;
+
+				// By key: the rule may read an o2m, or a join the rows do not go through
+				const casedColumn = applyCaseWhen(
+					{
+						column: knex.raw('??.??', [collection, field]),
+						columnCases: fieldCases,
+						table: collection,
+						cases,
+						aliasMap: Object.create(null),
+						permissions,
+						generateAlias,
+						readsCasesByKey: true,
+					},
+					{ knex, schema },
+				);
+
+				// knex drops the alias of an aggregate over a raw column
+				dbQuery.select(knex.raw(`${aggregateSql} as ??`, [
+					casedColumn,
+					`${operation}->${field}`,
+				]));
+
 				continue;
 			}
 

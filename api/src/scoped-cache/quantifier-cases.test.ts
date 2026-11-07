@@ -43,6 +43,109 @@ describe('scopedCacheAstWithQuantifierCases', () => {
 		expect(scopedCacheAstWithQuantifierCases(schema, ast, [])).toBe(ast);
 	});
 
+	test('adds the rule of the related rows to the root aggregate rules', () => {
+		expect(scopedCacheAstWithQuantifierCases(schema, {
+			type: 'root',
+			name: 'article',
+			query: {},
+			cases: [],
+			aggregateCases: [{ links: { _some: { id: { _eq: 7 } } } }],
+			children: [],
+		} as unknown as AST, permissions)).toEqual({
+			type: 'root',
+			name: 'article',
+			query: {},
+			cases: [],
+			aggregateCases: [{
+				links: {
+					_some: {
+						_and: [{ id: { _eq: 7 } }, { _or: [{ status: { _eq: 'open' } }] }],
+					},
+				},
+			}],
+			children: [],
+		});
+	});
+
+	test('adds it to the aggregate rules of a nested node', () => {
+		expect(scopedCacheAstWithQuantifierCases(schema, {
+			type: 'root',
+			name: 'project',
+			query: {},
+			cases: [],
+			children: [{
+				type: 'o2m',
+				name: 'article',
+				query: {},
+				cases: [],
+				aggregateCases: [{ links: { _some: { id: { _eq: 7 } } } }],
+				children: [],
+			}],
+		} as unknown as AST, permissions)).toEqual({
+			type: 'root',
+			name: 'project',
+			query: {},
+			cases: [],
+			children: [{
+				type: 'o2m',
+				name: 'article',
+				query: {},
+				cases: [],
+				aggregateCases: [{
+					links: {
+						_some: {
+							_and: [{ id: { _eq: 7 } }, { _or: [{ status: { _eq: 'open' } }] }],
+						},
+					},
+				}],
+				children: [],
+			}],
+		});
+	});
+
+	test('adds it to the aggregate rules of each collection of an A2O', () => {
+		expect(scopedCacheAstWithQuantifierCases(schema, {
+			type: 'root',
+			name: 'project',
+			query: {},
+			cases: [],
+			children: [{
+				type: 'a2o',
+				names: ['article'],
+				query: { article: {} },
+				cases: { article: [] },
+				aggregateCases: {
+					article: [{ links: { _some: { id: { _eq: 7 } } } }],
+				},
+				children: { article: [] },
+			}],
+		} as unknown as AST, permissions)).toEqual({
+			type: 'root',
+			name: 'project',
+			query: {},
+			cases: [],
+			children: [{
+				type: 'a2o',
+				names: ['article'],
+				query: { article: {} },
+				cases: { article: [] },
+				aggregateCases: {
+					article: [{
+						links: {
+							_some: {
+								_and: [
+									{ id: { _eq: 7 } },
+									{ _or: [{ status: { _eq: 'open' } }] },
+								],
+							},
+						},
+					}],
+				},
+				children: { article: [] },
+			}],
+		});
+	});
+
 	test('adds the rule of the related rows to the root', () => {
 		expect(scopedCacheAstWithQuantifierCases(schema, {
 			type: 'root',

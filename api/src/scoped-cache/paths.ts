@@ -906,7 +906,10 @@ export function scopedCacheFilterKeyingByCollection(
 		}
 	};
 
+	// Rules an aggregate reads fold apart from the node's filter: conjoined with
+	// it, the filter's key would still answer for what they read past that key.
 	readKeyingOf(ast.name, ast.query, ast.cases);
+	readKeyingOf(ast.name, {}, ast.aggregateCases ?? []);
 
 	const readKeyingOfChildren = (children: AST['children']): void => {
 		for (const child of children) {
@@ -924,6 +927,7 @@ export function scopedCacheFilterKeyingByCollection(
 			if (child.type === 'a2o') {
 				for (const name of child.names) {
 					readKeyingOf(name, child.query[name] ?? {}, child.cases[name] ?? []);
+					readKeyingOf(name, {}, child.aggregateCases?.[name] ?? []);
 					readKeyingOfChildren(child.children[name] ?? []);
 				}
 
@@ -931,6 +935,7 @@ export function scopedCacheFilterKeyingByCollection(
 			}
 
 			readKeyingOf(child.name, child.query, child.cases);
+			readKeyingOf(child.name, {}, child.aggregateCases ?? []);
 			readKeyingOfChildren(child.children);
 		}
 	};
@@ -938,6 +943,29 @@ export function scopedCacheFilterKeyingByCollection(
 	readKeyingOfChildren(ast.children);
 
 	return keyingByCollection;
+}
+
+/**
+ * The collection behind each function hop of a filter: `extractFieldsFromQuery`
+ * files `count(children)` as a field of its node, with no path to the rows it
+ * totals.
+ */
+export function scopedCacheFunctionHops(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	filter: Filter,
+): Map<string, CollectionKey> {
+	const collectionByAlias = new Map<string, CollectionKey>();
+
+	scopedCacheFilterKeyingByAlias(
+		schema,
+		collection,
+		expandRelatedKeyFilters(schema, collection, filter),
+		'',
+		collectionByAlias,
+	);
+
+	return new Map([...collectionByAlias].filter(([alias]) => alias.includes('(')));
 }
 
 /**
