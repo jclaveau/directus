@@ -152,7 +152,7 @@ export async function createCli(
 	/** One module for the three directions, reached once whichever was asked for. */
 	const migrate = async (
 		direction: 'latest' | 'up' | 'down',
-		options: { snapshot?: string } = {},
+		options: { snapshot?: string; phase?: string } = {},
 	) => {
 		const { default: dbMigrate } = await import('./commands/database/migrate.js');
 
@@ -167,7 +167,13 @@ export async function createCli(
 			'Schema snapshot applied between the before-schema and after-schema '
 			+ 'migrations',
 		)
-		.action((options: { snapshot?: string }) => migrate('latest', options));
+		.option(
+			'--phase <phase>',
+			'Run only the before-schema or the after-schema migrations',
+		)
+		.action((options: { snapshot?: string; phase?: string }) => {
+			return migrate('latest', options);
+		});
 
 	dbCommand
 		.command('migrate:up')

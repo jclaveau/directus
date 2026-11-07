@@ -17,11 +17,20 @@ import { isEmptySnapshotDiff } from '../commands/schema/report-diff.js';
  * Migrates to the latest version, the installed bundles' migrations included:
  * the core's and the before-schema ones, then the snapshot, then the
  * after-schema ones, which read what the snapshot creates.
+ *
+ * A `phase` runs that phase alone, for a deploy that applies its schema with its
+ * own tool in between.
  */
 export async function migrateLatest(
 	database: Knex,
 	snapshotPath?: string,
+	phase?: string,
 ): Promise<void> {
+	if (phase !== undefined) {
+		await migrateOnePhase(database, snapshotPath, phase);
+		return;
+	}
+
 	const extensionMigrations = await getExtensionMigrations();
 
 	await runMigrations(database, 'latest', true, {
@@ -39,6 +48,48 @@ export async function migrateLatest(
 	await runMigrations(database, 'latest', true, {
 		extensionMigrations,
 		phase: 'after-schema',
+	});
+}
+
+async function migrateOnePhase(
+	database: Knex,
+	snapshotPath: string | undefined,
+	phase: string,
+): Promise<void> {
+	if (phase !== 'before-schema' && phase !== 'after-schema') {
+		throw new Error(
+			`Unknown migration phase ${JSON.stringify(phase)}:`
+				+ ' expected "before-schema" or "after-schema"',
+		);
+	}
+
+	if (snapshotPath !== undefined) {
+		throw new Error(
+			`--snapshot ${JSON.stringify(snapshotPath)} is applied between the two`
+				+ ` phases: it cannot go with --phase ${JSON.stringify(phase)}`,
+		);
+	}
+
+	const extensionMigrations = await getExtensionMigrations();
+
+	if (phase === 'after-schema') {
+		const pendingVersions = await outstandingMigrations(
+			extensionMigrations.filter(({ config }) => config.phase !== 'after-schema'),
+		);
+
+		if (pendingVersions.length > 0) {
+			throw new Error(
+				`Migrations ${
+					pendingVersions.map((version) => JSON.stringify(version)).join(', ')
+				}`
+					+ ' run before the after-schema ones: run --phase before-schema first',
+			);
+		}
+	}
+
+	await runMigrations(database, 'latest', true, {
+		extensionMigrations,
+		phase,
 	});
 }
 
@@ -95,6 +146,7 @@ async function refusePendingAfterSchema(
 		`Migrations ${
 			pendingVersions.map((version) => JSON.stringify(version)).join(', ')
 		}`
-			+ ' run once the schema snapshot is applied: pass --snapshot <path>',
+			+ ' run once the schema snapshot is applied: pass --snapshot <path>,'
+			+ ' or --phase after-schema once your own tool applied it',
 	);
 }
