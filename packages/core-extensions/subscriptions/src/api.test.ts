@@ -7,6 +7,7 @@ describe('bundle api', () => {
 
 		expect(bundleApi.entries.map((bundleEntry) => bundleEntry.name)).toEqual([
 			'20261105A-create-subscription-tables',
+			'20261107A-create-parked-syncs-preset',
 			'subscriptions-sync',
 			'subscriptions',
 		]);
