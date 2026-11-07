@@ -759,6 +759,7 @@ export class PayloadService {
 				},
 				emitEvents: opts?.emitEvents,
 				mutationTracker: opts?.mutationTracker,
+				mutationBatching: opts?.mutationBatching,
 			},
 		);
 
