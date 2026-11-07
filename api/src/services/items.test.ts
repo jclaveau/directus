@@ -7730,8 +7730,8 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 	it('throws the preMutationError once a row passed its filter hooks', async () => {
 		await expect(new ItemsService('test', { knex: database, schema: rowSchema })
 			.createMany([{ id: 3 }], {
-				preMutationError: new InvalidPayloadError({ reason: 'stop' }),
-			})).rejects.toStrictEqual(new InvalidPayloadError({ reason: 'stop' }));
+				preMutationError: new ForbiddenError(),
+			})).rejects.toStrictEqual(new ForbiddenError());
 
 		await expect(database('test').select('id')).resolves.toStrictEqual([]);
 	});
@@ -7744,7 +7744,7 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 			await expect(new ItemsService('test', { knex: database, schema: rowSchema })
 				.createMany([{ id: 3 }], {
 					allowFilterCancel: true,
-					preMutationError: new InvalidPayloadError({ reason: 'stop' }),
+					preMutationError: new ForbiddenError(),
 				})).resolves.toStrictEqual([null]);
 		}
 		finally {
