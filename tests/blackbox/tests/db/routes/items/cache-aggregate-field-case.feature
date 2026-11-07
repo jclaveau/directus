@@ -937,3 +937,197 @@ Feature: A cached aggregate follows the rule that decides what it reads
       |   groupBy: category                         |     - category: news   |
       |   filter[id][_eq]: <run>-a                  |       sum:             |
       |                                             |         salary: null   |
+
+  Scenario: a nested grouped sum follows a third collection its rule reads
+    Given these requests are sent:
+      | request                                  | response  |
+      | method: POST                             | code: 200 |+
+      | path: /items/test_agg_cache_author       |           |
+      | payload:                                 |           |
+      |   - id: <run>-pub                        |           |
+      |     status: live                         |           |
+      | method: POST                             | code: 200 |+
+      | path: /items/test_agg_cache_article      |           |
+      | payload:                                 |           |
+      |   - id: <run>-a                          |           |
+      |     author: <run>-pub                    |           |
+      | method: POST                             | code: 200 |+
+      | path: /items/test_agg_cache_link         |           |
+      | payload:                                 |           |
+      |   - id: <run>-a1                         |           |
+      |     article: <run>-a                     |           |
+      |     weight: 5                            |           |
+      | method: POST                             | code: 200 |+
+      | path: /policies                          |           |
+      | payload:                                 |           |
+      |   id: <reader-policy-0>                  |           |
+      |   name: agg-cache-0-<run>                |           |
+      |   app_access: false                      |           |
+      |   admin_access: false                    |           |
+      |   permissions:                           |           |
+      |     - collection: test_agg_cache_article |           |
+      |       action: read                       |           |
+      |       fields:                            |           |
+      |         - id                             |           |
+      |         - links                          |           |
+      |       permissions: {}                    |           |
+      | method: POST                             | code: 200 |+
+      | path: /policies                          |           |
+      | payload:                                 |           |
+      |   id: <reader-policy-1>                  |           |
+      |   name: agg-cache-1-<run>                |           |
+      |   app_access: false                      |           |
+      |   admin_access: false                    |           |
+      |   permissions:                           |           |
+      |     - collection: test_agg_cache_link    |           |
+      |       action: read                       |           |
+      |       fields:                            |           |
+      |         - id                             |           |
+      |         - article                        |           |
+      |       permissions: {}                    |           |
+      | method: POST                             | code: 200 |+
+      | path: /policies                          |           |
+      | payload:                                 |           |
+      |   id: <reader-policy-2>                  |           |
+      |   name: agg-cache-2-<run>                |           |
+      |   app_access: false                      |           |
+      |   admin_access: false                    |           |
+      |   permissions:                           |           |
+      |     - collection: test_agg_cache_link    |           |
+      |       action: read                       |           |
+      |       fields:                            |           |
+      |         - weight                         |           |
+      |       permissions:                       |           |
+      |         article:                         |           |
+      |           author:                        |           |
+      |             status:                      |           |
+      |               _eq: live                  |           |
+      | method: POST                             | code: 200 |+
+      | path: /users                             |           |
+      | payload:                                 |           |
+      |   email: agg-cache-<run>@example.com     |           |
+      |   token: <reader-token>                  |           |
+      |   policies:                              |           |
+      |     - policy: <reader-policy-0>          |           |
+      |     - policy: <reader-policy-1>          |           |
+      |     - policy: <reader-policy-2>          |           |
+    Then these requests get these responses:
+      | request                                      | response                   |
+      | as: <reader-token>                           | code: 200                  |+
+      | method: GET                                  | headers:                   |
+      | path: /items/test_agg_cache_article          |   x-cache-status: MISS     |
+      | query:                                       | body:                      |
+      |   fields: id,links.article                   |   data:                    |
+      |   filter[id][_eq]: <run>-a                   |     - id: <run>-a          |
+      |   deep[links][_groupBy]: article             |       links:               |
+      |   deep[links][_aggregate][sum]: weight       |         - article: <run>-a |
+      |   deep[links][_sort]: article                |           sum:             |
+      |                                              |             weight: "5"    |
+      | as: <reader-token>                           | code: 200                  |+
+      | method: GET                                  | headers:                   |
+      | path: /items/test_agg_cache_article          |   x-cache-status: HIT      |
+      | query:                                       | body:                      |
+      |   fields: id,links.article                   |   data:                    |
+      |   filter[id][_eq]: <run>-a                   |     - id: <run>-a          |
+      |   deep[links][_groupBy]: article             |       links:               |
+      |   deep[links][_aggregate][sum]: weight       |         - article: <run>-a |
+      |   deep[links][_sort]: article                |           sum:             |
+      |                                              |             weight: "5"    |
+      | method: PATCH                                | code: 200                  |+
+      | path: /items/test_agg_cache_author/<run>-pub |                            |
+      | payload:                                     |                            |
+      |   status: draft                              |                            |
+      | as: <reader-token>                           | code: 200                  |+
+      | method: GET                                  | headers:                   |
+      | path: /items/test_agg_cache_article          |   x-cache-status: MISS     |
+      | query:                                       | body:                      |
+      |   fields: id,links.article                   |   data:                    |
+      |   filter[id][_eq]: <run>-a                   |     - id: <run>-a          |
+      |   deep[links][_groupBy]: article             |       links:               |
+      |   deep[links][_aggregate][sum]: weight       |         - article: <run>-a |
+      |   deep[links][_sort]: article                |           sum:             |
+      |                                              |             weight: null   |
+
+  Scenario: a read and an ungrouped sum filtered on their key follow another row
+    Given these requests are sent:
+      | request                                  | response  |
+      | method: POST                             | code: 200 |+
+      | path: /items/test_agg_cache_article      |           |
+      | payload:                                 |           |
+      |   - id: <run>-p                          |           |
+      |     status: live                         |           |
+      |     salary: 1                            |           |
+      |   - id: <run>-a                          |           |
+      |     salary: 100                          |           |
+      |     parent: <run>-p                      |           |
+      | method: POST                             | code: 200 |+
+      | path: /policies                          |           |
+      | payload:                                 |           |
+      |   id: <reader-policy-0>                  |           |
+      |   name: agg-cache-0-<run>                |           |
+      |   app_access: false                      |           |
+      |   admin_access: false                    |           |
+      |   permissions:                           |           |
+      |     - collection: test_agg_cache_article |           |
+      |       action: read                       |           |
+      |       fields:                            |           |
+      |         - id                             |           |
+      |         - salary                         |           |
+      |       permissions:                       |           |
+      |         parent:                          |           |
+      |           status:                        |           |
+      |             _eq: live                    |           |
+      | method: POST                             | code: 200 |+
+      | path: /users                             |           |
+      | payload:                                 |           |
+      |   email: agg-cache-<run>@example.com     |           |
+      |   token: <reader-token>                  |           |
+      |   policies:                              |           |
+      |     - policy: <reader-policy-0>          |           |
+    Then these requests get these responses:
+      | request                                     | response               |
+      | as: <reader-token>                          | code: 200              |+
+      | method: GET                                 | headers:               |
+      | path: /items/test_agg_cache_article         |   x-cache-status: MISS |
+      | query:                                      | body:                  |
+      |   fields: id,salary                         |   data:                |
+      |   filter[id][_eq]: <run>-a                  |     - id: <run>-a      |
+      |                                             |       salary: 100      |
+      | as: <reader-token>                          | code: 200              |+
+      | method: GET                                 | headers:               |
+      | path: /items/test_agg_cache_article         |   x-cache-status: MISS |
+      | query:                                      | body:                  |
+      |   aggregate[sum]: salary                    |   data:                |
+      |   filter[id][_eq]: <run>-a                  |     - sum:             |
+      |                                             |         salary: "100"  |
+      | as: <reader-token>                          | code: 200              |+
+      | method: GET                                 | headers:               |
+      | path: /items/test_agg_cache_article         |   x-cache-status: HIT  |
+      | query:                                      | body:                  |
+      |   fields: id,salary                         |   data:                |
+      |   filter[id][_eq]: <run>-a                  |     - id: <run>-a      |
+      |                                             |       salary: 100      |
+      | as: <reader-token>                          | code: 200              |+
+      | method: GET                                 | headers:               |
+      | path: /items/test_agg_cache_article         |   x-cache-status: HIT  |
+      | query:                                      | body:                  |
+      |   aggregate[sum]: salary                    |   data:                |
+      |   filter[id][_eq]: <run>-a                  |     - sum:             |
+      |                                             |         salary: "100"  |
+      | method: PATCH                               | code: 200              |+
+      | path: /items/test_agg_cache_article/<run>-p |                        |
+      | payload:                                    |                        |
+      |   status: draft                             |                        |
+      | as: <reader-token>                          | code: 200              |+
+      | method: GET                                 | headers:               |
+      | path: /items/test_agg_cache_article         |   x-cache-status: MISS |
+      | query:                                      | body:                  |
+      |   fields: id,salary                         |   data: []             |
+      |   filter[id][_eq]: <run>-a                  |                        |
+      | as: <reader-token>                          | code: 200              |+
+      | method: GET                                 | headers:               |
+      | path: /items/test_agg_cache_article         |   x-cache-status: MISS |
+      | query:                                      | body:                  |
+      |   aggregate[sum]: salary                    |   data:                |
+      |   filter[id][_eq]: <run>-a                  |     - sum:             |
+      |                                             |         salary: null   |
