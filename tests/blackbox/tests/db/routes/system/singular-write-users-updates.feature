@@ -112,7 +112,7 @@ Feature: Users are updated by query, by themselves and in their sessions
       | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
       | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
       | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index             | 2      | 0      | 0      | 0      | 0    |
       | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
       | 2       | directus_access      | 1      | 0      | 0      | 0      | 0    |
       | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
@@ -191,7 +191,7 @@ Feature: Users are updated by query, by themselves and in their sessions
       | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
       | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
       | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index             | 2      | 0      | 0      | 0      | 0    |
       | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
       | 2       | directus_users       | 2      | 0      | 0      | 0      | 0    |
       | 3       | directus_access      | 4      | 0      | 0      | 0      | 0    |
