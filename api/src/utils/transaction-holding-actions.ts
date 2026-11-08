@@ -4,7 +4,8 @@ import { transaction } from './transaction.js';
 
 /**
  * `transaction` for a service holding action events until the commit: the
- * events of an aborted attempt or of a rolled-back transaction never fire.
+ * events of an aborted attempt or of a failed transaction never fire. A caller's
+ * transaction ends later, so only its `bypassEmitAction` can hold them past that.
  */
 export async function transactionHoldingActions<T = unknown>(
 	knex: Knex,

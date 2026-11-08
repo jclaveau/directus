@@ -23,12 +23,14 @@ import { ALIAS_TYPES } from '../constants.js';
 import type { Helpers } from '../database/helpers/index.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase, { getSchemaInspector } from '../database/index.js';
-import emitter from '../emitter.js';
 import { fetchAllowedCollections } from '../permissions/modules/fetch-allowed-collections/fetch-allowed-collections.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import type { Collection } from '../types/index.js';
-import { getSchema } from '../utils/get-schema.js';
 import { chunk, groupBy, merge, omit } from '../utils/lodash-es-used.js';
+import {
+	clearCachesThenFireActions,
+	fireNestedActionEvents,
+} from '../utils/clear-caches-then-fire-actions.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { FieldsService } from './fields.js';
@@ -79,6 +81,8 @@ export class CollectionsService {
 		}
 
 		const nestedActionEvents: ActionEventParams[] = [];
+
+		let mutationFailed = false;
 
 		try {
 			const existingCollections: string[] = [
@@ -219,23 +223,18 @@ export class CollectionsService {
 			});
 
 			return payload.collection;
-		} finally {
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+			);
 		}
 	}
 
@@ -244,6 +243,8 @@ export class CollectionsService {
 	 */
 	async createMany(payloads: RawCollection[], opts?: MutationOptions): Promise<string[]> {
 		const nestedActionEvents: ActionEventParams[] = [];
+
+		let mutationFailed = false;
 
 		try {
 			const collections = await transactionHoldingActions(
@@ -273,23 +274,18 @@ export class CollectionsService {
 			);
 
 			return collections;
-		} finally {
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+			);
 		}
 	}
 
@@ -437,6 +433,8 @@ export class CollectionsService {
 
 		const nestedActionEvents: ActionEventParams[] = [];
 
+		let mutationFailed = false;
+
 		try {
 			const collectionsItemsService = new ItemsService('directus_collections', {
 				knex: this.knex,
@@ -474,23 +472,18 @@ export class CollectionsService {
 			}
 
 			return collectionKey;
-		} finally {
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+			);
 		}
 	}
 
@@ -511,6 +504,8 @@ export class CollectionsService {
 		const collectionKey = 'collection';
 		const collectionKeys: string[] = [];
 		const nestedActionEvents: ActionEventParams[] = [];
+
+		let mutationFailed = false;
 
 		try {
 			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
@@ -535,23 +530,18 @@ export class CollectionsService {
 					collectionKeys.push(payload[collectionKey]);
 				}
 			});
-		} finally {
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+			);
 		}
 
 		return collectionKeys;
@@ -568,6 +558,8 @@ export class CollectionsService {
 		}
 
 		const nestedActionEvents: ActionEventParams[] = [];
+
+		let mutationFailed = false;
 
 		try {
 			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
@@ -587,23 +579,18 @@ export class CollectionsService {
 			});
 
 			return collectionKeys;
-		} finally {
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+			);
 		}
 	}
 
@@ -619,6 +606,8 @@ export class CollectionsService {
 		}
 
 		const nestedActionEvents: ActionEventParams[] = [];
+
+		let mutationFailed = false;
 
 		try {
 			const collections = await this.readByQuery();
@@ -775,23 +764,18 @@ export class CollectionsService {
 			});
 
 			return collectionKey;
-		} finally {
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+			);
 		}
 	}
 
@@ -806,6 +790,8 @@ export class CollectionsService {
 		}
 
 		const nestedActionEvents: ActionEventParams[] = [];
+
+		let mutationFailed = false;
 
 		try {
 			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
@@ -825,23 +811,38 @@ export class CollectionsService {
 			});
 
 			return collectionKeys;
-		} finally {
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
-
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
 		}
+		catch (mutationError) {
+			mutationFailed = true;
+
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+			);
+		}
+	}
+
+	private async clearCachesThenFireNestedActions(
+		nestedActionEvents: ActionEventParams[],
+		mutationFailed: boolean,
+		opts?: MutationOptions,
+	): Promise<void> {
+		await clearCachesThenFireActions(
+			async () => {
+				if (shouldClearCache(this.cache, opts)) {
+					await flushResponseCache(this.cache);
+				}
+
+				if (opts?.autoPurgeSystemCache !== false) {
+					await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
+				}
+			},
+			() => fireNestedActionEvents(nestedActionEvents, opts),
+			mutationFailed,
+		);
 	}
 }

@@ -17,8 +17,7 @@ export const seedDBStructure = () => {
 					collections: [
 						{
 							// `accountability: 'all'` is what makes an update write a
-							// revision, and the revision block is where the read whose
-							// hook returns null happens.
+							// revision, whose snapshot the hook must not reach.
 							collection: collectionReadHookNull,
 							meta: { accountability: 'all' },
 							fields: [{ field: 'name', type: 'string', meta: {} }],
