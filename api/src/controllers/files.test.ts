@@ -1,11 +1,24 @@
 import type { Request, Response } from 'express';
 import FormData from 'form-data';
-import { PassThrough } from 'node:stream';
-import { describe, expect, it, vi } from 'vitest';
+import { PassThrough, type Readable } from 'node:stream';
+import { finished } from 'node:stream/promises';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { InvalidPayloadError, InvalidQueryError } from '@directus/errors';
 import { multipartHandler } from './files.js';
 
 vi.mock('../../src/database');
+
+const uploadOne = vi.hoisted(() => {
+	return vi.fn((fileStream: Readable): Promise<unknown> => finished(fileStream));
+});
+
+vi.mock('../services/files.js', () => {
+	return {
+		FilesService: vi.fn(function () {
+			return { uploadOne };
+		}),
+	};
+});
 
 vi.mock('../services', () => {
 	const FilesService = vi.fn();
@@ -16,6 +29,97 @@ vi.mock('../services', () => {
 });
 
 describe('multipartHandler', () => {
+	beforeEach(() => {
+		uploadOne.mockClear();
+	});
+
+	it('answers the error of a body cut inside a part', async () => {
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		multipartHandler(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: {},
+				query: {},
+			}) as unknown as Request,
+			{} as Response,
+			next,
+		);
+
+		requestBody.end([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.txt"',
+			'Content-Type: text/plain',
+			'',
+			'abc',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(uploadOne).toHaveBeenCalled();
+		});
+
+		await expect(uploadOne.mock.results[0]!.value).rejects.toEqual(
+			new Error('Unexpected end of form'),
+		);
+
+		// the route's catch runs once the upload rejected
+		await new Promise(setImmediate);
+
+		expect(next.mock.calls).toEqual([[new Error('Unexpected end of form')]]);
+	});
+
+	it('waits for the end of the body to answer', async () => {
+		uploadOne.mockImplementationOnce(async (fileStream: Readable) => {
+			fileStream.resume();
+			await finished(fileStream);
+			return 'a-key';
+		});
+
+		const requestBody = new PassThrough();
+		const res = { locals: {} };
+		const next = vi.fn();
+
+		multipartHandler(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: {},
+				query: {},
+			}) as unknown as Request,
+			res as unknown as Response,
+			next,
+		);
+
+		requestBody.write([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.txt"',
+			'Content-Type: text/plain',
+			'',
+			'abc',
+			'--cut',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(uploadOne).toHaveBeenCalled();
+		});
+
+		await uploadOne.mock.results[0]!.value;
+		await new Promise(setImmediate);
+
+		expect(next.mock.calls).toEqual([]);
+
+		requestBody.end('--\r\n');
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
+		});
+
+		expect(next.mock.calls).toEqual([[undefined]]);
+		expect(res.locals).toEqual({ savedFiles: ['a-key'] });
+	});
+
 	it(`Errors out if request doesn't contain any files to upload`, () => {
 		const fakeForm = new FormData();
 
@@ -24,6 +128,7 @@ describe('multipartHandler', () => {
 		const req = {
 			headers: fakeForm.getHeaders(),
 			is: vi.fn().mockReturnValue(true),
+			once: vi.fn(),
 			body: fakeForm.getBuffer(),
 			params: {},
 			query: {},
@@ -54,6 +159,7 @@ describe('multipartHandler', () => {
 		const req = {
 			headers: fakeForm.getHeaders(),
 			is: vi.fn().mockReturnValue(true),
+			once: vi.fn(),
 			body: fakeForm.getBuffer(),
 			params: {},
 			query: {},
@@ -75,6 +181,7 @@ describe('multipartHandler', () => {
 		const req = {
 			headers: { 'content-type': 'multipart/form-data; boundary=x' },
 			is: vi.fn().mockReturnValue(true),
+			once: vi.fn(),
 			params: {},
 			query: { mutationBatching: 'batchEverything' },
 		} as unknown as Request;

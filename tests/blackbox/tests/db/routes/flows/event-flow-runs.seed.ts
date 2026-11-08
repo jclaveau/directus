@@ -143,7 +143,7 @@ export const seedDBStructure = () => {
 					.send({
 						id: eventFlow.id,
 						name: eventFlow.name,
-						status: 'active',
+						status: 'inactive',
 						trigger: 'event',
 						accountability: 'all',
 						options: {

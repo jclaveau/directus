@@ -1,14 +1,15 @@
 import { InvalidPayloadError, UnsupportedMediaTypeError } from '@directus/errors';
 import { parseJSON } from '@directus/utils';
 import type { Snapshot, SnapshotDiffWithHash } from '@directus/types';
-import Busboy from 'busboy';
 import type { RequestHandler } from 'express';
 import express from 'express';
 import { load as loadYaml } from 'js-yaml';
 import { useLogger } from '../logger/index.js';
 import { respond } from '../middleware/respond.js';
 import { SchemaService } from '../services/schema.js';
+import { answerOnce } from '../utils/answer-once.js';
 import asyncHandler from '../utils/async-handler.js';
+import { createBusboy } from '../utils/create-busboy.js';
 import { getVersionedHash } from '../utils/get-versioned-hash.js';
 import { readMeta } from '../utils/read-meta.js';
 
@@ -29,7 +30,9 @@ router.get(
 	respond,
 );
 
-const schemaMultipartHandler: RequestHandler = (req, res, next) => {
+const schemaMultipartHandler: RequestHandler = (req, res, routeNext) => {
+	const next = answerOnce(routeNext);
+
 	if (req.is('application/json')) {
 		if (Object.keys(req.body).length === 0) {
 			throw new InvalidPayloadError({ reason: `No data was included in the body` });
@@ -50,9 +53,11 @@ const schemaMultipartHandler: RequestHandler = (req, res, next) => {
 				'content-type': 'application/octet-stream',
 			};
 
-	const busboy = Busboy({ headers });
+	const busboy = createBusboy(req, { headers });
 
 	let isFileIncluded = false;
+	let isUploadRead = false;
+	let isParserClosed = false;
 	let upload: any | null = null;
 
 	busboy.on('file', async (_, fileStream, { mimeType }) => {
@@ -88,8 +93,9 @@ const schemaMultipartHandler: RequestHandler = (req, res, next) => {
 			}
 
 			res.locals['upload'] = upload;
+			isUploadRead = true;
 
-			return next();
+			return answerUpload();
 		} catch (error: any) {
 			busboy.emit('error', error);
 		}
@@ -98,8 +104,19 @@ const schemaMultipartHandler: RequestHandler = (req, res, next) => {
 	busboy.on('error', (error: Error) => next(error));
 
 	busboy.on('close', () => {
+		isParserClosed = true;
+
 		if (!isFileIncluded) return next(new InvalidPayloadError({ reason: `No file was included in the body` }));
+
+		return answerUpload();
 	});
+
+	// a file read before the end of the body must not answer yet
+	function answerUpload() {
+		if (isParserClosed && isUploadRead) {
+			next();
+		}
+	}
 
 	req.pipe(busboy);
 };
