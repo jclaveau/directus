@@ -35,7 +35,24 @@ raw SQL; same key with data twice, last wins; B minimize 400 FK, preserve 200 (`
 `b-2`→created with null name); schema FK cycle 400.
 
 **Open — jean must rule, no #686 code until then:**
-- FK order itself: not yet ruled after the probe.
+- FK order: ruled 2026-11-08 by jean: apply on #686, tests first (session bbbfcd2c).
+  - Tests 44e85109d6 (pushed): items.test.ts, sqlite with FKs on, describe "the nested M2O
+    rows a foreign key orders": Q, A, and B under the default preserve mode.
+  - Port 4556287329 (local until CI shows the tests red):
+    `resolveMutationBatching(opts ?? {})` replaces `!== 'preserveMutationOrder'`; key-only
+    also requires a non-missing key, so `{ id: null }` is a create; `upsertRowIndexes` →
+    `upsertReferences`; type `NestedReference`.
+  - Open for jean, in a choice block: gap 1, the merged upsert passes
+    `nested: [...this.nested, references[0].field]`, so a validation error on a reviewer
+    record reports path ['owner']; a fix plumbs a per-record path through upsertMany →
+    createMany/updateGroups → processPayload. And **challenge `minimizeMutations` before
+    merge** (jean): on B it returns 400 FK = raw SQL; preserve's 200 is not clean (board 7
+    never existed, a hook swapped row 1 to board 9; row 2 then creates empty
+    `{id:7,name:null}`, passing only because `name` is nullable).
+  - A2O: still processA2O's own pass, after the M2O records; goes through
+    saveNestedReferences, so preserve segmenting applies; not ordered against the M2O
+    collections. Stated in the processM2O docblock.
+  - Probe files in `tmp/fk-order-686*` (untracked): delete once the port merges.
 - Q3 redone: A stops being a limit. Two groups in minimize now only changes B (400→200,
   predicted) and key-only-before-data (400→200, predicted, looser than raw SQL). Rec: drop.
 - D: `sameRowAs` twin files the nested revision under the last row, whose own record was
