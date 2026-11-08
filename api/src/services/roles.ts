@@ -9,6 +9,9 @@ import type {
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
+import {
+	clearCachesThenFireActions,
+} from '../utils/clear-caches-then-fire-actions.js';
 import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { emitActionEvents, ItemsService } from './items.js';
 import { AccessService } from './access.js';
@@ -126,9 +129,11 @@ export class RolesService extends ItemsService {
 		});
 
 		// Since nested roles could be updated, clear caches
-		await this.clearCaches();
-
-		await emitActionEvents(heldActionEvents, opts);
+		await clearCachesThenFireActions(
+			() => this.clearCaches(),
+			() => emitActionEvents(heldActionEvents, opts),
+			false,
+		);
 
 		return keys;
 	}

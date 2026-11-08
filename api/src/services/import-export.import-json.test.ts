@@ -1,8 +1,15 @@
 import type { AbstractServiceOptions } from '@directus/types';
-import { Readable } from 'node:stream';
+import { createTmpFile } from '@directus/utils/node';
+import { PassThrough, Readable } from 'node:stream';
 import { describe, expect, test, vi } from 'vitest';
 
 const upsertOne = vi.fn().mockResolvedValue(1);
+
+vi.mock('@directus/utils/node', async (importOriginal) => {
+	const original = await importOriginal<typeof import('@directus/utils/node')>();
+
+	return { ...original, createTmpFile: vi.fn(original.createTmpFile) };
+});
 
 vi.mock('../database/index.js', () => ({ default: vi.fn() }));
 vi.mock('../emitter.js', () => ({ default: { emitAction: vi.fn() } }));
@@ -14,6 +21,7 @@ vi.mock('../utils/transaction.js', () => ({
 vi.mock('../utils/get-service.js', () => ({ getService: vi.fn(() => ({ upsertOne })) }));
 
 import emitter from '../emitter.js';
+import { transaction } from '../utils/transaction.js';
 import { ImportService } from './import-export.js';
 
 // Contract test for the stream-json bump: importJSON must still parse a JSON array
@@ -40,6 +48,44 @@ describe('ImportService.importJSON (stream-json contract)', () => {
 		expect(upsertOne).toHaveBeenNthCalledWith(1, { name: 'a' }, expect.anything());
 		expect(upsertOne).toHaveBeenNthCalledWith(2, { name: 'b' }, expect.anything());
 		expect(upsertOne).toHaveBeenNthCalledWith(3, { name: 'c' }, expect.anything());
+	});
+});
+
+describe('ImportService.importJSON of an empty array', () => {
+	test('resolves without a write', async () => {
+		upsertOne.mockReset();
+
+		const service = new ImportService({
+			knex: {},
+			schema: {},
+			accountability: null,
+		} as unknown as AbstractServiceOptions);
+
+		await service.importJSON('test', Readable.from('[]'));
+
+		expect(upsertOne).toHaveBeenCalledTimes(0);
+	});
+
+	test('resolves when the queue drained before the source ended', async () => {
+		upsertOne.mockReset();
+		upsertOne.mockResolvedValue(1);
+
+		const service = new ImportService({
+			knex: {},
+			schema: {},
+			accountability: null,
+		} as unknown as AbstractServiceOptions);
+
+		const sourceStream = new PassThrough();
+		const importing = service.importJSON('test', sourceStream);
+
+		sourceStream.write('[{"name":"a"},{"name":"b"}]');
+
+		await new Promise((resolve) => setTimeout(resolve, 50));
+
+		sourceStream.end();
+
+		await expect(importing).resolves.toBeUndefined();
 	});
 });
 
@@ -74,6 +120,98 @@ describe.each([
 		await service[importMethod]('test', Readable.from(importBodies[importMethod]));
 
 		expect(emitter.emitAction).toHaveBeenCalledTimes(2);
+		expect(emitter.emitAction).toHaveBeenCalledWith('test.items.create', {}, {});
+	});
+
+	test('rejects when the source stream fails', async () => {
+		const service = new ImportService({
+			knex: {},
+			schema: {},
+			accountability: null,
+		} as unknown as AbstractServiceOptions);
+
+		const sourceStream = new PassThrough();
+		const importing = service[importMethod]('test', sourceStream);
+
+		const failure = expect(importing).rejects.toEqual(
+			new Error('Error while retrieving import data', {
+				cause: new Error('source failed'),
+			}),
+		);
+
+		await vi.waitFor(() => {
+			expect(sourceStream.readableFlowing).toBe(true);
+		});
+
+		sourceStream.destroy(new Error('source failed'));
+
+		await failure;
+	});
+
+	test('rejects when the source failed before the import started', async () => {
+		const service = new ImportService({
+			knex: {},
+			schema: {},
+			accountability: null,
+		} as unknown as AbstractServiceOptions);
+
+		const sourceStream = new PassThrough();
+		sourceStream.on('error', () => undefined);
+		sourceStream.destroy(new Error('source failed'));
+
+		await expect(service[importMethod]('test', sourceStream)).rejects.toEqual(
+			new Error('Error while retrieving import data', {
+				cause: new Error('source failed'),
+			}),
+		);
+	});
+
+	test('resolves when the queue drained before the source ended', async () => {
+		upsertOne.mockReset();
+		upsertOne.mockResolvedValue(1);
+
+		const service = new ImportService({
+			knex: {},
+			schema: {},
+			accountability: null,
+		} as unknown as AbstractServiceOptions);
+
+		await service[importMethod]('test', Readable.from(importBodies[importMethod]));
+
+		expect(upsertOne).toHaveBeenCalledTimes(2);
+		expect(upsertOne).toHaveBeenNthCalledWith(1, { name: 'a' }, expect.anything());
+		expect(upsertOne).toHaveBeenNthCalledWith(2, { name: 'b' }, expect.anything());
+	});
+
+	test('fires no action when the commit fails', async () => {
+		vi.mocked(emitter.emitAction).mockClear();
+		upsertOne.mockReset();
+
+		upsertOne.mockImplementation(async (_row, opts) => {
+			opts.bypassEmitAction({ event: 'test.items.create', meta: {}, context: {} });
+
+			await new Promise((resolve) => setTimeout(resolve, 50));
+
+			return 1;
+		});
+
+		vi.mocked(transaction).mockImplementationOnce(async (trxKnex, handler) => {
+			await handler(trxKnex as never);
+
+			throw new Error('commit failed');
+		});
+
+		const service = new ImportService({
+			knex: {},
+			schema: {},
+			accountability: null,
+		} as unknown as AbstractServiceOptions);
+
+		await expect(
+			service[importMethod]('test', Readable.from(importBodies[importMethod])),
+		).rejects.toEqual(new Error('commit failed'));
+
+		expect(emitter.emitAction).not.toHaveBeenCalled();
 	});
 
 	test('fires no action when a later row rolls the import back', async () => {
@@ -106,5 +244,56 @@ describe.each([
 		await new Promise((resolve) => setTimeout(resolve, 50));
 
 		expect(emitter.emitAction).not.toHaveBeenCalled();
+	});
+});
+
+describe('ImportService.importCSV temporary file', () => {
+	test('is cleaned up once when writing it fails', async () => {
+		const cleanupTmpFile = vi.fn().mockResolvedValue(undefined);
+
+		vi.mocked(createTmpFile).mockResolvedValueOnce({
+			path: '/nonexistent-import-directory/import.csv',
+			cleanup: cleanupTmpFile,
+		});
+
+		const service = new ImportService({
+			knex: {},
+			schema: {},
+			accountability: null,
+		} as unknown as AbstractServiceOptions);
+
+		await expect(service.importCSV('test', new PassThrough())).rejects.toThrow(
+			new Error('Error while writing import data to temporary file'),
+		);
+
+		// `finished` reports the source the cleanup destroyed a tick later
+		await new Promise((resolve) => setTimeout(resolve, 50));
+
+		expect(cleanupTmpFile).toHaveBeenCalledTimes(1);
+	});
+
+	test('is cleaned up when the source fails', async () => {
+		const cleanupTmpFile = vi.fn().mockResolvedValue(undefined);
+
+		vi.mocked(createTmpFile).mockResolvedValueOnce({
+			path: '/dev/null',
+			cleanup: cleanupTmpFile,
+		});
+
+		const service = new ImportService({
+			knex: {},
+			schema: {},
+			accountability: null,
+		} as unknown as AbstractServiceOptions);
+
+		const sourceStream = new PassThrough();
+		sourceStream.on('error', () => undefined);
+		sourceStream.destroy(new Error('source failed'));
+
+		await expect(service.importCSV('test', sourceStream)).rejects.toThrow(
+			new Error('Error while retrieving import data'),
+		);
+
+		expect(cleanupTmpFile).toHaveBeenCalledTimes(1);
 	});
 });

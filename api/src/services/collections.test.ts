@@ -201,6 +201,29 @@ describe('Services / Collections', () => {
 			await expect(service.deleteOne('missing')).rejects.toThrowError(ForbiddenError);
 			await expect(service.deleteOne('missing')).rejects.toThrowError(`Collection to delete 'missing' does not exist`);
 		});
+
+		it('keeps its own error when clearing the caches fails', async () => {
+			const service = new CollectionsService({
+				knex: db,
+				schema,
+				accountability: {
+					role: 'admin',
+					admin: true,
+					user: 'admin-user',
+				} as Accountability,
+			});
+
+			vi.spyOn(CollectionsService.prototype, 'readByQuery').mockResolvedValue([]);
+
+			vi.mocked(clearSystemCache)
+				.mockRejectedValueOnce(new Error('cache store refused'));
+
+			await expect(service.deleteOne('missing')).rejects.toEqual(
+				new ForbiddenError({
+					reason: `Collection to delete 'missing' does not exist`,
+				}),
+			);
+		});
 	});
 
 	describe('deleteMany', () => {

@@ -732,12 +732,70 @@ describe('Services / Extensions / updateOne', () => {
 			meta: { options: null },
 		} as any);
 
+		const callOrder: string[] = [];
+
+		vi.mocked(transaction).mockImplementationOnce(async (trxKnex, handler) => {
+			const handlerResult = await handler(trxKnex as any);
+			callOrder.push('committed');
+			return handlerResult;
+		});
+
+		emitActionSpy.mockImplementationOnce(async () => {
+			callOrder.push('action');
+		});
+
 		const service = new ExtensionsService({
 			knex: knex.default({ client: MockClient }),
 			schema,
 		});
 
 		await service.updateOne('extension-id', { meta: { options: null } } as any);
+
+		expect(emitActionSpy).toHaveBeenCalledExactlyOnceWith(
+			'extensions.update',
+			{ keys: ['extension-id'] },
+			{},
+		);
+
+		expect(callOrder).toEqual(['committed', 'action']);
+	});
+
+	it('fires the action of the settings write when the reload fails', async () => {
+		vi.mocked(getExtensionManager).mockReturnValue({
+			reload: vi.fn().mockRejectedValue(new Error('load failed')),
+			broadcastReloadNotification: vi.fn().mockResolvedValue(undefined),
+		} as any);
+
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
+
+		vi.spyOn(ItemsService.prototype, 'updateOne')
+			.mockImplementationOnce(async (_id, _data, opts) => {
+				opts!.bypassEmitAction!({
+					event: 'extensions.update',
+					meta: { keys: ['extension-id'] },
+					context: {},
+				} as any);
+
+				return 'extension-id';
+			});
+
+		vi.spyOn(ExtensionsService.prototype, 'readOne').mockResolvedValueOnce({
+			id: 'extension-id',
+			bundle: null,
+			schema: null,
+			meta: { options: null },
+		} as any);
+
+		const service = new ExtensionsService({
+			knex: knex.default({ client: MockClient }),
+			schema,
+		});
+
+		await expect(service.updateOne('extension-id', {
+			meta: { options: null },
+		} as any)).rejects.toBeInstanceOf(ServiceUnavailableError);
 
 		expect(emitActionSpy).toHaveBeenCalledExactlyOnceWith(
 			'extensions.update',

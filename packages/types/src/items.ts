@@ -134,6 +134,8 @@ export type MutationOptions = {
 
 	/**
 	 * Allow disabling the emitting of hooks. Useful if a custom hook is fired (like files.upload)
+	 * The actions of the activity and revision rows the mutation writes still fire;
+	 * #696 tracks filtering them.
 	 */
 	emitEvents?: boolean | undefined;
 
