@@ -1455,7 +1455,9 @@ implements AbstractService<Item> {
 	 * Uses `this.updateMany` under the hood.
 	 */
 	async updateByQuery(query: Query, data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey[]> {
-		const keys = await this.getKeysByQuery(query);
+		const keys = await this.getKeysByQuery(query, {
+			emitEvents: opts?.emitEvents ?? true,
+		});
 
 		return keys.length
 			? await this.updateMany(keys, data, opts)
