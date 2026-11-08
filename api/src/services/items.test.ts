@@ -7835,6 +7835,25 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 		})
 		.build();
 
+	// person.board → board and board.lead → person: a foreign key cycle
+	const cycleSchema = new SchemaBuilder()
+		.collection('card', (c) => {
+			c.field('id').id();
+			c.field('owner').m2o('person');
+			c.field('board').m2o('board');
+		})
+		.collection('person', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('board').m2o('board');
+		})
+		.collection('board', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('lead').m2o('person');
+		})
+		.build();
+
 	// the relational paths below load PayloadService's lazy `get-service.js` graph
 	beforeAll(async () => {
 		await import('../utils/get-service.js');
@@ -7855,6 +7874,7 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 		await database.schema.createTable('board', (table) => {
 			table.increments('id');
 			table.string('name');
+			table.integer('lead').references('person.id');
 		});
 
 		await database.schema.createTable('person', (table) => {
@@ -7906,6 +7926,52 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 				{ id: 1, collection: 'person', item: { id: 10, name: 'a', board: 21 } },
 				{ id: 2, collection: 'board', item: { id: 21, name: 'b' } },
 			])).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('person').select('id', 'name', 'board'))
+			.resolves.toStrictEqual([{ id: 10, name: 'a', board: 21 }]);
+	});
+
+	it.each([
+		'preserveMutationOrder',
+		'minimizeMutations',
+		'disableBatching',
+	] as const)(oneLine`
+		writes a board leading an existing person, then that person moving
+		to the board, in row order: %s
+	`, async (mutationBatching) => {
+		await database('person').insert({ id: 10, name: 'old' });
+
+		await expect(new ItemsService('card', { knex: database, schema: cycleSchema })
+			.createMany([
+				{ id: 1, board: { id: 21, name: 'b', lead: 10 } },
+				{ id: 2, owner: { id: 10, name: 'a', board: 21 } },
+			], { mutationBatching })).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('board').select('id', 'name', 'lead'))
+			.resolves.toStrictEqual([{ id: 21, name: 'b', lead: 10 }]);
+
+		await expect(database('person').select('id', 'name', 'board'))
+			.resolves.toStrictEqual([{ id: 10, name: 'a', board: 21 }]);
+	});
+
+	it.each([
+		'preserveMutationOrder',
+		'minimizeMutations',
+		'disableBatching',
+	] as const)(oneLine`
+		writes a person moving to an existing board, then that board led by
+		the person, in row order: %s
+	`, async (mutationBatching) => {
+		await database('board').insert({ id: 21, name: 'b' });
+
+		await expect(new ItemsService('card', { knex: database, schema: cycleSchema })
+			.createMany([
+				{ id: 1, owner: { id: 10, name: 'a', board: 21 } },
+				{ id: 2, board: { id: 21, lead: 10 } },
+			], { mutationBatching })).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('board').select('id', 'name', 'lead'))
+			.resolves.toStrictEqual([{ id: 21, name: 'b', lead: 10 }]);
 
 		await expect(database('person').select('id', 'name', 'board'))
 			.resolves.toStrictEqual([{ id: 10, name: 'a', board: 21 }]);
