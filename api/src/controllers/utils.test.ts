@@ -99,12 +99,14 @@ function handlerFor(path: string, method = 'get') {
 
 describe('utils controller /import/:collection', () => {
 	test('answers the error of a body cut inside a part it never read', async () => {
+		const importFile = vi.fn(
+			(_collection: string, _mimeType: string, fileStream: Readable) => {
+				return finished(fileStream);
+			},
+		);
+
 		vi.mocked(ImportService).mockImplementationOnce(function () {
-			return {
-				import: (_collection: string, _mimeType: string, fileStream: Readable) => {
-					return finished(fileStream);
-				},
-			};
+			return { import: importFile };
 		} as any);
 
 		const importRoute = router.stack.find((layer: any) => {
@@ -133,11 +135,15 @@ describe('utils controller /import/:collection', () => {
 		].join('\r\n'));
 
 		await vi.waitFor(() => {
-			expect(next).toHaveBeenCalled();
+			expect(importFile).toHaveBeenCalled();
 		});
 
-		// the import of the cut part fails after the parser
-		await new Promise((resolve) => setTimeout(resolve, 50));
+		await expect(importFile.mock.results[0]!.value).rejects.toEqual(
+			new Error('Unexpected end of form'),
+		);
+
+		// the route's catch runs once the import rejected
+		await new Promise(setImmediate);
 
 		expect(next.mock.calls).toEqual([[new Error('Unexpected end of form')]]);
 	});

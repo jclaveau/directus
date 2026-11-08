@@ -1,11 +1,24 @@
 import type { Request, Response } from 'express';
 import FormData from 'form-data';
-import { PassThrough } from 'node:stream';
+import { PassThrough, type Readable } from 'node:stream';
+import { finished } from 'node:stream/promises';
 import { describe, expect, it, vi } from 'vitest';
 import { InvalidPayloadError, InvalidQueryError } from '@directus/errors';
 import { multipartHandler } from './files.js';
 
 vi.mock('../../src/database');
+
+const uploadOne = vi.hoisted(() => {
+	return vi.fn((fileStream: Readable) => finished(fileStream));
+});
+
+vi.mock('../services/files.js', () => {
+	return {
+		FilesService: vi.fn(function () {
+			return { uploadOne };
+		}),
+	};
+});
 
 vi.mock('../services', () => {
 	const FilesService = vi.fn();
@@ -40,11 +53,15 @@ describe('multipartHandler', () => {
 		].join('\r\n'));
 
 		await vi.waitFor(() => {
-			expect(next).toHaveBeenCalled();
+			expect(uploadOne).toHaveBeenCalled();
 		});
 
-		// the upload of the cut part fails after the parser
-		await new Promise((resolve) => setTimeout(resolve, 50));
+		await expect(uploadOne.mock.results[0]!.value).rejects.toEqual(
+			new Error('Unexpected end of form'),
+		);
+
+		// the route's catch runs once the upload rejected
+		await new Promise(setImmediate);
 
 		expect(next.mock.calls).toEqual([[new Error('Unexpected end of form')]]);
 	});

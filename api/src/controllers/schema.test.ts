@@ -7,7 +7,7 @@ vi.mock('../database/index.js', () => ({ default: vi.fn() }));
 vi.mock('../middleware/respond.js', () => ({ respond: vi.fn() }));
 vi.mock('../services/schema.js', () => ({ SchemaService: vi.fn() }));
 
-test('POST /diff answers the error of a cut part it never read', async () => {
+test('POST /diff answers once, refusing the second file of a cut body', async () => {
 	const diffRoute = router.stack.find((layer) => layer.route?.path === '/diff')!;
 	const requestBody = new PassThrough();
 	const next = vi.fn();

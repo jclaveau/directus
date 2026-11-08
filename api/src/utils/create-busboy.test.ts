@@ -56,4 +56,31 @@ describe('createBusboy', () => {
 			new Error('Unexpected end of form'),
 		);
 	});
+
+	test('keeps the parser of a request that completed', async () => {
+		const requestBody = Object.assign(new PassThrough(), { complete: true });
+
+		const busboy = createBusboy(requestBody as unknown as IncomingMessage, {
+			headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+		});
+
+		const partStarted = new Promise((resolve) => busboy.on('file', resolve));
+
+		requestBody.pipe(busboy);
+
+		requestBody.write([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"a"',
+		].join('\r\n'));
+
+		await partStarted;
+
+		// a request closes once its body is received, while a part is still read
+		requestBody.emit('close');
+
+		expect(busboy.destroyed).toBe(false);
+	});
 });
