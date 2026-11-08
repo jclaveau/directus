@@ -32,8 +32,19 @@ export class NotificationsService extends ItemsService<Notification> {
 				accountability: this.accountability,
 			});
 
-			for (const notification of data) {
-				await notificationsService.sendEmail(notification);
+			for (const [index, notification] of data.entries()) {
+				// A row a filter hook cancelled was never written
+				if (primaryKeys[index] === null) {
+					continue;
+				}
+
+				// One recipient's failure must not cost the later ones their email
+				try {
+					await notificationsService.sendEmail(notification);
+				}
+				catch (error) {
+					logger.error(error, `Could not send notification via mail`);
+				}
 			}
 		};
 

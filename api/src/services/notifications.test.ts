@@ -3,6 +3,7 @@ import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import getDatabase from '../database/index.js';
+import { useLogger } from '../logger/index.js';
 import { withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { ItemsService } from './items.js';
@@ -26,6 +27,12 @@ vi.mock(
 	'../permissions/modules/fetch-global-access/fetch-global-access.js',
 	() => ({ fetchGlobalAccess: vi.fn().mockResolvedValue({ app: false }) }),
 );
+
+vi.mock('../logger/index.js', () => {
+	const logger = { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), trace: vi.fn() };
+
+	return { useLogger: () => logger };
+});
 
 vi.mock('./mail/index.js', () => {
 	const MailService = vi.fn();
@@ -112,5 +119,58 @@ describe('NotificationsService.createMany', () => {
 			to: 'user-a@example.com',
 			subject: 'Hi',
 		});
+	});
+
+	test(oneLine`
+		emails the later notifications of a transaction when an earlier one fails
+	`, async () => {
+		const database = knex.default({ client: MockClient });
+		createTracker(database);
+		vi.mocked(getDatabase).mockReturnValue(database);
+		const readError = new Error('user-a deleted');
+
+		vi.mocked(UsersService.prototype.readOne)
+			.mockRejectedValueOnce(readError);
+
+		await transaction(database, async (trx) => {
+			await new NotificationsService({ knex: trx, schema }).createMany([
+				{ recipient: 'user-a', subject: 'A' },
+				{ recipient: 'user-b', subject: 'B' },
+			]);
+		});
+
+		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
+			template: { name: 'base', data: { html: '' } },
+			to: 'user-a@example.com',
+			subject: 'B',
+		}]]);
+
+		expect(vi.mocked(useLogger().error).mock.calls).toEqual([
+			[readError, 'Could not send notification via mail'],
+		]);
+	});
+
+	test(oneLine`
+		sends no email for a notification a filter hook cancelled
+	`, async () => {
+		const database = knex.default({ client: MockClient });
+
+		vi.spyOn(ItemsService.prototype, 'createMany')
+			// the spy is typed off the overload without allowFilterCancel
+			.mockResolvedValue([null, 'notification-b'] as never);
+
+		await new NotificationsService({ knex: database, schema }).createMany(
+			[
+				{ recipient: 'user-a', subject: 'A' },
+				{ recipient: 'user-a', subject: 'B' },
+			],
+			{ allowFilterCancel: true },
+		);
+
+		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
+			template: { name: 'base', data: { html: '' } },
+			to: 'user-a@example.com',
+			subject: 'B',
+		}]]);
 	});
 });
