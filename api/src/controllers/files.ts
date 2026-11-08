@@ -2,20 +2,22 @@ import { useEnv } from '@directus/env';
 import { ErrorCode, InvalidPayloadError, isDirectusError } from '@directus/errors';
 import formatTitle from '@directus/format-title';
 import type { BusboyFileStream, PrimaryKey } from '@directus/types';
-import { toArray } from '@directus/utils';
-import Busboy from 'busboy';
+import { oneLine, toArray } from '@directus/utils';
 import bytes from 'bytes';
 import type { RequestHandler } from 'express';
 import express from 'express';
 import Joi from 'joi';
 import { minimatch } from 'minimatch';
 import path from 'node:path';
+import { useLogger } from '../logger/index.js';
 import { respond } from '../middleware/respond.js';
 import useCollection from '../middleware/use-collection.js';
 import { validateBatch } from '../middleware/validate-batch.js';
 import { FilesService } from '../services/files.js';
 import { MetaService } from '../services/meta.js';
+import { answerOnce } from '../utils/answer-once.js';
 import asyncHandler from '../utils/async-handler.js';
+import { createBusboy } from '../utils/create-busboy.js';
 import { mutationBatchingFromQuery } from '../utils/mutation-batching-from-query.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
@@ -24,7 +26,9 @@ const env = useEnv();
 
 router.use(useCollection('directus_files'));
 
-export const multipartHandler: RequestHandler = (req, res, next) => {
+export const multipartHandler: RequestHandler = (req, res, routeNext) => {
+	const next = answerOnce(routeNext);
+
 	if (req.is('multipart/form-data') === false) return next();
 
 	let headers;
@@ -38,7 +42,7 @@ export const multipartHandler: RequestHandler = (req, res, next) => {
 		};
 	}
 
-	const busboy = Busboy({
+	const busboy = createBusboy(req, {
 		headers,
 		defParamCharset: 'utf8',
 		limits: {
@@ -80,6 +84,11 @@ export const multipartHandler: RequestHandler = (req, res, next) => {
 	});
 
 	busboy.on('file', async (_fieldname, fileStream: BusboyFileStream, { filename, mimeType }) => {
+		// a part parsed from the same chunk as a refused one
+		if (busboy.destroyed) {
+			return undefined;
+		}
+
 		if (!filename) {
 			return busboy.emit('error', new InvalidPayloadError({ reason: `File is missing filename` }));
 		}
@@ -119,7 +128,13 @@ export const multipartHandler: RequestHandler = (req, res, next) => {
 			);
 
 			savedFiles.push(primaryKey);
-			tryDone();
+
+			if (isBodyRefused) {
+				await deleteSavedFiles();
+			}
+			else {
+				tryDone();
+			}
 		} catch (error: any) {
 			busboy.emit('error', error);
 		}
@@ -127,18 +142,50 @@ export const multipartHandler: RequestHandler = (req, res, next) => {
 		return undefined;
 	});
 
-	busboy.on('error', (error: Error) => {
+	let isBodyRefused = false;
+
+	busboy.on('error', async (error: Error) => {
+		isBodyRefused = true;
+		await deleteSavedFiles();
 		next(error);
 	});
 
+	let isParserClosed = false;
+
 	busboy.on('close', () => {
+		isParserClosed = true;
 		tryDone();
 	});
 
 	req.pipe(busboy);
 
+	// a refused body leaves no file behind; a replaced file cannot be restored
+	async function deleteSavedFiles() {
+		if (existingPrimaryKey) {
+			return;
+		}
+
+		const createdFiles = savedFiles.splice(0);
+
+		if (createdFiles.length === 0) {
+			return;
+		}
+
+		try {
+			await service.deleteMany(createdFiles);
+		}
+		catch (error) {
+			useLogger().error(
+				error,
+				oneLine`Couldn't delete the files ${JSON.stringify(createdFiles)}
+					of a refused upload`,
+			);
+		}
+	}
+
 	function tryDone() {
-		if (savedFiles.length === fileCount) {
+		// a file saved before the next one's headers arrive must not answer yet
+		if (!isBodyRefused && isParserClosed && savedFiles.length === fileCount) {
 			if (fileCount === 0) {
 				return next(new InvalidPayloadError({ reason: `No files were included in the body` }));
 			}

@@ -976,6 +976,10 @@ implements AbstractService<Item> {
 
 				const activityService = new ActivityService({ knex: trx, schema: this.schema });
 
+				const holdActionEvent = (actionEvent: ActionEventParams) => {
+					nestedActionEvents.push(actionEvent);
+				};
+
 				const activityIds = await activityService.createMany(
 					postPrepared.map((p) => ({
 						action: Action.CREATE,
@@ -986,6 +990,7 @@ implements AbstractService<Item> {
 						origin: this.accountability!.origin,
 						item: p.primaryKey,
 					})),
+					{ bypassEmitAction: holdActionEvent },
 				);
 
 				// If revisions are tracked, create revisions record
@@ -1007,7 +1012,10 @@ implements AbstractService<Item> {
 						}),
 					);
 
-					const revisionIds = await revisionsService.createMany(revisionInputs);
+					const revisionIds = await revisionsService.createMany(
+						revisionInputs,
+						{ bypassEmitAction: holdActionEvent },
+					);
 
 					for (let i = 0; i < postPrepared.length; i++) {
 						const p = postPrepared[i]!;
@@ -1016,7 +1024,11 @@ implements AbstractService<Item> {
 						const childrenRevisions = [...p.revisionsM2O, ...p.revisionsA2O, ...p.revisionsO2M];
 
 						if (childrenRevisions.length > 0) {
-							await revisionsService.updateMany(childrenRevisions, { parent: revisionId });
+							await revisionsService.updateMany(
+								childrenRevisions,
+								{ parent: revisionId },
+								{ bypassEmitAction: holdActionEvent },
+							);
 						}
 
 						if (opts.onRevisionCreate) {
@@ -1094,6 +1106,24 @@ implements AbstractService<Item> {
 			throw error;
 		});
 
+		// Before the actions: a reader would get the old rows from the cache for as
+		// long as an awaited hook runs.
+		if (shouldClearCache(this.cache, opts, this.collection)) {
+			// A `sameRowAs` position repeats its row's key; counted twice it would read
+			// as a takeover.
+			const liveKeys = [
+				...new Set(results.filter((key): key is PrimaryKey => key !== null)),
+			];
+
+			await this.purgeCreatedScopedCache(
+				liveKeys,
+				takenOverRowKeys,
+				scopedCacheHookDeclarations,
+				declaredPurgesAtStart,
+				opts,
+			);
+		}
+
 		if (opts.emitEvents !== false && actionPayloads.length > 0) {
 			const actionContext = {
 				database: getDatabase(),
@@ -1121,21 +1151,11 @@ implements AbstractService<Item> {
 				opts,
 			);
 		}
-
-		if (shouldClearCache(this.cache, opts, this.collection)) {
-			// A `sameRowAs` position repeats its row's key; counted twice it would read
-			// as a takeover.
-			const liveKeys = [
-				...new Set(results.filter((key): key is PrimaryKey => key !== null)),
-			];
-
-			await this.purgeCreatedScopedCache(
-				liveKeys,
-				takenOverRowKeys,
-				scopedCacheHookDeclarations,
-				declaredPurgesAtStart,
-				opts,
-			);
+		else {
+			// `payload.ts` forwards `emitEvents`, so only activity and revision actions
+			// are held here: tooling rather than business events. They fire until #696
+			// lets a caller filter them.
+			await emitActionEvents(nestedActionEvents, opts);
 		}
 
 		return results;
@@ -2542,6 +2562,12 @@ implements AbstractService<Item> {
 				opts,
 			);
 		}
+		else {
+			// `payload.ts` forwards `emitEvents`, so only activity and revision actions
+			// are held here: tooling rather than business events. They fire until #696
+			// lets a caller filter them.
+			await emitActionEvents(nestedActionEvents, opts);
+		}
 
 		await this.applyUpdateSideEffects(writingGroups, opts);
 
@@ -2991,6 +3017,7 @@ implements AbstractService<Item> {
 				keys.map((key) => ({ key, payload: payloadWithTypeCasting })),
 				childrenRevisions,
 				opts,
+				nestedActionEvents,
 			);
 		}, opts.mutationTracker.snapshot());
 
@@ -3262,6 +3289,7 @@ implements AbstractService<Item> {
 				}),
 				[],
 				opts,
+				nestedActionEvents,
 			);
 		}, opts.mutationTracker.snapshot());
 
@@ -3284,7 +3312,12 @@ implements AbstractService<Item> {
 		updatedRows: { key: PrimaryKey; payload: Partial<AnyItem> }[],
 		childrenRevisions: PrimaryKey[],
 		opts: MutationOptions,
+		nestedActionEvents: ActionEventParams[],
 	): Promise<void> {
+		const holdActionEvent = (actionEvent: ActionEventParams) => {
+			nestedActionEvents.push(actionEvent);
+		};
+
 		const { ActivityService } = await import('./activity.js');
 		const { RevisionsService } = await import('./revisions.js');
 
@@ -3311,7 +3344,7 @@ implements AbstractService<Item> {
 						item: key,
 					};
 				}),
-				{ bypassLimits: true },
+				{ bypassLimits: true, bypassEmitAction: holdActionEvent },
 			);
 
 			if (collectionAccountability === 'all') {
@@ -3320,6 +3353,8 @@ implements AbstractService<Item> {
 					schema: this.schema,
 				}).readMany(
 					updatedRows.map(({ key }) => key),
+					{},
+					{ emitEvents: false },
 				);
 
 				// `readMany` applies no ordering, so pairing its rows
@@ -3363,7 +3398,10 @@ implements AbstractService<Item> {
 					)
 				).filter((revision) => revision.delta);
 
-				const revisionIDs = await revisionsService.createMany(revisions);
+				const revisionIDs = await revisionsService.createMany(
+					revisions,
+					{ bypassEmitAction: holdActionEvent },
+				);
 
 				for (let i = 0; i < revisionIDs.length; i++) {
 					const revisionID = revisionIDs[i]!;
@@ -3381,7 +3419,7 @@ implements AbstractService<Item> {
 						if (childrenRevisions.length > 0) {
 							await revisionsService.updateMany(childrenRevisions, {
 								parent: revisionID,
-							});
+							}, { bypassEmitAction: holdActionEvent });
 						}
 					}
 				}
@@ -3643,7 +3681,6 @@ implements AbstractService<Item> {
 		});
 
 		await flushDeferredResponseCache();
-		await emitActionEvents(payloadActionEvents, opts);
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			const takenOverKeys = changedTakenOverKeys();
@@ -3696,6 +3733,9 @@ implements AbstractService<Item> {
 				},
 			);
 		}
+
+		// After the purge, as on a create.
+		await emitActionEvents(payloadActionEvents, opts);
 
 		return primaryKeys;
 	}
@@ -3950,7 +3990,9 @@ implements AbstractService<Item> {
 	 * Uses `this.deleteMany` under the hood.
 	 */
 	async deleteByQuery(query: Query, opts?: MutationOptions): Promise<PrimaryKey[]> {
-		const keys = await this.getKeysByQuery(query);
+		const keys = await this.getKeysByQuery(query, {
+			emitEvents: opts?.emitEvents ?? true,
+		});
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
@@ -4160,6 +4202,7 @@ implements AbstractService<Item> {
 		// retryable error.
 		const deletion = await transaction(this.knex, async (trx) => {
 			const service = this.fork({ knex: trx });
+			const activityActionEvents: ActionEventParams[] = [];
 
 			// NB: this is the sole `items.delete` filter emit and it runs BEFORE
 			// `validateAccess` (below) — deliberately, so a hook can cancel the delete
@@ -4285,11 +4328,20 @@ implements AbstractService<Item> {
 						origin: this.accountability!.origin,
 						item: key,
 					})),
-					{ bypassLimits: true },
+					{
+						bypassLimits: true,
+						bypassEmitAction: (actionEvent) => {
+							activityActionEvents.push(actionEvent);
+						},
+					},
 				);
 			}
 
-			return { selfRelationSurvivorKeys, oldScopedCacheSnapshot };
+			return {
+				selfRelationSurvivorKeys,
+				oldScopedCacheSnapshot,
+				activityActionEvents,
+			};
 		}, opts.mutationTracker.snapshot()).catch(async (error) => {
 			// The rollback leaves standing what a hook wrote through a connection of
 			// its own, so the slices it declared are purged whatever failed.
@@ -4385,7 +4437,15 @@ implements AbstractService<Item> {
 				},
 			};
 
-			await emitActionEvents([actionEvent], opts);
+			await emitActionEvents(
+				[actionEvent, ...deletion.activityActionEvents],
+				opts,
+			);
+		}
+		else {
+			// Tooling rather than a business event: it fires until #696 lets a caller
+			// filter it.
+			await emitActionEvents(deletion.activityActionEvents, opts);
 		}
 
 		return keys;

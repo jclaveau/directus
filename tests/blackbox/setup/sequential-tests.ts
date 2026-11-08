@@ -127,8 +127,11 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/routes/items/graphql-ip-gated-read.test.ts',
 			'/tests/db/routes/permissions/cache-purge.test.ts',
 			'/tests/db/routes/flows/webhook.test.ts',
-			// Reloading the flow manager unloads every flow for a moment: left in the
-			// parallel middle it would drop the handlers `event-flow-runs` waits on.
+			// Activates its flows, two on `directus_users` updates: an instance a
+			// sibling boots meanwhile loads them, then runs them on its user updates.
+			'/tests/db/routes/flows/event-flow-runs.test.ts',
+			// Reloading the flow manager unloads every flow for a moment: run beside
+			// `event-flow-runs` it would drop the handlers that file waits on.
 			'/tests/db/routes/system/singular-write-flows.test.ts',
 			// Sets the password policy on the settings singleton, which every user
 			// creation of a sibling would then have to satisfy.

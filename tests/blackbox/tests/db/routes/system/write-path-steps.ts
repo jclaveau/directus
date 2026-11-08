@@ -17,12 +17,14 @@ import { load as loadYaml } from 'js-yaml';
 import request, { type Response } from 'supertest';
 import { describe, expect } from 'vitest';
 
+type AttachedFile = { name: string; content: string };
+
 type HttpCell = {
 	method: 'DELETE' | 'GET' | 'PATCH' | 'POST';
 	path: string;
 	query?: Record<string, string>;
 	payload?: unknown;
-	file?: { name: string; content: string };
+	file?: AttachedFile | AttachedFile[];
 };
 
 type WebSocketCell = {
@@ -134,11 +136,15 @@ function sendHttpRequest(instanceUrl: string, requestCell: HttpCell) {
 	pendingRequest.query(query).set('Authorization', AUTH);
 
 	if (file !== undefined) {
-		return pendingRequest.attach(
-			'file',
-			Buffer.from(file.content),
-			file.name,
-		);
+		for (const attachedFile of [file].flat()) {
+			pendingRequest.attach(
+				'file',
+				Buffer.from(attachedFile.content),
+				attachedFile.name,
+			);
+		}
+
+		return pendingRequest;
 	}
 
 	return payload === undefined

@@ -601,6 +601,50 @@ describe(oneLine`
 		);
 	});
 
+	it('createMany purges before awaiting its action hooks', async () => {
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		tracker.on.insert('test').response([1]);
+
+		const purgesSeenByHook: number[] = [];
+
+		const countPurges = () => {
+			purgesSeenByHook.push(purgeScopedCache.mock.calls.length);
+		};
+
+		emitter.onAction('test.items.create', countPurges);
+
+		try {
+			await service().createMany([{ name: 'a', student: 'A' }]);
+		}
+		finally {
+			emitter.offAction('test.items.create', countPurges);
+		}
+
+		expect(purgesSeenByHook).toEqual([1]);
+	});
+
+	it('upsertMany purges before awaiting its action hooks', async () => {
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		tracker.on.insert('test').response([1]);
+
+		const purgesSeenByHook: number[] = [];
+
+		const countPurges = () => {
+			purgesSeenByHook.push(purgeScopedCache.mock.calls.length);
+		};
+
+		emitter.onAction('test.items.create', countPurges);
+
+		try {
+			await service().upsertMany([{ name: 'a', student: 'A' }]);
+		}
+		finally {
+			emitter.offAction('test.items.create', countPurges);
+		}
+
+		expect(purgesSeenByHook).toEqual([1]);
+	});
+
 	it(oneLine`
 		updateBatch purges old ∪ new — re-snapshots the committed rows for the new values
 	`, async () => {
