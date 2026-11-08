@@ -26,3 +26,7 @@ UPDATE 2026-11-08 (run 3): jean ruled "5 => A". Applied as 6784e647fe: uploads/i
 Lesson: a gate shared by success and error must not infer which from truthiness; pass an explicit success marker.
 
 MERGED 2026-11-08 as 0bb994cabd (merge commit, matched head fa478a2dc6): CI all green, autoreviewed 100% (563/563), run-3 comment issuecomment-6719215789. Predating points 9/10 + the two import edges remain reported only, no issue filed yet.
+
+FOLLOW-UP 2026-11-08 (after merge): jean asked "attack them in a pr to fix 698 misses". Verified on trunk 0bb994cabd that all 4 predating points (error leaves body unread; parts after an error still saved/imported; import with no file part never answers; import cut after a complete part = 400 while it commits) were still open, no issue covered them. New branch `v11.10.1-fix/multipart-after-error`, reusing the merged `multipart-part-end` worktree. Tests first (red), then `createBusboy` drain + route guards. Point 4 changes import semantics: probe first, ask jean before fixing if it is a choice. The create-busboy docblock "ends the process" wording (security, public) still unruled.
+Gotcha: `busboy.destroy()` does NOT stop a later part in the same chunk, so each route's `file` handler needs a `busboy.destroyed` guard besides the drain. Busboy's cut-body message is "Unexpected end of file". Test fakes of the request need `unpipe` and `resume` once the fix calls them.
+Method: revert each fix on its own and confirm only its own tests go red (two `utils.ts` hunks reverted one at a time).
