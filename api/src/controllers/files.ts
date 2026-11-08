@@ -185,7 +185,7 @@ export const multipartHandler: RequestHandler = (req, res, routeNext) => {
 
 	function tryDone() {
 		// a file saved before the next one's headers arrive must not answer yet
-		if (isParserClosed && savedFiles.length === fileCount) {
+		if (!isBodyRefused && isParserClosed && savedFiles.length === fileCount) {
 			if (fileCount === 0) {
 				return next(new InvalidPayloadError({ reason: `No files were included in the body` }));
 			}

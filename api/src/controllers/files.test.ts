@@ -286,6 +286,7 @@ describe('multipartHandler', () => {
 
 		const requestBody = new PassThrough();
 		const next = vi.fn();
+		const res = { locals: {} };
 
 		multipartHandler(
 			Object.assign(requestBody, {
@@ -294,7 +295,7 @@ describe('multipartHandler', () => {
 				params: { pk: 'a-key' },
 				query: {},
 			}) as unknown as Request,
-			{} as Response,
+			res as unknown as Response,
 			next,
 		);
 
@@ -330,6 +331,8 @@ describe('multipartHandler', () => {
 		expect(next.mock.calls).toEqual([
 			[new InvalidPayloadError({ reason: 'File is missing filename' })],
 		]);
+
+		expect(res.locals).toEqual({});
 	});
 
 	it(`Errors out if request doesn't contain any files to upload`, async () => {
