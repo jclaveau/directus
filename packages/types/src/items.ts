@@ -115,7 +115,13 @@ export type MutationOptions = {
 	/**
 	 * Called once by `createMany` when its rows are written, with the key and the
 	 * payload after hooks of each row it inserted: none for a row a hook took
-	 * over, cancelled or pointed `sameRowAs` another
+	 * over, cancelled or pointed `sameRowAs` another.
+	 * The payload is the `items.create` action's: presets applied, key set.
+	 * Inside a caller's transaction the rows are not committed yet: a rollback
+	 * or a retried attempt (`upsertMany` calls it once per run) reports rows
+	 * that never commit; `queueAfterCommit` defers work to the commit.
+	 * A callback that throws fails the create after its rows are written,
+	 * skipping its cache purge and its actions.
 	 */
 	onItemsCreate?:
 		| ((items: { primaryKey: PrimaryKey; payload: Item }[]) => void)
