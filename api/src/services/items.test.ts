@@ -8046,6 +8046,138 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 			.resolves.toStrictEqual([{ id: 9, name: 'held' }]);
 	});
 
+	it.each(['preserveMutationOrder', 'minimizeMutations'] as const)(oneLine`
+		writes the records one row nests in a foreign key cycle in relation
+		order, owner before board: %s
+	`, async (mutationBatching) => {
+		await database('board').insert({ id: 21, name: 'b' });
+
+		await expect(new ItemsService('card', { knex: database, schema: cycleSchema })
+			.createMany([{
+				id: 1,
+				owner: { id: 10, name: 'a', board: 21 },
+				board: { id: 21, lead: 10 },
+			}], { mutationBatching })).resolves.toStrictEqual([1]);
+
+		await expect(database('board').select('id', 'name', 'lead'))
+			.resolves.toStrictEqual([{ id: 21, name: 'b', lead: 10 }]);
+
+		await expect(database('person').select('id', 'name', 'board'))
+			.resolves.toStrictEqual([{ id: 10, name: 'a', board: 21 }]);
+	});
+
+	it.each(['preserveMutationOrder', 'minimizeMutations'] as const)(oneLine`
+		writes the tag a team names before the member nesting that team, the
+		member ↔ team cycle reached first through a region: %s
+	`, async (mutationBatching) => {
+		await database.schema.createTable('tag', (table) => {
+			table.increments('id');
+		});
+
+		await database.schema.createTable('team', (table) => {
+			table.increments('id');
+			table.integer('leader').references('member.id');
+			table.integer('tag').references('tag.id');
+		});
+
+		await database.schema.createTable('member', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('team').references('team.id');
+		});
+
+		await database.schema.createTable('region', (table) => {
+			table.increments('id');
+			table.integer('team').references('team.id');
+		});
+
+		await database.schema.createTable('route', (table) => {
+			table.increments('id');
+			table.integer('region').references('region.id');
+			table.integer('tag').references('tag.id');
+			table.integer('member').references('member.id');
+		});
+
+		// region.team → team ↔ member, team.tag → tag: a depth-first walk
+		// from region finishes member before tag
+		await expect(new ItemsService('route', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('route', (c) => {
+					c.field('id').id();
+					c.field('region').m2o('region');
+					c.field('tag').m2o('tag');
+					c.field('member').m2o('member');
+				})
+				.collection('region', (c) => {
+					c.field('id').id();
+					c.field('team').m2o('team');
+				})
+				.collection('team', (c) => {
+					c.field('id').id();
+					c.field('leader').m2o('member');
+					c.field('tag').m2o('tag');
+				})
+				.collection('member', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('team').m2o('team');
+				})
+				.collection('tag', (c) => {
+					c.field('id').id();
+				})
+				.build(),
+		})
+			.createMany([{
+				id: 1,
+				region: { id: 4 },
+				tag: { id: 5 },
+				member: { id: 1, name: 'a', team: { id: 2, tag: 5 } },
+			}], { mutationBatching })).resolves.toStrictEqual([1]);
+
+		await expect(database('team').select('id', 'leader', 'tag'))
+			.resolves.toStrictEqual([{ id: 2, leader: null, tag: 5 }]);
+
+		await expect(database('member').select('id', 'name', 'team'))
+			.resolves.toStrictEqual([{ id: 1, name: 'a', team: 2 }]);
+	});
+
+	it.each(['preserveMutationOrder', 'minimizeMutations'] as const)(oneLine`
+		refuses a board of a foreign key cycle named by its key alone after a
+		hook took over the record writing that key: %s
+	`, async (mutationBatching) => {
+		await database('board').insert({ id: 9, name: 'held' });
+
+		const takeOverTaken = (entries: { data?: { name?: string } }[]) => {
+			return entries.map((entry) => {
+				return entry.data?.name === 'taken'
+					? { key: 9 }
+					: entry;
+			});
+		};
+
+		emitter.onFilter('board.items.create', takeOverTaken);
+
+		try {
+			await expect(new ItemsService('card', {
+				knex: database,
+				schema: cycleSchema,
+			}).createMany([
+				{ id: 1, board: { id: 7, name: 'taken' } },
+				{ id: 2, board: { id: 7 } },
+				{ id: 3, owner: { id: 10, name: 'a' } },
+			], { mutationBatching })).rejects.toMatchObject({
+				message: 'Invalid foreign key in collection "card".',
+			});
+		}
+		finally {
+			emitter.offFilter('board.items.create', takeOverTaken);
+		}
+
+		await expect(database('board').select('id', 'name', 'lead'))
+			.resolves.toStrictEqual([{ id: 9, name: 'held', lead: null }]);
+	});
+
 	it.each([
 		'preserveMutationOrder',
 		'minimizeMutations',

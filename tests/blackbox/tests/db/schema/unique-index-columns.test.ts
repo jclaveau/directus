@@ -48,14 +48,26 @@ describe.each(vendors)('%s', (vendor) => {
 					then(
 						'the table\'s columns answer:',
 						(table: { column: string, in_unique_index: string }[]) => {
-							// an empty cell is a column the overview leaves unflagged: no key
 							expect(schemaOverview[INSPECTED_TABLE]!.columns)
 								.toMatchObject(Object.fromEntries(table.map((row) => {
-									return [row.column, row.in_unique_index === 'true'
-										? { column_name: row.column, in_unique_index: true }
-										: expect.not.objectContaining({
-											in_unique_index: expect.anything(),
-										})];
+									if (row.in_unique_index === 'true') {
+										return [row.column, {
+											column_name: row.column,
+											in_unique_index: true,
+										}];
+									}
+
+									if (row.in_unique_index !== '') {
+										throw new Error(
+											'An in_unique_index cell is true or empty, got'
+											+ ` ${JSON.stringify(row.in_unique_index)}`,
+										);
+									}
+
+									// unflagged: the overview sets no in_unique_index
+									return [row.column, expect.not.objectContaining({
+										in_unique_index: expect.anything(),
+									})];
 								})));
 						},
 					);
