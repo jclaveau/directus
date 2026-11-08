@@ -58,6 +58,23 @@ describe('createBusboy', () => {
 		);
 	});
 
+	test('fails the parser of a request aborted before it was created', async () => {
+		const requestBody = Object.assign(new PassThrough(), { complete: false });
+		requestBody.destroy();
+		await new Promise((resolve) => requestBody.once('close', resolve));
+
+		const busboy = createBusboy(requestBody as unknown as IncomingMessage, {
+			headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+		});
+
+		const reportedError = new Promise((resolve) => busboy.on('error', resolve));
+		requestBody.pipe(busboy);
+
+		await expect(reportedError).resolves.toEqual(
+			new Error('Unexpected end of form'),
+		);
+	});
+
 	test('keeps the parser of a request that completed', async () => {
 		const requestBody = Object.assign(new PassThrough(), { complete: true });
 

@@ -26,12 +26,18 @@ export function createBusboy(
 	});
 
 	// Nothing ends the part of an aborted request, and an import reading it holds
-	// its transaction until it ends.
-	request.once('close', () => {
-		if (request.complete === false) {
-			busboy.destroy();
-		}
-	});
+	// its transaction until it ends. An import creates its parser only once the
+	// transaction is open, by which time the request may already be aborted.
+	if (request.destroyed && request.complete === false) {
+		busboy.destroy();
+	}
+	else {
+		request.once('close', () => {
+			if (request.complete === false) {
+				busboy.destroy();
+			}
+		});
+	}
 
 	return busboy;
 }
