@@ -161,9 +161,6 @@ export default class Postgres implements SchemaInspector {
         JOIN pg_attribute a
           ON a.attrelid = c.oid AND a.attnum = ANY (i.indkey)
         WHERE i.indisunique
-          AND NOT i.indisprimary
-          AND i.indpred IS NULL
-          AND i.indexprs IS NULL
           AND c.relkind IN ('r', 'p')
           AND n.nspname IN (${bindings})
       `,
