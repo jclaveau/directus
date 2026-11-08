@@ -87,11 +87,16 @@ describe('NotificationsService.createMany', () => {
 			expect(MailService.prototype.send).not.toHaveBeenCalled();
 		});
 
-		expect(MailService.prototype.send).toHaveBeenCalledWith({
+		// the transaction is complete by then: its email reads on the database
+		expect(vi.mocked(UsersService).mock.calls).toEqual([
+			[{ schema, knex: database }],
+		]);
+
+		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
 			template: { name: 'base', data: { html: '' } },
 			to: 'user-a@example.com',
 			subject: 'Hi',
-		});
+		}]]);
 	});
 
 	test(oneLine`

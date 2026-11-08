@@ -23,7 +23,8 @@ export class NotificationsService extends ItemsService<Notification> {
 		const primaryKeys = await super.createMany(data, opts);
 
 		// A notification created in a transaction (an import) is emailed once its row
-		// commits: a rolled-back one sends nothing.
+		// commits: a rolled-back one sends nothing. One created in a savepoint that
+		// rolls back is still emailed once the outer transaction commits.
 		const sendEmails = async (database: Knex) => {
 			const notificationsService = new NotificationsService({
 				schema: this.schema,
