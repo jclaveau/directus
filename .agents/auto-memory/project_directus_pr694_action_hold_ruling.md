@@ -97,3 +97,21 @@ read hook fires; rec A = pass the caller's flag, not always-false, which would c
 **Ruled 2026-11-08:** `deleteByQuery` key read → A (pass the caller's `emitEvents`, default true),
 applied in 28e0aa6d92. `updateByQuery` has the same unflagged `getKeysByQuery` call: not ruled.
 #686 merges after #695.
+
+**Ruled 2026-11-08 (#694 follow-ups, to fix inside #695, test first):** 7 → B (`try`/`finally`
+around the cache clear at every site: a committed write always fires its actions, a rolled-back
+one keeps its own 400; 14 sites); 8 → A (scoped purge BEFORE awaiting the action hooks, so a slow
+hook cannot serve a stale HIT). Items 9-11 not answered separately. Order chosen: crash fix PR,
+then 8, then 7.
+
+**Item 8 scope found 2026-11-08:** the bug was NOT only upsertMany (items.ts ~3682): `createMany`
+(emit ~1118, purge ~1150) had it too; update and delete already purged first. Fixed both by moving
+the purge block above the emit, one red test per site (each site alone turns its own test red).
+Item 7: 14 identical `finally` blocks (collections 7, fields 4, relations 3) + roles.ts; collections'
+ForbiddenError checks sit before `try`, so they never reach the `finally`.
+
+**Applied 2026-11-08:** item 8 in d0b6364c8a, item 7 in 2192abb1ca
+(`api/src/utils/clear-caches-then-fire-actions.ts`; each service's 14 `finally` bodies → one
+private `clearCachesThenFireNestedActions`; a `mutationFailed` catch flag decides rethrow vs log
+of the clear error). JS `finally` cannot see a pending error, hence the flag. Crash fix = public
+PR #698 (upstream warning parked in `~/.agents/parked/`).
