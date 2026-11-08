@@ -20,7 +20,17 @@ export class NotificationsService extends ItemsService<Notification> {
 	}
 
 	override async createMany(data: Partial<Notification>[], opts?: MutationOptions): Promise<PrimaryKey[]> {
-		const primaryKeys = await super.createMany(data, opts);
+		// Only the rows written are emailed, as written: none for a row a filter
+		// hook cancelled or took over, one for a row written for two positions
+		const writtenNotifications: Partial<Notification>[] = [];
+
+		const primaryKeys = await super.createMany(data, {
+			...opts,
+			onItemsCreate: (items) => {
+				writtenNotifications.push(...items.map((item) => item.payload));
+				opts?.onItemsCreate?.(items);
+			},
+		});
 
 		// A notification created in a transaction (an import) is emailed once its row
 		// commits: a rolled-back one sends nothing. One created in a savepoint that
@@ -32,12 +42,7 @@ export class NotificationsService extends ItemsService<Notification> {
 				accountability: this.accountability,
 			});
 
-			for (const [index, notification] of data.entries()) {
-				// A row a filter hook cancelled was never written
-				if (primaryKeys[index] === null) {
-					continue;
-				}
-
+			for (const notification of writtenNotifications) {
 				// One recipient's failure must not cost the later ones their email
 				try {
 					await notificationsService.sendEmail(notification);

@@ -4397,6 +4397,99 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 	});
 
+	describe('onItemsCreate', () => {
+		it(oneLine`
+			reports only the rows the create wrote, with their payload after hooks
+		`, async () => {
+			tracker.on.insert('test').response([1]);
+
+			const reshapeRows = () => {
+				return [
+					{ data: { name: 'rewritten' } },
+					{ key: 9 },
+					{ sameRowAs: 0 },
+					null,
+				];
+			};
+
+			emitter.onFilter('test.items.create', reshapeRows);
+			const reportedItems: unknown[] = [];
+
+			try {
+				const keys = await new ItemsService('test', {
+					knex: db,
+					schema: shapesSchema,
+				}).createMany(
+					[{ name: 'a' }, { name: 'stored' }, { name: 'a' }, { name: 'b' }],
+					{
+						allowFilterCancel: true,
+						onItemsCreate: (items) => reportedItems.push(items),
+					},
+				);
+
+				expect(keys).toEqual([1, 9, 1, null]);
+
+				expect(reportedItems).toEqual([
+					[{ primaryKey: 1, payload: { id: 1, name: 'rewritten' } }],
+				]);
+			}
+			finally {
+				emitter.offFilter('test.items.create', reshapeRows);
+			}
+		});
+
+		it(oneLine`
+			reports the rows of a create written row by row once, after its
+			transaction
+		`, async () => {
+			tracker.on.insert('test').responseOnce([1]);
+			tracker.on.insert('test').responseOnce([2]);
+			const reportedItems: unknown[] = [];
+
+			await new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			}).createMany([{ name: 'a' }, { name: 'b' }], {
+				mutationBatching: 'disableBatching',
+				onItemsCreate: (items) => reportedItems.push(items),
+			});
+
+			expect(reportedItems).toEqual([[
+				{ primaryKey: 1, payload: { id: 1, name: 'a' } },
+				{ primaryKey: 2, payload: { id: 2, name: 'b' } },
+			]]);
+		});
+
+		it(oneLine`
+			reports none of the rows a retried row-by-row attempt rolled back
+		`, async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+			tracker.on.insert('test').responseOnce([1]);
+
+			tracker.on.insert('test').simulateErrorOnce(Object.assign(
+				new Error('database is locked'),
+				{ code: 'SQLITE_BUSY' },
+			));
+
+			tracker.on.insert('test').responseOnce([3]);
+			tracker.on.insert('test').responseOnce([4]);
+			const reportedItems: unknown[] = [];
+
+			await new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			}).createMany([{ name: 'a' }, { name: 'b' }], {
+				mutationBatching: 'disableBatching',
+				onItemsCreate: (items) => reportedItems.push(items),
+			});
+
+			expect(reportedItems).toEqual([[
+				{ primaryKey: 3, payload: { id: 3, name: 'a' } },
+				{ primaryKey: 4, payload: { id: 4, name: 'b' } },
+			]]);
+		});
+	});
+
 	describe('singletons', () => {
 		it('readSingleton synthesizes defaults for an empty collection', async () => {
 			tracker.on.select('settings').response([]);

@@ -53,7 +53,14 @@ describe('NotificationsService.createMany', () => {
 		vi.clearAllMocks();
 
 		vi.spyOn(ItemsService.prototype, 'createMany')
-			.mockResolvedValue(['notification-a']);
+			.mockImplementation(async (_data, opts) => {
+				opts?.onItemsCreate?.([{
+					primaryKey: 'notification-a',
+					payload: { recipient: 'user-a', subject: 'Hi' },
+				}]);
+
+				return ['notification-a'];
+			});
 
 		vi.mocked(UsersService.prototype.readOne).mockResolvedValue(withMeta({
 			id: 'user-a',
@@ -130,7 +137,20 @@ describe('NotificationsService.createMany', () => {
 		const readError = new Error('user-a deleted');
 
 		vi.spyOn(ItemsService.prototype, 'createMany')
-			.mockResolvedValue(['notification-a', 'notification-b']);
+			.mockImplementation(async (_data, opts) => {
+				opts?.onItemsCreate?.([
+					{
+						primaryKey: 'notification-a',
+						payload: { recipient: 'user-a', subject: 'A' },
+					},
+					{
+						primaryKey: 'notification-b',
+						payload: { recipient: 'user-b', subject: 'B' },
+					},
+				]);
+
+				return ['notification-a', 'notification-b'];
+			});
 
 		vi.mocked(UsersService.prototype.readOne)
 			.mockRejectedValueOnce(readError)
@@ -172,8 +192,15 @@ describe('NotificationsService.createMany', () => {
 		const database = knex.default({ client: MockClient });
 
 		vi.spyOn(ItemsService.prototype, 'createMany')
-			// the spy is typed off the overload without allowFilterCancel
-			.mockResolvedValue([null, 'notification-b'] as never);
+			.mockImplementation(async (_data, opts) => {
+				opts?.onItemsCreate?.([{
+					primaryKey: 'notification-b',
+					payload: { recipient: 'user-a', subject: 'B' },
+				}]);
+
+				// the spy is typed off the overload without allowFilterCancel
+				return [null, 'notification-b'] as never;
+			});
 
 		await new NotificationsService({ knex: database, schema }).createMany(
 			[
@@ -187,6 +214,88 @@ describe('NotificationsService.createMany', () => {
 			template: { name: 'base', data: { html: '' } },
 			to: 'user-a@example.com',
 			subject: 'B',
+		}]]);
+	});
+
+	test(oneLine`
+		sends no email for a notification a filter hook took over, nor twice for
+		one written once for two positions
+	`, async () => {
+		const database = knex.default({ client: MockClient });
+
+		vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockImplementation(async (_data, opts) => {
+				opts?.onItemsCreate?.([{
+					primaryKey: 'notification-b',
+					payload: { recipient: 'user-a', subject: 'B' },
+				}]);
+
+				return ['notification-9', 'notification-b', 'notification-b'];
+			});
+
+		await new NotificationsService({ knex: database, schema }).createMany([
+			{ recipient: 'user-a', subject: 'Stored' },
+			{ recipient: 'user-a', subject: 'B' },
+			{ recipient: 'user-a', subject: 'B' },
+		]);
+
+		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
+			template: { name: 'base', data: { html: '' } },
+			to: 'user-a@example.com',
+			subject: 'B',
+		}]]);
+	});
+
+	test(oneLine`
+		emails a notification to the recipient a filter hook wrote
+	`, async () => {
+		const database = knex.default({ client: MockClient });
+
+		vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockImplementation(async (_data, opts) => {
+				opts?.onItemsCreate?.([{
+					primaryKey: 'notification-a',
+					payload: { recipient: 'user-b', subject: 'A' },
+				}]);
+
+				return ['notification-a'];
+			});
+
+		vi.mocked(UsersService.prototype.readOne).mockResolvedValue(withMeta({
+			id: 'user-b',
+			email: 'user-b@example.com',
+			email_notifications: true,
+			role: null,
+		}, { scopedCacheFingerprints: [] }));
+
+		await new NotificationsService({ knex: database, schema })
+			.createMany([{ recipient: 'user-a', subject: 'A' }]);
+
+		expect(vi.mocked(UsersService.prototype.readOne).mock.calls).toEqual([
+			['user-b', { fields: ['id', 'email', 'email_notifications', 'role'] }],
+		]);
+
+		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
+			template: { name: 'base', data: { html: '' } },
+			to: 'user-b@example.com',
+			subject: 'A',
+		}]]);
+	});
+
+	test(oneLine`
+		passes the rows a create wrote on to the caller's onItemsCreate
+	`, async () => {
+		const database = knex.default({ client: MockClient });
+		const reportedItems: unknown[] = [];
+
+		await new NotificationsService({ knex: database, schema }).createMany(
+			[{ recipient: 'user-a', subject: 'Hi' }],
+			{ onItemsCreate: (items) => reportedItems.push(items) },
+		);
+
+		expect(reportedItems).toEqual([[{
+			primaryKey: 'notification-a',
+			payload: { recipient: 'user-a', subject: 'Hi' },
 		}]]);
 	});
 });

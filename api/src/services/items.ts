@@ -1106,6 +1106,10 @@ implements AbstractService<Item> {
 			throw error;
 		});
 
+		opts.onItemsCreate?.(actionPayloads.map(({ primaryKey, actionHookPayload }) => {
+			return { primaryKey, payload: actionHookPayload };
+		}));
+
 		// Before the actions: a reader would get the old rows from the cache for as
 		// long as an awaited hook runs.
 		if (shouldClearCache(this.cache, opts, this.collection)) {
@@ -1179,12 +1183,14 @@ implements AbstractService<Item> {
 		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
 			?? createScopedCacheHookDeclarations(this.schema);
 
-		const createdKeys = await transactionHoldingActions(
+		const { rowKeys: createdKeys, createdItems } = await transactionHoldingActions(
 			this.knex,
 			rowActionEvents,
 			async (trx) => {
 				const service = this.fork({ knex: trx });
 				const rowKeys: (PrimaryKey | null)[] = [];
+				// per attempt: a retried attempt reports none of the rows it rolled back
+				const createdItems: { primaryKey: PrimaryKey; payload: AnyItem }[] = [];
 				let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
 
 				const rowOpts: MutationOptions = {
@@ -1195,6 +1201,9 @@ implements AbstractService<Item> {
 					},
 					onRequireUserIntegrityCheck: (flags) => {
 						userIntegrityCheckFlags |= flags;
+					},
+					onItemsCreate: (rowItems) => {
+						createdItems.push(...rowItems);
 					},
 				};
 
@@ -1208,7 +1217,7 @@ implements AbstractService<Item> {
 
 				await this.checkUserIntegrityOnce(userIntegrityCheckFlags, trx, opts);
 
-				return rowKeys;
+				return { rowKeys, createdItems };
 			},
 			mutationTracker.snapshot(),
 		).catch(async (error) => {
@@ -1216,6 +1225,8 @@ implements AbstractService<Item> {
 
 			throw error;
 		});
+
+		opts.onItemsCreate?.(createdItems);
 
 		await emitActionEvents(rowActionEvents, opts);
 
