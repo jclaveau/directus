@@ -1,9 +1,11 @@
 import { useEnv } from '@directus/env';
 import type { AbstractServiceOptions, MutationOptions, Notification, PrimaryKey } from '@directus/types';
+import type { Knex } from 'knex';
 import { useLogger } from '../logger/index.js';
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { md } from '../utils/md.js';
+import { queueAfterCommit } from '../utils/transaction.js';
 import { Url } from '../utils/url.js';
 import { ItemsService } from './items.js';
 import { MailService } from './mail/index.js';
@@ -20,8 +22,22 @@ export class NotificationsService extends ItemsService<Notification> {
 	override async createMany(data: Partial<Notification>[], opts?: MutationOptions): Promise<PrimaryKey[]> {
 		const primaryKeys = await super.createMany(data, opts);
 
-		for (const notification of data) {
-			await this.sendEmail(notification);
+		// A notification created in a transaction (an import) is emailed once its row
+		// commits: a rolled-back one sends nothing.
+		const sendEmails = async (database: Knex) => {
+			const notificationsService = new NotificationsService({
+				schema: this.schema,
+				knex: database,
+				accountability: this.accountability,
+			});
+
+			for (const notification of data) {
+				await notificationsService.sendEmail(notification);
+			}
+		};
+
+		if (!queueAfterCommit(this.knex, sendEmails)) {
+			await sendEmails(this.knex);
 		}
 
 		return primaryKeys;
