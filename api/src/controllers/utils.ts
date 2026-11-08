@@ -178,7 +178,7 @@ router.post(
 			try {
 				await service.import(req.params['collection']!, mimeType, fileStream);
 			} catch (err: any) {
-				return answerRequest(err);
+				return busboy.emit('error', err);
 			}
 
 			importedCount++;
@@ -189,7 +189,14 @@ router.post(
 
 		busboy.on('close', () => {
 			isParserClosed = true;
-			answerImported();
+
+			if (fileCount === 0) {
+				return answerRequest(
+					new InvalidPayloadError({ reason: 'No files were included in the body' }),
+				);
+			}
+
+			return answerImported();
 		});
 
 		req.pipe(busboy);

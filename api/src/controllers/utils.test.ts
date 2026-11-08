@@ -1,3 +1,4 @@
+import { InvalidPayloadError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import { PassThrough, type Readable } from 'node:stream';
 import { finished } from 'node:stream/promises';
@@ -254,6 +255,99 @@ describe('utils controller /import/:collection', () => {
 
 		expect(res.status.mock.calls).toEqual([]);
 		expect(next.mock.calls).toEqual([[undefined]]);
+	});
+
+	test('imports no file arriving after a failed one', async () => {
+		const importFile = vi.fn(async () => {
+			throw new Error('refused');
+		});
+
+		vi.mocked(ImportService).mockImplementationOnce(function () {
+			return { import: importFile };
+		} as any);
+
+		const importRoute = router.stack.find((layer: any) => {
+			return layer.route?.path === '/import/:collection';
+		})!;
+
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		await importRoute.route!.stack[1]!.handle(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: { collection: 'articles' },
+			}) as any,
+			{} as any,
+			next,
+		);
+
+		requestBody.write([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"a"}]',
+			'--cut',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
+		});
+
+		requestBody.end([
+			'',
+			'Content-Disposition: form-data; name="file"; filename="b.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"b"}]',
+			'--cut--',
+			'',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(requestBody.readableEnded).toBe(true);
+		});
+
+		expect(importFile).toHaveBeenCalledTimes(1);
+		expect(next.mock.calls).toEqual([[new Error('refused')]]);
+	});
+
+	test('refuses an import body with no file', async () => {
+		const importRoute = router.stack.find((layer: any) => {
+			return layer.route?.path === '/import/:collection';
+		})!;
+
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		await importRoute.route!.stack[1]!.handle(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: { collection: 'articles' },
+			}) as any,
+			{} as any,
+			next,
+		);
+
+		requestBody.end([
+			'--cut',
+			'Content-Disposition: form-data; name="title"',
+			'',
+			'articles',
+			'--cut--',
+			'',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
+		});
+
+		expect(next.mock.calls).toEqual([
+			[new InvalidPayloadError({ reason: 'No files were included in the body' })],
+		]);
 	});
 });
 

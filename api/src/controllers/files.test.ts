@@ -120,6 +120,47 @@ describe('multipartHandler', () => {
 		expect(res.locals).toEqual({ savedFiles: ['a-key'] });
 	});
 
+	it('saves no file arriving after a refused one', async () => {
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		multipartHandler(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: {},
+				query: {},
+			}) as unknown as Request,
+			{} as Response,
+			next,
+		);
+
+		requestBody.end([
+			'--cut',
+			'Content-Disposition: form-data; name="file"',
+			'Content-Type: application/octet-stream',
+			'',
+			'abc',
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="b.txt"',
+			'Content-Type: text/plain',
+			'',
+			'def',
+			'--cut--',
+			'',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
+		});
+
+		expect(uploadOne.mock.calls).toEqual([]);
+
+		expect(next.mock.calls).toEqual([
+			[new InvalidPayloadError({ reason: 'File is missing filename' })],
+		]);
+	});
+
 	it(`Errors out if request doesn't contain any files to upload`, () => {
 		const fakeForm = new FormData();
 
@@ -164,6 +205,8 @@ describe('multipartHandler', () => {
 			params: {},
 			query: {},
 			pipe: (input: NodeJS.WritableStream) => stream.pipe(input),
+			unpipe: vi.fn(),
+			resume: vi.fn(),
 		} as unknown as Request;
 
 		const res = {} as Response;

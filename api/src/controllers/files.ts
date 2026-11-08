@@ -83,6 +83,11 @@ export const multipartHandler: RequestHandler = (req, res, routeNext) => {
 	});
 
 	busboy.on('file', async (_fieldname, fileStream: BusboyFileStream, { filename, mimeType }) => {
+		// a part parsed from the same chunk as a refused one
+		if (busboy.destroyed) {
+			return undefined;
+		}
+
 		if (!filename) {
 			return busboy.emit('error', new InvalidPayloadError({ reason: `File is missing filename` }));
 		}

@@ -17,6 +17,15 @@ export function createBusboy(
 		fileStream.on('error', () => undefined);
 	});
 
+	// Once the route answers an error, the pipe stops feeding the parser and the
+	// rest of the body would sit unread, and a part still being read would never
+	// end: drain the body and fail that part.
+	busboy.on('error', () => {
+		request.unpipe(busboy);
+		request.resume();
+		busboy.destroy();
+	});
+
 	// Nothing ends the part of an aborted request, and an import reading it holds
 	// its transaction until it ends.
 	request.once('close', () => {
