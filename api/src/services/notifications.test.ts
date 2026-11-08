@@ -283,6 +283,35 @@ describe('NotificationsService.createMany', () => {
 	});
 
 	test(oneLine`
+		emails a notification whose recipient is sent as an object
+	`, async () => {
+		const database = knex.default({ client: MockClient });
+
+		vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockImplementation(async (_data, opts) => {
+				opts?.onItemsCreate?.([{
+					primaryKey: 'notification-a',
+					payload: { recipient: { id: 'user-a' }, subject: 'A' },
+				}]);
+
+				return ['notification-a'];
+			});
+
+		await new NotificationsService({ knex: database, schema })
+			.createMany([{ recipient: { id: 'user-a' } as never, subject: 'A' }]);
+
+		expect(vi.mocked(UsersService.prototype.readOne).mock.calls).toEqual([
+			['user-a', { fields: ['id', 'email', 'email_notifications', 'role'] }],
+		]);
+
+		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
+			template: { name: 'base', data: { html: '' } },
+			to: 'user-a@example.com',
+			subject: 'A',
+		}]]);
+	});
+
+	test(oneLine`
 		passes the rows a create wrote on to the caller's onItemsCreate
 	`, async () => {
 		const database = knex.default({ client: MockClient });

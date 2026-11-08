@@ -64,9 +64,11 @@ export class NotificationsService extends ItemsService<Notification> {
 		if (data.recipient) {
 			const usersService = new UsersService({ schema: this.schema, knex: this.knex });
 
-			const user = await usersService.readOne(data.recipient, {
-				fields: ['id', 'email', 'email_notifications', 'role'],
-			});
+			// A recipient sent as an M2O object (`{ id }`) reaches here as sent
+			const user = await usersService.readOne(
+				(data.recipient as any).id ?? data.recipient,
+				{ fields: ['id', 'email', 'email_notifications', 'role'] },
+			);
 
 			if (user['email'] && user['email_notifications'] === true) {
 				const manageUserAccountUrl = new Url(env['PUBLIC_URL'] as string)
