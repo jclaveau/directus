@@ -2,14 +2,14 @@ import type { Request, Response } from 'express';
 import FormData from 'form-data';
 import { PassThrough, type Readable } from 'node:stream';
 import { finished } from 'node:stream/promises';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { InvalidPayloadError, InvalidQueryError } from '@directus/errors';
 import { multipartHandler } from './files.js';
 
 vi.mock('../../src/database');
 
 const uploadOne = vi.hoisted(() => {
-	return vi.fn((fileStream: Readable) => finished(fileStream));
+	return vi.fn((fileStream: Readable): Promise<unknown> => finished(fileStream));
 });
 
 vi.mock('../services/files.js', () => {
@@ -29,6 +29,10 @@ vi.mock('../services', () => {
 });
 
 describe('multipartHandler', () => {
+	beforeEach(() => {
+		uploadOne.mockClear();
+	});
+
 	it('answers the error of a body cut inside a part', async () => {
 		const requestBody = new PassThrough();
 		const next = vi.fn();
@@ -64,6 +68,56 @@ describe('multipartHandler', () => {
 		await new Promise(setImmediate);
 
 		expect(next.mock.calls).toEqual([[new Error('Unexpected end of form')]]);
+	});
+
+	it('waits for the end of the body to answer', async () => {
+		uploadOne.mockImplementationOnce(async (fileStream: Readable) => {
+			fileStream.resume();
+			await finished(fileStream);
+			return 'a-key';
+		});
+
+		const requestBody = new PassThrough();
+		const res = { locals: {} };
+		const next = vi.fn();
+
+		multipartHandler(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: {},
+				query: {},
+			}) as unknown as Request,
+			res as unknown as Response,
+			next,
+		);
+
+		requestBody.write([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.txt"',
+			'Content-Type: text/plain',
+			'',
+			'abc',
+			'--cut',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(uploadOne).toHaveBeenCalled();
+		});
+
+		await uploadOne.mock.results[0]!.value;
+		await new Promise(setImmediate);
+
+		expect(next.mock.calls).toEqual([]);
+
+		requestBody.end('--\r\n');
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
+		});
+
+		expect(next.mock.calls).toEqual([[undefined]]);
+		expect(res.locals).toEqual({ savedFiles: ['a-key'] });
 	});
 
 	it(`Errors out if request doesn't contain any files to upload`, () => {

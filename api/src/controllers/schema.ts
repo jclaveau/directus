@@ -56,6 +56,8 @@ const schemaMultipartHandler: RequestHandler = (req, res, routeNext) => {
 	const busboy = createBusboy(req, { headers });
 
 	let isFileIncluded = false;
+	let isUploadRead = false;
+	let isParserClosed = false;
 	let upload: any | null = null;
 
 	busboy.on('file', async (_, fileStream, { mimeType }) => {
@@ -91,8 +93,9 @@ const schemaMultipartHandler: RequestHandler = (req, res, routeNext) => {
 			}
 
 			res.locals['upload'] = upload;
+			isUploadRead = true;
 
-			return next();
+			return answerUpload();
 		} catch (error: any) {
 			busboy.emit('error', error);
 		}
@@ -101,8 +104,19 @@ const schemaMultipartHandler: RequestHandler = (req, res, routeNext) => {
 	busboy.on('error', (error: Error) => next(error));
 
 	busboy.on('close', () => {
+		isParserClosed = true;
+
 		if (!isFileIncluded) return next(new InvalidPayloadError({ reason: `No file was included in the body` }));
+
+		return answerUpload();
 	});
+
+	// a file read before the end of the body must not answer yet
+	function answerUpload() {
+		if (isParserClosed && isUploadRead) {
+			next();
+		}
+	}
 
 	req.pipe(busboy);
 };

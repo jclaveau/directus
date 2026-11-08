@@ -134,14 +134,18 @@ export const multipartHandler: RequestHandler = (req, res, routeNext) => {
 		next(error);
 	});
 
+	let isParserClosed = false;
+
 	busboy.on('close', () => {
+		isParserClosed = true;
 		tryDone();
 	});
 
 	req.pipe(busboy);
 
 	function tryDone() {
-		if (savedFiles.length === fileCount) {
+		// a file saved before the next one's headers arrive must not answer yet
+		if (isParserClosed && savedFiles.length === fileCount) {
 			if (fileCount === 0) {
 				return next(new InvalidPayloadError({ reason: `No files were included in the body` }));
 			}

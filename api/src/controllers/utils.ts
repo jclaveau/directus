@@ -129,7 +129,13 @@ router.post(
 	'/import/:collection',
 	collectionExists,
 	asyncHandler(async (req, res, routeNext) => {
-		const next = answerOnce(routeNext);
+		const answerRequest = answerOnce((error?: unknown) => {
+			if (error) {
+				return routeNext(error);
+			}
+
+			return res.status(200).end();
+		});
 
 		if (req.is('multipart/form-data') === false) {
 			throw new UnsupportedMediaTypeError({ mediaType: req.headers['content-type']!, where: 'Content-Type header' });
@@ -153,17 +159,36 @@ router.post(
 
 		const busboy = createBusboy(req, { headers });
 
+		let fileCount = 0;
+		let importedCount = 0;
+		let isParserClosed = false;
+
+		// a part imported before the next one's headers arrive must not answer yet
+		const answerImported = () => {
+			if (isParserClosed && fileCount > 0 && importedCount === fileCount) {
+				answerRequest();
+			}
+		};
+
 		busboy.on('file', async (_fieldname, fileStream, { mimeType }) => {
+			fileCount++;
+
 			try {
 				await service.import(req.params['collection']!, mimeType, fileStream);
 			} catch (err: any) {
-				return next(err);
+				return answerRequest(err);
 			}
 
-			return res.status(200).end();
+			importedCount++;
+			return answerImported();
 		});
 
-		busboy.on('error', (err: Error) => next(err));
+		busboy.on('error', (err: Error) => answerRequest(err));
+
+		busboy.on('close', () => {
+			isParserClosed = true;
+			answerImported();
+		});
 
 		req.pipe(busboy);
 	}),
