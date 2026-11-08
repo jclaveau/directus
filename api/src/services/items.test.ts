@@ -3329,6 +3329,47 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			expect(keys).toEqual([1]);
 		});
+
+		it(oneLine`
+			updateByQuery reads its keys without read hooks under emitEvents: false
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1 }]);
+			tracker.on.update('test').response(1);
+			const readFilter = vi.fn((rows) => rows);
+			emitter.onFilter('test.items.read', readFilter);
+
+			try {
+				await service().updateByQuery(
+					{ filter: { name: { _eq: 'x' } } },
+					{ name: 'y' },
+					{ emitEvents: false },
+				);
+
+				expect(readFilter).not.toHaveBeenCalled();
+			}
+			finally {
+				emitter.offFilter('test.items.read', readFilter);
+			}
+		});
+
+		it('updateByQuery reads its keys with read hooks by default', async () => {
+			tracker.on.select('test').response([{ id: 1 }]);
+			tracker.on.update('test').response(1);
+			const readFilter = vi.fn((rows) => rows);
+			emitter.onFilter('test.items.read', readFilter);
+
+			try {
+				await service().updateByQuery(
+					{ filter: { name: { _eq: 'x' } } },
+					{ name: 'y' },
+				);
+
+				expect(readFilter).toHaveBeenCalledTimes(1);
+			}
+			finally {
+				emitter.offFilter('test.items.read', readFilter);
+			}
+		});
 	});
 
 	describe('a create revision names a nested row by its key', () => {
