@@ -172,17 +172,28 @@ router.post(
 			}
 		};
 
-		busboy.on('file', async (_fieldname, fileStream, { mimeType }) => {
+		// parts of one chunk are all parsed before the first import fails: each
+		// waits for the previous one, so none starts once the body is refused
+		let previousImport: Promise<unknown> = Promise.resolve();
+
+		busboy.on('file', (_fieldname, fileStream, { mimeType }) => {
 			fileCount++;
 
-			try {
-				await service.import(req.params['collection']!, mimeType, fileStream);
-			} catch (err: any) {
-				return busboy.emit('error', err);
-			}
+			previousImport = previousImport.then(async () => {
+				if (busboy.destroyed) {
+					return undefined;
+				}
 
-			importedCount++;
-			return answerImported();
+				try {
+					await service.import(req.params['collection']!, mimeType, fileStream);
+				}
+				catch (err: any) {
+					return busboy.emit('error', err);
+				}
+
+				importedCount++;
+				return answerImported();
+			});
 		});
 
 		busboy.on('error', (err: Error) => answerRequest(err));

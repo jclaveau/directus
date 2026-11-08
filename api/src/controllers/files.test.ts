@@ -205,7 +205,6 @@ describe('multipartHandler', () => {
 			params: {},
 			query: {},
 			pipe: (input: NodeJS.WritableStream) => stream.pipe(input),
-			unpipe: vi.fn(),
 			resume: vi.fn(),
 		} as unknown as Request;
 

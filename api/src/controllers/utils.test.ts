@@ -314,6 +314,102 @@ describe('utils controller /import/:collection', () => {
 		expect(next.mock.calls).toEqual([[new Error('refused')]]);
 	});
 
+	test('imports no file parsed from the chunk of a failed one', async () => {
+		const importFile = vi.fn(async () => {
+			throw new Error('refused');
+		});
+
+		vi.mocked(ImportService).mockImplementationOnce(function () {
+			return { import: importFile };
+		} as any);
+
+		const importRoute = router.stack.find((layer: any) => {
+			return layer.route?.path === '/import/:collection';
+		})!;
+
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		await importRoute.route!.stack[1]!.handle(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: { collection: 'articles' },
+			}) as any,
+			{} as any,
+			next,
+		);
+
+		requestBody.end([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"a"}]',
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="b.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"b"}]',
+			'--cut--',
+			'',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
+		});
+
+		expect(importFile).toHaveBeenCalledTimes(1);
+		expect(next.mock.calls).toEqual([[new Error('refused')]]);
+	});
+
+	test('imports no file parsed after a malformed part header', async () => {
+		const importFile = vi.fn(async () => undefined);
+
+		vi.mocked(ImportService).mockImplementationOnce(function () {
+			return { import: importFile };
+		} as any);
+
+		const importRoute = router.stack.find((layer: any) => {
+			return layer.route?.path === '/import/:collection';
+		})!;
+
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		await importRoute.route!.stack[1]!.handle(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: { collection: 'articles' },
+			}) as any,
+			{} as any,
+			next,
+		);
+
+		requestBody.end([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.json"',
+			`${'X'.repeat(17_000)}: y`,
+			'',
+			'[{"name":"a"}]',
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="b.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"b"}]',
+			'--cut--',
+			'',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(requestBody.readableEnded).toBe(true);
+		});
+
+		expect(importFile.mock.calls).toEqual([]);
+		expect(next.mock.calls).toEqual([[new Error('Malformed part header')]]);
+	});
+
 	test('refuses an import body with no file', async () => {
 		const importRoute = router.stack.find((layer: any) => {
 			return layer.route?.path === '/import/:collection';

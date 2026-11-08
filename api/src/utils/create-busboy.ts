@@ -21,7 +21,6 @@ export function createBusboy(
 	// rest of the body would sit unread, and a part still being read would never
 	// end: drain the body and fail that part.
 	busboy.on('error', () => {
-		request.unpipe(busboy);
 		request.resume();
 		busboy.destroy();
 	});
