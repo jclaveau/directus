@@ -3963,7 +3963,7 @@ implements AbstractService<Item> {
 			: opts;
 
 		const nestedOf = (index: number) => {
-			return opts.nestedOfPayloads?.[index] ?? this.nested;
+			return index === -1 ? opts.nestedOfPayloads?.[index] ?? this.nested : this.nested;
 		};
 
 		for (const { updating, indexes: segmentIndexes } of upsertSegments) {

@@ -715,7 +715,6 @@ export class PayloadService {
 					segmentReferences,
 					rowsResult,
 					opts,
-					upsertedKeyNames,
 				);
 
 				segmentReferences = [];
@@ -729,7 +728,6 @@ export class PayloadService {
 			segmentReferences,
 			rowsResult,
 			opts,
-			upsertedKeyNames,
 		);
 	}
 
