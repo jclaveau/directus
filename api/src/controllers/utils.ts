@@ -7,7 +7,6 @@ import {
 import type { CacheFlushTarget } from '@directus/types';
 import { oneLine } from '@directus/utils';
 import argon2 from 'argon2';
-import Busboy from 'busboy';
 import { Router } from 'express';
 import Joi from 'joi';
 import { autoscaleDrillEnabled } from '../processes/autoscale/lib/drill.js';
@@ -29,9 +28,11 @@ import {
 import { redisConfigAvailable } from '../redis/index.js';
 import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
+import { answerOnce } from '../utils/answer-once.js';
 import asyncHandler from '../utils/async-handler.js';
 import { cacheAuditEnabled } from '../utils/cache-audit-enabled.js';
 import { CacheAuditOptionsSchema } from '../utils/cache-audit-options.js';
+import { createBusboy } from '../utils/create-busboy.js';
 import { generateHash } from '../utils/generate-hash.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
@@ -127,7 +128,17 @@ router.post(
 router.post(
 	'/import/:collection',
 	collectionExists,
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, routeNext) => {
+		const importSucceeded = Symbol('import succeeded');
+
+		const answerRequest = answerOnce((outcome?: unknown) => {
+			if (outcome === importSucceeded) {
+				return res.status(200).end();
+			}
+
+			return routeNext(outcome);
+		});
+
 		if (req.is('multipart/form-data') === false) {
 			throw new UnsupportedMediaTypeError({ mediaType: req.headers['content-type']!, where: 'Content-Type header' });
 		}
@@ -148,19 +159,38 @@ router.post(
 			};
 		}
 
-		const busboy = Busboy({ headers });
+		const busboy = createBusboy(req, { headers });
+
+		let fileCount = 0;
+		let importedCount = 0;
+		let isParserClosed = false;
+
+		// a part imported before the next one's headers arrive must not answer yet
+		const answerImported = () => {
+			if (isParserClosed && fileCount > 0 && importedCount === fileCount) {
+				answerRequest(importSucceeded);
+			}
+		};
 
 		busboy.on('file', async (_fieldname, fileStream, { mimeType }) => {
+			fileCount++;
+
 			try {
 				await service.import(req.params['collection']!, mimeType, fileStream);
 			} catch (err: any) {
-				return next(err);
+				return answerRequest(err);
 			}
 
-			return res.status(200).end();
+			importedCount++;
+			return answerImported();
 		});
 
-		busboy.on('error', (err: Error) => next(err));
+		busboy.on('error', (err: Error) => answerRequest(err));
+
+		busboy.on('close', () => {
+			isParserClosed = true;
+			answerImported();
+		});
 
 		req.pipe(busboy);
 	}),
