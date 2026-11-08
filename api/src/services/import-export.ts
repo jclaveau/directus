@@ -36,7 +36,7 @@ import type { FunctionFieldNode, FieldNode, NestedCollectionNode } from '../type
 import { getDateFormatted } from '../utils/get-date-formatted.js';
 import { getService } from '../utils/get-service.js';
 import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
-import { transaction } from '../utils/transaction.js';
+import { queueAfterCommit, transaction } from '../utils/transaction.js';
 import { Url } from '../utils/url.js';
 import { userName } from '../utils/user-name.js';
 import { FilesService } from './files.js';
@@ -54,6 +54,22 @@ export const exportMimeTypes: Record<ExportFormat, string> = {
 	xml: 'text/xml',
 	yaml: 'text/yaml',
 };
+
+/**
+ * Fire the actions an import held once its rows commit: with the knex of a
+ * caller's transaction, the import returns before that commit.
+ */
+function fireActionsAfterCommit(knex: Knex, actionEvents: ActionEventParams[]) {
+	const fireActions = async () => {
+		for (const actionEvent of actionEvents) {
+			emitter.emitAction(actionEvent.event, actionEvent.meta, actionEvent.context);
+		}
+	};
+
+	if (!queueAfterCommit(knex, fireActions)) {
+		void fireActions();
+	}
+}
 
 export class ImportService {
 	knex: Knex;
@@ -166,13 +182,7 @@ export class ImportService {
 			});
 		});
 
-		for (const nestedActionEvent of nestedActionEvents) {
-			emitter.emitAction(
-				nestedActionEvent.event,
-				nestedActionEvent.meta,
-				nestedActionEvent.context,
-			);
-		}
+		fireActionsAfterCommit(this.knex, nestedActionEvents);
 	}
 
 	async importCSV(collection: string, stream: Readable): Promise<void> {
@@ -306,13 +316,7 @@ export class ImportService {
 			});
 		});
 
-		for (const nestedActionEvent of nestedActionEvents) {
-			emitter.emitAction(
-				nestedActionEvent.event,
-				nestedActionEvent.meta,
-				nestedActionEvent.context,
-			);
-		}
+		fireActionsAfterCommit(this.knex, nestedActionEvents);
 	}
 }
 

@@ -1,3 +1,4 @@
+import { InvalidPayloadError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import { PassThrough, type Readable } from 'node:stream';
 import { finished } from 'node:stream/promises';
@@ -76,6 +77,20 @@ vi.mock('../services/import-export.js', () => {
 		},
 		ImportService: vi.fn(),
 	};
+});
+
+const importTransaction = vi.hoisted(() => ({ isTransaction: true }));
+
+// knex commits the transaction once the handler's promise resolves, and rolls
+// it back once it rejects
+const openTransaction = vi.hoisted(() => {
+	return vi.fn(async (handler: (trx: unknown) => Promise<unknown>) => {
+		return handler(importTransaction);
+	});
+});
+
+vi.mock('../database/index.js', () => {
+	return { default: () => ({ transaction: openTransaction }) };
 });
 
 vi.mock('../utils/cache-audit-enabled.js', () => ({ cacheAuditEnabled }));
@@ -254,6 +269,261 @@ describe('utils controller /import/:collection', () => {
 
 		expect(res.status.mock.calls).toEqual([]);
 		expect(next.mock.calls).toEqual([[undefined]]);
+	});
+
+	test('imports no file arriving after a failed one', async () => {
+		const importFile = vi.fn(async () => {
+			throw new Error('refused');
+		});
+
+		vi.mocked(ImportService).mockImplementationOnce(function () {
+			return { import: importFile };
+		} as any);
+
+		const importRoute = router.stack.find((layer: any) => {
+			return layer.route?.path === '/import/:collection';
+		})!;
+
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		await importRoute.route!.stack[1]!.handle(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: { collection: 'articles' },
+			}) as any,
+			{} as any,
+			next,
+		);
+
+		requestBody.write([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"a"}]',
+			'--cut',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
+		});
+
+		requestBody.end([
+			'',
+			'Content-Disposition: form-data; name="file"; filename="b.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"b"}]',
+			'--cut--',
+			'',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(requestBody.readableEnded).toBe(true);
+		});
+
+		expect(importFile).toHaveBeenCalledTimes(1);
+		expect(next.mock.calls).toEqual([[new Error('refused')]]);
+	});
+
+	test('imports no file parsed from the chunk of a failed one', async () => {
+		const importFile = vi.fn(async () => {
+			throw new Error('refused');
+		});
+
+		vi.mocked(ImportService).mockImplementationOnce(function () {
+			return { import: importFile };
+		} as any);
+
+		const importRoute = router.stack.find((layer: any) => {
+			return layer.route?.path === '/import/:collection';
+		})!;
+
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		await importRoute.route!.stack[1]!.handle(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: { collection: 'articles' },
+			}) as any,
+			{} as any,
+			next,
+		);
+
+		requestBody.end([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"a"}]',
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="b.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"b"}]',
+			'--cut--',
+			'',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
+		});
+
+		expect(importFile).toHaveBeenCalledTimes(1);
+		expect(next.mock.calls).toEqual([[new Error('refused')]]);
+	});
+
+	test('imports no file parsed after a malformed part header', async () => {
+		const importFile = vi.fn(async () => undefined);
+
+		vi.mocked(ImportService).mockImplementationOnce(function () {
+			return { import: importFile };
+		} as any);
+
+		const importRoute = router.stack.find((layer: any) => {
+			return layer.route?.path === '/import/:collection';
+		})!;
+
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		await importRoute.route!.stack[1]!.handle(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: { collection: 'articles' },
+			}) as any,
+			{} as any,
+			next,
+		);
+
+		requestBody.end([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.json"',
+			`${'X'.repeat(17_000)}: y`,
+			'',
+			'[{"name":"a"}]',
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="b.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"b"}]',
+			'--cut--',
+			'',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(requestBody.readableEnded).toBe(true);
+		});
+
+		expect(importFile.mock.calls).toEqual([]);
+		expect(next.mock.calls).toEqual([[new Error('Malformed part header')]]);
+	});
+
+	test('imports every file of a body on one transaction', async () => {
+		openTransaction.mockClear();
+		vi.mocked(ImportService).mockClear();
+
+		const importFile = vi.fn()
+			.mockImplementationOnce(async (_collection, _mimeType, fileStream) => {
+				fileStream.resume();
+				await finished(fileStream);
+			})
+			.mockImplementationOnce(async () => {
+				throw new Error('refused');
+			});
+
+		vi.mocked(ImportService).mockImplementationOnce(function () {
+			return { import: importFile };
+		} as any);
+
+		const importRoute = router.stack.find((layer: any) => {
+			return layer.route?.path === '/import/:collection';
+		})!;
+
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		await importRoute.route!.stack[1]!.handle(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: { collection: 'articles' },
+			}) as any,
+			{} as any,
+			next,
+		);
+
+		requestBody.end([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"a"}]',
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="b.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"b"}]',
+			'--cut--',
+			'',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
+		});
+
+		expect(vi.mocked(ImportService).mock.calls).toEqual([
+			[{ knex: importTransaction, accountability: undefined, schema: undefined }],
+		]);
+
+		expect(importFile).toHaveBeenCalledTimes(2);
+
+		await expect(openTransaction.mock.results[0]!.value).rejects.toEqual(
+			new Error('refused'),
+		);
+
+		expect(next.mock.calls).toEqual([[new Error('refused')]]);
+	});
+
+	test('refuses an import body with no file', async () => {
+		const importRoute = router.stack.find((layer: any) => {
+			return layer.route?.path === '/import/:collection';
+		})!;
+
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		await importRoute.route!.stack[1]!.handle(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: { collection: 'articles' },
+			}) as any,
+			{} as any,
+			next,
+		);
+
+		requestBody.end([
+			'--cut',
+			'Content-Disposition: form-data; name="title"',
+			'',
+			'articles',
+			'--cut--',
+			'',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
+		});
+
+		expect(next.mock.calls).toEqual([
+			[new InvalidPayloadError({ reason: 'No files were included in the body' })],
+		]);
 	});
 });
 

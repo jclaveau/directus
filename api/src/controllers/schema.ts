@@ -63,7 +63,14 @@ const schemaMultipartHandler: RequestHandler = (req, res, routeNext) => {
 	busboy.on('file', async (_, fileStream, { mimeType }) => {
 		const logger = useLogger();
 
-		if (isFileIncluded) return next(new InvalidPayloadError({ reason: `More than one file was included in the body` }));
+		if (isFileIncluded) {
+			return busboy.emit(
+				'error',
+				new InvalidPayloadError({
+					reason: `More than one file was included in the body`,
+				}),
+			);
+		}
 
 		isFileIncluded = true;
 
