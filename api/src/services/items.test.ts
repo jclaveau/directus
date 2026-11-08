@@ -7674,6 +7674,38 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 		]);
 	});
 
+	it.each([
+		'preserveMutationOrder',
+		'minimizeMutations',
+		'disableBatching',
+	] as const)(oneLine`
+		creates a country a row writes and a later row names by its key
+		alone once, and updates it from neither: %s
+	`, async (mutationBatching) => {
+		const countryUpdateFilter = vi.fn((payload) => payload);
+		emitter.onFilter('country.items.update', countryUpdateFilter);
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema: rowSchema })
+				.createMany([
+					{ id: 3, country: { id: 8, name: 'Peru' } },
+					{ id: 4, country: { id: 8 } },
+				], { mutationBatching })).resolves.toStrictEqual([3, 4]);
+		}
+		finally {
+			emitter.offFilter('country.items.update', countryUpdateFilter);
+		}
+
+		expect(countryUpdateFilter).not.toHaveBeenCalled();
+
+		await expect(database('country').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'Spain' },
+			{ id: 2, name: 'Italy' },
+			{ id: 8, name: 'Peru' },
+		]);
+	});
+
 	it(oneLine`
 		links and files the country of a row behind one a filter hook
 		cancelled under that row
@@ -7913,10 +7945,10 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 			.resolves.toStrictEqual([{ id: 7, name: 'written' }]);
 	});
 
-	it(oneLine`
+	it.each(['preserveMutationOrder', 'minimizeMutations'] as const)(oneLine`
 		refuses a board named by its key alone after a hook took over the
-		record writing that key
-	`, async () => {
+		record writing that key: %s
+	`, async (mutationBatching) => {
 		await database('board').insert({ id: 9, name: 'held' });
 
 		const takeOverTaken = (entries: { data?: { name?: string } }[]) => {
@@ -7936,7 +7968,9 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 			}).createMany([
 				{ id: 1, board: { id: 7, name: 'taken' } },
 				{ id: 2, board: { id: 7 } },
-			])).rejects.toThrow('Invalid foreign key in collection "card".');
+			], { mutationBatching })).rejects.toMatchObject({
+				message: 'Invalid foreign key in collection "card".',
+			});
 		}
 		finally {
 			emitter.offFilter('board.items.create', takeOverTaken);
