@@ -129,12 +129,14 @@ router.post(
 	'/import/:collection',
 	collectionExists,
 	asyncHandler(async (req, res, routeNext) => {
-		const answerRequest = answerOnce((error?: unknown) => {
-			if (error) {
-				return routeNext(error);
+		const importSucceeded = Symbol('import succeeded');
+
+		const answerRequest = answerOnce((outcome?: unknown) => {
+			if (outcome === importSucceeded) {
+				return res.status(200).end();
 			}
 
-			return res.status(200).end();
+			return routeNext(outcome);
 		});
 
 		if (req.is('multipart/form-data') === false) {
@@ -166,7 +168,7 @@ router.post(
 		// a part imported before the next one's headers arrive must not answer yet
 		const answerImported = () => {
 			if (isParserClosed && fileCount > 0 && importedCount === fileCount) {
-				answerRequest();
+				answerRequest(importSucceeded);
 			}
 		};
 

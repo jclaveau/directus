@@ -206,6 +206,55 @@ describe('utils controller /import/:collection', () => {
 		expect(res.status.mock.calls).toEqual([[200]]);
 		expect(next.mock.calls).toEqual([]);
 	});
+
+	test('never answers 200 for an import rejecting with no error', async () => {
+		const importFile = vi.fn(
+			async (_collection: string, _mimeType: string, fileStream: Readable) => {
+				fileStream.resume();
+				await finished(fileStream);
+				throw undefined;
+			},
+		);
+
+		vi.mocked(ImportService).mockImplementationOnce(function () {
+			return { import: importFile };
+		} as any);
+
+		const importRoute = router.stack.find((layer: any) => {
+			return layer.route?.path === '/import/:collection';
+		})!;
+
+		const requestBody = new PassThrough();
+		const res = { status: vi.fn() };
+		const next = vi.fn();
+
+		await importRoute.route!.stack[1]!.handle(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: { collection: 'articles' },
+			}) as any,
+			res as any,
+			next,
+		);
+
+		requestBody.end([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.json"',
+			'Content-Type: application/json',
+			'',
+			'[{"name":"a"}]',
+			'--cut--',
+			'',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
+		});
+
+		expect(res.status.mock.calls).toEqual([]);
+		expect(next.mock.calls).toEqual([[undefined]]);
+	});
 });
 
 describe('utils controller /cache/latencies', () => {
