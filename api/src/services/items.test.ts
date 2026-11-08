@@ -7911,31 +7911,45 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 		reports the path of the field nesting a record that fails
 		validation: %s
 	`, async (mutationBatching) => {
-		await expect(new ItemsService('card', {
-			knex: database,
-			schema: new SchemaBuilder()
-				.collection('card', (c) => {
-					c.field('id').id();
-					c.field('owner').m2o('person');
-					c.field('reviewer').m2o('person');
-				})
-				.collection('person', (c) => {
-					c.field('id').id();
+		const { processPayload: processForReal }
+			= await vi.importActual<
+				typeof import('../permissions/modules/process-payload/process-payload.js')
+			>('../permissions/modules/process-payload/process-payload.js');
 
-					c.field('name')
-						.string()
-						.options({ nullable: false });
-				})
-				.build(),
-			accountability: { admin: true } as any,
-		}).createMany([
-			{ id: 1, owner: { name: 'a' }, reviewer: { name: null } },
-		], { mutationBatching })).rejects.toMatchObject([{
-			message: oneLine`
-				Validation failed for field "name" at "reviewer".
-				Value can't be null.
-			`,
-		}]);
+		vi.mocked(processPayload).mockImplementation(processForReal);
+
+		try {
+			await expect(new ItemsService('card', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('card', (c) => {
+						c.field('id').id();
+						c.field('owner').m2o('person');
+						c.field('reviewer').m2o('person');
+					})
+					.collection('person', (c) => {
+						c.field('id').id();
+
+						c.field('name')
+							.string()
+							.options({ nullable: false });
+					})
+					.build(),
+				accountability: { admin: true } as any,
+			}).createMany([
+				{ id: 1, owner: { name: 'a' }, reviewer: { name: null } },
+			], { mutationBatching })).rejects.toMatchObject([{
+				message: oneLine`
+					Validation failed for field "name" at "reviewer".
+					Value can't be null.
+				`,
+			}]);
+		}
+		finally {
+			vi.mocked(processPayload).mockImplementation(async ({ payload }) => {
+				return payload;
+			});
+		}
 	});
 });
 
