@@ -1,6 +1,7 @@
 import { SchemaBuilder } from '@directus/schema-builder';
 import knex, { type Knex } from 'knex';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearSystemCache } from '../cache.js';
 import emitter from '../emitter.js';
 import { transaction } from '../utils/transaction.js';
 import { FieldsService } from './fields.js';
@@ -251,6 +252,64 @@ describe('Services / Fields / createField actions', () => {
 			expect(emitAction).not.toHaveBeenCalled();
 		},
 	);
+
+	it('fires its action when clearing the caches fails', async () => {
+		const emitAction = vi.spyOn(emitter, 'emitAction').mockResolvedValue(undefined);
+
+		vi.mocked(clearSystemCache)
+			.mockRejectedValueOnce(new Error('cache store refused'));
+
+		const service = new FieldsService({
+			knex: database,
+			schema,
+			accountability: null,
+		});
+
+		await expect(service.createField(
+			'test',
+			{ field: 'alias_field', type: 'alias', meta: { special: ['no-data'] } } as any,
+		)).rejects.toEqual(new Error('cache store refused'));
+
+		expect(emitAction).toHaveBeenCalledExactlyOnceWith(
+			'fields.create',
+			{
+				payload: {
+					field: 'alias_field',
+					type: 'alias',
+					meta: { special: ['no-data'] },
+				},
+				key: 'alias_field',
+				collection: 'test',
+			},
+			{
+				database: undefined,
+				schema: undefined,
+				accountability: null,
+			},
+		);
+	});
+
+	it('keeps the error of its commit when clearing the caches fails', async () => {
+		vi.mocked(transaction).mockImplementationOnce(async (trxKnex, runHandler) => {
+			await runHandler(trxKnex);
+
+			throw new Error('commit failed');
+		});
+
+		vi.mocked(clearSystemCache)
+			.mockRejectedValueOnce(new Error('cache store refused'));
+
+		const service = new FieldsService({
+			knex: database,
+			schema,
+			accountability: null,
+		});
+
+		await expect(service.createField(
+			'test',
+			{ field: 'alias_field', type: 'alias', meta: { special: ['no-data'] } } as any,
+		)).rejects.toEqual(new Error('commit failed'));
+	});
 
 	it('fires the action of the attempt that committed, once', async () => {
 		const emitAction = vi.spyOn(emitter, 'emitAction').mockResolvedValue(undefined);

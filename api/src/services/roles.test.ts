@@ -339,6 +339,39 @@ describe('Integration Tests', () => {
 				expect(emittedActions).toEqual([['access.delete', ['committed']]]);
 			});
 
+			it(
+				'fires the actions of its cascade when clearing the caches fails',
+				async () => {
+					const emitActionSpy = vi
+						.spyOn(emitter, 'emitAction')
+						.mockResolvedValue(undefined);
+
+					const accessEvent = {
+						event: 'access.delete',
+						meta: {},
+						context: {},
+					} as any;
+
+					accessDeleteRoleAccessSpy.mockImplementationOnce(async (_keys, opts) => {
+						opts!.bypassEmitAction!(accessEvent);
+
+						return ['access-id-1'];
+					});
+
+					vi.mocked(clearSystemCache)
+						.mockRejectedValueOnce(new Error('cache store refused'));
+
+					await expect(service.deleteMany(['role-id-12']))
+						.rejects.toEqual(new Error('cache store refused'));
+
+					expect(emitActionSpy).toHaveBeenCalledExactlyOnceWith(
+						'access.delete',
+						{},
+						{},
+					);
+				},
+			);
+
 			it('clears the caches once the parent transaction has committed', async () => {
 				const database = knex.default({ client: MockClient });
 				const databaseTracker = createTracker(database);

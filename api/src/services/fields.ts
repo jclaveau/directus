@@ -37,10 +37,13 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import getDefaultValue from '../utils/get-default-value.js';
 import { getSystemFieldRowsWithAuthProviders } from '../utils/get-field-system-rows.js';
 import getLocalType from '../utils/get-local-type.js';
-import { getSchema } from '../utils/get-schema.js';
 import { isEqual, isNil, merge } from '../utils/lodash-es-used.js';
 import { withMeta } from '../utils/read-meta.js';
 import { sanitizeColumn } from '../utils/sanitize-schema.js';
+import {
+	clearCachesThenFireActions,
+	fireNestedActionEvents,
+} from '../utils/clear-caches-then-fire-actions.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { transaction } from '../utils/transaction.js';
@@ -390,6 +393,8 @@ export class FieldsService {
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
 		const nestedActionEvents: ActionEventParams[] = [];
 
+		let mutationFailed = false;
+
 		try {
 			const exists =
 				field.field in this.schema.collections[collection]!.fields ||
@@ -486,27 +491,19 @@ export class FieldsService {
 					nestedActionEvents.push(actionEvent);
 				}
 			});
-		} finally {
-			if (runPostColumnChange) {
-				await this.helpers.schema.postColumnChange();
-			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
-
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+				runPostColumnChange,
+			);
 		}
 	}
 
@@ -527,6 +524,8 @@ export class FieldsService {
 			const existingType = this.schema.collections[collection]?.fields[field.field]?.type;
 			if (existingType) field.type = existingType;
 		}
+
+		let mutationFailed = false;
 
 		try {
 			const hookAdjustedField =
@@ -644,32 +643,26 @@ export class FieldsService {
 			}
 
 			return field.field;
-		} finally {
-			if (runPostColumnChange) {
-				await this.helpers.schema.postColumnChange();
-			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
-
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+				runPostColumnChange,
+			);
 		}
 	}
 
 	async updateFields(collection: string, fields: RawField[], opts?: MutationOptions): Promise<string[]> {
 		const nestedActionEvents: ActionEventParams[] = [];
+
+		let mutationFailed = false;
 
 		try {
 			const fieldNames = [];
@@ -685,23 +678,18 @@ export class FieldsService {
 			}
 
 			return fieldNames;
-		} finally {
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+			);
 		}
 	}
 
@@ -714,6 +702,8 @@ export class FieldsService {
 
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
 		const nestedActionEvents: ActionEventParams[] = [];
+
+		let mutationFailed = false;
 
 		try {
 			if (opts?.emitEvents !== false) {
@@ -875,27 +865,19 @@ export class FieldsService {
 			} else {
 				nestedActionEvents.push(actionEvent);
 			}
-		} finally {
-			if (runPostColumnChange) {
-				await this.helpers.schema.postColumnChange();
-			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
-
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+				runPostColumnChange,
+			);
 		}
 	}
 
@@ -1003,5 +985,30 @@ export class FieldsService {
 		if (existing) {
 			column.alter();
 		}
+	}
+
+	private async clearCachesThenFireNestedActions(
+		nestedActionEvents: ActionEventParams[],
+		mutationFailed: boolean,
+		opts?: MutationOptions,
+		runPostColumnChange = false,
+	): Promise<void> {
+		await clearCachesThenFireActions(
+			async () => {
+				if (runPostColumnChange) {
+					await this.helpers.schema.postColumnChange();
+				}
+
+				if (shouldClearCache(this.cache, opts)) {
+					await flushResponseCache(this.cache);
+				}
+
+				if (opts?.autoPurgeSystemCache !== false) {
+					await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
+				}
+			},
+			() => fireNestedActionEvents(nestedActionEvents, opts),
+			mutationFailed,
+		);
 	}
 }

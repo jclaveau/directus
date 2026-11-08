@@ -6,6 +6,7 @@ import knex from 'knex';
 import type { Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { clearSystemCache } from '../cache.js';
 import emitter from '../emitter.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
@@ -21,6 +22,13 @@ vi.mock('../../src/database/index', () => ({
 	default: vi.fn(),
 	getDatabaseClient: vi.fn().mockReturnValue('postgres'),
 }));
+
+vi.mock('../cache.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../cache.js')>(),
+		clearSystemCache: vi.fn(),
+	};
+});
 
 vi.mock('../permissions/modules/validate-access/validate-access.js', () => ({
 	validateAccess: vi.fn(),
@@ -403,6 +411,30 @@ describe('Services / Relations', () => {
 
 			expect(emitActionSpy).not.toHaveBeenCalled();
 		});
+	});
+
+	it('keeps the error of its commit when clearing the caches fails', async () => {
+		vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([]);
+		tracker.on.delete('directus_relations').response(1);
+
+		vi.mocked(transaction)
+			.mockImplementationOnce(async (trxKnex, runInTransaction) => {
+				await runInTransaction(trxKnex);
+
+				throw new Error('commit failed');
+			});
+
+		vi.mocked(clearSystemCache)
+			.mockRejectedValueOnce(new Error('cache store refused'));
+
+		const service = new RelationsService({
+			knex: db,
+			schema,
+			accountability: admin,
+		});
+
+		await expect(service.deleteOne('test', 'related'))
+			.rejects.toEqual(new Error('commit failed'));
 	});
 
 	describe('readAll', () => {
