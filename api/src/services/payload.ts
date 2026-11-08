@@ -794,7 +794,7 @@ export class PayloadService {
 
 			if (
 				keyOnlyOf({ rowIndex, field }) !== null
-				&& (existingKeyNames.has(keyName) || upsertedKeyNames.has(keyName))
+				&& existingKeyNames.has(keyName)
 			) {
 				return false;
 			}
