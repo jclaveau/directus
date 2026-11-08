@@ -332,7 +332,7 @@ describe('multipartHandler', () => {
 		]);
 	});
 
-	it(`Errors out if request doesn't contain any files to upload`, () => {
+	it(`Errors out if request doesn't contain any files to upload`, async () => {
 		const fakeForm = new FormData();
 
 		fakeForm.append('field', 'test');
@@ -350,15 +350,21 @@ describe('multipartHandler', () => {
 		const res = {} as Response;
 
 		const stream = new PassThrough();
-		stream.push(fakeForm.getBuffer());
+		const next = vi.fn();
 
-		multipartHandler(req, res, (err) => {
-			expect(err.message).toBe('No files where included in the body');
-			expect(err).toBeInstanceOf(InvalidPayloadError);
+		multipartHandler(req, res, next);
+		stream.end(fakeForm.getBuffer());
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
 		});
+
+		expect(next.mock.calls).toEqual([
+			[new InvalidPayloadError({ reason: 'No files were included in the body' })],
+		]);
 	});
 
-	it(`Errors out if uploaded file doesn't include the filename`, () => {
+	it(`Errors out if uploaded file doesn't include the filename`, async () => {
 		const fakeForm = new FormData();
 
 		fakeForm.append(
@@ -382,12 +388,18 @@ describe('multipartHandler', () => {
 		const res = {} as Response;
 
 		const stream = new PassThrough();
-		stream.push(fakeForm.getBuffer());
+		const next = vi.fn();
 
-		multipartHandler(req, res, (err) => {
-			expect(err.message).toBe('Invalid payload. File is missing filename.');
-			expect(err).toBeInstanceOf(InvalidPayloadError);
+		multipartHandler(req, res, next);
+		stream.end(fakeForm.getBuffer());
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
 		});
+
+		expect(next.mock.calls).toEqual([
+			[new InvalidPayloadError({ reason: 'File is missing filename' })],
+		]);
 	});
 
 	it('refuses an unknown mutationBatching before uploading', () => {

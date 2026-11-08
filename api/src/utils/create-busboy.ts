@@ -3,9 +3,9 @@ import type { IncomingMessage } from 'node:http';
 
 /**
  * A body ending inside a part destroys that part with an error, and the parser
- * reports the same error. On a part nothing reads (access or type refused, or a
- * consumer still awaiting something) the first one would be uncaught, which ends
- * the process.
+ * reports the same error. A part nothing reads (access or type refused, or a
+ * consumer still awaiting something) still gets an error listener, so that error
+ * is reported once, by the parser.
  */
 export function createBusboy(
 	request: IncomingMessage,
