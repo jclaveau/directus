@@ -7871,7 +7871,7 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 	});
 
 	it(oneLine`
-		creates a board named by its key alone after a hook took over the
+		refuses a board named by its key alone after a hook took over the
 		record writing that key
 	`, async () => {
 		await database('board').insert({ id: 9, name: 'held' });
@@ -7893,23 +7893,45 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 			}).createMany([
 				{ id: 1, board: { id: 7, name: 'taken' } },
 				{ id: 2, board: { id: 7 } },
-			])).resolves.toStrictEqual([1, 2]);
+			])).rejects.toThrow('Invalid foreign key in collection "card".');
 		}
 		finally {
 			emitter.offFilter('board.items.create', takeOverTaken);
 		}
 
-		await expect(database('card').select('id', 'board')
-			.orderBy('id')).resolves.toStrictEqual([
-			{ id: 1, board: 9 },
-			{ id: 2, board: 7 },
-		]);
+		await expect(database('board').select('id', 'name'))
+			.resolves.toStrictEqual([{ id: 9, name: 'held' }]);
+	});
 
-		await expect(database('board').select('id', 'name')
-			.orderBy('id')).resolves.toStrictEqual([
-			{ id: 7, name: null },
-			{ id: 9, name: 'held' },
-		]);
+	it(oneLine`
+		reports the path of the field nesting a record that fails
+		validation
+	`, async () => {
+		await expect(new ItemsService('card', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('card', (c) => {
+					c.field('id').id();
+					c.field('owner').m2o('person');
+					c.field('reviewer').m2o('person');
+				})
+				.collection('person', (c) => {
+					c.field('id').id();
+
+					c.field('name')
+						.string()
+						.options({ nullable: false });
+				})
+				.build(),
+			accountability: { admin: true } as any,
+		}).createMany([
+			{ id: 1, owner: { name: 'a' }, reviewer: { name: null } },
+		])).rejects.toMatchObject([{
+			message: oneLine`
+				Validation failed for field "name" at "reviewer".
+				Value can't be null.
+			`,
+		}]);
 	});
 });
 
