@@ -54,7 +54,9 @@ describe('/assets', () => {
 
 								const result = JSON.parse(log);
 
-								if (result.timeouts > 0 || result.non2xx > 0) {
+								// autocannon's errors counts timeouts and connections that broke
+								// before any answer (ECONNRESET, ECONNREFUSED…).
+								if (result.errors > 0 || result.non2xx > 0) {
 									failedRound = {
 										round: spawnCount,
 										requests: result.requests.total,
@@ -81,7 +83,7 @@ describe('/assets', () => {
 
 						// Assert
 						// The autocannon numbers of the round that failed, so a red run
-						// says whether it timed out or answered non-2xx.
+						// says whether it timed out, broke connections or answered non-2xx.
 						expect(failedRound).toBeNull();
 					},
 					600_000,
