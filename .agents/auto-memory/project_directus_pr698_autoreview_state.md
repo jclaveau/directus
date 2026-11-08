@@ -1,6 +1,6 @@
 ---
 name: project_directus_pr698_autoreview_state
-description: PR #698 (createBusboy, multipart part-end) autoreview state 2026-11-08 — open double-next findings, JSON-import hang already fixed by #695, rebase plan; #695 merged
+description: PR #698 (createBusboy, multipart part-end) — MERGED 2026-11-08 as 0bb994cabd after 3 autoreview runs; answer-once + close-gated success; predating points left reported
 metadata:
   author: Jean Claveau
   type: project
@@ -21,3 +21,8 @@ Test-review points to verify before posting (subagent, 6 yellow, none verified y
 Lesson: pins by timer (`setTimeout`) on an async rejection pass vacuously when the second error is late; wait on the causal event.
 
 UPDATE 2026-11-08 (run 2, head 13c43b9e3d): the 4 test points fixed (mock `../services/files.js`, causal waits on the mocked reader's rejection, schema retitle, `complete: true` test), each red without its fix. Refuted: the noop part error listener IS pinned (without it vitest reports 2 unhandled errors and exits 1). New choice, predates: success answered before the parser closes (files.ts `tryDone` when savedFiles == fileCount, utils import `res.status(200).end()` per part, schema `/apply` first file) → a later part failure is dropped (files/schema) or sent after headers (import). Options A wait for `close` (recommended) / B keep + log. Predating reports: import cut after a complete part = 400 while it commits; import with no file part never answers. NOT merged: choice open.
+
+UPDATE 2026-11-08 (run 3): jean ruled "5 => A". Applied as 6784e647fe: uploads/import/schema answer success only after busboy `close` + every part done; import's 200 goes through the same `answerOnce` gate as its errors (else parser error then close sends 200 after it); `answerOnce` takes any callback. One "waits for the end of the body" test per route, red without. Run-3 review found 1 yellow of mine: `if (error)` truthiness made a falsy rejection answer 200 → success now has its own marker (fa478a2dc6, test "never answers 200 for an import rejecting with no error"). Reviewer proved no hang (busboy `close` needs every file stream consumed; all success readers consume) and no double answer. Predating, reported not fixed: error answered mid-body leaves rest of body unread; parts after an error answer are still saved/imported. Run-2 CI red was `singular-write-flows` flake (rerun green). Results comment for fa478a2dc6 still to post, then percent, then merge if green ~100%.
+Lesson: a gate shared by success and error must not infer which from truthiness; pass an explicit success marker.
+
+MERGED 2026-11-08 as 0bb994cabd (merge commit, matched head fa478a2dc6): CI all green, autoreviewed 100% (563/563), run-3 comment issuecomment-6719215789. Predating points 9/10 + the two import edges remain reported only, no issue filed yet.
