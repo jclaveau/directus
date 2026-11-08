@@ -72,7 +72,7 @@ describe.each(vendors)('%s', (vendor) => {
 	}, 30_000);
 
 	// Left active, the users flows would run on every later update of a user,
-	// and any flow makes a later reload read its operations.
+	// and any active flow makes a later reload read its operations.
 	afterAll(async () => {
 		const deactivation = await request(getUrl(vendor))
 			.patch('/flows')

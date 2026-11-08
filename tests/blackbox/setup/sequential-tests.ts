@@ -122,8 +122,8 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/routes/items/graphql-ip-gated-read.test.ts',
 			'/tests/db/routes/permissions/cache-purge.test.ts',
 			'/tests/db/routes/flows/webhook.test.ts',
-			// Activates flows on `directus_users` updates: an instance a sibling
-			// boots meanwhile loads them, then runs them on each of its user updates.
+			// Activates its flows, two on `directus_users` updates: an instance a
+			// sibling boots meanwhile loads them, then runs them on its user updates.
 			'/tests/db/routes/flows/event-flow-runs.test.ts',
 			// Reloading the flow manager unloads every flow for a moment: run beside
 			// `event-flow-runs` it would drop the handlers that file waits on.
