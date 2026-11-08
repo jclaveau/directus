@@ -39,15 +39,11 @@ import {
 	pick,
 } from '../utils/lodash-es-used.js';
 import { primaryKeyNameOf } from '../utils/primary-key-name.js';
-import { resolveMutationBatching } from '../utils/resolve-mutation-batching.js';
 import { validateKeys } from '../utils/validate-keys.js';
 import type { ItemsService } from './items.js';
 
 // One read names at most this many keys, under every dialect's bind limit
 const RELATED_READ_CHUNK_SIZE = 10_000;
-
-// a record a row nests in one of its fields
-type NestedReference = { rowIndex: number; field: string };
 
 type Transformers = {
 	[type: string]: (context: {
@@ -554,9 +550,10 @@ export class PayloadService {
 			}
 
 			for (const [relatedCollection, rowIndexes] of rowIndexesOfCollections) {
-				await this.saveNestedReferences(
+				await this.saveNestedRecords(
 					relatedCollection,
-					rowIndexes.map((rowIndex) => ({ rowIndex, field: relation.field })),
+					relation.field,
+					rowIndexes,
 					rowsResult,
 					opts,
 				);
@@ -569,11 +566,8 @@ export class PayloadService {
 	/**
 	 * Save/update the nested m2o items of several rows.
 	 *
-	 * Per related collection, the records the rows nest in any of its fields go
-	 * through one upsertMany, and each payload comes back with its record
-	 * replaced by the record's key. A collection another one references is
-	 * written first; inside a foreign key cycle, in field order. The A2O
-	 * records are processA2O's, written after these.
+	 * Per relation, the records the rows nest go through one upsertMany, and
+	 * each payload comes back with its record replaced by the record's key.
 	 */
 	async processM2O(
 		rows: Partial<Item>[],
@@ -598,68 +592,24 @@ export class PayloadService {
 			return relation.collection === this.collection;
 		});
 
-		const fieldsOfCollections = new Map<string, string[]>();
-
 		for (const relation of relations) {
 			// If no "one collection" exists, this is a A2O, not a M2O
 			if (!relation.related_collection) {
 				continue;
 			}
 
-			const collectionFields =
-				fieldsOfCollections.get(relation.related_collection) ?? [];
-
-			// a schema can list one relation twice
-			if (!collectionFields.includes(relation.field)) {
-				collectionFields.push(relation.field);
-			}
-
-			fieldsOfCollections.set(relation.related_collection, collectionFields);
-		}
-
-		const orderedCollections: string[] = [];
-		const visitedCollections = new Set<string>();
-
-		const visitCollection = (collectionName: string) => {
-			if (visitedCollections.has(collectionName)) {
-				return;
-			}
-
-			visitedCollections.add(collectionName);
-
-			for (const relation of this.schema.relations) {
-				if (
-					relation.collection === collectionName
-					&& relation.related_collection
-				) {
-					visitCollection(relation.related_collection);
-				}
-			}
-
-			if (fieldsOfCollections.has(collectionName)) {
-				orderedCollections.push(collectionName);
-			}
-		};
-
-		for (const collectionName of fieldsOfCollections.keys()) {
-			visitCollection(collectionName);
-		}
-
-		for (const collectionName of orderedCollections) {
-			const collectionFields = fieldsOfCollections.get(collectionName)!;
-
 			// Only process related records that are actually in the payload
-			const references = [...rowsResult.payloads.entries()]
-				.flatMap(([rowIndex, payload]) => {
-					return collectionFields
-						.filter((field) => field in payload && isObject(payload[field]))
-						.map((field) => ({ rowIndex, field }));
-				});
+			const rowIndexes = [...rowsResult.payloads.keys()].filter((rowIndex) => {
+				const payload = rowsResult.payloads[rowIndex]!;
 
-			if (references.length > 0) {
-				await this.saveNestedReferences(
-					collectionName,
-					references,
+				return relation.field in payload && isObject(payload[relation.field]);
+			});
+
+			if (rowIndexes.length > 0) {
+				await this.saveNestedRecords(
+					relation.related_collection,
+					relation.field,
+					rowIndexes,
 					rowsResult,
 					opts,
 				);
@@ -670,77 +620,18 @@ export class PayloadService {
 	}
 
 	/**
-	 * Under preserveMutationOrder, cut the records into one upsert each time a
-	 * record holding only its key follows one holding fields, or the reverse:
-	 * a key alone is then read after the records sent before it are written.
-	 */
-	private async saveNestedReferences(
-		relatedCollection: string,
-		references: NestedReference[],
-		rowsResult: PayloadServiceProcessRowsResult,
-		opts?: MutationOptions,
-	): Promise<void> {
-		if (resolveMutationBatching(opts ?? {}) !== 'preserveMutationOrder') {
-			return this.saveNestedRecords(
-				relatedCollection,
-				references,
-				rowsResult,
-				opts,
-			);
-		}
-
-		const relatedPrimaryKeyField =
-			this.schema.collections[relatedCollection]!.primary;
-
-		const holdsKeyOnly = ({ rowIndex, field }: NestedReference) => {
-			const record: Partial<Item> = rowsResult.payloads[rowIndex]![field];
-			const recordFields = Object.keys(record);
-
-			return recordFields.length === 1
-				&& recordFields[0] === relatedPrimaryKeyField
-				&& !isMissingPrimaryKey(record[relatedPrimaryKeyField]);
-		};
-
-		let segmentReferences: NestedReference[] = [];
-
-		for (const reference of references) {
-			if (
-				segmentReferences.length > 0
-				&& holdsKeyOnly(segmentReferences[0]!) !== holdsKeyOnly(reference)
-			) {
-				await this.saveNestedRecords(
-					relatedCollection,
-					segmentReferences,
-					rowsResult,
-					opts,
-				);
-
-				segmentReferences = [];
-			}
-
-			segmentReferences.push(reference);
-		}
-
-		await this.saveNestedRecords(
-			relatedCollection,
-			segmentReferences,
-			rowsResult,
-			opts,
-		);
-	}
-
-	/**
-	 * Upsert the records several rows nest, all of one collection, and replace
-	 * each by its key in its row's payload. A record naming only the key of a
-	 * row that exists writes nothing. That key is compared by its spelling, as
-	 * in `upsertRun`: under a column storing another one (char(n) padding,
-	 * citext) it reads as no row, and creating it is refused as not unique.
+	 * Upsert the records several rows nest in one field, all of one collection,
+	 * and replace each by its key in its row's payload. A record naming only
+	 * the key of a row that exists writes nothing. That key is compared by its
+	 * spelling, as in `upsertRun`: under a column storing another one (char(n)
+	 * padding, citext) it reads as no row, and creating it is refused as not unique.
 	 *
 	 * TODO(#610): the same under a MariaDB `_ci` collation.
 	 */
 	private async saveNestedRecords(
 		relatedCollection: string,
-		references: NestedReference[],
+		field: string,
+		rowIndexes: number[],
 		rowsResult: PayloadServiceProcessRowsResult,
 		opts?: MutationOptions,
 	): Promise<void> {
@@ -750,16 +641,13 @@ export class PayloadService {
 			accountability: this.accountability,
 			knex: this.knex,
 			schema: this.schema,
-			nested: [...this.nested, references[0]!.field],
+			nested: [...this.nested, field],
 		});
 
 		const relatedPrimaryKeyField =
 			this.schema.collections[relatedCollection]!.primary;
 
-		const keyOnlyOf = ({
-			rowIndex,
-			field,
-		}: NestedReference): PrimaryKey | null => {
+		const keyOnlyOf = (rowIndex: number): PrimaryKey | null => {
 			const record: Partial<Item> = rowsResult.payloads[rowIndex]![field];
 			const recordFields = Object.keys(record);
 			const relatedPrimaryKey = record[relatedPrimaryKeyField];
@@ -771,8 +659,8 @@ export class PayloadService {
 				: null;
 		};
 
-		const keyOnlyKeys = references.flatMap((reference) => {
-			const keyOnly = keyOnlyOf(reference);
+		const keyOnlyKeys = rowIndexes.flatMap((rowIndex) => {
+			const keyOnly = keyOnlyOf(rowIndex);
 
 			return keyOnly === null
 				? []
@@ -806,7 +694,7 @@ export class PayloadService {
 		// a key alone names a row an earlier record of the batch writes, too
 		const upsertedKeyNames = new Set<string>();
 
-		const upsertReferences = references.filter(({ rowIndex, field }) => {
+		const upsertRowIndexes = rowIndexes.filter((rowIndex) => {
 			const relatedPrimaryKey =
 				rowsResult.payloads[rowIndex]![field][relatedPrimaryKeyField];
 
@@ -821,7 +709,7 @@ export class PayloadService {
 			);
 
 			if (
-				keyOnlyOf({ rowIndex, field }) !== null
+				keyOnlyOf(rowIndex) !== null
 				&& (existingKeyNames.has(keyName) || upsertedKeyNames.has(keyName))
 			) {
 				return false;
@@ -832,24 +720,22 @@ export class PayloadService {
 			return true;
 		});
 
-		const upsertReferenceSet = new Set(upsertReferences);
+		const upsertRowIndexSet = new Set(upsertRowIndexes);
 
-		for (const reference of references) {
-			const keyOnly = keyOnlyOf(reference);
+		for (const rowIndex of rowIndexes) {
+			const keyOnly = keyOnlyOf(rowIndex);
 
-			if (keyOnly !== null && !upsertReferenceSet.has(reference)) {
-				rowsResult.payloads[reference.rowIndex]![reference.field] = keyOnly;
+			if (keyOnly !== null && !upsertRowIndexSet.has(rowIndex)) {
+				rowsResult.payloads[rowIndex]![field] = keyOnly;
 			}
 		}
 
-		if (upsertReferences.length === 0) {
+		if (upsertRowIndexes.length === 0) {
 			return;
 		}
 
 		const upsertedKeys = await service.upsertMany(
-			upsertReferences.map(({ rowIndex, field }) => {
-				return rowsResult.payloads[rowIndex]![field];
-			}),
+			upsertRowIndexes.map((rowIndex) => rowsResult.payloads[rowIndex]![field]),
 			{
 				// a row an update hook adds is refused, like the updateOne this was
 				refuseHookAddedRows: true,
@@ -863,7 +749,7 @@ export class PayloadService {
 						);
 					}
 
-					const { rowIndex } = upsertReferences[recordIndex]!;
+					const rowIndex = upsertRowIndexes[recordIndex]!;
 
 					rowsResult.revisionsByParent[rowIndex]!.push(revision);
 				},
@@ -882,9 +768,7 @@ export class PayloadService {
 		);
 
 		for (const [recordIndex, upsertedKey] of upsertedKeys.entries()) {
-			const { rowIndex, field } = upsertReferences[recordIndex]!;
-
-			rowsResult.payloads[rowIndex]![field] = upsertedKey;
+			rowsResult.payloads[upsertRowIndexes[recordIndex]!]![field] = upsertedKey;
 		}
 	}
 
