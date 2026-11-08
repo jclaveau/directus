@@ -7754,6 +7754,139 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 	});
 });
 
+describe('Services / Items / the nested M2O rows a foreign key orders', () => {
+	let database: Knex;
+
+	const cardSchema = new SchemaBuilder()
+		.collection('card', (c) => {
+			c.field('id').id();
+			c.field('owner').m2o('person');
+			c.field('reviewer').m2o('person');
+			c.field('board').m2o('board');
+		})
+		.collection('person', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('board').m2o('board');
+		})
+		.collection('board', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+		})
+		.build();
+
+	// the relational paths below load PayloadService's lazy `get-service.js` graph
+	beforeAll(async () => {
+		await import('../utils/get-service.js');
+	}, 120_000);
+
+	beforeEach(async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+		database = knex.default({
+			client: 'sqlite3',
+			connection: { filename: ':memory:' },
+			useNullAsDefault: true,
+			pool: { min: 1, max: 1 },
+		});
+
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('board', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		await database.schema.createTable('person', (table) => {
+			table.increments('id');
+			table.string('name').notNullable();
+			table.integer('board').references('board.id');
+		});
+
+		await database.schema.createTable('card', (table) => {
+			table.increments('id');
+			table.integer('owner').references('person.id');
+			table.integer('reviewer').references('person.id');
+			table.integer('board').references('board.id');
+		});
+	});
+
+	afterEach(async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+		await database.destroy();
+	});
+
+	it('writes the board a nested person names before that person', async () => {
+		await expect(new ItemsService('card', { knex: database, schema: cardSchema })
+			.createMany([
+				{ id: 1, board: { id: 21, name: 'b' } },
+				{ id: 2, owner: { id: 10, name: 'a', board: 21 } },
+			])).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('person').select('id', 'name', 'board'))
+			.resolves.toStrictEqual([{ id: 10, name: 'a', board: 21 }]);
+	});
+
+	it('links a person by its key alone that another field writes', async () => {
+		await expect(new ItemsService('card', { knex: database, schema: cardSchema })
+			.createMany([
+				{ id: 1, reviewer: { id: 7, name: 'written' } },
+				{ id: 2, owner: { id: 7 } },
+			])).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('card').select('id', 'owner', 'reviewer')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, owner: null, reviewer: 7 },
+			{ id: 2, owner: 7, reviewer: null },
+		]);
+
+		await expect(database('person').select('id', 'name'))
+			.resolves.toStrictEqual([{ id: 7, name: 'written' }]);
+	});
+
+	it(oneLine`
+		creates a board named by its key alone after a hook took over the
+		record writing that key
+	`, async () => {
+		await database('board').insert({ id: 9, name: 'held' });
+
+		const takeOverTaken = (entries: { data?: { name?: string } }[]) => {
+			return entries.map((entry) => {
+				return entry.data?.name === 'taken'
+					? { key: 9 }
+					: entry;
+			});
+		};
+
+		emitter.onFilter('board.items.create', takeOverTaken);
+
+		try {
+			await expect(new ItemsService('card', {
+				knex: database,
+				schema: cardSchema,
+			}).createMany([
+				{ id: 1, board: { id: 7, name: 'taken' } },
+				{ id: 2, board: { id: 7 } },
+			])).resolves.toStrictEqual([1, 2]);
+		}
+		finally {
+			emitter.offFilter('board.items.create', takeOverTaken);
+		}
+
+		await expect(database('card').select('id', 'board')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, board: 9 },
+			{ id: 2, board: 7 },
+		]);
+
+		await expect(database('board').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 7, name: null },
+			{ id: 9, name: 'held' },
+		]);
+	});
+});
+
 describe('updateBatch on postgres', () => {
 	const postsSchema = new SchemaBuilder()
 		.collection('posts', (c) => {
