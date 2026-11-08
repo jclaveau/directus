@@ -2,13 +2,14 @@ import { useEnv } from '@directus/env';
 import { ErrorCode, InvalidPayloadError, isDirectusError } from '@directus/errors';
 import formatTitle from '@directus/format-title';
 import type { BusboyFileStream, PrimaryKey } from '@directus/types';
-import { toArray } from '@directus/utils';
+import { oneLine, toArray } from '@directus/utils';
 import bytes from 'bytes';
 import type { RequestHandler } from 'express';
 import express from 'express';
 import Joi from 'joi';
 import { minimatch } from 'minimatch';
 import path from 'node:path';
+import { useLogger } from '../logger/index.js';
 import { respond } from '../middleware/respond.js';
 import useCollection from '../middleware/use-collection.js';
 import { validateBatch } from '../middleware/validate-batch.js';
@@ -127,7 +128,13 @@ export const multipartHandler: RequestHandler = (req, res, routeNext) => {
 			);
 
 			savedFiles.push(primaryKey);
-			tryDone();
+
+			if (isBodyRefused) {
+				await deleteSavedFiles();
+			}
+			else {
+				tryDone();
+			}
 		} catch (error: any) {
 			busboy.emit('error', error);
 		}
@@ -135,7 +142,11 @@ export const multipartHandler: RequestHandler = (req, res, routeNext) => {
 		return undefined;
 	});
 
-	busboy.on('error', (error: Error) => {
+	let isBodyRefused = false;
+
+	busboy.on('error', async (error: Error) => {
+		isBodyRefused = true;
+		await deleteSavedFiles();
 		next(error);
 	});
 
@@ -147,6 +158,30 @@ export const multipartHandler: RequestHandler = (req, res, routeNext) => {
 	});
 
 	req.pipe(busboy);
+
+	// a refused body leaves no file behind; a replaced file cannot be restored
+	async function deleteSavedFiles() {
+		if (existingPrimaryKey) {
+			return;
+		}
+
+		const createdFiles = savedFiles.splice(0);
+
+		if (createdFiles.length === 0) {
+			return;
+		}
+
+		try {
+			await service.deleteMany(createdFiles);
+		}
+		catch (error) {
+			useLogger().error(
+				error,
+				oneLine`Couldn't delete the files ${JSON.stringify(createdFiles)}
+					of a refused upload`,
+			);
+		}
+	}
 
 	function tryDone() {
 		// a file saved before the next one's headers arrive must not answer yet

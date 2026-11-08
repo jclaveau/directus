@@ -16,12 +16,13 @@ vi.mock('../emitter.js', () => ({ default: { emitAction: vi.fn() } }));
 
 vi.mock('../utils/transaction.js', () => ({
 	transaction: vi.fn(async (_knex: unknown, cb: (trx: unknown) => unknown) => cb({})),
+	queueAfterCommit: vi.fn(() => false),
 }));
 
 vi.mock('../utils/get-service.js', () => ({ getService: vi.fn(() => ({ upsertOne })) }));
 
 import emitter from '../emitter.js';
-import { transaction } from '../utils/transaction.js';
+import { queueAfterCommit, transaction } from '../utils/transaction.js';
 import { ImportService } from './import-export.js';
 
 // Contract test for the stream-json bump: importJSON must still parse a JSON array
@@ -244,6 +245,42 @@ describe.each([
 		await new Promise((resolve) => setTimeout(resolve, 50));
 
 		expect(emitter.emitAction).not.toHaveBeenCalled();
+	});
+
+	test('holds the actions until the caller\'s transaction commits', async () => {
+		vi.mocked(emitter.emitAction).mockClear();
+		upsertOne.mockReset();
+
+		upsertOne.mockImplementation(async (_row, opts) => {
+			opts.bypassEmitAction({ event: 'test.items.create', meta: {}, context: {} });
+
+			return 1;
+		});
+
+		let fireAfterCommit: (database: never) => Promise<void> = async () => undefined;
+
+		vi.mocked(queueAfterCommit).mockImplementationOnce((_knex, task) => {
+			fireAfterCommit = task;
+
+			return true;
+		});
+
+		const service = new ImportService({
+			knex: {},
+			schema: {},
+			accountability: null,
+		} as unknown as AbstractServiceOptions);
+
+		await service[importMethod]('test', Readable.from(importBodies[importMethod]));
+
+		expect(emitter.emitAction).not.toHaveBeenCalled();
+
+		await fireAfterCommit({} as never);
+
+		expect(vi.mocked(emitter.emitAction).mock.calls).toEqual([
+			['test.items.create', {}, {}],
+			['test.items.create', {}, {}],
+		]);
 	});
 });
 

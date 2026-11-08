@@ -12,10 +12,12 @@ const uploadOne = vi.hoisted(() => {
 	return vi.fn((fileStream: Readable): Promise<unknown> => finished(fileStream));
 });
 
+const deleteMany = vi.hoisted(() => vi.fn(async () => undefined));
+
 vi.mock('../services/files.js', () => {
 	return {
 		FilesService: vi.fn(function () {
-			return { uploadOne };
+			return { uploadOne, deleteMany };
 		}),
 	};
 });
@@ -155,6 +157,175 @@ describe('multipartHandler', () => {
 		});
 
 		expect(uploadOne.mock.calls).toEqual([]);
+
+		expect(next.mock.calls).toEqual([
+			[new InvalidPayloadError({ reason: 'File is missing filename' })],
+		]);
+	});
+
+	it('deletes the files a body saved before a refused part', async () => {
+		deleteMany.mockClear();
+
+		uploadOne.mockImplementationOnce(async (fileStream: Readable) => {
+			fileStream.resume();
+			await finished(fileStream);
+			return 'a-key';
+		});
+
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		multipartHandler(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: {},
+				query: {},
+			}) as unknown as Request,
+			{} as Response,
+			next,
+		);
+
+		requestBody.write([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.txt"',
+			'Content-Type: text/plain',
+			'',
+			'abc',
+			'--cut',
+		].join('\r\n'));
+
+		await vi.waitFor(async () => {
+			await expect(uploadOne.mock.results[0]!.value).resolves.toBe('a-key');
+		});
+
+		requestBody.end([
+			'',
+			'Content-Disposition: form-data; name="file"',
+			'Content-Type: application/octet-stream',
+			'',
+			'def',
+			'--cut--',
+			'',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
+		});
+
+		expect(deleteMany.mock.calls).toEqual([[['a-key']]]);
+
+		expect(next.mock.calls).toEqual([
+			[new InvalidPayloadError({ reason: 'File is missing filename' })],
+		]);
+	});
+
+	it('deletes a file saved after its body was refused', async () => {
+		deleteMany.mockClear();
+
+		let saveFile: (primaryKey: string) => void = () => undefined;
+
+		uploadOne.mockImplementationOnce(async (fileStream: Readable) => {
+			fileStream.resume();
+			await finished(fileStream);
+			return new Promise((resolve) => (saveFile = resolve));
+		});
+
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		multipartHandler(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: {},
+				query: {},
+			}) as unknown as Request,
+			{} as Response,
+			next,
+		);
+
+		requestBody.end([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.txt"',
+			'Content-Type: text/plain',
+			'',
+			'abc',
+			'--cut',
+			'Content-Disposition: form-data; name="file"',
+			'Content-Type: application/octet-stream',
+			'',
+			'def',
+			'--cut--',
+			'',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
+		});
+
+		saveFile('a-key');
+
+		await vi.waitFor(() => {
+			expect(deleteMany.mock.calls).toEqual([[['a-key']]]);
+		});
+
+		expect(next.mock.calls).toEqual([
+			[new InvalidPayloadError({ reason: 'File is missing filename' })],
+		]);
+	});
+
+	it('keeps a replaced file when a later part is refused', async () => {
+		deleteMany.mockClear();
+
+		uploadOne.mockImplementationOnce(async (fileStream: Readable) => {
+			fileStream.resume();
+			await finished(fileStream);
+			return 'a-key';
+		});
+
+		const requestBody = new PassThrough();
+		const next = vi.fn();
+
+		multipartHandler(
+			Object.assign(requestBody, {
+				headers: { 'content-type': 'multipart/form-data; boundary=cut' },
+				is: () => true,
+				params: { pk: 'a-key' },
+				query: {},
+			}) as unknown as Request,
+			{} as Response,
+			next,
+		);
+
+		requestBody.write([
+			'--cut',
+			'Content-Disposition: form-data; name="file"; filename="a.txt"',
+			'Content-Type: text/plain',
+			'',
+			'abc',
+			'--cut',
+		].join('\r\n'));
+
+		await vi.waitFor(async () => {
+			await expect(uploadOne.mock.results[0]!.value).resolves.toBe('a-key');
+		});
+
+		requestBody.end([
+			'',
+			'Content-Disposition: form-data; name="file"',
+			'Content-Type: application/octet-stream',
+			'',
+			'def',
+			'--cut--',
+			'',
+		].join('\r\n'));
+
+		await vi.waitFor(() => {
+			expect(next).toHaveBeenCalled();
+		});
+
+		expect(deleteMany.mock.calls).toEqual([]);
 
 		expect(next.mock.calls).toEqual([
 			[new InvalidPayloadError({ reason: 'File is missing filename' })],
