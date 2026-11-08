@@ -701,6 +701,8 @@ export class PayloadService {
 				&& !isMissingPrimaryKey(record[relatedPrimaryKeyField]);
 		};
 
+		// a key alone names a row a record of an earlier segment writes, too
+		const upsertedKeyNames = new Set<string>();
 		let segmentReferences: NestedReference[] = [];
 
 		for (const reference of references) {
@@ -713,6 +715,7 @@ export class PayloadService {
 					segmentReferences,
 					rowsResult,
 					opts,
+					upsertedKeyNames,
 				);
 
 				segmentReferences = [];
@@ -726,6 +729,7 @@ export class PayloadService {
 			segmentReferences,
 			rowsResult,
 			opts,
+			upsertedKeyNames,
 		);
 	}
 
@@ -743,6 +747,7 @@ export class PayloadService {
 		references: NestedReference[],
 		rowsResult: PayloadServiceProcessRowsResult,
 		opts?: MutationOptions,
+		upsertedKeyNames = new Set<string>(),
 	): Promise<void> {
 		const { getService } = await import('../utils/get-service.js');
 
@@ -803,9 +808,6 @@ export class PayloadService {
 			}
 		}
 
-		// a key alone names a row an earlier record of the batch writes, too
-		const upsertedKeyNames = new Set<string>();
-
 		const upsertReferences = references.filter(({ rowIndex, field }) => {
 			const relatedPrimaryKey =
 				rowsResult.payloads[rowIndex]![field][relatedPrimaryKeyField];
@@ -853,6 +855,9 @@ export class PayloadService {
 			{
 				// a row an update hook adds is refused, like the updateOne this was
 				refuseHookAddedRows: true,
+				nestedOfPayloads: upsertReferences.map(({ field }) => {
+					return [...this.nested, field];
+				}),
 				onRevisionCreate: (revision, item, recordIndex) => {
 					// refuseHookAddedRows leaves every revision a record of its own
 					if (recordIndex === undefined) {

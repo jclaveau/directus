@@ -3624,6 +3624,8 @@ implements AbstractService<Item> {
 										: runOffset + payloadIndex,
 								);
 							}),
+						nestedOfPayloads: opts.nestedOfPayloads
+							?.slice(runOffset, runOffset + run.length),
 					};
 
 					for (const primaryKey of await service.upsertRun(run, runOpts)) {
@@ -3960,30 +3962,52 @@ implements AbstractService<Item> {
 			}
 			: opts;
 
-		for (const { updating, indexes } of upsertSegments) {
-			if (indexes.length === 0) {
-				continue;
+		const nestedOf = (index: number) => {
+			return opts.nestedOfPayloads?.[index] ?? this.nested;
+		};
+
+		for (const { updating, indexes: segmentIndexes } of upsertSegments) {
+			// Payload indexes of one `nested` path, written by a service holding it
+			const nestedRuns: number[][] = [];
+
+			for (const index of segmentIndexes) {
+				const nestedRun = preservesOrder
+					? nestedRuns.at(-1)
+					: nestedRuns.find((run) => isEqual(nestedOf(run[0]!), nestedOf(index)));
+
+				if (nestedRun && isEqual(nestedOf(nestedRun[0]!), nestedOf(index))) {
+					nestedRun.push(index);
+				}
+				else {
+					nestedRuns.push([index]);
+				}
 			}
 
-			// one key per group, so one answer per group: null where a filter
-			// cancelled it
-			const segmentKeys = updating
-				? await this.updateGroups(
-					indexes.map((index) => {
-						return {
-							data: omit(upsertRun[index]!, primaryKeyField) as Partial<Item>,
-							keys: [upsertRun[index]![primaryKeyField] as PrimaryKey],
-						};
-					}),
-					writeOpts,
-				)
-				: await this.createMany(
-					indexes.map((index) => upsertRun[index]!),
-					writeOpts,
-				);
+			for (const indexes of nestedRuns) {
+				const nestedService = isEqual(nestedOf(indexes[0]!), this.nested)
+					? this
+					: this.fork({ nested: nestedOf(indexes[0]!) });
 
-			for (const [segmentIndex, segmentKey] of segmentKeys.entries()) {
-				upsertedKeys[indexes[segmentIndex]!] = segmentKey;
+				// one key per group, so one answer per group: null where a filter
+				// cancelled it
+				const segmentKeys = updating
+					? await nestedService.updateGroups(
+						indexes.map((index) => {
+							return {
+								data: omit(upsertRun[index]!, primaryKeyField) as Partial<Item>,
+								keys: [upsertRun[index]![primaryKeyField] as PrimaryKey],
+							};
+						}),
+						writeOpts,
+					)
+					: await nestedService.createMany(
+						indexes.map((index) => upsertRun[index]!),
+						writeOpts,
+					);
+
+				for (const [segmentIndex, segmentKey] of segmentKeys.entries()) {
+					upsertedKeys[indexes[segmentIndex]!] = segmentKey;
+				}
 			}
 		}
 

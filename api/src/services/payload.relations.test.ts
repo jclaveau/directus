@@ -68,6 +68,7 @@ describe('processA2O', () => {
 			[{ title: 'Hello' }],
 			{
 				refuseHookAddedRows: true,
+				nestedOfPayloads: [['item']],
 				onRevisionCreate: expect.any(Function),
 				onRequireUserIntegrityCheck: expect.any(Function),
 				bypassEmitAction: expect.any(Function),
@@ -239,6 +240,7 @@ describe('processM2O', () => {
 			[{ id: 3, name: 'France' }, { name: 'Spain' }],
 			{
 				refuseHookAddedRows: true,
+				nestedOfPayloads: [['country'], ['country']],
 				onRevisionCreate: expect.any(Function),
 				onRequireUserIntegrityCheck: expect.any(Function),
 				bypassEmitAction: expect.any(Function),
@@ -274,6 +276,7 @@ describe('processM2O', () => {
 			[{ name: 'France' }],
 			{
 				refuseHookAddedRows: true,
+				nestedOfPayloads: [['country']],
 				onRevisionCreate: expect.any(Function),
 				onRequireUserIntegrityCheck: expect.any(Function),
 				bypassEmitAction: expect.any(Function),

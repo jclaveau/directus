@@ -215,6 +215,13 @@ export type MutationOptions = {
 	refuseHookAddedRows?: boolean | undefined;
 
 	/**
+	 * The `nested` path of each payload of an upsertMany, by payload index. The
+	 * payloads are written per path, so a record failing validation is named at
+	 * the field nesting it.
+	 */
+	nestedOfPayloads?: string[][] | undefined;
+
+	/**
 	 * Allow a filter hook to cancel the mutation by returning null. When set, the mutation
 	 * resolves to null instead of throwing; otherwise a nulling filter is an InvalidPayloadError.
 	 */
