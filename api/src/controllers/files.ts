@@ -14,6 +14,7 @@ import useCollection from '../middleware/use-collection.js';
 import { validateBatch } from '../middleware/validate-batch.js';
 import { FilesService } from '../services/files.js';
 import { MetaService } from '../services/meta.js';
+import { answerOnce } from '../utils/answer-once.js';
 import asyncHandler from '../utils/async-handler.js';
 import { createBusboy } from '../utils/create-busboy.js';
 import { mutationBatchingFromQuery } from '../utils/mutation-batching-from-query.js';
@@ -24,7 +25,9 @@ const env = useEnv();
 
 router.use(useCollection('directus_files'));
 
-export const multipartHandler: RequestHandler = (req, res, next) => {
+export const multipartHandler: RequestHandler = (req, res, routeNext) => {
+	const next = answerOnce(routeNext);
+
 	if (req.is('multipart/form-data') === false) return next();
 
 	let headers;

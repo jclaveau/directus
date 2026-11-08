@@ -28,6 +28,7 @@ import {
 import { redisConfigAvailable } from '../redis/index.js';
 import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
+import { answerOnce } from '../utils/answer-once.js';
 import asyncHandler from '../utils/async-handler.js';
 import { cacheAuditEnabled } from '../utils/cache-audit-enabled.js';
 import { CacheAuditOptionsSchema } from '../utils/cache-audit-options.js';
@@ -127,7 +128,9 @@ router.post(
 router.post(
 	'/import/:collection',
 	collectionExists,
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, routeNext) => {
+		const next = answerOnce(routeNext);
+
 		if (req.is('multipart/form-data') === false) {
 			throw new UnsupportedMediaTypeError({ mediaType: req.headers['content-type']!, where: 'Content-Type header' });
 		}

@@ -1,5 +1,6 @@
 import { oneLine } from '@directus/utils';
-import { PassThrough } from 'node:stream';
+import { PassThrough, type Readable } from 'node:stream';
+import { finished } from 'node:stream/promises';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const cacheAuditEnabled = vi.fn(() => true);
@@ -99,7 +100,11 @@ function handlerFor(path: string, method = 'get') {
 describe('utils controller /import/:collection', () => {
 	test('answers the error of a body cut inside a part it never read', async () => {
 		vi.mocked(ImportService).mockImplementationOnce(function () {
-			return { import: vi.fn().mockRejectedValue(new Error('refused')) };
+			return {
+				import: (_collection: string, _mimeType: string, fileStream: Readable) => {
+					return finished(fileStream);
+				},
+			};
 		} as any);
 
 		const importRoute = router.stack.find((layer: any) => {
@@ -128,8 +133,13 @@ describe('utils controller /import/:collection', () => {
 		].join('\r\n'));
 
 		await vi.waitFor(() => {
-			expect(next).toHaveBeenCalledWith(new Error('Unexpected end of form'));
+			expect(next).toHaveBeenCalled();
 		});
+
+		// the import of the cut part fails after the parser
+		await new Promise((resolve) => setTimeout(resolve, 50));
+
+		expect(next.mock.calls).toEqual([[new Error('Unexpected end of form')]]);
 	});
 });
 

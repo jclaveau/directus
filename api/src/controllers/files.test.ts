@@ -40,8 +40,13 @@ describe('multipartHandler', () => {
 		].join('\r\n'));
 
 		await vi.waitFor(() => {
-			expect(next).toHaveBeenCalledWith(new Error('Unexpected end of form'));
+			expect(next).toHaveBeenCalled();
 		});
+
+		// the upload of the cut part fails after the parser
+		await new Promise((resolve) => setTimeout(resolve, 50));
+
+		expect(next.mock.calls).toEqual([[new Error('Unexpected end of form')]]);
 	});
 
 	it(`Errors out if request doesn't contain any files to upload`, () => {

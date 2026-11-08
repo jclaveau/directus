@@ -7,6 +7,7 @@ import { load as loadYaml } from 'js-yaml';
 import { useLogger } from '../logger/index.js';
 import { respond } from '../middleware/respond.js';
 import { SchemaService } from '../services/schema.js';
+import { answerOnce } from '../utils/answer-once.js';
 import asyncHandler from '../utils/async-handler.js';
 import { createBusboy } from '../utils/create-busboy.js';
 import { getVersionedHash } from '../utils/get-versioned-hash.js';
@@ -29,7 +30,9 @@ router.get(
 	respond,
 );
 
-const schemaMultipartHandler: RequestHandler = (req, res, next) => {
+const schemaMultipartHandler: RequestHandler = (req, res, routeNext) => {
+	const next = answerOnce(routeNext);
+
 	if (req.is('application/json')) {
 		if (Object.keys(req.body).length === 0) {
 			throw new InvalidPayloadError({ reason: `No data was included in the body` });
