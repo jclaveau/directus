@@ -27,7 +27,10 @@ export class NotificationsService extends ItemsService<Notification> {
 		const primaryKeys = await super.createMany(data, {
 			...opts,
 			onItemsCreate: (items) => {
-				writtenNotifications.push(...items.map((item) => item.payload));
+				for (const item of items) {
+					writtenNotifications.push(item.payload);
+				}
+
 				opts?.onItemsCreate?.(items);
 			},
 		});

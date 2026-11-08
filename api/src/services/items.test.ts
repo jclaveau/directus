@@ -4439,8 +4439,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it(oneLine`
-			reports the rows of a create written row by row once, after its
-			transaction
+			reports the rows of a create written row by row in one call
 		`, async () => {
 			tracker.on.insert('test').responseOnce([1]);
 			tracker.on.insert('test').responseOnce([2]);

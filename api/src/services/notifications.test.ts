@@ -312,6 +312,37 @@ describe('NotificationsService.createMany', () => {
 	});
 
 	test(oneLine`
+		emails the rows of a create too large to spread into one call
+	`, async () => {
+		const database = knex.default({ client: MockClient });
+
+		vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockImplementation(async (_data, opts) => {
+				opts?.onItemsCreate?.([
+					...new Array(500_000).fill({
+						primaryKey: 'notification-null',
+						payload: { recipient: null, subject: 'None' },
+					}),
+					{
+						primaryKey: 'notification-a',
+						payload: { recipient: 'user-a', subject: 'A' },
+					},
+				]);
+
+				return ['notification-a'];
+			});
+
+		await new NotificationsService({ knex: database, schema })
+			.createMany([{ recipient: 'user-a', subject: 'A' }]);
+
+		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
+			template: { name: 'base', data: { html: '' } },
+			to: 'user-a@example.com',
+			subject: 'A',
+		}]]);
+	});
+
+	test(oneLine`
 		passes the rows a create wrote on to the caller's onItemsCreate
 	`, async () => {
 		const database = knex.default({ client: MockClient });
