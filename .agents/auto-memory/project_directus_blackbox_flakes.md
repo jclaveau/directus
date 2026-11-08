@@ -223,6 +223,8 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 - `update-batch-guards` "A batch update of a system collection is checked as a single update is" on #683, 2026-11-07: shard 5, step `on postgres the requests ran these statements:`, on 3000de077e (test files added on top of a CLI-only diff); passed on the next head a43f19bd30, no related change between them. Timing by that alone, cause not found.
 - `update-batch-guards` statement counts again on #688, 2026-11-07: shard 5 of run 42373060402 on 8490df26b7 (a tests-only head on aggregate code); passed on the next head 76a3ef9f44. Same step as the #683 line above; cause still not found.
 - `update-batch-guards` statement counts a third time on #686, 2026-11-07: shard 5 of run 42413476694 on 1df073d3a8 (4 scenarios, request 1 read `directus_users` in more rows than the one expected); its one `--failed` rerun passed. Same step as the two lines above.
+- #686 MUTATION `2d2badf7c2`, 2026-11-08, postgres shard 5: `singular-write-flows` (request 1: 3 selects on `directus_operations` vs 2) and `update-batch-guards` (4 scenarios, a refused batch saw `directus_activity`/`directus_revisions` inserts) red together; the mutant touched no system-collection path. Fourth `update-batch-guards` sighting: past the third-means-diagnose bar.
+- `common/assets/concurrency` on #686 `b3a28e8c76` (tests-only), 2026-11-08: sqlite3, `expected true to be false`; the next push passed it.
 - `common/assets/concurrency` on #683, 2026-11-07: sqlite3, a43f19bd30, one `--failed` rerun cleared it (merged 05eeca0e73).
 
 ## 2026-11-03 (#673 shard 1): invite statement-count flake
