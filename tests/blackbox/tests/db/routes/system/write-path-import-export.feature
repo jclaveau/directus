@@ -45,8 +45,10 @@ Feature: Imports write each row, exports notify whoever asked
       |     content: '[{ "id": "first-<run>" }]'       |         Unsupported media   |
       |   - name: crates.txt                           |         type "text/plain"   |
       |     content: not an import                     |         in file import.     |
-      | method: GET                                    | code: 403                   |+
-      | path: /items/test_wp_porter_crates/first-<run> |                             |
+      | method: GET                                    | code: 200                   |+
+      | path: /items/test_wp_porter_crates             | body:                       |
+      | query:                                         |   data: []                  |
+      |   filter: '{"id":{"_eq":"first-<run>"}}'       |                             |
 
   Scenario: a finished export leaves a file and a notification pointing at it
     Given these requests are sent:
