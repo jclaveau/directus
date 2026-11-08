@@ -129,8 +129,17 @@ describe('NotificationsService.createMany', () => {
 		vi.mocked(getDatabase).mockReturnValue(database);
 		const readError = new Error('user-a deleted');
 
+		vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockResolvedValue(['notification-a', 'notification-b']);
+
 		vi.mocked(UsersService.prototype.readOne)
-			.mockRejectedValueOnce(readError);
+			.mockRejectedValueOnce(readError)
+			.mockResolvedValueOnce(withMeta({
+				id: 'user-b',
+				email: 'user-b@example.com',
+				email_notifications: true,
+				role: null,
+			}, { scopedCacheFingerprints: [] }));
 
 		await transaction(database, async (trx) => {
 			await new NotificationsService({ knex: trx, schema }).createMany([
@@ -139,9 +148,16 @@ describe('NotificationsService.createMany', () => {
 			]);
 		});
 
+		const userFields = ['id', 'email', 'email_notifications', 'role'];
+
+		expect(vi.mocked(UsersService.prototype.readOne).mock.calls).toEqual([
+			['user-a', { fields: userFields }],
+			['user-b', { fields: userFields }],
+		]);
+
 		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
 			template: { name: 'base', data: { html: '' } },
-			to: 'user-a@example.com',
+			to: 'user-b@example.com',
 			subject: 'B',
 		}]]);
 
