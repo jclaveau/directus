@@ -224,11 +224,12 @@ describe('multipartHandler', () => {
 		deleteMany.mockClear();
 
 		let saveFile: (primaryKey: string) => void = () => undefined;
+		const savedFile = new Promise<string>((resolve) => (saveFile = resolve));
 
 		uploadOne.mockImplementationOnce(async (fileStream: Readable) => {
 			fileStream.resume();
 			await finished(fileStream);
-			return new Promise((resolve) => (saveFile = resolve));
+			return savedFile;
 		});
 
 		const requestBody = new PassThrough();
