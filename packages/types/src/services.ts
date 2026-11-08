@@ -308,11 +308,7 @@ interface PayloadService {
 		aliasMap?: Record<string, string>,
 		aggregate?: Aggregate,
 	): Partial<Record<string, any>>[];
-	processA2O(
-		rows: Partial<Item>[],
-		opts?: MutationOptions,
-	): Promise<PayloadServiceProcessRowsResult>;
-	processM2O(
+	processM2OAndA2O(
 		rows: Partial<Item>[],
 		opts?: MutationOptions,
 	): Promise<PayloadServiceProcessRowsResult>;

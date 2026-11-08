@@ -560,8 +560,7 @@ implements AbstractService<Item> {
 				payloadWithoutAliases: Record<string, unknown>;
 				revisionPayload: AnyItem;
 				primaryKey: PrimaryKey | undefined;
-				revisionsM2O: PrimaryKey[];
-				revisionsA2O: PrimaryKey[];
+				revisionsM2OAndA2O: PrimaryKey[];
 				payloadService: PayloadService;
 			};
 
@@ -721,22 +720,15 @@ implements AbstractService<Item> {
 			});
 
 			// Once for every row, so each related collection takes one upsert.
-			const m2o = await payloadService.processM2O(
+			const nestedRecords = await payloadService.processM2OAndA2O(
 				presetRows.map((row) => row.payloadWithPresets),
 				opts,
 			);
 
-			const a2o = await payloadService.processA2O(m2o.payloads, opts);
-
-			userIntegrityCheckFlags |=
-				m2o.userIntegrityCheckFlags | a2o.userIntegrityCheckFlags;
+			userIntegrityCheckFlags |= nestedRecords.userIntegrityCheckFlags;
 
 			// every row's events: a spread could pass more arguments than allowed
-			for (const nestedActionEvent of m2o.nestedActionEvents) {
-				nestedActionEvents.push(nestedActionEvent);
-			}
-
-			for (const nestedActionEvent of a2o.nestedActionEvents) {
+			for (const nestedActionEvent of nestedRecords.nestedActionEvents) {
 				nestedActionEvents.push(nestedActionEvent);
 			}
 
@@ -744,7 +736,7 @@ implements AbstractService<Item> {
 				const { index, payloadAfterHooks, payloadWithPresets } = presetRow;
 				// Ensure the action hook payload has the post filter hook + preset changes
 				const actionHookPayload = payloadWithPresets;
-				const payloadWithA2O = a2o.payloads[rowIndex]!;
+				const payloadWithA2O = nestedRecords.payloads[rowIndex]!;
 
 				const payloadWithoutAliases = pick(payloadWithA2O, without(fields, ...aliases));
 				const payloadWithTypeCasting = await payloadService.processValues('create', payloadWithoutAliases);
@@ -789,8 +781,7 @@ implements AbstractService<Item> {
 					payloadWithoutAliases,
 					revisionPayload,
 					primaryKey,
-					revisionsM2O: m2o.revisionsByParent[rowIndex]!,
-					revisionsA2O: a2o.revisionsByParent[rowIndex]!,
+					revisionsM2OAndA2O: nestedRecords.revisionsByParent[rowIndex]!,
 					payloadService,
 				});
 			}
@@ -1022,7 +1013,7 @@ implements AbstractService<Item> {
 						const p = postPrepared[i]!;
 						const revisionId = revisionIds[i]!;
 						// Make sure to set the parent field of the child-revision rows
-						const childrenRevisions = [...p.revisionsM2O, ...p.revisionsA2O, ...p.revisionsO2M];
+						const childrenRevisions = [...p.revisionsM2OAndA2O, ...p.revisionsO2M];
 
 						if (childrenRevisions.length > 0) {
 							await revisionsService.updateMany(
@@ -2944,18 +2935,11 @@ implements AbstractService<Item> {
 			});
 
 			const {
-				payloads: payloadsWithM2O,
-				revisionsByParent: revisionsM2OByParent,
-				nestedActionEvents: nestedActionEventsM2O,
-				userIntegrityCheckFlags: userIntegrityCheckFlagsM2O,
-			} = await payloadService.processM2O([payloadWithPresets], opts);
-
-			const {
 				payloads: payloadsWithA2O,
-				revisionsByParent: revisionsA2OByParent,
-				nestedActionEvents: nestedActionEventsA2O,
-				userIntegrityCheckFlags: userIntegrityCheckFlagsA2O,
-			} = await payloadService.processA2O(payloadsWithM2O, opts);
+				revisionsByParent: revisionsM2OAndA2OByParent,
+				nestedActionEvents: nestedActionEventsM2OAndA2O,
+				userIntegrityCheckFlags: userIntegrityCheckFlagsM2OAndA2O,
+			} = await payloadService.processM2OAndA2O([payloadWithPresets], opts);
 
 			const payloadWithA2O = payloadsWithA2O[0]!;
 			const payloadWithoutAliasAndPK = pick(payloadWithA2O, without(fields, primaryKeyField, ...aliases));
@@ -2983,17 +2967,13 @@ implements AbstractService<Item> {
 				await this.refuseKeysNoRowHolds(keys, trx);
 			}
 
-			const childrenRevisions = [
-				...revisionsM2OByParent[0]!,
-				...revisionsA2OByParent[0]!,
-			];
+			const childrenRevisions = [...revisionsM2OAndA2OByParent[0]!];
 
 			let userIntegrityCheckFlags =
 				opts.userIntegrityCheckFlags ??
-				UserIntegrityCheckFlag.None | userIntegrityCheckFlagsM2O | userIntegrityCheckFlagsA2O;
+				UserIntegrityCheckFlag.None | userIntegrityCheckFlagsM2OAndA2O;
 
-			nestedActionEvents.push(...nestedActionEventsM2O);
-			nestedActionEvents.push(...nestedActionEventsA2O);
+			nestedActionEvents.push(...nestedActionEventsM2OAndA2O);
 
 			const {
 				revisionsByParent,

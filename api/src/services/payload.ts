@@ -475,114 +475,23 @@ export class PayloadService {
 	}
 
 	/**
-	 * Recursively save/update the nested Any-to-One items of several rows.
+	 * Save/update the nested M2O and A2O items of several rows.
 	 *
-	 * Per relation, the records of one collection the rows nest go through one
-	 * upsertMany, and each payload comes back with its record replaced by the
-	 * record's key.
+	 * Per related collection, the records the rows nest in any of its fields,
+	 * M2O or A2O, go through one upsertMany in payload order, and each payload
+	 * comes back with its record replaced by the record's key. A collection
+	 * another one references is written first; inside a foreign key cycle, in
+	 * field order.
 	 */
-	async processA2O(
+	async processM2OAndA2O(
 		rows: Partial<Item>[],
 		opts?: MutationOptions,
 	): Promise<PayloadServiceProcessRowsResult> {
-		// a caller of the former processA2O(data) would get a TypeError
+		// a single row would otherwise fail on a TypeError
 		if (!Array.isArray(rows)) {
 			throw new Error(
-				`processA2O takes the rows as an array, got ${JSON.stringify(rows)}`,
-			);
-		}
-
-		const rowsResult: PayloadServiceProcessRowsResult = {
-			payloads: rows.map((row) => cloneDeep(row)),
-			revisionsByParent: rows.map(() => []),
-			nestedActionEvents: [],
-			userIntegrityCheckFlags: UserIntegrityCheckFlag.None,
-		};
-
-		const relations = this.schema.relations.filter((relation) => {
-			return relation.collection === this.collection;
-		});
-
-		for (const relation of relations) {
-			// If the required a2o configuration fields are missing, this is a m2o
-			// instead of an a2o
-			if (
-				!relation.meta?.one_collection_field
-				|| !relation.meta?.one_allowed_collections
-			) {
-				continue;
-			}
-
-			const collectionField = relation.meta.one_collection_field;
-			const allowedCollections = relation.meta.one_allowed_collections;
-			const rowIndexesOfCollections = new Map<string, number[]>();
-
-			for (const [rowIndex, payload] of rowsResult.payloads.entries()) {
-				// Only process related records that are actually in the payload
-				if (
-					!(relation.field in payload)
-					|| !isPlainObject(payload[relation.field])
-				) {
-					continue;
-				}
-
-				const relatedCollection = payload[collectionField];
-
-				if (!relatedCollection) {
-					throw new InvalidPayloadError({
-						reason: `Can't update nested record`
-							+ ` ${JSON.stringify(`${relation.collection}.${relation.field}`)}`
-							+ ' without field'
-							+ ` ${JSON.stringify(`${relation.collection}.${collectionField}`)}`
-							+ ' being set',
-					});
-				}
-
-				if (allowedCollections.includes(relatedCollection) === false) {
-					throw new InvalidPayloadError({
-						reason: `${JSON.stringify(`${relation.collection}.${relation.field}`)}`
-							+ ' can\'t be linked to collection'
-							+ ` ${JSON.stringify(relatedCollection)}`,
-					});
-				}
-
-				const collectionRowIndexes =
-					rowIndexesOfCollections.get(relatedCollection) ?? [];
-
-				collectionRowIndexes.push(rowIndex);
-				rowIndexesOfCollections.set(relatedCollection, collectionRowIndexes);
-			}
-
-			for (const [relatedCollection, rowIndexes] of rowIndexesOfCollections) {
-				await this.saveNestedReferences(
-					relatedCollection,
-					rowIndexes.map((rowIndex) => ({ rowIndex, field: relation.field })),
-					rowsResult,
-					opts,
-				);
-			}
-		}
-
-		return rowsResult;
-	}
-
-	/**
-	 * Save/update the nested m2o items of several rows.
-	 *
-	 * Per related collection, the records the rows nest in any of its fields go
-	 * through one upsertMany, and each payload comes back with its record
-	 * replaced by the record's key. A collection another one references is
-	 * written first; inside a foreign key cycle, in field order. The A2O
-	 * records are processA2O's, written after these.
-	 */
-	async processM2O(
-		rows: Partial<Item>[],
-		opts?: MutationOptions,
-	): Promise<PayloadServiceProcessRowsResult> {
-		// a caller of the former processM2O(data) would get a TypeError
-		if (!Array.isArray(rows)) {
-			throw new Error(
-				`processM2O takes the rows as an array, got ${JSON.stringify(rows)}`,
+				'processM2OAndA2O takes the rows as an array,'
+				+ ` got ${JSON.stringify(rows)}`,
 			);
 		}
 
@@ -617,6 +526,77 @@ export class PayloadService {
 			fieldsOfCollections.set(relation.related_collection, collectionFields);
 		}
 
+		const referencesOfCollections = new Map<string, NestedReference[]>();
+
+		for (const [collectionName, collectionFields] of fieldsOfCollections) {
+			// Only process related records that are actually in the payload
+			const references = [...rowsResult.payloads.entries()]
+				.flatMap(([rowIndex, payload]) => {
+					return collectionFields
+						.filter((field) => field in payload && isObject(payload[field]))
+						.map((field) => ({ rowIndex, field }));
+				});
+
+			if (references.length > 0) {
+				referencesOfCollections.set(collectionName, references);
+			}
+		}
+
+		const a2oFields = new Set<string>();
+
+		for (const relation of relations) {
+			// If the required a2o configuration fields are missing, this is a m2o
+			// instead of an a2o
+			if (
+				!relation.meta?.one_collection_field
+				|| !relation.meta?.one_allowed_collections
+				|| a2oFields.has(relation.field)
+			) {
+				continue;
+			}
+
+			a2oFields.add(relation.field);
+
+			const collectionField = relation.meta.one_collection_field;
+			const allowedCollections = relation.meta.one_allowed_collections;
+
+			for (const [rowIndex, payload] of rowsResult.payloads.entries()) {
+				// Only process related records that are actually in the payload
+				if (
+					!(relation.field in payload)
+					|| !isPlainObject(payload[relation.field])
+				) {
+					continue;
+				}
+
+				const relatedCollection = payload[collectionField];
+
+				if (!relatedCollection) {
+					throw new InvalidPayloadError({
+						reason: `Can't update nested record`
+							+ ` ${JSON.stringify(`${relation.collection}.${relation.field}`)}`
+							+ ' without field'
+							+ ` ${JSON.stringify(`${relation.collection}.${collectionField}`)}`
+							+ ' being set',
+					});
+				}
+
+				if (allowedCollections.includes(relatedCollection) === false) {
+					throw new InvalidPayloadError({
+						reason: `${JSON.stringify(`${relation.collection}.${relation.field}`)}`
+							+ ' can\'t be linked to collection'
+							+ ` ${JSON.stringify(relatedCollection)}`,
+					});
+				}
+
+				const collectionReferences =
+					referencesOfCollections.get(relatedCollection) ?? [];
+
+				collectionReferences.push({ rowIndex, field: relation.field });
+				referencesOfCollections.set(relatedCollection, collectionReferences);
+			}
+		}
+
 		const orderedCollections: string[] = [];
 		const visitedCollections = new Set<string>();
 
@@ -636,34 +616,24 @@ export class PayloadService {
 				}
 			}
 
-			if (fieldsOfCollections.has(collectionName)) {
+			if (referencesOfCollections.has(collectionName)) {
 				orderedCollections.push(collectionName);
 			}
 		};
 
-		for (const collectionName of fieldsOfCollections.keys()) {
+		for (const collectionName of referencesOfCollections.keys()) {
 			visitCollection(collectionName);
 		}
 
 		for (const collectionName of orderedCollections) {
-			const collectionFields = fieldsOfCollections.get(collectionName)!;
-
-			// Only process related records that are actually in the payload
-			const references = [...rowsResult.payloads.entries()]
-				.flatMap(([rowIndex, payload]) => {
-					return collectionFields
-						.filter((field) => field in payload && isObject(payload[field]))
-						.map((field) => ({ rowIndex, field }));
-				});
-
-			if (references.length > 0) {
-				await this.saveNestedReferences(
-					collectionName,
-					references,
-					rowsResult,
-					opts,
-				);
-			}
+			await this.saveNestedReferences(
+				collectionName,
+				// payload order: a row's M2O records come before its A2O ones
+				referencesOfCollections.get(collectionName)!
+					.sort((left, right) => left.rowIndex - right.rowIndex),
+				rowsResult,
+				opts,
+			);
 		}
 
 		return rowsResult;

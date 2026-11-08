@@ -34,7 +34,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-describe('processA2O', () => {
+describe('processM2OAndA2O on an A2O', () => {
 	const schema = new SchemaBuilder()
 		.collection('comment', (c) => {
 			c.field('id').id();
@@ -52,7 +52,7 @@ describe('processA2O', () => {
 
 		const service = new PayloadService('comment', { knex: db, schema });
 
-		const result = await service.processA2O([{
+		const result = await service.processM2OAndA2O([{
 			collection: 'post',
 			item: { title: 'Hello' },
 		}]);
@@ -89,7 +89,7 @@ describe('processA2O', () => {
 
 		const service = new PayloadService('comment', { knex: db, schema });
 
-		const result = await service.processA2O([{
+		const result = await service.processM2OAndA2O([{
 			collection: 'post',
 			item: { id: 5, title: 'Hello' },
 		}]);
@@ -114,7 +114,7 @@ describe('processA2O', () => {
 
 		const service = new PayloadService('comment', { knex: db, schema });
 
-		const result = await service.processA2O([{
+		const result = await service.processM2OAndA2O([{
 			collection: 'post',
 			item: { id: 5 },
 		}]);
@@ -133,7 +133,7 @@ describe('processA2O', () => {
 
 		const service = new PayloadService('comment', { knex: db, schema });
 
-		const result = await service.processA2O([{
+		const result = await service.processM2OAndA2O([{
 			collection: 'post',
 			item: { id: 5 },
 		}]);
@@ -146,20 +146,53 @@ describe('processA2O', () => {
 		expect(result.payloads).toStrictEqual([{ collection: 'post', item: 5 }]);
 	});
 
-	test('leaves a nested m2o record to processM2O', async () => {
-		const service = new PayloadService('comment', { knex: db, schema });
+	test('upserts the M2O and A2O records of one collection in one call', async () => {
+		const upsertManySpy = vi.fn().mockResolvedValue([5, 6]);
 
-		const result = await service.processA2O([{ author: { name: 'Ada' } }]);
+		vi.mocked(getService).mockReturnValue({
+			upsertMany: upsertManySpy,
+		} as unknown as ItemsService);
 
-		expect(getService).not.toHaveBeenCalled();
-		expect(result.payloads).toStrictEqual([{ author: { name: 'Ada' } }]);
+		const result = await new PayloadService('comment', {
+			knex: db,
+			schema: new SchemaBuilder()
+				.collection('comment', (c) => {
+					c.field('id').id();
+					c.field('item').a2o(['post']);
+					c.field('reply').m2o('post');
+				})
+				.build(),
+		}).processM2OAndA2O([
+			{ collection: 'post', item: { title: 'A2O' } },
+			{ reply: { title: 'M2O' } },
+		]);
+
+		expect(upsertManySpy).toHaveBeenCalledTimes(1);
+
+		expect(upsertManySpy).toHaveBeenCalledWith(
+			[{ title: 'A2O' }, { title: 'M2O' }],
+			{
+				refuseHookAddedRows: true,
+				nestedOfPayloads: [['item'], ['reply']],
+				onRevisionCreate: expect.any(Function),
+				onRequireUserIntegrityCheck: expect.any(Function),
+				bypassEmitAction: expect.any(Function),
+				emitEvents: undefined,
+				mutationTracker: undefined,
+			},
+		);
+
+		expect(result.payloads).toStrictEqual([
+			{ collection: 'post', item: 5 },
+			{ reply: 6 },
+		]);
 	});
 
 	test('refuses a nested record without its collection field', async () => {
 		const service = new PayloadService('comment', { knex: db, schema });
 
 		await expect(
-			service.processA2O([{ item: { title: 'Hello' } }]),
+			service.processM2OAndA2O([{ item: { title: 'Hello' } }]),
 		).rejects.toStrictEqual(new InvalidPayloadError({
 			reason: 'Can\'t update nested record "comment.item" without'
 				+ ' field "comment.collection" being set',
@@ -170,7 +203,7 @@ describe('processA2O', () => {
 		const service = new PayloadService('comment', { knex: db, schema });
 
 		await expect(
-			service.processA2O([{ collection: 'video', item: { title: 'Hello' } }]),
+			service.processM2OAndA2O([{ collection: 'video', item: { title: 'Hello' } }]),
 		).rejects.toStrictEqual(new InvalidPayloadError({
 			reason: '"comment.item" can\'t be linked to collection "video"',
 		}));
@@ -180,7 +213,7 @@ describe('processA2O', () => {
 		const service = new PayloadService('comment', { knex: db, schema });
 
 		await expect(
-			service.processA2O([{ collection: ['post'], item: { title: 'Hello' } }]),
+			service.processM2OAndA2O([{ collection: ['post'], item: { title: 'Hello' } }]),
 		).rejects.toStrictEqual(new InvalidPayloadError({
 			reason: '"comment.item" can\'t be linked to collection ["post"]',
 		}));
@@ -190,9 +223,9 @@ describe('processA2O', () => {
 		const service = new PayloadService('comment', { knex: db, schema });
 
 		await expect(
-			service.processA2O({ collection: 'post' } as never),
+			service.processM2OAndA2O({ collection: 'post' } as never),
 		).rejects.toStrictEqual(new Error(
-			'processA2O takes the rows as an array, got {"collection":"post"}',
+			'processM2OAndA2O takes the rows as an array, got {"collection":"post"}',
 		));
 	});
 
@@ -205,7 +238,7 @@ describe('processA2O', () => {
 
 		const service = new PayloadService('comment', { knex: db, schema });
 
-		await expect(service.processA2O([{
+		await expect(service.processM2OAndA2O([{
 			collection: 'post',
 			item: { title: 'Hello' },
 		}])).rejects.toStrictEqual(new Error(
@@ -214,7 +247,7 @@ describe('processA2O', () => {
 	});
 });
 
-describe('processM2O', () => {
+describe('processM2OAndA2O on an M2O', () => {
 	const schema = new SchemaBuilder()
 		.collection('city', (c) => {
 			c.field('id').id();
@@ -231,7 +264,7 @@ describe('processM2O', () => {
 
 		const service = new PayloadService('city', { knex: db, schema });
 
-		const result = await service.processM2O([
+		const result = await service.processM2OAndA2O([
 			{ country: { id: 3, name: 'France' } },
 			{ country: { name: 'Spain' } },
 		], { mutationBatching: 'disableBatching' });
@@ -267,7 +300,7 @@ describe('processM2O', () => {
 		};
 
 		await new PayloadService('city', { knex: db, schema })
-			.processM2O([{ country: { name: 'France' } }], {
+			.processM2OAndA2O([{ country: { name: 'France' } }], {
 				emitEvents: false,
 				mutationTracker,
 			});
@@ -299,7 +332,7 @@ describe('processM2O', () => {
 			}),
 		} as unknown as ItemsService);
 
-		await expect(new PayloadService('city', { knex: db, schema }).processM2O([
+		await expect(new PayloadService('city', { knex: db, schema }).processM2OAndA2O([
 			{ country: { name: 'France' } },
 			{},
 			{ country: { name: 'Spain' } },
@@ -322,7 +355,7 @@ describe('processM2O', () => {
 
 		const bypassEmitAction = vi.fn();
 
-		await expect(new PayloadService('city', { knex: db, schema }).processM2O(
+		await expect(new PayloadService('city', { knex: db, schema }).processM2OAndA2O(
 			[{ country: { name: 'France' } }],
 			{ bypassEmitAction },
 		)).resolves.toMatchObject({ nestedActionEvents: [] });
@@ -336,9 +369,9 @@ describe('processM2O', () => {
 		const service = new PayloadService('city', { knex: db, schema });
 
 		await expect(
-			service.processM2O({ country: 3 } as never),
+			service.processM2OAndA2O({ country: 3 } as never),
 		).rejects.toStrictEqual(new Error(
-			'processM2O takes the rows as an array, got {"country":3}',
+			'processM2OAndA2O takes the rows as an array, got {"country":3}',
 		));
 	});
 });
