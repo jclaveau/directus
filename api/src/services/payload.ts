@@ -593,7 +593,7 @@ export class PayloadService {
 				const collectionReferences =
 					referencesOfCollections.get(relatedCollection) ?? [];
 
-				collectionReferences.unshift({ rowIndex, field: relation.field });
+				collectionReferences.push({ rowIndex, field: relation.field });
 				referencesOfCollections.set(relatedCollection, collectionReferences);
 			}
 		}
