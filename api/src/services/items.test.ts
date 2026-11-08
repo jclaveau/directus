@@ -8012,6 +8012,27 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 	});
 
 	it.each(['preserveMutationOrder', 'minimizeMutations'] as const)(oneLine`
+		links an A2O person by its key alone that the M2O of its own row
+		writes: %s
+	`, async (mutationBatching) => {
+		await expect(new ItemsService('card', { knex: database, schema: cardSchema })
+			.createMany([
+				{
+					id: 1,
+					owner: { id: 7, name: 'written' },
+					collection: 'person',
+					item: { id: 7 },
+				},
+			], { mutationBatching })).resolves.toStrictEqual([1]);
+
+		await expect(database('card').select('id', 'owner', 'item'))
+			.resolves.toStrictEqual([{ id: 1, owner: 7, item: 7 }]);
+
+		await expect(database('person').select('id', 'name'))
+			.resolves.toStrictEqual([{ id: 7, name: 'written' }]);
+	});
+
+	it.each(['preserveMutationOrder', 'minimizeMutations'] as const)(oneLine`
 		refuses a board named by its key alone after a hook took over the
 		record writing that key: %s
 	`, async (mutationBatching) => {
