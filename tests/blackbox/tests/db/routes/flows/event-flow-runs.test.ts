@@ -1,4 +1,4 @@
-import { getNoCacheUrl, getUrl } from '@common/config';
+import { getUrl } from '@common/config';
 import {
 	defineFeature,
 	loadFeature,
@@ -34,8 +34,9 @@ const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 const feature = loadFeature('./tests/db/routes/flows/event-flow-runs.feature');
 
 describe.each(vendors)('%s', (vendor) => {
-	// The seed wrote the flows through the seed server, and a server registers
-	// flows only on a reload of its own, which a write to a flow starts.
+	// The seed writes the flows inactive, as a server loads every active flow
+	// when it boots. A write to a flow reloads only the server it reaches, so
+	// activating them here loads them on this one alone.
 	beforeAll(async () => {
 		const reload = await request(getUrl(vendor))
 			.patch('/flows')
@@ -70,17 +71,13 @@ describe.each(vendors)('%s', (vendor) => {
 		throw new Error('the flows never loaded on this server');
 	}, 30_000);
 
-	// Left active, the users flows would run on every later update of a user. A
-	// write to a flow reloads only the server it reaches, and both servers hold
-	// them: the seed server since the seed, this one since the reload above.
+	// Left active, the users flows would run on every later update of a user,
+	// and any active flow makes a later reload read its operations.
 	afterAll(async () => {
-		const deactivation = await request(getNoCacheUrl(vendor))
+		const deactivation = await request(getUrl(vendor))
 			.patch('/flows')
 			.send({
-				keys: [
-					'6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f06',
-					'6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f07',
-				],
+				keys: eventFlows.map((eventFlow) => eventFlow.id),
 				data: { status: 'inactive' },
 			})
 			.set('Authorization', AUTH);
