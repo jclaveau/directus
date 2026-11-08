@@ -7553,10 +7553,11 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 
 		expect(sqlStatements).toStrictEqual([
 			'BEGIN;',
-			'select `id` from `country` where `id` in (?, ?)',
-			'select `id` from `country` where `id` in (?, ?)',
+			'select `id` from `country` where `id` in (?)',
 			'insert into `country` (`name`) values (?) returning `id`',
 			'update `country` set `name` = ? where `id` in (?)',
+			'select `id` from `country` where `id` in (?, ?)',
+			'select `id` from `country` where `id` in (?)',
 			'insert into `country` (`id`) values (?) returning `id`',
 			'select sqlite_version() as version limit ?',
 			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
