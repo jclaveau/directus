@@ -7903,10 +7903,14 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 			.resolves.toStrictEqual([{ id: 9, name: 'held' }]);
 	});
 
-	it(oneLine`
+	it.each([
+		'preserveMutationOrder',
+		'minimizeMutations',
+		'disableBatching',
+	] as const)(oneLine`
 		reports the path of the field nesting a record that fails
-		validation
-	`, async () => {
+		validation: %s
+	`, async (mutationBatching) => {
 		await expect(new ItemsService('card', {
 			knex: database,
 			schema: new SchemaBuilder()
@@ -7926,7 +7930,7 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 			accountability: { admin: true } as any,
 		}).createMany([
 			{ id: 1, owner: { name: 'a' }, reviewer: { name: null } },
-		])).rejects.toMatchObject([{
+		], { mutationBatching })).rejects.toMatchObject([{
 			message: oneLine`
 				Validation failed for field "name" at "reviewer".
 				Value can't be null.
