@@ -7789,6 +7789,8 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 			c.field('owner').m2o('person');
 			c.field('reviewer').m2o('person');
 			c.field('board').m2o('board');
+			c.field('collection').string();
+			c.field('item').a2o(['person', 'board']);
 		})
 		.collection('person', (c) => {
 			c.field('id').id();
@@ -7834,6 +7836,8 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 			table.integer('owner').references('person.id');
 			table.integer('reviewer').references('person.id');
 			table.integer('board').references('board.id');
+			table.string('collection');
+			table.integer('item');
 		});
 	});
 
@@ -7851,6 +7855,45 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 
 		await expect(database('person').select('id', 'name', 'board'))
 			.resolves.toStrictEqual([{ id: 10, name: 'a', board: 21 }]);
+	});
+
+	it('writes an A2O board before the M2O person naming it', async () => {
+		await expect(new ItemsService('card', { knex: database, schema: cardSchema })
+			.createMany([
+				{ id: 1, owner: { id: 10, name: 'a', board: 21 } },
+				{ id: 2, collection: 'board', item: { id: 21, name: 'b' } },
+			])).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('person').select('id', 'name', 'board'))
+			.resolves.toStrictEqual([{ id: 10, name: 'a', board: 21 }]);
+	});
+
+	it('writes an A2O board before the A2O person naming it', async () => {
+		await expect(new ItemsService('card', { knex: database, schema: cardSchema })
+			.createMany([
+				{ id: 1, collection: 'person', item: { id: 10, name: 'a', board: 21 } },
+				{ id: 2, collection: 'board', item: { id: 21, name: 'b' } },
+			])).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('person').select('id', 'name', 'board'))
+			.resolves.toStrictEqual([{ id: 10, name: 'a', board: 21 }]);
+	});
+
+	it('links a person by its key alone that an A2O record writes', async () => {
+		await expect(new ItemsService('card', { knex: database, schema: cardSchema })
+			.createMany([
+				{ id: 1, collection: 'person', item: { id: 7, name: 'written' } },
+				{ id: 2, reviewer: { id: 7 } },
+			])).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('card').select('id', 'reviewer', 'item')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, reviewer: null, item: 7 },
+			{ id: 2, reviewer: 7, item: null },
+		]);
+
+		await expect(database('person').select('id', 'name'))
+			.resolves.toStrictEqual([{ id: 7, name: 'written' }]);
 	});
 
 	it('links a person by its key alone that another field writes', async () => {
