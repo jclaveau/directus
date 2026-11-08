@@ -480,8 +480,9 @@ export class PayloadService {
 	 * Per related collection, the records the rows nest in any of its fields,
 	 * M2O or A2O, go through one upsertMany in payload order, and each payload
 	 * comes back with its record replaced by the record's key. A collection
-	 * another one references is written first; inside a foreign key cycle, in
-	 * field order.
+	 * another one references is written first. The collections of a foreign
+	 * key cycle are written one record at a time in payload order, as before
+	 * batching: no single collection order fits every batch inside a cycle.
 	 */
 	async processM2OAndA2O(
 		rows: Partial<Item>[],
@@ -625,15 +626,87 @@ export class PayloadService {
 			visitCollection(collectionName);
 		}
 
+		const reachableCollectionsOf = (collectionName: string) => {
+			const reachedCollections = new Set<string>();
+			const pendingCollections = [collectionName];
+
+			while (pendingCollections.length > 0) {
+				const currentCollection = pendingCollections.pop()!;
+
+				for (const relation of this.schema.relations) {
+					if (
+						relation.collection === currentCollection
+						&& relation.related_collection
+						&& !reachedCollections.has(relation.related_collection)
+					) {
+						reachedCollections.add(relation.related_collection);
+						pendingCollections.push(relation.related_collection);
+					}
+				}
+			}
+
+			return reachedCollections;
+		};
+
+		const reachableCollections = new Map(orderedCollections.map((name) => {
+			return [name, reachableCollectionsOf(name)];
+		}));
+
+		// as before batching: a row's M2O records in relation order, then its A2O
+		const relationRankOf = (field: string) => {
+			const relationIndex = relations
+				.findIndex((relation) => relation.field === field);
+
+			return a2oFields.has(field)
+				? relations.length + relationIndex
+				: relationIndex;
+		};
+
 		for (const collectionName of orderedCollections) {
-			await this.saveNestedReferences(
-				collectionName,
-				// payload order: a row's M2O records come before its A2O ones
-				referencesOfCollections.get(collectionName)!
-					.sort((left, right) => left.rowIndex - right.rowIndex),
-				rowsResult,
-				opts,
-			);
+			const cycleCollections = orderedCollections.filter((otherName) => {
+				return otherName === collectionName
+					|| (reachableCollections.get(collectionName)!.has(otherName)
+						&& reachableCollections.get(otherName)!.has(collectionName));
+			});
+
+			if (cycleCollections.length === 1) {
+				await this.saveNestedReferences(
+					collectionName,
+					// payload order: a row's M2O records come before its A2O ones
+					referencesOfCollections.get(collectionName)!
+						.sort((left, right) => left.rowIndex - right.rowIndex),
+					rowsResult,
+					opts,
+				);
+
+				continue;
+			}
+
+			// the last collection of a cycle in post-order comes after every
+			// collection the cycle references
+			if (cycleCollections.at(-1) !== collectionName) {
+				continue;
+			}
+
+			const cycleReferences = cycleCollections
+				.flatMap((cycleCollection) => {
+					return referencesOfCollections.get(cycleCollection)!
+						.map((reference) => ({ cycleCollection, reference }));
+				})
+				.sort((left, right) => {
+					return left.reference.rowIndex - right.reference.rowIndex
+						|| relationRankOf(left.reference.field)
+						- relationRankOf(right.reference.field);
+				});
+
+			for (const { cycleCollection, reference } of cycleReferences) {
+				await this.saveNestedReferences(
+					cycleCollection,
+					[reference],
+					rowsResult,
+					opts,
+				);
+			}
 		}
 
 		return rowsResult;
