@@ -102,7 +102,7 @@ export default class Postgres implements SchemaInspector {
 
 		const bindings = this.explodedSchema.map(() => '?').join(',');
 
-		const [columnsResult, primaryKeysResult] = await Promise.all([
+		const [columnsResult, primaryKeysResult, uniqueIndexResult] = await Promise.all([
 			// Only select columns from BASE TABLEs to exclude views (Postgres views
 			// cannot have primary keys so they cannot be used)
 			this.knex.raw(
@@ -143,6 +143,29 @@ export default class Postgres implements SchemaInspector {
           AND indisprimary
           AND indnatts = 1
 			 AND relkind != 'S'
+      `,
+				this.explodedSchema,
+			),
+
+			// a unique index a foreign key can name: an update writing its column
+			// locks the row FOR UPDATE. Its INCLUDE columns are flagged too, where
+			// Postgres would not; a unique index of one partition only is not
+			// flagged on the partitioned table
+			this.knex.raw(
+				`
+        SELECT DISTINCT c.relname AS table_name
+          , a.attname AS column_name
+        FROM pg_index i
+        JOIN pg_class c ON c.oid = i.indrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_attribute a
+          ON a.attrelid = c.oid AND a.attnum = ANY (i.indkey)
+        WHERE i.indisunique
+          AND NOT i.indisprimary
+          AND i.indpred IS NULL
+          AND i.indexprs IS NULL
+          AND c.relkind IN ('r', 'p')
+          AND n.nspname IN (${bindings})
       `,
 				this.explodedSchema,
 			),
@@ -206,6 +229,21 @@ export default class Postgres implements SchemaInspector {
 			} else {
 				/* eslint-disable-next-line no-console */
 				console.error(`Could not set primary key "${column_name}" for unknown table "${table_name}"`);
+			}
+		}
+
+		for (const { table_name, column_name } of uniqueIndexResult.rows) {
+			const uniqueColumn = overview[table_name]?.columns[column_name];
+
+			if (uniqueColumn) {
+				uniqueColumn.in_unique_index = true;
+			}
+			else {
+				/* eslint-disable-next-line no-console */
+				console.error(
+					`Could not flag unique column "${column_name}"`
+					+ ` of unknown table "${table_name}"`,
+				);
 			}
 		}
 

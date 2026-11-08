@@ -56,6 +56,10 @@ describe('CapabilitiesHelper (default)', () => {
 	test('locks the rows a FOR UPDATE reads', () => {
 		expect(helper.supportsRowLocks()).toBe(true);
 	});
+
+	test('has no FOR NO KEY UPDATE', () => {
+		expect(helper.supportsNoKeyUpdateLock()).toBe(false);
+	});
 });
 
 describe('CapabilitiesHelperPostgres', () => {
@@ -93,10 +97,18 @@ describe('CapabilitiesHelperPostgres', () => {
 			'uuid',
 		]));
 	});
+
+	test('has FOR NO KEY UPDATE', () => {
+		expect(helper.supportsNoKeyUpdateLock()).toBe(true);
+	});
 });
 
 describe('CapabilitiesHelperCockroachDb', () => {
 	const helper = new CapabilitiesHelperCockroachDb(noKnex);
+
+	test('keeps FOR UPDATE', () => {
+		expect(helper.supportsNoKeyUpdateLock()).toBe(false);
+	});
 
 	test('does not support a json batch update', () => {
 		expect(helper.supportsJsonBatchUpdate()).toBe(false);

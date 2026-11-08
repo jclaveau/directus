@@ -226,6 +226,7 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 					note: null,
 					validation: null,
 					alias: false,
+					inUniqueIndex: column.in_unique_index ?? false,
 				};
 			}),
 		};
@@ -290,6 +291,7 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 			note: field.note,
 			alias: existing?.alias ?? true,
 			validation: (validation as Filter) ?? null,
+			inUniqueIndex: existing?.inUniqueIndex ?? false,
 		};
 	}
 

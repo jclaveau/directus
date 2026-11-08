@@ -14,8 +14,8 @@ Feature: A nested many-to-one or any-to-one object writes its related row
     database, that reports the statements each request ran
     (`QUERY_AUDIT_HEADER`). The last step counts a request's statements per
     table and kind, on postgres alone: other vendors run other statements.
-  - Those counts are the baseline before the batched writes of #414, which
-    are expected to drop them.
+  - Those counts pin the batched writes of #414: the nested records of several
+    rows take one read, and one write per run of a kind.
 
   Scenario: a nested M2O object naming an existing row with fields updates it
     When these requests get these responses:
@@ -246,6 +246,130 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       | 1       | test_nested_m2o_card  | 1      | 1      | 0      | 0      |
       | 1       | test_nested_m2o_owner | 1      | 1      | 0      | 0      |
 
+  Scenario: a batch create writes the nested records of its rows at once
+    When these requests get these responses:
+      | request                            | response            |
+      | method: POST                       | code: 200           |+
+      | path: /items/test_nested_m2o_owner |                     |
+      | payload:                           |                     |
+      |   - id: own-bu                     |                     |
+      |     name: before                   |                     |
+      |   - id: own-bk                     |                     |
+      |     name: kept                     |                     |
+      | method: POST                       | code: 200           |+
+      | path: /items/test_nested_m2o_card  | body:               |
+      | query:                             |   data:             |
+      |   fields:                          |     - id: br-a      |
+      |     - id                           |       owner: own-bn |
+      |     - owner                        |     - id: br-b      |
+      | payload:                           |       owner: own-bm |
+      |   - id: br-a                       |     - id: br-c      |
+      |     owner:                         |       owner: own-bu |
+      |       id: own-bn                   |     - id: br-d      |
+      |       name: first                  |       owner: own-bk |
+      |   - id: br-b                       |                     |
+      |     owner:                         |                     |
+      |       id: own-bm                   |                     |
+      |       name: second                 |                     |
+      |   - id: br-c                       |                     |
+      |     owner:                         |                     |
+      |       id: own-bu                   |                     |
+      |       name: after                  |                     |
+      |   - id: br-d                       |                     |
+      |     owner:                         |                     |
+      |       id: own-bk                   |                     |
+      | method: GET                        | code: 200           |+
+      | path: /items/test_nested_m2o_owner | body:               |
+      | query:                             |   data:             |
+      |   filter[id][_in]:                 |     - name: kept    |
+      |     - own-bk                       |     - name: second  |
+      |     - own-bm                       |     - name: first   |
+      |     - own-bn                       |     - name: after   |
+      |     - own-bu                       |                     |
+      |   sort: id                         |                     |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 2       | directus_activity     | 0      | 3      | 0      | 0      |
+      | 2       | directus_revisions    | 0      | 3      | 3      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | test_nested_m2o_card  | 1      | 1      | 0      | 0      |
+      | 2       | test_nested_m2o_owner | 3      | 1      | 1      | 0      |
+
+  Scenario: a batch create files a revision under its row behind a key named alone
+    When these requests get these responses:
+      | request                            | response           |
+      | method: POST                       | code: 200          |+
+      | path: /items/test_nested_m2o_owner |                    |
+      | payload:                           |                    |
+      |   id: own-sk                       |                    |
+      |   name: kept                       |                    |
+      | method: POST                       | code: 200          |+
+      | path: /items/test_nested_m2o_card  |                    |
+      | payload:                           |                    |
+      |   - id: sk-a                       |                    |
+      |     owner:                         |                    |
+      |       id: own-sk                   |                    |
+      |   - id: sk-b                       |                    |
+      |     owner:                         |                    |
+      |       id: own-sn                   |                    |
+      |       name: made                   |                    |
+      | method: GET                        | code: 200          |+
+      | path: /revisions                   | body:              |
+      | query:                             |   data:            |
+      |   filter[item][_eq]: own-sn        |     - parent:      |
+      |   fields:                          |         item: sk-b |
+      |     - parent.item                  |                    |
+
+  Scenario: a batch create writes a record once when a later row names its key alone
+    When these requests get these responses:
+      | request                           | response           |
+      | method: POST                      | code: 200          |+
+      | path: /items/test_nested_m2o_card | body:              |
+      | query:                            |   data:            |
+      |   fields:                         |     - id: fk-a     |
+      |     - id                          |       owner: own-f |
+      |     - owner                       |     - id: fk-b     |
+      | payload:                          |       owner: own-f |
+      |   - id: fk-a                      |                    |
+      |     owner:                        |                    |
+      |       id: own-f                   |                    |
+      |       name: first                 |                    |
+      |   - id: fk-b                      |                    |
+      |     owner:                        |                    |
+      |       id: own-f                   |                    |
+      | method: GET                       | code: 200          |+
+      | path: /revisions                  | body:              |
+      | query:                            |   data:            |
+      |   filter[item][_eq]: own-f        |     - parent:      |
+      |   fields:                         |         item: fk-a |
+      |     - parent.item                 |                    |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 2      | 1      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_m2o_card  | 1      | 1      | 0      | 0      |
+      | 1       | test_nested_m2o_owner | 2      | 1      | 0      | 0      |
+
+  Scenario: a nested M2O key alone of the wrong type is refused
+    When these requests get these responses:
+      | request                           | response                      |
+      | method: POST                      | code: 400                     |+
+      | path: /items/test_nested_m2o_task | body:                         |
+      | payload:                          |   errors:                     |
+      |   id: task-k                      |     - extensions:             |
+      |   assignee:                       |         code: INVALID_PAYLOAD |
+      |     id: not-a-uuid                |                               |
+      | method: GET                       | code: 200                     |+
+      | path: /items/test_nested_m2o_task | body:                         |
+      | query:                            |   data: []                    |
+      |   filter[id][_eq]: task-k         |                               |
+    Then response 1 is refused with the message:
+      """
+      Invalid payload. Primary key of directus_users must be a uuid instead of
+      "not-a-uuid".
+      """
+
   Scenario: a PATCH creating a user through an M2O passes the user checks
     When these requests get these responses:
       | request                                  | response                          |
@@ -415,6 +539,52 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       | 2       | directus_users       | 1      | 0      | 0      | 0      |
       | 2       | test_nested_a2o_link | 1      | 1      | 0      | 0      |
       | 2       | test_nested_a2o_page | 1      | 0      | 0      | 0      |
+
+  Scenario: a batch create writes the nested A2O records once per collection
+    When these requests get these responses:
+      | request                                     | response            |
+      | method: POST                                | code: 200           |+
+      | path: /items/test_nested_a2o_link           | body:               |
+      | query:                                      |   data:             |
+      |   fields:                                   |     - id: lk-ba     |
+      |     - id                                    |       item: po-ba   |
+      |     - item                                  |     - id: lk-bb     |
+      | payload:                                    |       item: pg-ba   |
+      |   - id: lk-ba                               |     - id: lk-bc     |
+      |     target_collection: test_nested_a2o_post |       item: po-bc   |
+      |     item:                                   |                     |
+      |       id: po-ba                             |                     |
+      |       title: first                          |                     |
+      |   - id: lk-bb                               |                     |
+      |     target_collection: test_nested_a2o_page |                     |
+      |     item:                                   |                     |
+      |       id: pg-ba                             |                     |
+      |       title: second                         |                     |
+      |   - id: lk-bc                               |                     |
+      |     target_collection: test_nested_a2o_post |                     |
+      |     item:                                   |                     |
+      |       id: po-bc                             |                     |
+      |       title: third                          |                     |
+      | method: GET                                 | code: 200           |+
+      | path: /revisions                            | body:               |
+      | query:                                      |   data:             |
+      |   filter[item][_in]:                        |     - item: pg-ba   |
+      |     - pg-ba                                 |       parent:       |
+      |     - po-ba                                 |         item: lk-bb |
+      |     - po-bc                                 |     - item: po-ba   |
+      |   fields:                                   |       parent:       |
+      |     - item                                  |         item: lk-ba |
+      |     - parent.item                           |     - item: po-bc   |
+      |   sort: item                                |       parent:       |
+      |                                             |         item: lk-bc |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_activity    | 0      | 3      | 0      | 0      |
+      | 1       | directus_revisions   | 0      | 3      | 3      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_a2o_link | 1      | 1      | 0      | 0      |
+      | 1       | test_nested_a2o_page | 1      | 1      | 0      | 0      |
+      | 1       | test_nested_a2o_post | 1      | 1      | 0      | 0      |
 
   Scenario: a PATCH carrying a nested A2O object needs its collection field too
     When these requests get these responses:

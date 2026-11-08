@@ -560,16 +560,17 @@ implements AbstractService<Item> {
 				payloadWithoutAliases: Record<string, unknown>;
 				revisionPayload: AnyItem;
 				primaryKey: PrimaryKey | undefined;
-				revisionsM2O: Awaited<ReturnType<PayloadService['processM2O']>>['revisions'];
-				revisionsA2O: Awaited<ReturnType<PayloadService['processA2O']>>['revisions'];
-				nestedActionEventsM2O: ActionEventParams[];
-				nestedActionEventsA2O: ActionEventParams[];
-				userIntegrityCheckFlagsM2O: UserIntegrityCheckFlag;
-				userIntegrityCheckFlagsA2O: UserIntegrityCheckFlag;
+				revisionsM2OAndA2O: PrimaryKey[];
 				payloadService: PayloadService;
 			};
 
 			const prepared: PreparedRow[] = [];
+
+			const presetRows: {
+				index: number;
+				payloadAfterHooks: AnyItem;
+				payloadWithPresets: AnyItem;
+			}[] = [];
 
 			// Resolved once every other row has its key.
 			const sameRowPositions: { index: number; sameRowAs: number }[] = [];
@@ -702,34 +703,40 @@ implements AbstractService<Item> {
 					)
 					: payloadAfterHooks;
 
-				if (opts.preMutationError) {
-					throw opts.preMutationError;
-				}
+				presetRows.push({ index, payloadAfterHooks, payloadWithPresets });
+			}
 
+			if (presetRows.length > 0 && opts.preMutationError) {
+				throw opts.preMutationError;
+			}
+
+			// We're creating new services instances so they can use the transaction
+			// as their Knex interface
+			const payloadService = new PayloadService(this.collection, {
+				accountability: this.accountability,
+				knex: trx,
+				schema: this.schema,
+				nested: this.nested,
+			});
+
+			// Once for every row, so each related collection takes one upsert.
+			const nestedRecords = await payloadService.processM2OAndA2O(
+				presetRows.map((row) => row.payloadWithPresets),
+				opts,
+			);
+
+			userIntegrityCheckFlags |= nestedRecords.userIntegrityCheckFlags;
+
+			// every row's events: a spread could pass more arguments than allowed
+			for (const nestedActionEvent of nestedRecords.nestedActionEvents) {
+				nestedActionEvents.push(nestedActionEvent);
+			}
+
+			for (const [rowIndex, presetRow] of presetRows.entries()) {
+				const { index, payloadAfterHooks, payloadWithPresets } = presetRow;
 				// Ensure the action hook payload has the post filter hook + preset changes
 				const actionHookPayload = payloadWithPresets;
-
-				// We're creating new services instances so they can use the transaction as their Knex interface
-				const payloadService = new PayloadService(this.collection, {
-					accountability: this.accountability,
-					knex: trx,
-					schema: this.schema,
-					nested: this.nested,
-				});
-
-				const {
-					payload: payloadWithM2O,
-					revisions: revisionsM2O,
-					nestedActionEvents: nestedActionEventsM2O,
-					userIntegrityCheckFlags: userIntegrityCheckFlagsM2O,
-				} = await payloadService.processM2O(payloadWithPresets, opts);
-
-				const {
-					payload: payloadWithA2O,
-					revisions: revisionsA2O,
-					nestedActionEvents: nestedActionEventsA2O,
-					userIntegrityCheckFlags: userIntegrityCheckFlagsA2O,
-				} = await payloadService.processA2O(payloadWithM2O, opts);
+				const payloadWithA2O = nestedRecords.payloads[rowIndex]!;
 
 				const payloadWithoutAliases = pick(payloadWithA2O, without(fields, ...aliases));
 				const payloadWithTypeCasting = await payloadService.processValues('create', payloadWithoutAliases);
@@ -774,12 +781,7 @@ implements AbstractService<Item> {
 					payloadWithoutAliases,
 					revisionPayload,
 					primaryKey,
-					revisionsM2O,
-					revisionsA2O,
-					nestedActionEventsM2O,
-					nestedActionEventsA2O,
-					userIntegrityCheckFlagsM2O,
-					userIntegrityCheckFlagsA2O,
+					revisionsM2OAndA2O: nestedRecords.revisionsByParent[rowIndex]!,
 					payloadService,
 				});
 			}
@@ -936,16 +938,6 @@ implements AbstractService<Item> {
 				nested: this.nested,
 			}).processO2M(parentRows, opts);
 
-			for (const p of prepared) {
-				userIntegrityCheckFlags |=
-					p.userIntegrityCheckFlagsM2O | p.userIntegrityCheckFlagsA2O;
-
-				nestedActionEvents.push(
-					...p.nestedActionEventsM2O,
-					...p.nestedActionEventsA2O,
-				);
-			}
-
 			const postPrepared: PostRow[] = prepared.map((p, index) => {
 				return {
 					...p,
@@ -1021,7 +1013,7 @@ implements AbstractService<Item> {
 						const p = postPrepared[i]!;
 						const revisionId = revisionIds[i]!;
 						// Make sure to set the parent field of the child-revision rows
-						const childrenRevisions = [...p.revisionsM2O, ...p.revisionsA2O, ...p.revisionsO2M];
+						const childrenRevisions = [...p.revisionsM2OAndA2O, ...p.revisionsO2M];
 
 						if (childrenRevisions.length > 0) {
 							await revisionsService.updateMany(
@@ -1474,7 +1466,9 @@ implements AbstractService<Item> {
 	 * Uses `this.updateMany` under the hood.
 	 */
 	async updateByQuery(query: Query, data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey[]> {
-		const keys = await this.getKeysByQuery(query);
+		const keys = await this.getKeysByQuery(query, {
+			emitEvents: opts?.emitEvents ?? true,
+		});
 
 		return keys.length
 			? await this.updateMany(keys, data, opts)
@@ -2941,19 +2935,13 @@ implements AbstractService<Item> {
 			});
 
 			const {
-				payload: payloadWithM2O,
-				revisions: revisionsM2O,
-				nestedActionEvents: nestedActionEventsM2O,
-				userIntegrityCheckFlags: userIntegrityCheckFlagsM2O,
-			} = await payloadService.processM2O(payloadWithPresets, opts);
+				payloads: payloadsWithA2O,
+				revisionsByParent: revisionsM2OAndA2OByParent,
+				nestedActionEvents: nestedActionEventsM2OAndA2O,
+				userIntegrityCheckFlags: userIntegrityCheckFlagsM2OAndA2O,
+			} = await payloadService.processM2OAndA2O([payloadWithPresets], opts);
 
-			const {
-				payload: payloadWithA2O,
-				revisions: revisionsA2O,
-				nestedActionEvents: nestedActionEventsA2O,
-				userIntegrityCheckFlags: userIntegrityCheckFlagsA2O,
-			} = await payloadService.processA2O(payloadWithM2O, opts);
-
+			const payloadWithA2O = payloadsWithA2O[0]!;
 			const payloadWithoutAliasAndPK = pick(payloadWithA2O, without(fields, primaryKeyField, ...aliases));
 			const payloadWithTypeCasting = await payloadService.processValues('update', payloadWithoutAliasAndPK);
 
@@ -2979,14 +2967,13 @@ implements AbstractService<Item> {
 				await this.refuseKeysNoRowHolds(keys, trx);
 			}
 
-			const childrenRevisions = [...revisionsM2O, ...revisionsA2O];
+			const childrenRevisions = [...revisionsM2OAndA2OByParent[0]!];
 
 			let userIntegrityCheckFlags =
 				opts.userIntegrityCheckFlags ??
-				UserIntegrityCheckFlag.None | userIntegrityCheckFlagsM2O | userIntegrityCheckFlagsA2O;
+				UserIntegrityCheckFlag.None | userIntegrityCheckFlagsM2OAndA2O;
 
-			nestedActionEvents.push(...nestedActionEventsM2O);
-			nestedActionEvents.push(...nestedActionEventsA2O);
+			nestedActionEvents.push(...nestedActionEventsM2OAndA2O);
 
 			const {
 				revisionsByParent,
@@ -3617,6 +3604,8 @@ implements AbstractService<Item> {
 										: runOffset + payloadIndex,
 								);
 							}),
+						nestedOfPayloads: opts.nestedOfPayloads
+							?.slice(runOffset, runOffset + run.length),
 					};
 
 					for (const primaryKey of await service.upsertRun(run, runOpts)) {
@@ -3871,6 +3860,15 @@ implements AbstractService<Item> {
 				: [primaryKey];
 		});
 
+		const { fields } = this.schema.collections[this.collection]!;
+
+		const writesUniqueColumn = upsertRun.some((payload) => {
+			return Object.keys(payload)
+				.some((field) => {
+					return field !== primaryKeyField && fields[field]?.inUniqueIndex;
+				});
+		});
+
 		const existingKeyNames = new Set<string>();
 
 		for (const keyChunk of chunk(sentKeys, UPSERT_PROBE_CHUNK_SIZE)) {
@@ -3879,10 +3877,21 @@ implements AbstractService<Item> {
 				.from(this.collection)
 				.whereIn(primaryKeyField, keyChunk);
 
+			const { capabilities } = getHelpers(this.knex);
+
 			// a row found is updated: a delete committing before the update would
 			// leave it writing nothing, so the found rows stay locked until commit
-			if (getHelpers(this.knex).capabilities.supportsRowLocks()) {
-				existenceRead.forUpdate();
+			if (capabilities.supportsRowLocks()) {
+				// an update writing no unique column keeps every key a foreign key can
+				// name, so that foreign key need not wait. One writing it takes FOR
+				// UPDATE: taken here, it is not upgraded at the update while a foreign
+				// key holds the row, which could deadlock
+				if (capabilities.supportsNoKeyUpdateLock() && !writesUniqueColumn) {
+					existenceRead.forNoKeyUpdate();
+				}
+				else {
+					existenceRead.forUpdate();
+				}
 			}
 
 			const existingRows = await existenceRead;
@@ -3933,30 +3942,52 @@ implements AbstractService<Item> {
 			}
 			: opts;
 
-		for (const { updating, indexes } of upsertSegments) {
-			if (indexes.length === 0) {
-				continue;
+		const nestedOf = (index: number) => {
+			return opts.nestedOfPayloads?.[index] ?? this.nested;
+		};
+
+		for (const { updating, indexes: segmentIndexes } of upsertSegments) {
+			// Payload indexes of one `nested` path, written by a service holding it
+			const nestedRuns: number[][] = [];
+
+			for (const index of segmentIndexes) {
+				const nestedRun = preservesOrder
+					? nestedRuns.at(-1)
+					: nestedRuns.find((run) => isEqual(nestedOf(run[0]!), nestedOf(index)));
+
+				if (nestedRun && isEqual(nestedOf(nestedRun[0]!), nestedOf(index))) {
+					nestedRun.push(index);
+				}
+				else {
+					nestedRuns.push([index]);
+				}
 			}
 
-			// one key per group, so one answer per group: null where a filter
-			// cancelled it
-			const segmentKeys = updating
-				? await this.updateGroups(
-					indexes.map((index) => {
-						return {
-							data: omit(upsertRun[index]!, primaryKeyField) as Partial<Item>,
-							keys: [upsertRun[index]![primaryKeyField] as PrimaryKey],
-						};
-					}),
-					writeOpts,
-				)
-				: await this.createMany(
-					indexes.map((index) => upsertRun[index]!),
-					writeOpts,
-				);
+			for (const indexes of nestedRuns) {
+				const nestedService = isEqual(nestedOf(indexes[0]!), this.nested)
+					? this
+					: this.fork({ nested: nestedOf(indexes[0]!) });
 
-			for (const [segmentIndex, segmentKey] of segmentKeys.entries()) {
-				upsertedKeys[indexes[segmentIndex]!] = segmentKey;
+				// one key per group, so one answer per group: null where a filter
+				// cancelled it
+				const segmentKeys = updating
+					? await nestedService.updateGroups(
+						indexes.map((index) => {
+							return {
+								data: omit(upsertRun[index]!, primaryKeyField) as Partial<Item>,
+								keys: [upsertRun[index]![primaryKeyField] as PrimaryKey],
+							};
+						}),
+						writeOpts,
+					)
+					: await nestedService.createMany(
+						indexes.map((index) => upsertRun[index]!),
+						writeOpts,
+					);
+
+				for (const [segmentIndex, segmentKey] of segmentKeys.entries()) {
+					upsertedKeys[indexes[segmentIndex]!] = segmentKey;
+				}
 			}
 		}
 

@@ -122,7 +122,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | 4       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
       | 4       | information_schema   | 1      | 0      | 0      | 0      | 0    |
       | 4       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 4       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_index             | 2      | 0      | 0      | 0      | 0    |
       | 4       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a user's policies deleting an access row delete it
@@ -169,7 +169,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | 3       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
       | 3       | information_schema   | 1      | 0      | 0      | 0      | 0    |
       | 3       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 3       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 3       | pg_index             | 2      | 0      | 0      | 0      | 0    |
       | 3       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a role's users given as an empty list leave the role
