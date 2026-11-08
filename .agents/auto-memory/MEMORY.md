@@ -184,3 +184,4 @@
 - [Planner bump past #614 carries a parked description](project_directus_planner_bump_614_parked.md) — migration deploy hold + REST 404/batch-delete/system-POST are ON PURPOSE; paste `.agents/parked/planner-bump-scalabus-614.md` into the bump PR
 - [PR #686 autoreview state](project_directus_pr686_autoreview_points.md) — batched nested M2O/A2O; default flip is #694; Q2/Q3/D await jean with probed outcomes (not settled)
 - [PR #694 action-hold ruling](project_directus_pr694_action_hold_ruling.md) — actions never fire for a rolled-back mutation (jean, 2026-11-07); audited early-emit sites, singular-write-flows flake
+- [PR #698 autoreview state](project_directus_pr698_autoreview_state.md) — double-next findings, JSON hang already fixed by #695, rebase plan; #695 merged f26d8cb95b
