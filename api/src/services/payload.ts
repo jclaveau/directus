@@ -713,8 +713,8 @@ export class PayloadService {
 				})
 				.sort((left, right) => {
 					return left.reference.rowIndex - right.reference.rowIndex
-						|| 0 * (relationRankOf(left.reference.field)
-						- relationRankOf(right.reference.field));
+						|| relationRankOf(left.reference.field)
+						- relationRankOf(right.reference.field);
 				});
 
 			for (const { cycleCollection, reference } of cycleReferences) {
