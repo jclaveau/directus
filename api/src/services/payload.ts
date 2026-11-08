@@ -662,8 +662,26 @@ export class PayloadService {
 				: relationIndex;
 		};
 
-		for (const collectionName of orderedCollections) {
-			const cycleCollections = orderedCollections.filter((otherName) => {
+		// a depth-first walk stops at a collection it is already in, so a cycle
+		// it entered through a collection the rows do not nest can finish before
+		// a collection the cycle references: the count of collections a
+		// collection references outside its cycle orders the writes instead
+		const referencedCountOf = (collectionName: string) => {
+			return orderedCollections.filter((otherName) => {
+				return reachableCollections.get(collectionName)!.has(otherName)
+					&& !reachableCollections.get(otherName)!.has(collectionName);
+			}).length;
+		};
+
+		const writtenCollections = [...orderedCollections].sort((left, right) => {
+			return referencedCountOf(left) - referencedCountOf(right);
+		});
+
+		// a key alone names a record an earlier reference of the cycle writes
+		const upsertedKeyNamesOfCollections = new Map<string, Set<string>>();
+
+		for (const collectionName of writtenCollections) {
+			const cycleCollections = writtenCollections.filter((otherName) => {
 				return otherName === collectionName
 					|| (reachableCollections.get(collectionName)!.has(otherName)
 						&& reachableCollections.get(otherName)!.has(collectionName));
@@ -682,8 +700,8 @@ export class PayloadService {
 				continue;
 			}
 
-			// the last collection of a cycle in post-order comes after every
-			// collection the cycle references
+			// the last collection of a cycle comes after every collection the
+			// cycle references
 			if (cycleCollections.at(-1) !== collectionName) {
 				continue;
 			}
@@ -700,11 +718,17 @@ export class PayloadService {
 				});
 
 			for (const { cycleCollection, reference } of cycleReferences) {
+				const upsertedKeyNames =
+					upsertedKeyNamesOfCollections.get(cycleCollection) ?? new Set();
+
+				upsertedKeyNamesOfCollections.set(cycleCollection, upsertedKeyNames);
+
 				await this.saveNestedReferences(
 					cycleCollection,
 					[reference],
 					rowsResult,
 					opts,
+					upsertedKeyNames,
 				);
 			}
 		}
@@ -722,6 +746,8 @@ export class PayloadService {
 		references: NestedReference[],
 		rowsResult: PayloadServiceProcessRowsResult,
 		opts?: MutationOptions,
+		// a key alone names a row a record of an earlier segment writes, too
+		upsertedKeyNames = new Set<string>(),
 	): Promise<void> {
 		if (resolveMutationBatching(opts ?? {}) !== 'preserveMutationOrder') {
 			return this.saveNestedRecords(
@@ -729,6 +755,7 @@ export class PayloadService {
 				references,
 				rowsResult,
 				opts,
+				upsertedKeyNames,
 			);
 		}
 
@@ -744,8 +771,6 @@ export class PayloadService {
 				&& !isMissingPrimaryKey(record[relatedPrimaryKeyField]);
 		};
 
-		// a key alone names a row a record of an earlier segment writes, too
-		const upsertedKeyNames = new Set<string>();
 		let segmentReferences: NestedReference[] = [];
 
 		for (const reference of references) {
