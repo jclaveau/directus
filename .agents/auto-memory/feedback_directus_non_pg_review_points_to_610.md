@@ -27,6 +27,9 @@ the code.
   a numbered point: failure scenario, the TODO's location, possible fix. Keep the
   `Assisted-by:` footer last.
 - This is a standing ruling: no need to ask jean "fix or #610?" for a non-PG point.
+  jean restated it 2026-11-10 after being asked anyway (#707's MariaDB cycle point):
+  _"mariadb points should go to the oos mariadb issue without asking me"_. File the
+  point, then report it as `filed #610 point N`; never list it as an open question.
 - The #330 (sqlite) / #331 (maria) trackers keep the per-dialect blackbox failures;
   #610 is for design/review points.
 
