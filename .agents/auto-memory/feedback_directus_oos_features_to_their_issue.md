@@ -15,6 +15,7 @@ Features jean doesn't use are "out of scope", each with one gathering issue whos
 - Comments (`directus_comments`, CommentsService) → #647
 - Redis cluster → #646
 - Shares (`directus_shares`, SharesService, share access checks) → #657 (opened 2026-11-01)
+- File uploads and storage (multipart/JSON/import/tus uploads, replacements, deletes, thumbnails, disk names) → #709 (opened 2026-11-09; absorbed #635 + #621, both closed not planned)
 
 Every bug, gap, dead code path, missing test or design doubt found on one of these goes into its issue as a new numbered point, using the same `### N. title` + failure scenario shape as the existing points. Edit the issue body with the new point; don't add a comment. Then leave it out of the review, the findings table and the end-of-task report. At most one line, e.g. "2 ldap points filed in #619".
 
