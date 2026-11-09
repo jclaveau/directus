@@ -98,6 +98,8 @@ UPDATE directus_migrations SET version = '20220501A' WHERE version = '20220501';
 | ----------------------------------------------------- | ------------------------------------------------------- |
 | `directus database migrate:latest`                    | before-schema; refuses while an after-schema one is pending |
 | `directus database migrate:latest --snapshot s.yaml`  | before-schema, then the snapshot, then after-schema     |
+| `directus database migrate:latest --phase before-schema` | before-schema alone, even with an after-schema one pending |
+| `directus database migrate:latest --phase after-schema` | after-schema alone; refuses while a before-schema one is pending; the caller imports the schema first |
 | `directus bootstrap --snapshot s.yaml`                | same, on a fresh or existing database                   |
 
 `directus database migrate:down` on a migration whose bundle is no longer installed

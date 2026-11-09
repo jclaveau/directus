@@ -27,7 +27,7 @@ import type { Notification } from './notifications.js';
 import type {
 	PayloadAction,
 	PayloadServiceProcessO2MResult,
-	PayloadServiceProcessRelationResult,
+	PayloadServiceProcessRowsResult,
 } from './payload.js';
 import type { Aggregate, Query } from './query.js';
 import type { FieldOverview } from './schema.js';
@@ -308,22 +308,10 @@ interface PayloadService {
 		aliasMap?: Record<string, string>,
 		aggregate?: Aggregate,
 	): Partial<Record<string, any>>[];
-	processA2O(
-		data: Partial<Item>,
+	processM2OAndA2O(
+		rows: Partial<Item>[],
 		opts?: MutationOptions,
-	): Promise<
-		PayloadServiceProcessRelationResult & {
-			payload: Partial<Item>;
-		}
-	>;
-	processM2O(
-		data: Partial<Item>,
-		opts?: MutationOptions,
-	): Promise<
-		PayloadServiceProcessRelationResult & {
-			payload: Partial<Item>;
-		}
-	>;
+	): Promise<PayloadServiceProcessRowsResult>;
 	processO2M(
 		parentRows: { data: Partial<Item>; key: PrimaryKey }[],
 		opts?: MutationOptions,

@@ -181,7 +181,7 @@ Feature: A file's disk name is held by one file, whichever way it is written
       | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
       | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
       | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index             | 2      | 0      | 0      | 0      | 0    |
       | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
       | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
       | 2       | directus_files       | 1      | 1      | 0      | 1      | 0    |
@@ -281,7 +281,7 @@ Feature: A file's disk name is held by one file, whichever way it is written
       | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
       | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
       | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index             | 2      | 0      | 0      | 0      | 0    |
       | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a disk name is judged once per file a batch writes, and not for no file

@@ -11,4 +11,9 @@ export class CapabilitiesHelperCockroachDb extends CapabilitiesHelperPostgres {
 	override jsonBatchUpdateTypes(): ReadonlySet<Type> {
 		return new Set();
 	}
+
+	// TODO(#610): FOR NO KEY UPDATE has not been tested on cockroach.
+	override supportsNoKeyUpdateLock(): boolean {
+		return false;
+	}
 }

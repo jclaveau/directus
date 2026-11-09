@@ -166,7 +166,7 @@ Feature: A single access row grants its policy from the next request on
       | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
       | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
       | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index             | 2      | 0      | 0      | 0      | 0    |
       | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
       | 2       | directus_access      | 7      | 0      | 1      | 0      | 0    |
       | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
@@ -179,7 +179,7 @@ Feature: A single access row grants its policy from the next request on
       | 2       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
       | 2       | information_schema   | 1      | 0      | 0      | 0      | 0    |
       | 2       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 2       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 2       | pg_index             | 2      | 0      | 0      | 0      | 0    |
       | 2       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a key no item holds is not found for the admin, forbidden to a user

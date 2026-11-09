@@ -118,6 +118,7 @@ import {
 	startScopedCachePurgeRecovery,
 	warnFullPurgeDeprecated,
 } from './scoped-cache/index.js';
+import { initNotificationEmails } from './services/notifications.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { merge } from './utils/lodash-es-used.js';
 import { Url } from './utils/url.js';
@@ -472,6 +473,7 @@ export default async function createApp(): Promise<express.Application> {
 	initPoolHealthMirror();
 	await initSharedSettingsGuard();
 	await initProcessReports();
+	initNotificationEmails();
 	initAutoscaleDrill();
 	assertPgBouncerConnections();
 

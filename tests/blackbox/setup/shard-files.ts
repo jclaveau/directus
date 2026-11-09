@@ -147,6 +147,8 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/schema/timezone/timezone-changed-node-tz-america.test.ts': 4_000,
 	'/tests/db/schema/timezone/timezone-changed-node-tz-asia.test.ts': 4_000,
 	'/tests/db/routes/flows/webhook.test.ts': 6_000,
+	// Measured on the postgres shard 5 run of 2026-11-08.
+	'/tests/db/routes/flows/event-flow-runs.test.ts': 1_200,
 	// These run in well under a second, which the source-size fallback does not
 	// guess anywhere near: it reads them as 4-10 s and moves real work off
 	// whichever shard they land on. Measured over the postgres runs of

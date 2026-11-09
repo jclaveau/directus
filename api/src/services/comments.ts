@@ -36,8 +36,13 @@ export class CommentsService extends ItemsService {
 
 	constructor(options: AbstractServiceOptions) {
 		super('directus_comments', options);
-		this.notificationsService = new NotificationsService({ schema: this.schema });
-		this.usersService = new UsersService({ schema: this.schema });
+
+		this.notificationsService = new NotificationsService({
+			schema: this.schema,
+			knex: this.knex,
+		});
+
+		this.usersService = new UsersService({ schema: this.schema, knex: this.knex });
 	}
 
 	override async createMany(data: Partial<Comment>[], opts?: MutationOptions): Promise<PrimaryKey[]> {
@@ -139,7 +144,11 @@ export class CommentsService extends ItemsService {
 				accountability.admin = userGlobalAccess.admin;
 				accountability.app = userGlobalAccess.app;
 
-				const usersService = new UsersService({ schema: this.schema, accountability });
+				const usersService = new UsersService({
+					schema: this.schema,
+					knex: this.knex,
+					accountability,
+				});
 
 				try {
 					await validateAccess(
@@ -211,7 +220,7 @@ ${comment}
 						message,
 						collection: collection,
 						item: itemKey,
-					});
+					}, { bypassEmitAction: opts?.bypassEmitAction });
 				} catch (err: any) {
 					if (isDirectusError(err, ErrorCode.Forbidden)) {
 						logger.warn(`User ${userID} doesn't have proper permissions to receive notification for this item.`);

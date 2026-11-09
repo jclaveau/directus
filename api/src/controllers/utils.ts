@@ -7,9 +7,9 @@ import {
 import type { CacheFlushTarget } from '@directus/types';
 import { oneLine } from '@directus/utils';
 import argon2 from 'argon2';
-import Busboy from 'busboy';
 import { Router } from 'express';
 import Joi from 'joi';
+import getDatabase from '../database/index.js';
 import { autoscaleDrillEnabled } from '../processes/autoscale/lib/drill.js';
 import collectionExists from '../middleware/collection-exists.js';
 import { respond } from '../middleware/respond.js';
@@ -29,9 +29,11 @@ import {
 import { redisConfigAvailable } from '../redis/index.js';
 import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
+import { answerOnce } from '../utils/answer-once.js';
 import asyncHandler from '../utils/async-handler.js';
 import { cacheAuditEnabled } from '../utils/cache-audit-enabled.js';
 import { CacheAuditOptionsSchema } from '../utils/cache-audit-options.js';
+import { createBusboy } from '../utils/create-busboy.js';
 import { generateHash } from '../utils/generate-hash.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
@@ -127,42 +129,100 @@ router.post(
 router.post(
 	'/import/:collection',
 	collectionExists,
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, routeNext) => {
+		const importSucceeded = Symbol('import succeeded');
+
+		const answerRequest = answerOnce((outcome?: unknown) => {
+			if (outcome === importSucceeded) {
+				return res.status(200).end();
+			}
+
+			return routeNext(outcome);
+		});
+
 		if (req.is('multipart/form-data') === false) {
 			throw new UnsupportedMediaTypeError({ mediaType: req.headers['content-type']!, where: 'Content-Type header' });
 		}
 
-		const service = new ImportService({
-			accountability: req.accountability,
-			schema: req.schema,
+		// every file of a body commits or rolls back with the others
+		const importing = getDatabase().transaction((trx) => {
+			return new Promise<void>((resolveImport, rejectImport) => {
+				const service = new ImportService({
+					knex: trx,
+					accountability: req.accountability,
+					schema: req.schema,
+				});
+
+				let headers;
+
+				if (req.headers['content-type']) {
+					headers = req.headers;
+				}
+				else {
+					headers = {
+						...req.headers,
+						'content-type': 'application/octet-stream',
+					};
+				}
+
+				const busboy = createBusboy(req, { headers });
+
+				let fileCount = 0;
+				let importedCount = 0;
+				let isParserClosed = false;
+
+				// a part imported before the next one's headers arrive must not answer yet
+				const answerImported = () => {
+					if (isParserClosed && fileCount > 0 && importedCount === fileCount) {
+						resolveImport();
+					}
+				};
+
+				// parts of one chunk are all parsed before the first import fails: each
+				// waits for the previous one, so none starts once the body is refused
+				let previousImport: Promise<unknown> = Promise.resolve();
+
+				busboy.on('file', (_fieldname, fileStream, { mimeType }) => {
+					fileCount++;
+
+					previousImport = previousImport.then(async () => {
+						if (busboy.destroyed) {
+							return undefined;
+						}
+
+						try {
+							await service.import(req.params['collection']!, mimeType, fileStream);
+						}
+						catch (err: any) {
+							return busboy.emit('error', err);
+						}
+
+						importedCount++;
+						return answerImported();
+					});
+				});
+
+				busboy.on('error', (err: Error) => rejectImport(err));
+
+				busboy.on('close', () => {
+					isParserClosed = true;
+
+					if (fileCount === 0) {
+						const noFileError = new InvalidPayloadError({
+							reason: 'No files were included in the body',
+						});
+
+						return rejectImport(noFileError);
+					}
+
+					return answerImported();
+				});
+
+				req.pipe(busboy);
+			});
 		});
 
-		let headers;
-
-		if (req.headers['content-type']) {
-			headers = req.headers;
-		} else {
-			headers = {
-				...req.headers,
-				'content-type': 'application/octet-stream',
-			};
-		}
-
-		const busboy = Busboy({ headers });
-
-		busboy.on('file', async (_fieldname, fileStream, { mimeType }) => {
-			try {
-				await service.import(req.params['collection']!, mimeType, fileStream);
-			} catch (err: any) {
-				return next(err);
-			}
-
-			return res.status(200).end();
-		});
-
-		busboy.on('error', (err: Error) => next(err));
-
-		req.pipe(busboy);
+		importing.then(() => answerRequest(importSucceeded), answerRequest);
 	}),
 );
 

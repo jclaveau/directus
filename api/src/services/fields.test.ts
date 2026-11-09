@@ -6,14 +6,18 @@ import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Knex } from 'knex';
 import type { Tracker } from 'knex-mock-client';
+import emitter from '../emitter.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { FieldsService } from './fields.js';
 import { ItemsService } from './items.js';
+import { RelationsService } from './relations.js';
 
 vi.mock('../../src/database/index', () => ({
 	default: vi.fn(),
 	getDatabaseClient: vi.fn().mockReturnValue('postgres'),
 }));
+
+vi.mock('../utils/get-schema.js', () => ({ getSchema: vi.fn() }));
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -97,6 +101,49 @@ describe('Services / Fields', () => {
 			await expect(service.deleteField('test', 'foo')).rejects.toThrowError(
 				'does not have the permission to delete the field',
 			);
+		});
+	});
+
+	describe('deleteField that rolled back', () => {
+		it('fires no action of its nested relation delete', async () => {
+			const emitActionSpy = vi
+				.spyOn(emitter, 'emitAction')
+				.mockResolvedValue(undefined);
+
+			vi.spyOn(RelationsService.prototype, 'deleteOne')
+				.mockImplementationOnce(async (_collection, _field, opts) => {
+					opts!.bypassEmitAction!({
+						event: 'relations.delete',
+						meta: {},
+						context: {},
+					} as any);
+				});
+
+			tracker.on.any(/alter table/).simulateError('column refused');
+
+			const service = new FieldsService({
+				knex: db,
+				schema: new SchemaBuilder()
+					.collection('articles', (c) => {
+						c.field('id')
+							.uuid()
+							.primary();
+
+						c.field('author').m2o('authors');
+					})
+					.collection('authors', (c) => {
+						c.field('id')
+							.uuid()
+							.primary();
+					})
+					.build(),
+				accountability: admin,
+			});
+
+			await expect(service.deleteField('articles', 'author'))
+				.rejects.toThrow('column refused');
+
+			expect(emitActionSpy).not.toHaveBeenCalled();
 		});
 	});
 

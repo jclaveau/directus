@@ -288,6 +288,41 @@ describe('getDatabaseSchema (via getSchema bypassCache)', () => {
 		expect(validation).toEqual({ _and: [] });
 	});
 
+	it('flags a field whose column is in a unique index', async () => {
+		overview.mockResolvedValue({
+			test: {
+				primary: 'id',
+				columns: {
+					id: { column_name: 'id', data_type: 'integer', is_nullable: false },
+					slug: {
+						column_name: 'slug',
+						data_type: 'varchar',
+						is_nullable: true,
+						in_unique_index: true,
+					},
+				},
+			},
+		});
+
+		tracker.on.select('directus_collections').response([]);
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 1,
+				collection: 'test',
+				field: 'slug',
+				special: null,
+				note: null,
+				validation: null,
+			},
+		]);
+
+		const { fields } = (await run()).collections['test']!;
+
+		expect(fields['id']!.inUniqueIndex).toBe(false);
+		expect(fields['slug']!.inUniqueIndex).toBe(true);
+	});
+
 	// A non-alias field row with no matching column is skipped (227-229): neither an alias
 	// special nor an existing column, so nothing is added.
 	it('skips a non-alias field row that has no matching column', async () => {

@@ -134,6 +134,8 @@ export type MutationOptions = {
 
 	/**
 	 * Allow disabling the emitting of hooks. Useful if a custom hook is fired (like files.upload)
+	 * The actions of the activity and revision rows the mutation writes still fire;
+	 * #696 tracks filtering them.
 	 */
 	emitEvents?: boolean | undefined;
 
@@ -213,6 +215,13 @@ export type MutationOptions = {
 	refuseHookAddedRows?: boolean | undefined;
 
 	/**
+	 * The `nested` path of each payload of an upsertMany, by payload index. The
+	 * payloads are written per path, so a record failing validation is named at
+	 * the field nesting it.
+	 */
+	nestedOfPayloads?: string[][] | undefined;
+
+	/**
 	 * Allow a filter hook to cancel the mutation by returning null. When set, the mutation
 	 * resolves to null instead of throwing; otherwise a nulling filter is an InvalidPayloadError.
 	 */
@@ -237,7 +246,8 @@ export type MutationOptions = {
 
 	/**
 	 * How a write batches its statements, passed down to its nested writes.
-	 * Left unset, `DEFAULT_MUTATION_BATCHING` decides.
+	 * Left unset, `DEFAULT_MUTATION_BATCHING` decides, `preserveMutationOrder`
+	 * by default.
 	 *
 	 * ```
 	 * upsertMany([U1, C2, U3, C4])     U = key found, C = new row

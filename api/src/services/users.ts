@@ -28,7 +28,7 @@ import isUrlAllowed from '../utils/is-url-allowed.js';
 import { verifyJWT } from '../utils/jwt.js';
 import { chunk, isEmpty } from '../utils/lodash-es-used.js';
 import { stall } from '../utils/stall.js';
-import { transaction } from '../utils/transaction.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { Url } from '../utils/url.js';
 import { ItemsService } from './items.js';
 import { MailService } from './mail/index.js';
@@ -379,9 +379,9 @@ export class UsersService extends ItemsService {
 
 		opts.mutationTracker ??= this.createMutationTracker();
 
-		// Held until the delete's transaction ends, a savepoint inside a caller's: a
-		// hook fired inside it would read the users still there, or wait on the rows
-		// it locks.
+		// Held until the delete's transaction ends: a hook fired inside it would read
+		// the users still there, or wait on the rows it locks. Inside a caller's
+		// transaction that is the caller's `bypassEmitAction`, or this call's end.
 		const heldActionEvents: ActionEventParams[] = [];
 
 		// Manual constraint, see https://github.com/directus/directus/pull/19912
@@ -392,7 +392,7 @@ export class UsersService extends ItemsService {
 		] as const;
 
 		// In the delete's transaction: a delete refused there rolls it back.
-		await transaction(this.knex, async (trx) => {
+		await transactionHoldingActions(this.knex, heldActionEvents, async (trx) => {
 			// Through ItemsService so the cache purges the nulled rows, without the
 			// hooks, activity and revisions the raw update never had.
 			if (!opts.preMutationError) {

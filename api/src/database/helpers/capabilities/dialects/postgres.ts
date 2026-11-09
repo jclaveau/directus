@@ -49,4 +49,8 @@ export class CapabilitiesHelperPostgres extends CapabilitiesHelper {
 	override jsonBatchUpdateTypes(): ReadonlySet<Type> {
 		return JSON_BATCH_UPDATE_TYPES;
 	}
+
+	override supportsNoKeyUpdateLock(): boolean {
+		return true;
+	}
 }

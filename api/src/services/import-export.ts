@@ -25,7 +25,7 @@ import { Parser as CSVParser, transforms as CSVTransforms } from 'json2csv';
 import type { Knex } from 'knex';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { appendFile } from 'node:fs/promises';
-import type { Readable, Stream } from 'node:stream';
+import { finished, type Readable, type Stream } from 'node:stream';
 import Papa from 'papaparse';
 import StreamArray from 'stream-json/streamers/stream-array.js';
 import getDatabase from '../database/index.js';
@@ -35,7 +35,8 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import type { FunctionFieldNode, FieldNode, NestedCollectionNode } from '../types/index.js';
 import { getDateFormatted } from '../utils/get-date-formatted.js';
 import { getService } from '../utils/get-service.js';
-import { transaction } from '../utils/transaction.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
+import { queueAfterCommit, transaction } from '../utils/transaction.js';
 import { Url } from '../utils/url.js';
 import { userName } from '../utils/user-name.js';
 import { FilesService } from './files.js';
@@ -53,6 +54,22 @@ export const exportMimeTypes: Record<ExportFormat, string> = {
 	xml: 'text/xml',
 	yaml: 'text/yaml',
 };
+
+/**
+ * Fire the actions an import held once its rows commit: with the knex of a
+ * caller's transaction, the import returns before that commit.
+ */
+function fireActionsAfterCommit(knex: Knex, actionEvents: ActionEventParams[]) {
+	const fireActions = async () => {
+		for (const actionEvent of actionEvents) {
+			emitter.emitAction(actionEvent.event, actionEvent.meta, actionEvent.context);
+		}
+	};
+
+	if (!queueAfterCommit(knex, fireActions)) {
+		void fireActions();
+	}
+}
 
 export class ImportService {
 	knex: Knex;
@@ -112,7 +129,7 @@ export class ImportService {
 		const extractJSON = StreamArray.withParserAsStream();
 		const nestedActionEvents: ActionEventParams[] = [];
 
-		return transaction(this.knex, (trx) => {
+		await transactionHoldingActions(this.knex, nestedActionEvents, (trx) => {
 			const service = getService(collection, {
 				knex: trx,
 				schema: this.schema,
@@ -124,6 +141,18 @@ export class ImportService {
 			});
 
 			return new Promise<void>((resolve, reject) => {
+				finished(stream, (sourceError) => {
+					if (!sourceError) {
+						return;
+					}
+
+					destroyStream(extractJSON);
+
+					reject(new Error('Error while retrieving import data', {
+						cause: sourceError,
+					}));
+				});
+
 				stream.pipe(extractJSON);
 
 				extractJSON.on('data', ({ value }: Record<string, any>) => {
@@ -142,16 +171,18 @@ export class ImportService {
 				});
 
 				extractJSON.on('end', () => {
-					saveQueue.drain(() => {
-						for (const nestedActionEvent of nestedActionEvents) {
-							emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-						}
+					if (saveQueue.idle()) {
+						return resolve();
+					}
 
+					saveQueue.drain(() => {
 						return resolve();
 					});
 				});
 			});
 		});
+
+		fireActionsAfterCommit(this.knex, nestedActionEvents);
 	}
 
 	async importCSV(collection: string, stream: Readable): Promise<void> {
@@ -160,7 +191,7 @@ export class ImportService {
 
 		const nestedActionEvents: ActionEventParams[] = [];
 
-		return transaction(this.knex, (trx) => {
+		await transactionHoldingActions(this.knex, nestedActionEvents, (trx) => {
 			const service = getService(collection, {
 				knex: trx,
 				schema: this.schema,
@@ -197,7 +228,16 @@ export class ImportService {
 			return new Promise<void>((resolve, reject) => {
 				const streams: Stream[] = [stream];
 
+				let tmpFileCleaned = false;
+
 				const cleanup = (destroy = true) => {
+					// `finished` reports the source a cleanup destroyed
+					if (tmpFileCleaned) {
+						return;
+					}
+
+					tmpFileCleaned = true;
+
 					if (destroy) {
 						for (const stream of streams) {
 							destroyStream(stream);
@@ -247,14 +287,12 @@ export class ImportService {
 							.on('end', () => {
 								cleanup(false);
 
-								// In case of empty CSV file
-								if (!saveQueue.started) return resolve();
+								// An empty CSV file, or a queue that already drained
+								if (saveQueue.idle()) {
+									return resolve();
+								}
 
 								saveQueue.drain(() => {
-									for (const nestedActionEvent of nestedActionEvents) {
-										emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-									}
-
 									return resolve();
 								});
 							});
@@ -262,14 +300,23 @@ export class ImportService {
 
 				streams.push(fileWriteStream);
 
-				stream
-					.on('error', (error) => {
-						cleanup();
-						reject(new Error('Error while retrieving import data', { cause: error }));
-					})
-					.pipe(fileWriteStream);
+				finished(stream, (sourceError) => {
+					if (!sourceError) {
+						return;
+					}
+
+					cleanup();
+
+					reject(new Error('Error while retrieving import data', {
+						cause: sourceError,
+					}));
+				});
+
+				stream.pipe(fileWriteStream);
 			});
 		});
+
+		fireActionsAfterCommit(this.knex, nestedActionEvents);
 	}
 }
 

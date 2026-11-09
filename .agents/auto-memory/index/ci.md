@@ -2,7 +2,8 @@
 
 Full hooks for this area. The routing keys live in `../MEMORY.md`.
 
-- [CodeQL CSRF alert on a new route](../reference_directus_codeql_csrf_alert_new_route.md) — alert #25 (app.ts cookie-parser) flags any new route; design question, not a bug
+- [CodeQL CSRF alert on a new route](../reference_directus_codeql_csrf_alert_new_route.md) — alert #25 (app.ts cookie-parser) dismissed won't fix 2026-11-04: SameSite=lax + CORS
+- [Re-pin a consumer lockfile to a new dist sha](../reference_directus_dist_repin_lockfile_integrity.md) — pnpm will not refresh tarball integrity; compute it, cross-check pnpm's `Actual`, swap sha + integrity
 - [Worktree style gate + subagent fixer](../reference_directus_worktree_style_gate_and_subagent_fix.md) — pnpm lint:style:changes fails in a worktree (symlinked node_modules): run eslint directly; a style subagent strips eslint-disable comments, diff its work
 
 - [Codecov per-package flags; blackbox not in api unit flag](../project_directus_codecov_flags.md) — codecov/patch/<pkg> target=auto≈project; blackbox-only api code fails patch/api → needs knex-mock-client unit tests; constants barrel line needs import-through-index
@@ -24,3 +25,4 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [Preview killed by CodeRabbit body edit](../project_directus_preview_cancelled_by_bot_edit.md) — `edited` event cancels the live admin preview via workflow-level concurrency; fix snippet + dispatch allow rule
 - [ci-prebuilds rejected; slim postgres image (PR #586)](../project_directus_ci_prebuilds_slim_postgres.md) — prebuilt runner images save 0-5s/job (not worth it); real lever = 645→204 MiB composite timescaledb+postgis image, "Start database" 26-30s→12-17s
 - [no-restricted-imports misses require and dynamic import](../reference_eslint_restricted_imports_static_only.md) — a lazy-load pin needs a no-restricted-syntax pair; mutation-test the pin or the ignores are dead config
+- [CodeRabbit never auto-reviews here](../reference_directus_coderabbit_no_auto_review.md) — repo < 10 stars: only a "Trigger review" checkbox; skip the CR watch, ticking it is jean's call
