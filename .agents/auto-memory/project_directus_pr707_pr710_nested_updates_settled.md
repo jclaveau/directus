@@ -19,6 +19,11 @@ jean's rulings, 2026-11-09. #710 is based on #707's branch (`nestedUpdates` only
 1  apply + key-only update alteration on a linked child still calls updateOne(key, {}) and fires hooks
                                  → A (2026-11-10, first ruled B): skipped under every mode, as a key-only
                                    M2O record writes nothing; hooks/activity/date_updated no longer fire
+-  cycle split by a chunk boundary → A (2026-11-10): chunks cut between write groups only; a cycle
+                                   longer than a chunk gets one statement. NOT null-then-update
+                                   (breaks NOT NULL FKs, exposes a transient null); MariaDB → #610 pt 22.
+                                   Past Postgres' 65535 bind params → 400 naming the cycle's first
+                                   keys ("Rows 1, …, 10 and N more name each other in a cycle…").
 ```
 
 **Why:** each was a behaviour choice put to jean as a gherkin block in the autoreview results comment.
