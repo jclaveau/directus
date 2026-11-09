@@ -9303,6 +9303,46 @@ describe('Services / Items / mutationBatching', () => {
 		]);
 	});
 
+	it('runs a subclass createMany once for a reordered batch', async () => {
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.integer('parent');
+		});
+
+		const overrideCalls: unknown[] = [];
+
+		class RecordingService extends ItemsService {
+			constructor(options: AbstractServiceOptions) {
+				super('entries', options);
+			}
+
+			override async createMany(
+				data: Partial<Item>[],
+				opts?: MutationOptions,
+			): Promise<PrimaryKey[]> {
+				overrideCalls.push(data);
+
+				return await super.createMany(data, opts);
+			}
+		}
+
+		await expect(new RecordingService({
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('parent').m2o('entries');
+				})
+				.build(),
+		})
+			.createMany([{ id: 1, parent: 2 }, { id: 2 }]))
+			.resolves.toStrictEqual([1, 2]);
+
+		expect(overrideCalls).toStrictEqual([
+			[{ id: 1, parent: 2 }, { id: 2 }],
+		]);
+	});
+
 	it('nestedUpdates refuse: refuses a nested record updating a row', async () => {
 		await database.raw('PRAGMA foreign_keys = ON');
 
@@ -9640,6 +9680,43 @@ describe('Services / Items / mutationBatching', () => {
 		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
 			{ id: 1, name: null, parent: null },
 			{ id: 2, name: 'row', parent: null },
+		]);
+	});
+
+	it('nestedUpdates refuse: lets an update of no row through', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.string('name');
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		await database('entries').insert([{ id: 1 }]);
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('parent').m2o('entries');
+					c.field('children').o2m('entries', 'parent');
+				})
+				.build(),
+		})
+			.updateOne(
+				1,
+				{ children: { update: [{ id: 99, name: 'nested' }] } },
+				{ nestedUpdates: 'refuse' },
+			))
+			.resolves.toStrictEqual(1);
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: null, parent: null },
 		]);
 	});
 
