@@ -505,7 +505,9 @@ implements AbstractService<Item> {
 		if (writeOrder !== null) {
 			untrackRows();
 
-			const writtenKeys = await this.createMany(
+			// a subclass override already ran for the whole batch
+			const writtenKeys = await ItemsService.prototype.createMany.call(
+				this,
 				writeOrder.map((rowIndex) => data[rowIndex]!),
 				opts,
 			);
@@ -1202,6 +1204,10 @@ implements AbstractService<Item> {
 			if (!isMissingPrimaryKey(key) && !rowIndexOfKey.has(String(key))) {
 				rowIndexOfKey.set(String(key), rowIndex);
 			}
+		}
+
+		if (rowIndexOfKey.size === 0) {
+			return data.map(() => []);
 		}
 
 		const nameRow = (

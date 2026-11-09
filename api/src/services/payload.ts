@@ -1159,8 +1159,15 @@ export class PayloadService {
 					for (const item of alterations.update) {
 						const { [relatedPrimaryKeyField]: key, ...fields } = item;
 
+						const existingRecord = await this.knex
+							.select(relatedPrimaryKeyField, relation.field)
+							.from(relation.collection)
+							.where({ [relatedPrimaryKeyField]: key })
+							.first();
+
 						if (
-							Object.keys(fields).length > 0
+							existingRecord
+							&& Object.keys(fields).length > 0
 							&& opts?.nestedUpdates === 'refuse'
 						) {
 							throw nestedUpdateRefusal(key, relation.collection);
@@ -1170,12 +1177,6 @@ export class PayloadService {
 						const record: Partial<Item> = opts?.nestedUpdates === 'skip'
 							? {}
 							: fields;
-
-						const existingRecord = await this.knex
-							.select(relatedPrimaryKeyField, relation.field)
-							.from(relation.collection)
-							.where({ [relatedPrimaryKeyField]: key })
-							.first();
 
 						if (!existingRecord || existingRecord[relation.field] != parent) {
 							record[relation.field] = parent;
