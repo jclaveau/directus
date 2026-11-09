@@ -194,6 +194,22 @@ describe('items controller', () => {
 			expect(createMany).not.toHaveBeenCalled();
 		});
 
+		test('refuses an unknown nestedUpdates before creating', async () => {
+			const refusal = await nextError(handler(), makeReq({
+				body: [{ a: 1 }],
+				query: { nestedUpdates: 'ignore' },
+			}));
+
+			expect(refusal).toBeInstanceOf(InvalidQueryError);
+			expect(refusal.status).toBe(400);
+
+			expect(refusal.message).toEqual(
+				'Invalid query. "nestedUpdates" must be one of apply, refuse, skip.',
+			);
+
+			expect(createMany).not.toHaveBeenCalled();
+		});
+
 		test('passes nestedUpdates to the create', async () => {
 			createMany.mockResolvedValueOnce([1]);
 			readMany.mockResolvedValueOnce([{ id: 1 }]);

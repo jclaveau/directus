@@ -9211,6 +9211,42 @@ describe('Services / Items / mutationBatching', () => {
 		]);
 	});
 
+	it('inserts first a later row named by another spelling of its key', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		env['DB_BATCH_INSERT_CHUNK_SIZE'] = 1;
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+						c.field('parent').m2o('entries');
+					})
+					.build(),
+			})
+				.createMany([{ id: 1, parent: '02' }, { id: 2 }]))
+				.resolves.toStrictEqual([1, 2]);
+		}
+		finally {
+			delete env['DB_BATCH_INSERT_CHUNK_SIZE'];
+		}
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, parent: 2 },
+			{ id: 2, parent: null },
+		]);
+	});
+
 	it('creates a row before an earlier row nests its key', async () => {
 		await database.raw('PRAGMA foreign_keys = ON');
 
@@ -9874,6 +9910,192 @@ describe('Services / Items / mutationBatching', () => {
 		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
 			{ id: 1, name: null, parent: null },
 			{ id: 2, name: 'row', parent: 1 },
+		]);
+	});
+
+	it('nestedUpdates skip: leaves an altered child already linked', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.string('name');
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		await database('entries').insert([
+			{ id: 1 },
+			{ id: 2, name: 'row', parent: 1 },
+		]);
+
+		emitter.onFilter('entries.items.update', recordUpdateFilter);
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+						c.field('name').string();
+						c.field('parent').m2o('entries');
+						c.field('children').o2m('entries', 'parent');
+					})
+					.build(),
+			})
+				.updateOne(
+					1,
+					{ children: { update: [{ id: 2, name: 'nested' }] } },
+					{ nestedUpdates: 'skip' },
+				))
+				.resolves.toStrictEqual(1);
+		}
+		finally {
+			emitter.offFilter('entries.items.update', recordUpdateFilter);
+		}
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [{
+				data: { children: { update: [{ id: 2, name: 'nested' }] } },
+				keys: [1],
+			}]],
+		]);
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: null, parent: null },
+			{ id: 2, name: 'row', parent: 1 },
+		]);
+	});
+
+	it('nestedUpdates refuse: refuses a nested any-to-one record', async () => {
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.string('collection');
+			table.string('item');
+		});
+
+		await database.schema.createTable('pages', (table) => {
+			table.integer('id').primary();
+			table.string('title');
+		});
+
+		await database('pages').insert({ id: 2, title: 'row' });
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('collection').string();
+					c.field('item').a2o(['pages']);
+				})
+				.collection('pages', (c) => {
+					c.field('id').id();
+					c.field('title').string();
+				})
+				.build(),
+		})
+			.createMany(
+				[{ id: 1, collection: 'pages', item: { id: 2, title: 'nested' } }],
+				{ nestedUpdates: 'refuse' },
+			))
+			.rejects
+			.toThrow(new InvalidPayloadError({
+				reason: 'Record 2 of "pages" is nested with fields besides its key,'
+					+ ' refused by nestedUpdates=refuse',
+			}));
+
+		await expect(database('entries')).resolves.toStrictEqual([]);
+
+		await expect(database('pages')).resolves.toStrictEqual([
+			{ id: 2, title: 'row' },
+		]);
+	});
+
+	it('nestedUpdates skip: names the row of a nested any-to-one record', async () => {
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.string('collection');
+			table.string('item');
+		});
+
+		await database.schema.createTable('pages', (table) => {
+			table.integer('id').primary();
+			table.string('title');
+		});
+
+		await database('pages').insert({ id: 2, title: 'row' });
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('collection').string();
+					c.field('item').a2o(['pages']);
+				})
+				.collection('pages', (c) => {
+					c.field('id').id();
+					c.field('title').string();
+				})
+				.build(),
+		})
+			.createMany(
+				[{ id: 1, collection: 'pages', item: { id: 2, title: 'nested' } }],
+				{ nestedUpdates: 'skip' },
+			))
+			.resolves.toStrictEqual([1]);
+
+		await expect(database('entries')).resolves.toStrictEqual([
+			{ id: 1, collection: 'pages', item: '2' },
+		]);
+
+		await expect(database('pages')).resolves.toStrictEqual([
+			{ id: 2, title: 'row' },
+		]);
+	});
+
+	it('nestedUpdates refuse: refuses a listed child two levels deep', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.string('name');
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		await database('entries').insert({ id: 2, name: 'row' });
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('parent').m2o('entries');
+					c.field('children').o2m('entries', 'parent');
+				})
+				.build(),
+		})
+			.createMany(
+				[{
+					id: 1,
+					children: [{ id: 3, children: [{ id: 2, name: 'nested' }] }],
+				}],
+				{ nestedUpdates: 'refuse' },
+			))
+			.rejects
+			.toThrow(new InvalidPayloadError({
+				reason: 'Record 2 of "entries" is nested with fields besides its key,'
+					+ ' refused by nestedUpdates=refuse',
+			}));
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 2, name: 'row', parent: null },
 		]);
 	});
 
