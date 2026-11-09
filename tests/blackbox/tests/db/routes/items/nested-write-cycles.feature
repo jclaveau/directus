@@ -131,3 +131,6 @@ Feature: A nested write reaching back into the collection it starts from
       | id   | name | owner | ref  |
       | cb-1 |      |       |      |
       | cb-2 |      |       | cb-9 |
+    And the rows of test_nested_cycle_ref whose key starts with "cb-" are:
+      | id   | entry |
+      | cb-9 | cb-1  |

@@ -8986,6 +8986,8 @@ describe('Services / Items / mutationBatching', () => {
 				.inTable('entries');
 		});
 
+		sqlStatements = [];
+
 		await expect(new ItemsService('entries', {
 			knex: database,
 			schema: new SchemaBuilder()
@@ -9002,10 +9004,113 @@ describe('Services / Items / mutationBatching', () => {
 			.createMany([{ id: 1 }, { id: 2, ref: { id: 9, entry: 1 } }]))
 			.resolves.toStrictEqual([1, 2]);
 
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'insert into `entries` (`id`) values (?) returning `id`',
+			'insert into `refs` (`entry`, `id`) values (?, ?) returning `id`',
+			'insert into `entries` (`id`, `ref`) values (?, ?) returning `id`',
+			'COMMIT;',
+		]);
+
 		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
 			{ id: 1, ref: null },
 			{ id: 2, ref: 9 },
 		]);
+
+		await expect(database('refs')).resolves.toStrictEqual([
+			{ id: 9, entry: 1 },
+		]);
+	});
+
+	it('keeps one insert when no nested record names a row of the batch', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+
+			table.integer('ref')
+				.references('id')
+				.inTable('refs');
+		});
+
+		await database.schema.createTable('refs', (table) => {
+			table.integer('id').primary();
+
+			table.integer('entry')
+				.references('id')
+				.inTable('entries');
+		});
+
+		sqlStatements = [];
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('ref').m2o('refs');
+				})
+				.collection('refs', (c) => {
+					c.field('id').id();
+					c.field('entry').m2o('entries');
+				})
+				.build(),
+		})
+			.createMany([{ id: 1, ref: null }, { id: 2, ref: { id: 9 } }]))
+			.resolves.toStrictEqual([1, 2]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'insert into `refs` (`id`) values (?) returning `id`',
+			'insert into `entries` (`id`, `ref`) select ? as `id`, ? as `ref` '
+			+ 'union all select ? as `id`, ? as `ref` returning `id`',
+			'COMMIT;',
+		]);
+	});
+
+	it('refuses a nested one-to-many create that is no list', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+
+			table.integer('ref')
+				.references('id')
+				.inTable('refs');
+		});
+
+		await database.schema.createTable('refs', (table) => {
+			table.integer('id').primary();
+
+			table.integer('entry')
+				.references('id')
+				.inTable('entries');
+		});
+
+		sqlStatements = [];
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('ref').m2o('refs');
+				})
+				.collection('refs', (c) => {
+					c.field('id').id();
+					c.field('entry').m2o('entries');
+					c.field('entries').o2m('entries', 'ref');
+				})
+				.build(),
+		})
+			.createMany([
+				{ id: 1 },
+				{ id: 2, ref: { id: 9, entries: { create: null } } },
+			]))
+			.rejects.toMatchObject({
+				message: 'Invalid payload. Invalid one-to-many update structure: '
+					+ '"create" must be an array.',
+			});
 	});
 
 	it('disableBatching creates one row at a time', async () => {
