@@ -673,11 +673,31 @@ describe('Integration Tests', () => {
 				]);
 			});
 
-			it('deletes a new file whose stat fails', async () => {
-				tracker.on
-					.select('from "directus_files" where "id" = ?')
-					.response(null);
+			it('deletes a new file whose bytes write fails', async () => {
+				vi.mocked(mockDriver.write!).mockRejectedValue(new Error('disk full'));
+				mockDriver.delete = vi.fn();
 
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toStrictEqual(new ServiceUnavailableError({
+					service: 'files',
+					reason: 'Couldn\'t save file test-file-id-123.txt',
+				}));
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123'], { emitEvents: false }]]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes a new file whose stat fails', async () => {
 				const statError = new Error('stat failed');
 				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
 				mockDriver.delete = vi.fn();
@@ -700,10 +720,6 @@ describe('Integration Tests', () => {
 			});
 
 			it('deletes a new file whose metadata extraction fails', async () => {
-				tracker.on
-					.select('from "directus_files" where "id" = ?')
-					.response(null);
-
 				const extractionError = new Error('extraction failed');
 				vi.mocked(extractMetadata).mockRejectedValueOnce(extractionError);
 				mockDriver.delete = vi.fn();
@@ -726,10 +742,6 @@ describe('Integration Tests', () => {
 			});
 
 			it('deletes a new file whose row update fails', async () => {
-				tracker.on
-					.select('from "directus_files" where "id" = ?')
-					.response(null);
-
 				const updateError = new Error('update failed');
 				superUpdateOne.mockRejectedValue(updateError);
 				mockDriver.delete = vi.fn();
@@ -772,10 +784,6 @@ describe('Integration Tests', () => {
 					},
 				});
 
-				tracker.on
-					.select('from "directus_files" where "id" = ?')
-					.response(null);
-
 				tracker.on.delete('directus_files').response(1);
 				vi.mocked(validateAccess).mockRejectedValue(new ForbiddenError());
 
@@ -792,6 +800,8 @@ describe('Integration Tests', () => {
 					type: 'text/plain',
 					filename_download: 'notes.txt',
 				})).rejects.toBe(statError);
+
+				expect(tracker.history.delete).toHaveLength(1);
 
 				expect(tracker.history.delete[0]?.sql).toBe(
 					'delete from "directus_files" where "id" in (?)',
@@ -825,10 +835,6 @@ describe('Integration Tests', () => {
 				emitter.onFilter('files.delete', refusingHook);
 				onTestFinished(() => emitter.offFilter('files.delete', refusingHook));
 
-				tracker.on
-					.select('from "directus_files" where "id" = ?')
-					.response(null);
-
 				tracker.on.delete('directus_files').response(1);
 				const statError = new Error('stat failed');
 				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
@@ -841,6 +847,11 @@ describe('Integration Tests', () => {
 				})).rejects.toBe(statError);
 
 				expect(refusingHook.mock.calls).toStrictEqual([]);
+				expect(tracker.history.delete).toHaveLength(1);
+
+				expect(tracker.history.delete[0]?.sql).toBe(
+					'delete from "directus_files" where "id" in (?)',
+				);
 
 				expect(tracker.history.delete[0]?.bindings)
 					.toStrictEqual(['test-file-id-123']);
@@ -851,10 +862,6 @@ describe('Integration Tests', () => {
 			});
 
 			it('deletes the bytes of a new file whose row delete fails', async () => {
-				tracker.on
-					.select('from "directus_files" where "id" = ?')
-					.response(null);
-
 				const statError = new Error('stat failed');
 				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
 				mockDriver.delete = vi.fn();
@@ -882,10 +889,6 @@ describe('Integration Tests', () => {
 			});
 
 			it('deletes the row of a new file whose bytes delete fails', async () => {
-				tracker.on
-					.select('from "directus_files" where "id" = ?')
-					.response(null);
-
 				const statError = new Error('stat failed');
 				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
 				const bytesDeleteError = new Error('disk unreachable');
