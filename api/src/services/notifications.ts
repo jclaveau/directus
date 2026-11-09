@@ -78,7 +78,9 @@ export class NotificationsService extends ItemsService<Notification> {
  * Email the notifications a create wrote, as written, once the transaction they
  * were written in commits: none for a row a filter hook cancelled, took over or
  * pointed at another, none for a row rolled back with a caller's transaction
- * (a filter flow's), none for a create with `emitEvents: false`.
+ * (a filter flow's), none for a create with `emitEvents: false`. A savepoint
+ * rolled back inside a transaction that then commits still emails its rows:
+ * `queueAfterCommit` keeps a savepoint's tasks.
  */
 export function initNotificationEmails(): void {
 	emitter.onFilter<Partial<Notification>[], void>(

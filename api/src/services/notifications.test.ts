@@ -11,7 +11,6 @@ import {
 	test,
 	vi,
 } from 'vitest';
-import { CapabilitiesHelper } from '../database/helpers/capabilities/types.js';
 import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
@@ -92,10 +91,6 @@ describe('notification emails', () => {
 
 	beforeEach(() => {
 		vi.mocked(getDatabase).mockReturnValue(database);
-
-		// this MockClient compiles no FOR UPDATE
-		vi.spyOn(CapabilitiesHelper.prototype, 'supportsRowLocks')
-			.mockReturnValue(false);
 
 		vi.mocked(UsersService.prototype.readOne).mockResolvedValue(withMeta({
 			id: 'user-a',
