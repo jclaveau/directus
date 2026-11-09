@@ -129,6 +129,10 @@ const revisionWrites = vi.hoisted<any[][]>(() => []);
 // were filed under which root.
 const revisionParentWrites = vi.hoisted<{ keys: any; data: any }[]>(() => []);
 
+// The groups of each re-parenting call, one entry per call, so a test can assert
+// how many updates linked them.
+const revisionParentCalls = vi.hoisted<{ keys: any; data: any }[][]>(() => []);
+
 // Revision ids run across the whole call rather than restarting per batch, so a
 // nested write's revision cannot share an id with the root it is filed under —
 // which is the only thing that makes that pairing assertable.
@@ -156,6 +160,13 @@ vi.mock('./revisions.js', () => {
 
 			updateMany = vi.fn(async (keys: any, data: any) => {
 				revisionParentWrites.push({ keys, data });
+				revisionParentCalls.push([{ keys, data }]);
+				return [];
+			});
+
+			updateGroups = vi.fn(async (groups: { keys: any; data: any }[]) => {
+				revisionParentWrites.push(...groups);
+				revisionParentCalls.push(groups);
 				return [];
 			});
 		},
@@ -2976,6 +2987,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		tracker.reset();
 		revisionWrites.length = 0;
 		revisionParentWrites.length = 0;
+		revisionParentCalls.length = 0;
 		revisionIds.issued = 0;
 		vi.clearAllMocks();
 		vi.restoreAllMocks();
@@ -7039,6 +7051,7 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 
 		revisionWrites.length = 0;
 		revisionParentWrites.length = 0;
+		revisionParentCalls.length = 0;
 		revisionIds.issued = 0;
 		sqlStatements = [];
 
@@ -7298,11 +7311,12 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 			],
 		]);
 
-		// revisions 1 and 2 are the children of 3, revision 3 the child of 4
-		expect(revisionParentWrites).toStrictEqual([
+		// revisions 1 and 2 are the children of 3, revision 3 the child of 4,
+		// linked by one update
+		expect(revisionParentCalls).toStrictEqual([[
 			{ keys: [1, 2], data: { parent: 4 } },
 			{ keys: [3], data: { parent: 5 } },
-		]);
+		]]);
 	});
 
 	it(oneLine`
@@ -7454,6 +7468,7 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 
 		revisionWrites.length = 0;
 		revisionParentWrites.length = 0;
+		revisionParentCalls.length = 0;
 		revisionIds.issued = 0;
 		sqlStatements = [];
 
@@ -7605,11 +7620,11 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 		]);
 
 		// revision 1 is France's, of row 3; revision 2 Spain's, of row 4; 3 and 4
-		// are the rows'
-		expect(revisionParentWrites).toStrictEqual([
+		// are the rows', linked by one update
+		expect(revisionParentCalls).toStrictEqual([[
 			{ keys: [1], data: { parent: 3 } },
 			{ keys: [2], data: { parent: 4 } },
-		]);
+		]]);
 	});
 
 	it(oneLine`

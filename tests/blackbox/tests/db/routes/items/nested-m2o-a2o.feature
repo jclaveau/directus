@@ -291,7 +291,7 @@ Feature: A nested many-to-one or any-to-one object writes its related row
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
       | 2       | directus_activity     | 0      | 3      | 0      | 0      |
-      | 2       | directus_revisions    | 0      | 3      | 3      | 0      |
+      | 2       | directus_revisions    | 0      | 3      | 1      | 0      |
       | 2       | directus_users        | 1      | 0      | 0      | 0      |
       | 2       | test_nested_m2o_card  | 1      | 1      | 0      | 0      |
       | 2       | test_nested_m2o_owner | 3      | 1      | 1      | 0      |
@@ -581,7 +581,7 @@ Feature: A nested many-to-one or any-to-one object writes its related row
     And on postgres the requests ran these statements:
       | request | table                | select | insert | update | delete |
       | 1       | directus_activity    | 0      | 3      | 0      | 0      |
-      | 1       | directus_revisions   | 0      | 3      | 3      | 0      |
+      | 1       | directus_revisions   | 0      | 3      | 1      | 0      |
       | 1       | directus_users       | 1      | 0      | 0      | 0      |
       | 1       | test_nested_a2o_link | 1      | 1      | 0      | 0      |
       | 1       | test_nested_a2o_page | 1      | 1      | 0      | 0      |
