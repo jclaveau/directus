@@ -9382,6 +9382,88 @@ describe('Services / Items / mutationBatching', () => {
 		]);
 	});
 
+	it('inserts a cycle a chunk would cut in the next chunk', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		env['DB_BATCH_INSERT_CHUNK_SIZE'] = 2;
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+						c.field('parent').m2o('entries');
+					})
+					.build(),
+			})
+				.createMany([
+					{ id: 5 },
+					{ id: 1, parent: 2 },
+					{ id: 2, parent: 1 },
+				]))
+				.resolves.toStrictEqual([5, 1, 2]);
+		}
+		finally {
+			delete env['DB_BATCH_INSERT_CHUNK_SIZE'];
+		}
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, parent: 2 },
+			{ id: 2, parent: 1 },
+			{ id: 5, parent: null },
+		]);
+	});
+
+	it('inserts a cycle longer than a chunk in one statement', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		env['DB_BATCH_INSERT_CHUNK_SIZE'] = 2;
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+						c.field('parent').m2o('entries');
+					})
+					.build(),
+			})
+				.createMany([
+					{ id: 1, parent: 2 },
+					{ id: 2, parent: 3 },
+					{ id: 3, parent: 1 },
+				]))
+				.resolves.toStrictEqual([1, 2, 3]);
+		}
+		finally {
+			delete env['DB_BATCH_INSERT_CHUNK_SIZE'];
+		}
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, parent: 2 },
+			{ id: 2, parent: 3 },
+			{ id: 3, parent: 1 },
+		]);
+	});
+
 	it('runs a subclass createMany once for a reordered batch', async () => {
 		await database.schema.createTable('entries', (table) => {
 			table.integer('id').primary();
