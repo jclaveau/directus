@@ -113,21 +113,6 @@ export type MutationOptions = {
 		| undefined;
 
 	/**
-	 * Called once by `createMany` when its rows are written, with the key and the
-	 * payload after hooks of each row it inserted: none for a row a hook took
-	 * over, cancelled or pointed `sameRowAs` another.
-	 * The payload is the `items.create` action's: presets applied, key set.
-	 * Inside a caller's transaction the rows are not committed yet: a rollback
-	 * or a retried attempt (`upsertMany` calls it once per run) reports rows
-	 * that never commit; `queueAfterCommit` defers work to the commit.
-	 * A callback that throws fails the create after its rows are written,
-	 * skipping its cache purge and its actions.
-	 */
-	onItemsCreate?:
-		| ((items: { primaryKey: PrimaryKey; payload: Item }[]) => void)
-		| undefined;
-
-	/**
 	 * Flag to disable the auto purging of the cache. Is ignored when CACHE_AUTO_PURGE isn't enabled.
 	 * `true` is the default, so a caller deciding at runtime passes its answer as is.
 	 */

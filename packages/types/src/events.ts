@@ -44,9 +44,14 @@ export type MutationEventContext = Omit<EventContext, 'database' | 'scopedCache'
 /**
  * What an `ItemsService` created/updated filter receives, once the rows are
  * written: it may purge, but no row is left to take over, so it has no
- * `skipPurgeFor` to spare one an update hook took over and moved.
+ * `skipPurgeFor` to spare one an update hook took over and moved. The service
+ * always has a schema, so the hook does too.
  */
-export type WrittenEventContext = Omit<MutationEventContext, 'scopedCache'> & {
+export type WrittenEventContext = Omit<
+	MutationEventContext,
+	'schema' | 'scopedCache'
+> & {
+	schema: SchemaOverview;
 	scopedCache: Pick<ScopedCachePurgeHandle, 'purgeBy'>;
 };
 
