@@ -770,8 +770,6 @@ describe('Integration Tests', () => {
 						.collection('directus_files', (collection) => {
 							collection.field('id').string()
 								.primary();
-
-							collection.field('filename_disk').string();
 						})
 						.build(),
 					accountability: {
@@ -816,14 +814,12 @@ describe('Integration Tests', () => {
 			});
 
 			it('deletes a new file a files.delete hook refuses', async () => {
-				const uploaderService = new FilesService({
+				const hookedFilesService = new FilesService({
 					knex: db,
 					schema: new SchemaBuilder()
 						.collection('directus_files', (collection) => {
 							collection.field('id').string()
 								.primary();
-
-							collection.field('filename_disk').string();
 						})
 						.build(),
 				});
@@ -840,7 +836,7 @@ describe('Integration Tests', () => {
 				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
 				mockDriver.delete = vi.fn();
 
-				await expect(uploaderService.uploadOne(new PassThrough(), {
+				await expect(hookedFilesService.uploadOne(new PassThrough(), {
 					storage: 'local',
 					type: 'text/plain',
 					filename_download: 'notes.txt',
