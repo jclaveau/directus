@@ -9119,6 +9119,62 @@ describe('Services / Items / mutationBatching', () => {
 			});
 	});
 
+	it('keeps one insert when nested children name no batch row', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+
+			table.integer('ref')
+				.references('id')
+				.inTable('refs');
+		});
+
+		await database.schema.createTable('refs', (table) => {
+			table.integer('id').primary();
+
+			table.integer('entry')
+				.references('id')
+				.inTable('entries');
+		});
+
+		await database('entries').insert({ id: 3 });
+
+		sqlStatements = [];
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('ref').m2o('refs');
+				})
+				.collection('refs', (c) => {
+					c.field('id').id();
+					c.field('entry').m2o('entries');
+					c.field('entries').o2m('entries', 'ref');
+				})
+				.build(),
+		})
+			.createMany([
+				{ id: 1, ref: null },
+				{ id: 2, ref: { id: 9, entries: [3, { id: 4 }] } },
+			]))
+			.resolves.toStrictEqual([1, 2]);
+
+		expect(sqlStatements).toContain(
+			'insert into `entries` (`id`, `ref`) select ? as `id`, ? as `ref` '
+			+ 'union all select ? as `id`, ? as `ref` returning `id`',
+		);
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, ref: null },
+			{ id: 2, ref: 9 },
+			{ id: 3, ref: 9 },
+			{ id: 4, ref: 9 },
+		]);
+	});
+
 	it('disableBatching creates one row at a time', async () => {
 		const service = new ItemsService('test', { knex: database, schema });
 
