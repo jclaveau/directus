@@ -105,7 +105,7 @@ const schema = new SchemaBuilder()
 schema.collections['directus_comments']!.accountability = null;
 schema.collections['directus_notifications']!.accountability = null;
 
-const author: Accountability = {
+const commentAuthor: Accountability = {
 	user: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
 	role: null,
 	admin: true,
@@ -114,8 +114,8 @@ const author: Accountability = {
 	ip: null,
 };
 
-const database = knex.default({ client: MockClient });
-const tracker = createTracker(database);
+const mockDatabase = knex.default({ client: MockClient });
+const queryTracker = createTracker(mockDatabase);
 
 describe('a comment mention in its caller\'s transaction', () => {
 	const notificationActionListener = vi.fn();
@@ -126,10 +126,10 @@ describe('a comment mention in its caller\'s transaction', () => {
 	});
 
 	beforeEach(() => {
-		vi.mocked(getDatabase).mockReturnValue(database);
-		vi.mocked(getDatabaseForAccountability).mockReturnValue(database);
-		tracker.on.insert('directus_comments').response([1]);
-		tracker.on.insert('directus_notifications').response([7]);
+		vi.mocked(getDatabase).mockReturnValue(mockDatabase);
+		vi.mocked(getDatabaseForAccountability).mockReturnValue(mockDatabase);
+		queryTracker.on.insert('directus_comments').response([1]);
+		queryTracker.on.insert('directus_notifications').response([7]);
 
 		vi.mocked(UsersService.prototype.readByQuery).mockResolvedValue(withMeta([{
 			id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -138,6 +138,7 @@ describe('a comment mention in its caller\'s transaction', () => {
 		}], { scopedCacheFingerprints: [] }));
 
 		vi.mocked(UsersService.prototype.readOne)
+			.mockReset()
 			.mockResolvedValueOnce(withMeta({
 				id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
 				first_name: 'Sam',
@@ -154,7 +155,7 @@ describe('a comment mention in its caller\'s transaction', () => {
 	});
 
 	afterEach(() => {
-		tracker.reset();
+		queryTracker.reset();
 		vi.clearAllMocks();
 	});
 
@@ -164,8 +165,8 @@ describe('a comment mention in its caller\'s transaction', () => {
 	`, async () => {
 		const heldActionEvents: ActionEventParams[] = [];
 
-		await expect(transaction(database, async (trx) => {
-			await new CommentsService({ knex: trx, schema, accountability: author })
+		await expect(transaction(mockDatabase, async (trx) => {
+			await new CommentsService({ knex: trx, schema, accountability: commentAuthor })
 				.createMany(
 					[{
 						comment: 'hey @aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -191,10 +192,10 @@ describe('a comment mention in its caller\'s transaction', () => {
 	`, async () => {
 		let callerTransaction: Knex | undefined;
 
-		await transaction(database, async (trx) => {
+		await transaction(mockDatabase, async (trx) => {
 			callerTransaction = trx;
 
-			await new CommentsService({ knex: trx, schema, accountability: author })
+			await new CommentsService({ knex: trx, schema, accountability: commentAuthor })
 				.createMany([{
 					comment: 'hey @aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 					collection: 'articles',
@@ -204,7 +205,7 @@ describe('a comment mention in its caller\'s transaction', () => {
 
 		expect(vi.mocked(UsersService).mock.calls).toEqual([
 			[{ schema, knex: callerTransaction }],
-			[{ schema, knex: callerTransaction, accountability: author }],
+			[{ schema, knex: callerTransaction, accountability: commentAuthor }],
 			[{
 				schema,
 				knex: callerTransaction,
@@ -217,7 +218,7 @@ describe('a comment mention in its caller\'s transaction', () => {
 					ip: null,
 				},
 			}],
-			[{ schema, knex: database }],
+			[{ schema, knex: mockDatabase }],
 		]);
 	});
 
@@ -227,8 +228,8 @@ describe('a comment mention in its caller\'s transaction', () => {
 	`, async () => {
 		const heldActionEvents: ActionEventParams[] = [];
 
-		await transaction(database, async (trx) => {
-			await new CommentsService({ knex: trx, schema, accountability: author })
+		await transaction(mockDatabase, async (trx) => {
+			await new CommentsService({ knex: trx, schema, accountability: commentAuthor })
 				.createMany(
 					[{
 						comment: 'hey @aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -260,7 +261,11 @@ describe('a comment mention in its caller\'s transaction', () => {
 					keys: [1],
 					collection: 'directus_comments',
 				},
-				context: { database, schema, accountability: author },
+				context: {
+					database: mockDatabase,
+					schema,
+					accountability: commentAuthor,
+				},
 			},
 			{
 				event: 'notifications.create',
@@ -285,7 +290,7 @@ Sam Sender has mentioned you in a comment:
 					keys: [7],
 					collection: 'directus_notifications',
 				},
-				context: { database, schema, accountability: null },
+				context: { database: mockDatabase, schema, accountability: null },
 			},
 		]);
 
