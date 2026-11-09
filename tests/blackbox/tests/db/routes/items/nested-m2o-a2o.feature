@@ -15,7 +15,7 @@ Feature: A nested many-to-one or any-to-one object writes its related row
     (`QUERY_AUDIT_HEADER`). The last step counts a request's statements per
     table and kind, on postgres alone: other vendors run other statements.
   - Those counts pin the batched writes of #414: the nested records of several
-    rows take one read, and one write per run of a kind.
+    rows are read and written per run of a kind, not per row.
 
   Scenario: a nested M2O object naming an existing row with fields updates it
     When these requests get these responses:

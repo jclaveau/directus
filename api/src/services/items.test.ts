@@ -8056,6 +8056,7 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 				{ id: 1, board: { id: 7, name: 'taken' } },
 				{ id: 2, board: { id: 7 } },
 			], { mutationBatching })).rejects.toMatchObject({
+				code: 'INVALID_FOREIGN_KEY',
 				message: 'Invalid foreign key in collection "card".',
 			});
 		}
@@ -8188,6 +8189,7 @@ describe('Services / Items / the nested M2O rows a foreign key orders', () => {
 				{ id: 2, board: { id: 7 } },
 				{ id: 3, owner: { id: 10, name: 'a' } },
 			], { mutationBatching })).rejects.toMatchObject({
+				code: 'INVALID_FOREIGN_KEY',
 				message: 'Invalid foreign key in collection "card".',
 			});
 		}
