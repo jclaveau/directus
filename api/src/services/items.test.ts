@@ -9464,6 +9464,70 @@ describe('Services / Items / mutationBatching', () => {
 		]);
 	});
 
+	it('refuses a cycle past the Postgres bind parameters', async () => {
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.integer('parent');
+		});
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('parent').m2o('entries');
+				})
+				.build(),
+		})
+			// a cycle of 32768 rows, 2 values each
+			.createMany(Array.from({ length: 32768 }, (_, rowIndex) => {
+				return { id: rowIndex + 1, parent: (rowIndex + 1) % 32768 + 1 };
+			})))
+			.rejects.toMatchObject({
+				message: 'Invalid payload. Rows 1, 2, 3, 4, 5, 6, 7, 8, 9, 10'
+					+ ' and 32758 more name each other in a cycle, so they are'
+					+ ' inserted in one statement, whose 65536 bind parameters'
+					+ ' pass the 65535 of Postgres.',
+			});
+
+		await expect(database('entries')).resolves.toStrictEqual([]);
+	});
+
+	it('refuses a chunk past the Postgres bind parameters', async () => {
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.integer('parent');
+		});
+
+		env['DB_BATCH_INSERT_CHUNK_SIZE'] = 40000;
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+						c.field('parent').m2o('entries');
+					})
+					.build(),
+			})
+				// 32768 rows, 2 values each
+				.createMany(Array.from({ length: 32768 }, (_, rowIndex) => {
+					return { id: rowIndex + 1, parent: null };
+				})))
+				.rejects.toMatchObject({
+					message: 'Invalid payload. Inserting 32768 rows in one statement'
+						+ ' takes 65536 bind parameters, past the 65535 of Postgres;'
+						+ ' send fewer rows or lower DB_BATCH_INSERT_CHUNK_SIZE.',
+				});
+		}
+		finally {
+			delete env['DB_BATCH_INSERT_CHUNK_SIZE'];
+		}
+
+		await expect(database('entries')).resolves.toStrictEqual([]);
+	});
+
 	it('runs a subclass createMany once for a reordered batch', async () => {
 		await database.schema.createTable('entries', (table) => {
 			table.integer('id').primary();
