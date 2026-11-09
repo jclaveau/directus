@@ -492,7 +492,11 @@ implements AbstractService<Item> {
 			opts.mutationTracker.trackMutations(data.length);
 		}
 
-		if (resolveMutationBatching(opts) === 'disableBatching' && data.length > 1) {
+		if (
+			data.length > 1
+			&& (resolveMutationBatching(opts) === 'disableBatching'
+				|| this.nestedRecordNamesBatchRow(data))
+		) {
 			untrackRows();
 
 			return await this.createRowByRow(data, opts, opts.mutationTracker);
@@ -1154,7 +1158,109 @@ implements AbstractService<Item> {
 	}
 
 	/**
-	 * `createMany` under `disableBatching`: one `createMany` per row, in one
+	 * Whether a record a row nests, at any depth, names another row of the
+	 * batch by the key that row provides. A batch writes every nested M2O and
+	 * A2O record before its rows, so the foreign key would refuse that name;
+	 * row by row, the rows before it are written first. Read off the payloads
+	 * before the filter hooks: a name a hook adds is not seen.
+	 */
+	private nestedRecordNamesBatchRow(data: Partial<Item>[]): boolean {
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+
+		const providedKeys = new Set(data
+			.map((row) => row[primaryKeyField])
+			.filter((key) => !isMissingPrimaryKey(key))
+			.map((key) => String(key)));
+
+		if (providedKeys.size === 0) {
+			return false;
+		}
+
+		// the rows' own O2M records and keys are written after the rows
+		const recordNamesBatchRow = (
+			collectionName: string,
+			record: unknown,
+			isNestedRecord: boolean,
+		): boolean => {
+			if (!isPlainObject(record)) {
+				return false;
+			}
+
+			const recordFields = record as AnyItem;
+
+			return this.schema.relations.some((relation) => {
+				// a M2O or an A2O of the record
+				if (
+					relation.collection === collectionName
+					&& relation.field in recordFields
+					&& valueNamesBatchRow(
+						relation.related_collection
+						?? recordFields[relation.meta?.one_collection_field ?? ''],
+						recordFields[relation.field],
+						isNestedRecord,
+					)
+				) {
+					return true;
+				}
+
+				const oneField = relation.meta?.one_field;
+
+				// an O2M of the record, a self relation's included
+				return isNestedRecord
+					&& relation.related_collection === collectionName
+					&& typeof oneField === 'string'
+					&& oneField in recordFields
+					&& childRecordsOf(recordFields[oneField]).some((child) => {
+						return recordNamesBatchRow(relation.collection, child, true);
+					});
+			});
+		};
+
+		const valueNamesBatchRow = (
+			relatedCollection: unknown,
+			value: unknown,
+			isNestedRecord: boolean,
+		): boolean => {
+			if (typeof relatedCollection !== 'string') {
+				return false;
+			}
+
+			if (isPlainObject(value)) {
+				return recordNamesBatchRow(relatedCollection, value, true);
+			}
+
+			return isNestedRecord
+				&& relatedCollection === this.collection
+				&& !isMissingPrimaryKey(value)
+				&& providedKeys.has(String(value));
+		};
+
+		// an O2M value is an array or a { create, update, delete } object
+		const childRecordsOf = (children: unknown): unknown[] => {
+			if (Array.isArray(children)) {
+				return children;
+			}
+
+			if (!isPlainObject(children)) {
+				return [];
+			}
+
+			const { create = [], update = [] } = children as {
+				create?: unknown[];
+				update?: unknown[];
+			};
+
+			return [...create, ...update];
+		};
+
+		return data.some((row) => {
+			return recordNamesBatchRow(this.collection, row, false);
+		});
+	}
+
+	/**
+	 * `createMany` under `disableBatching`, or when a nested record names
+	 * another row of the batch: one `createMany` per row, in one
 	 * transaction, each row with its own filter and insert. As before batching,
 	 * the actions fire once the transaction commits and the user count is checked
 	 * once. Each row takes `ItemsService`'s `createMany`: a subclass override
