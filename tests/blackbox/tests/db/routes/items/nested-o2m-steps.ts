@@ -103,26 +103,33 @@ export function defineNestedWriteSteps(
 		},
 	);
 
+	async function readRowsByKeyPrefix(
+		collection: string,
+		keyPrefix: string,
+		table: Record<string, string>[],
+	) {
+		const response = await request(instanceUrl())
+			.get(`/items/${collection}`)
+			.query({
+				'filter[id][_starts_with]': keyPrefix,
+				fields: Object.keys(table[0]!).join(','),
+				sort: 'id',
+				limit: -1,
+			})
+			.set('Authorization', AUTH);
+
+		expect(response.statusCode).toEqual(200);
+		expect(response.body.data).toEqual(parseGherkinTable(table));
+	}
+
 	then.optional(
 		/^the rows of (\S+) whose key starts with "([^"]+)" are:$/,
-		async (
-			collection: string,
-			keyPrefix: string,
-			table: Record<string, string>[],
-		) => {
-			const response = await request(instanceUrl())
-				.get(`/items/${collection}`)
-				.query({
-					'filter[id][_starts_with]': keyPrefix,
-					fields: Object.keys(table[0]!).join(','),
-					sort: 'id',
-					limit: -1,
-				})
-				.set('Authorization', AUTH);
+		readRowsByKeyPrefix,
+	);
 
-			expect(response.statusCode).toEqual(200);
-			expect(response.body.data).toEqual(parseGherkinTable(table));
-		},
+	and.optional(
+		/^the rows of (\S+) whose key starts with "([^"]+)" are:$/,
+		readRowsByKeyPrefix,
 	);
 
 	defineStatementCountsStep(and, vendor, receivedResponses);

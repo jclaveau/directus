@@ -9007,6 +9007,7 @@ describe('Services / Items / mutationBatching', () => {
 		expect(sqlStatements).toStrictEqual([
 			'BEGIN;',
 			'insert into `entries` (`id`) values (?) returning `id`',
+			'select `id` from `refs` where `id` in (?)',
 			'insert into `refs` (`entry`, `id`) values (?, ?) returning `id`',
 			'insert into `entries` (`id`, `ref`) values (?, ?) returning `id`',
 			'COMMIT;',
@@ -9061,9 +9062,14 @@ describe('Services / Items / mutationBatching', () => {
 
 		expect(sqlStatements).toStrictEqual([
 			'BEGIN;',
+			'select `id` from `refs` where `id` in (?)',
+			'select `id` from `refs` where `id` in (?)',
 			'insert into `refs` (`id`) values (?) returning `id`',
+			'select sqlite_version() as version limit ?',
+			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `entries` (`id`, `ref`) select ? as `id`, ? as `ref` '
 			+ 'union all select ? as `id`, ? as `ref` returning `id`',
+			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 	});
