@@ -9175,6 +9175,134 @@ describe('Services / Items / mutationBatching', () => {
 		]);
 	});
 
+	it('inserts a row its earlier row names in an earlier chunk', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		env['DB_BATCH_INSERT_CHUNK_SIZE'] = 1;
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+						c.field('parent').m2o('entries');
+					})
+					.build(),
+			})
+				.createMany([{ id: 1, parent: 2 }, { id: 2 }]))
+				.resolves.toStrictEqual([1, 2]);
+		}
+		finally {
+			delete env['DB_BATCH_INSERT_CHUNK_SIZE'];
+		}
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, parent: 2 },
+			{ id: 2, parent: null },
+		]);
+	});
+
+	it('creates a row before an earlier row nests its key', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('parent').m2o('entries');
+				})
+				.build(),
+		})
+			.createMany([{ id: 1, parent: { id: 2 } }, { id: 2 }]))
+			.resolves.toStrictEqual([1, 2]);
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, parent: 2 },
+			{ id: 2, parent: null },
+		]);
+	});
+
+	it('updates a row with the fields an earlier row nests it with', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.string('name');
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('parent').m2o('entries');
+				})
+				.build(),
+		})
+			.createMany([
+				{ id: 1, parent: { id: 2, name: 'nested' } },
+				{ id: 2, name: 'row' },
+			]))
+			.resolves.toStrictEqual([1, 2]);
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: null, parent: 2 },
+			{ id: 2, name: 'nested', parent: null },
+		]);
+	});
+
+	it('keeps the payload order of rows naming each other', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('parent').m2o('entries');
+				})
+				.build(),
+		})
+			.createMany([{ id: 1, parent: 2 }, { id: 2, parent: 1 }]))
+			.resolves.toStrictEqual([1, 2]);
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, parent: 2 },
+			{ id: 2, parent: 1 },
+		]);
+	});
+
 	it('disableBatching creates one row at a time', async () => {
 		const service = new ItemsService('test', { knex: database, schema });
 
