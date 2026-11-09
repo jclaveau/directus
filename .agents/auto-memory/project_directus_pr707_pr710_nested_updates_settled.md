@@ -17,7 +17,8 @@ jean's rulings, 2026-11-09. #710 is based on #707's branch (`nestedUpdates` only
 11 top-level O2M not walked      → B: filed #708 (predates the PR)
 #710
 1  apply + key-only update alteration on a linked child still calls updateOne(key, {}) and fires hooks
-                                 → B: kept as is (predates #707, a hook may rely on it); only skip leaves it alone
+                                 → A (2026-11-10, first ruled B): skipped under every mode, as a key-only
+                                   M2O record writes nothing; hooks/activity/date_updated no longer fire
 ```
 
 **Why:** each was a behaviour choice put to jean as a gherkin block in the autoreview results comment.
