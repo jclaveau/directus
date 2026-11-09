@@ -8967,6 +8967,47 @@ describe('Services / Items / mutationBatching', () => {
 		]);
 	});
 
+	it('creates a row before a record nested in a later row names it', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+
+			table.integer('ref')
+				.references('id')
+				.inTable('refs');
+		});
+
+		await database.schema.createTable('refs', (table) => {
+			table.integer('id').primary();
+
+			table.integer('entry')
+				.references('id')
+				.inTable('entries');
+		});
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('ref').m2o('refs');
+				})
+				.collection('refs', (c) => {
+					c.field('id').id();
+					c.field('entry').m2o('entries');
+				})
+				.build(),
+		})
+			.createMany([{ id: 1 }, { id: 2, ref: { id: 9, entry: 1 } }]))
+			.resolves.toStrictEqual([1, 2]);
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, ref: null },
+			{ id: 2, ref: 9 },
+		]);
+	});
+
 	it('disableBatching creates one row at a time', async () => {
 		const service = new ItemsService('test', { knex: database, schema });
 

@@ -115,3 +115,19 @@ Feature: A nested write reaching back into the collection it starts from
     Then the rows of test_nested_cycle_note whose key starts with "cn-" are:
       | id   | entry |
       | cn-9 | cn-2  |
+
+  Scenario: a created row nests a row pointing back at a row created before it
+    When these requests get these responses:
+      | request                                   | response  |
+      | method: POST                              | code: 200 |+
+      | path: /items/test_nested_cycle_entry      |           |
+      | payload:                                  |           |
+      |   - id: cb-1                              |           |
+      |   - id: cb-2                              |           |
+      |     ref:                                  |           |
+      |       id: cb-9                            |           |
+      |       entry: cb-1                         |           |
+    Then the rows of test_nested_cycle_entry whose key starts with "cb-" are:
+      | id   | name | owner | ref  |
+      | cb-1 |      |       |      |
+      | cb-2 |      |       | cb-9 |
