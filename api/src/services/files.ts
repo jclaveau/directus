@@ -18,7 +18,7 @@ import type {
 	UpdateGroup,
 } from '@directus/types';
 import type { Driver } from '@directus/storage';
-import { toArray } from '@directus/utils';
+import { oneLine, toArray } from '@directus/utils';
 import type { AxiosResponse } from 'axios';
 import type { Knex } from 'knex';
 import encodeURL from 'encodeurl';
@@ -161,27 +161,51 @@ export class FilesService extends ItemsService<File> {
 			payload.type = 'application/octet-stream';
 		}
 
+		// The row this upload just created goes without a delete permission or a
+		// delete hook, as its metadata update is written; the bytes go whatever
+		// the row delete did, an aborted transaction refusing it.
+		const deleteFailedUpload = async () => {
+			const sudoFilesItemsService = new ItemsService('directus_files', {
+				knex: this.knex,
+				schema: this.schema,
+			});
+
+			try {
+				await sudoFilesItemsService.deleteMany([primaryKey!], {
+					emitEvents: false,
+				});
+			}
+			catch (err: any) {
+				logger.warn(err, oneLine`
+					Couldn't delete the row ${JSON.stringify(primaryKey)}
+					of a failed upload
+				`);
+			}
+
+			try {
+				await disk.delete(payload.filename_disk!);
+			}
+			catch (err: any) {
+				logger.warn(err, oneLine`
+					Couldn't delete the file ${JSON.stringify(payload.filename_disk)}
+					of a failed upload
+				`);
+			}
+		};
+
 		// Used to clean up if something goes wrong
 		const cleanUp = async () => {
+			if (isReplacement === false) {
+				await deleteFailedUpload();
+
+				return;
+			}
+
 			try {
-				if (isReplacement === true) {
-					// If this is a replacement that failed, we need to delete the temp file
-					await disk.delete(tempFilenameDisk);
-				} else {
-					// If this is a new file that failed
-					// delete the DB record
-					await super.deleteMany([primaryKey!]);
-
-					// delete the final file
-					await disk.delete(payload.filename_disk!);
-				}
+				// If this is a replacement that failed, we need to delete the temp file
+				await disk.delete(tempFilenameDisk);
 			} catch (err: any) {
-				if (isReplacement === true) {
-					logger.warn(`Couldn't delete temp file ${tempFilenameDisk}`);
-				} else {
-					logger.warn(`Couldn't delete file ${payload.filename_disk}`);
-				}
-
+				logger.warn(`Couldn't delete temp file ${tempFilenameDisk}`);
 				logger.warn(err);
 			}
 		};
