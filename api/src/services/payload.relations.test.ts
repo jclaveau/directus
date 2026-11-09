@@ -72,8 +72,6 @@ describe('processM2OAndA2O on an A2O', () => {
 				onRevisionCreate: expect.any(Function),
 				onRequireUserIntegrityCheck: expect.any(Function),
 				bypassEmitAction: expect.any(Function),
-				emitEvents: undefined,
-				mutationTracker: undefined,
 			},
 		);
 
@@ -177,8 +175,6 @@ describe('processM2OAndA2O on an A2O', () => {
 				onRevisionCreate: expect.any(Function),
 				onRequireUserIntegrityCheck: expect.any(Function),
 				bypassEmitAction: expect.any(Function),
-				emitEvents: undefined,
-				mutationTracker: undefined,
 			},
 		);
 
@@ -277,8 +273,6 @@ describe('processM2OAndA2O on an M2O', () => {
 				onRevisionCreate: expect.any(Function),
 				onRequireUserIntegrityCheck: expect.any(Function),
 				bypassEmitAction: expect.any(Function),
-				emitEvents: undefined,
-				mutationTracker: undefined,
 				mutationBatching: 'disableBatching',
 			},
 		);
@@ -315,7 +309,6 @@ describe('processM2OAndA2O on an M2O', () => {
 				bypassEmitAction: expect.any(Function),
 				emitEvents: false,
 				mutationTracker,
-				mutationBatching: undefined,
 			},
 		);
 	});
