@@ -18,5 +18,7 @@ Checked 2026-11-09: re-measure blocked, Planner `develop` lockfile pins dist `47
 
 Guard written 2026-11-09: PR #711 `nested-write-scaling.feature` (O2M + M2M, 2 then 6 parents, scoped through parent, counts from CI's printed tables, head 9dcd90a7f6). Result: every count flat for 2 vs 6 parents EXCEPT `directus_revisions` update = one per created parent with nested children (2 vs 6), pinned as measured; batching it is a follow-up awaiting jean. Planner untouched by it (`accountability: null`).
 
+Revisions link batched 2026-11-09: PR #712 (stacked on #711, head 332f0bf6db) replaces the per-parent `revisionsService.updateMany` with one `updateGroups`; no CASE code needed, `splitBatchRuns`/`applyUpdateBatch` already write same-column groups as one json `batchUpdate` on postgres. Guard now 1 update for 2 and 6 parents; also nested-o2m-alterations/-array, nested-m2o-a2o 2-3 → 1. Autoreview clean, 100%. sqlite/maria still one per parent (#610).
+
 **Why:** jean asked "what has not been done in 414" then said "go write the guard".
 **How to apply:** guard = one blackbox scenario, same nested O2M write with 2 parents then 20, `scoped_cache_fields` set (block-style YAML), identical counts; worktree from hhh-dev. Don't claim #414 fixed without the re-measure. See [[project_directus_batched_plumbing_design]].
