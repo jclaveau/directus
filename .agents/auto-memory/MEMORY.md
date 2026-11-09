@@ -185,3 +185,4 @@
 - [PR #686 autoreview state](project_directus_pr686_autoreview_points.md) — batched nested M2O/A2O; default flip is #694; Q2/Q3/D await jean with probed outcomes (not settled)
 - [PR #694 action-hold ruling](project_directus_pr694_action_hold_ruling.md) — actions never fire for a rolled-back mutation (jean, 2026-11-07); audited early-emit sites, singular-write-flows flake
 - [PR #698 autoreview state](project_directus_pr698_autoreview_state.md) — MERGED 0bb994cabd: answerOnce + success after busboy close; predating mid-body-error points reported only
+- [#617 schema-move lock PARKED](project_directus_issue617_parked.md) — not a flake source (stale-hash 400 absorbed by retry, 0/88 failed shards); pick up when a schema-wide assertion test exists
