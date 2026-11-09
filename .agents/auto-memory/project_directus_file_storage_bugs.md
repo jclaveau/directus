@@ -25,4 +25,4 @@ Related: thumbnail-shaped disk names (#614 pt 6) disappear with point 1's folder
 **Why:** many storage bugs, they polluted #614; jean plans a dedicated pass soon.
 **2026-11-09:** jean made uploads/storage OOS: new issue #709 "oos feature: file uploads and storage: gathered points" lists #635 pts 1-6, 8, 9 as 1-8 and #621 pts 1-3 as 9-11 (links back); #635 and #621 closed not_planned. The numbering below is #635's.
 
-**How to apply:** any new file/upload/storage finding in any review → add it to #709 (comment or body edit), numbered after the last point, spec-by-example; keep it out of the PR under review. See [[feedback_directus_oos_features_to_their_issue]].
+**How to apply:** any new file/upload/storage finding in any review → add it to #709's body (no comment, per the oos rule), numbered after the last point, spec-by-example; keep it out of the PR under review. See [[feedback_directus_oos_features_to_their_issue]].
