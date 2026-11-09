@@ -335,6 +335,9 @@ function mergeUpdateGroups<Item extends AnyItem>(
 	return mergedGroups;
 }
 
+/** A row of the batch another row names, and whether a nested record does. */
+type BatchRowName = { rowIndex: number; byNestedRecord: boolean };
+
 export class ItemsService<Item extends AnyItem = AnyItem, Collection extends string = string>
 implements AbstractService<Item> {
 	collection: Collection;
@@ -492,10 +495,34 @@ implements AbstractService<Item> {
 			opts.mutationTracker.trackMutations(data.length);
 		}
 
+		const batchRowNames = data.length > 1
+			? this.batchRowNamesOf(data)
+			: [];
+
+		const writeOrder = this.writeOrderOf(batchRowNames);
+
+		// the rows a row names are written first; keys answer in payload order
+		if (writeOrder !== null) {
+			untrackRows();
+
+			const writtenKeys = await this.createMany(
+				writeOrder.map((rowIndex) => data[rowIndex]!),
+				opts,
+			);
+
+			const keys: (PrimaryKey | null)[] = new Array(data.length);
+
+			for (const [writeIndex, rowIndex] of writeOrder.entries()) {
+				keys[rowIndex] = writtenKeys[writeIndex]!;
+			}
+
+			return keys;
+		}
+
 		// resolveMutationBatching refuses its conflicting options for one row too
 		if (
 			(resolveMutationBatching(opts) === 'disableBatching' && data.length > 1)
-			|| (data.length > 1 && this.nestedRecordNamesBatchRow(data))
+			|| batchRowNames.flat().some((rowName) => rowName.byNestedRecord)
 		) {
 			untrackRows();
 
@@ -1158,81 +1185,104 @@ implements AbstractService<Item> {
 	}
 
 	/**
-	 * Whether a record a row nests, at any depth, names another row of the
-	 * batch by the key that row provides. A batch writes every nested M2O and
-	 * A2O record before its rows, so the foreign key would refuse that name;
-	 * row by row, the rows before it are written first. Read off the payloads
-	 * before the filter hooks: a name a hook adds is not seen.
+	 * Per row, the rows of the batch it names by the key they provide: through
+	 * its own M2O or A2O, or through a record it nests at any depth, naming
+	 * that row or carrying its key. A batch writes every nested M2O and A2O
+	 * record before its rows, so a nested record's name sends the batch row by
+	 * row, after the rows it names. Read off the payloads before the filter
+	 * hooks: a name a hook adds is not seen.
 	 */
-	private nestedRecordNamesBatchRow(data: Partial<Item>[]): boolean {
+	private batchRowNamesOf(data: Partial<Item>[]): BatchRowName[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const rowIndexOfKey = new Map<string, number>();
 
-		const providedKeys = new Set(data
-			.map((row) => row[primaryKeyField])
-			.filter((key) => !isMissingPrimaryKey(key))
-			.map((key) => String(key)));
+		for (const [rowIndex, row] of data.entries()) {
+			const key = row[primaryKeyField];
 
-		if (providedKeys.size === 0) {
-			return false;
+			if (!isMissingPrimaryKey(key) && !rowIndexOfKey.has(String(key))) {
+				rowIndexOfKey.set(String(key), rowIndex);
+			}
 		}
 
+		const nameRow = (
+			key: unknown,
+			byNestedRecord: boolean,
+			rowNames: BatchRowName[],
+		): void => {
+			const rowIndex = isMissingPrimaryKey(key)
+				? undefined
+				: rowIndexOfKey.get(String(key));
+
+			if (rowIndex !== undefined) {
+				rowNames.push({ rowIndex, byNestedRecord });
+			}
+		};
+
 		// the rows' own O2M records and keys are written after the rows
-		const recordNamesBatchRow = (
+		const collectRecordNames = (
 			collectionName: string,
 			record: unknown,
 			isNestedRecord: boolean,
-		): boolean => {
+			rowNames: BatchRowName[],
+		): void => {
 			if (!isPlainObject(record)) {
-				return false;
+				return;
 			}
 
 			const recordFields = record as AnyItem;
 
-			return this.schema.relations.some((relation) => {
+			// a nested record carrying a batch row's key is that row
+			if (isNestedRecord && collectionName === this.collection) {
+				nameRow(recordFields[primaryKeyField], true, rowNames);
+			}
+
+			for (const relation of this.schema.relations) {
 				// a M2O or an A2O of the record
 				if (
 					relation.collection === collectionName
 					&& relation.field in recordFields
-					&& valueNamesBatchRow(
+				) {
+					collectValueNames(
 						relation.related_collection
 						?? recordFields[relation.meta?.one_collection_field ?? ''],
 						recordFields[relation.field],
 						isNestedRecord,
-					)
-				) {
-					return true;
+						rowNames,
+					);
 				}
 
 				const oneField = relation.meta?.one_field;
 
 				// an O2M of the record, a self relation's included
-				return isNestedRecord
+				if (
+					isNestedRecord
 					&& relation.related_collection === collectionName
 					&& typeof oneField === 'string'
 					&& oneField in recordFields
-					&& childRecordsOf(recordFields[oneField]).some((child) => {
-						return recordNamesBatchRow(relation.collection, child, true);
-					});
-			});
+				) {
+					for (const child of childRecordsOf(recordFields[oneField])) {
+						collectRecordNames(relation.collection, child, true, rowNames);
+					}
+				}
+			}
 		};
 
-		const valueNamesBatchRow = (
+		const collectValueNames = (
 			relatedCollection: unknown,
 			value: unknown,
 			isNestedRecord: boolean,
-		): boolean => {
+			rowNames: BatchRowName[],
+		): void => {
 			if (typeof relatedCollection !== 'string') {
-				return false;
+				return;
 			}
 
 			if (isPlainObject(value)) {
-				return recordNamesBatchRow(relatedCollection, value, true);
+				collectRecordNames(relatedCollection, value, true, rowNames);
 			}
-
-			return isNestedRecord
-				&& relatedCollection === this.collection
-				&& !isMissingPrimaryKey(value)
-				&& providedKeys.has(String(value));
+			else if (relatedCollection === this.collection) {
+				nameRow(value, isNestedRecord, rowNames);
+			}
 		};
 
 		// an O2M value is an array or a { create, update, delete } object
@@ -1251,9 +1301,66 @@ implements AbstractService<Item> {
 			return [create, update].filter(Array.isArray).flat();
 		};
 
-		return data.some((row) => {
-			return recordNamesBatchRow(this.collection, row, false);
+		return data.map((row) => {
+			const rowNames: BatchRowName[] = [];
+			collectRecordNames(this.collection, row, false, rowNames);
+
+			return rowNames;
 		});
+	}
+
+	/**
+	 * The order to write a batch's rows in: each row after the rows it names,
+	 * otherwise in payload order. Null for the payload order itself, and for rows
+	 * naming each other in a cycle, which keep it. Walked with a stack of its
+	 * own, so a long parent chain cannot overflow the call stack.
+	 */
+	private writeOrderOf(batchRowNames: BatchRowName[][]): number[] | null {
+		const writeOrder: number[] = [];
+		const visitStates = new Map<number, 'visiting' | 'written'>();
+
+		for (const startRowIndex of batchRowNames.keys()) {
+			if (visitStates.has(startRowIndex)) {
+				continue;
+			}
+
+			visitStates.set(startRowIndex, 'visiting');
+			const pendingRows = [{ rowIndex: startRowIndex, nameIndex: 0 }];
+
+			while (pendingRows.length > 0) {
+				const pendingRow = pendingRows.at(-1)!;
+				const rowNames = batchRowNames[pendingRow.rowIndex]!;
+
+				if (pendingRow.nameIndex === rowNames.length) {
+					visitStates.set(pendingRow.rowIndex, 'written');
+					writeOrder.push(pendingRow.rowIndex);
+					pendingRows.pop();
+					continue;
+				}
+
+				const namedRowIndex = rowNames[pendingRow.nameIndex]!.rowIndex;
+				pendingRow.nameIndex += 1;
+				const namedRowState = visitStates.get(namedRowIndex);
+
+				if (
+					namedRowIndex === pendingRow.rowIndex
+					|| namedRowState === 'written'
+				) {
+					continue;
+				}
+
+				if (namedRowState === 'visiting') {
+					return null;
+				}
+
+				visitStates.set(namedRowIndex, 'visiting');
+				pendingRows.push({ rowIndex: namedRowIndex, nameIndex: 0 });
+			}
+		}
+
+		return writeOrder.some((rowIndex, writeIndex) => rowIndex !== writeIndex)
+			? writeOrder
+			: null;
 	}
 
 	/**
