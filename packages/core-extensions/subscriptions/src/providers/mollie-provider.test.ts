@@ -139,6 +139,28 @@ describe('fetchSubscription', () => {
 		});
 	});
 
+	test('reports a subscription of a deleted customer', async () => {
+		const fetchFailure = await createMollieProvider({
+			customerSubscriptions: {
+				get: vi.fn().mockRejectedValue(
+					new MollieApiError(
+						'The customer is no longer available',
+						{ statusCode: 410 },
+					),
+				),
+			},
+		} as unknown as MollieClient)
+			.fetchSubscription('cst_1/sub_1')
+			.catch((fetchError: unknown) => fetchError);
+
+		expect(fetchFailure).toBeInstanceOf(MissingProviderSubscriptionError);
+
+		expect(fetchFailure).toMatchObject({
+			message: 'The provider has no subscription for "cst_1/sub_1"',
+			extensions: { resourceId: 'cst_1/sub_1', subscriptionId: 'sub_1' },
+		});
+	});
+
 	test('rethrows any other failure reading a subscription', async () => {
 		const unavailableError = new MollieApiError(
 			'Unavailable',
