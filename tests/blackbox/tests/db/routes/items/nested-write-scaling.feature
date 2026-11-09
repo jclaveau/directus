@@ -6,7 +6,8 @@ Feature: A nested write runs the statements of two parents for six, but one
     parents, then with six, and holds both requests to the same counts.
   - Every child collection is scoped through its parent (`scoped_cache_fields`
     on a relational path), as the planner's are, so the purge's scope reads
-    are counted too. Activity and revisions are kept, as in the planner.
+    are counted too. Activity and revisions are kept, which the planner's
+    `student_*` collections turn off, so their counts show the core's cost.
   - Every key is a string the scenario chooses, all of one scenario's keys
     sharing a prefix of its own.
   - A Given creates its table's rows in one request. A request authenticates
