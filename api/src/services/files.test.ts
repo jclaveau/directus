@@ -20,6 +20,7 @@ import {
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
 import { getStorage } from '../storage/index.js';
+import { extractMetadata } from './files/lib/extract-metadata.js';
 import { withMeta } from '../utils/read-meta.js';
 import { FilesService, ItemsService } from './index.js';
 
@@ -653,6 +654,112 @@ describe('Integration Tests', () => {
 					['test-file-id-123.jpg'],
 					[`test-file-id-123__${thumbnailHash}.webp`],
 				]);
+			});
+
+			it('deletes a new file whose stat fails', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response(null);
+
+				const statError = new Error('stat failed');
+				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
+				mockDriver.delete = vi.fn();
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(statError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123']]]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes a new file whose metadata extraction fails', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response(null);
+
+				const extractionError = new Error('extraction failed');
+				vi.mocked(extractMetadata).mockRejectedValueOnce(extractionError);
+				mockDriver.delete = vi.fn();
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(extractionError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123']]]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes a new file whose row update fails', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response(null);
+
+				const updateError = new Error('update failed');
+				superUpdateOne.mockRejectedValue(updateError);
+				mockDriver.delete = vi.fn();
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(updateError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123']]]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('keeps a replaced file whose metadata extraction fails', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response({ filename_disk: 'test-file-id-123.txt' });
+
+				const extractionError = new Error('extraction failed');
+				vi.mocked(extractMetadata).mockRejectedValueOnce(extractionError);
+				mockDriver.delete = vi.fn();
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(
+					new PassThrough(),
+					{
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+					},
+					sample.id,
+				)).rejects.toBe(extractionError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([]);
 			});
 		});
 

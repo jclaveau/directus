@@ -233,24 +233,45 @@ export class FilesService extends ItemsService<File> {
 			}
 		}
 
-		const { size } = await storage.location(data.storage).stat(payload.filename_disk);
-		payload.filesize = size;
+		try {
+			const { size } = await storage
+				.location(data.storage)
+				.stat(payload.filename_disk);
 
-		const metadata = await extractMetadata(data.storage, payload as Parameters<typeof extractMetadata>[1]);
+			payload.filesize = size;
 
-		payload.uploaded_on = new Date().toISOString();
+			const metadata = await extractMetadata(
+				data.storage,
+				payload as Parameters<typeof extractMetadata>[1],
+			);
 
-		// We do this in a service without accountability. Even if you don't have update permissions to the file,
-		// we still want to be able to set the extracted values from the file on create
-		const sudoFilesItemsService = new ItemsService('directus_files', {
-			knex: this.knex,
-			schema: this.schema,
-		});
+			payload.uploaded_on = new Date().toISOString();
 
-		await sudoFilesItemsService.updateOne(primaryKey, { ...payload, ...metadata }, {
-			emitEvents: false,
-			mutationBatching: opts?.mutationBatching,
-		});
+			// We do this in a service without accountability. Even if you don't
+			// have update permissions to the file, we still want to be able to set
+			// the extracted values from the file on create
+			const sudoFilesItemsService = new ItemsService('directus_files', {
+				knex: this.knex,
+				schema: this.schema,
+			});
+
+			await sudoFilesItemsService.updateOne(
+				primaryKey,
+				{ ...payload, ...metadata },
+				{
+					emitEvents: false,
+					mutationBatching: opts?.mutationBatching,
+				},
+			);
+		}
+		catch (err: any) {
+			// A replaced file's old content is already gone, so its new one stays.
+			if (isReplacement === false) {
+				await cleanUp();
+			}
+
+			throw err;
+		}
 
 		if (opts?.emitEvents !== false) {
 			emitter.emitAction(
