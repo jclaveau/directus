@@ -1,4 +1,9 @@
-import { InvalidPayloadError, RecordNotUniqueError } from '@directus/errors';
+import {
+	ForbiddenError,
+	InvalidPayloadError,
+	RecordNotUniqueError,
+	ServiceUnavailableError,
+} from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { Driver, StorageManager } from '@directus/storage';
 import type { File } from '@directus/types';
@@ -14,12 +19,18 @@ import {
 	describe,
 	expect,
 	it,
+	onTestFinished,
 	vi,
 	type MockInstance,
 } from 'vitest';
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
+import { useLogger } from '../logger/index.js';
+import {
+	validateAccess,
+} from '../permissions/modules/validate-access/validate-access.js';
 import { getStorage } from '../storage/index.js';
+import { extractMetadata } from './files/lib/extract-metadata.js';
 import { withMeta } from '../utils/read-meta.js';
 import { FilesService, ItemsService } from './index.js';
 
@@ -33,6 +44,13 @@ vi.mock('../database/index.js', () => {
 vi.mock('../storage/index.js');
 vi.mock('@directus/storage');
 vi.mock('./files/lib/extract-metadata.js');
+vi.mock('../permissions/modules/validate-access/validate-access.js');
+
+vi.mock('../logger/index.js', () => {
+	const logger = { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), trace: vi.fn() };
+
+	return { useLogger: () => logger };
+});
 
 describe('Integration Tests', () => {
 	let db: Knex;
@@ -653,6 +671,312 @@ describe('Integration Tests', () => {
 					['test-file-id-123.jpg'],
 					[`test-file-id-123__${thumbnailHash}.webp`],
 				]);
+			});
+
+			it('deletes a new file whose bytes write fails', async () => {
+				vi.mocked(mockDriver.write!).mockRejectedValue(new Error('disk full'));
+				mockDriver.delete = vi.fn();
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toStrictEqual(new ServiceUnavailableError({
+					service: 'files',
+					reason: 'Couldn\'t save file test-file-id-123.txt',
+				}));
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123'], { emitEvents: false }]]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes a new file whose stat fails', async () => {
+				const statError = new Error('stat failed');
+				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
+				mockDriver.delete = vi.fn();
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(statError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123'], { emitEvents: false }]]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes a new file whose metadata extraction fails', async () => {
+				const extractionError = new Error('extraction failed');
+				vi.mocked(extractMetadata).mockRejectedValueOnce(extractionError);
+				mockDriver.delete = vi.fn();
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(extractionError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123'], { emitEvents: false }]]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes a new file whose row update fails', async () => {
+				const updateError = new Error('update failed');
+				superUpdateOne.mockRejectedValue(updateError);
+				mockDriver.delete = vi.fn();
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(updateError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123'], { emitEvents: false }]]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes a new file its uploader may not delete', async () => {
+				const uploaderService = new FilesService({
+					knex: db,
+					schema: new SchemaBuilder()
+						.collection('directus_files', (collection) => {
+							collection.field('id').string()
+								.primary();
+						})
+						.build(),
+					accountability: {
+						admin: false,
+						app: false,
+						ip: null,
+						role: 'uploader-role',
+						roles: ['uploader-role'],
+						user: 'uploader-id',
+					},
+				});
+
+				tracker.on.delete('directus_files').response(1);
+				vi.mocked(validateAccess).mockRejectedValue(new ForbiddenError());
+
+				onTestFinished(() => {
+					vi.mocked(validateAccess).mockResolvedValue(undefined);
+				});
+
+				const statError = new Error('stat failed');
+				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
+				mockDriver.delete = vi.fn();
+
+				await expect(uploaderService.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(statError);
+
+				expect(tracker.history.delete).toHaveLength(1);
+
+				expect(tracker.history.delete[0]?.sql).toBe(
+					'delete from "directus_files" where "id" in (?)',
+				);
+
+				expect(tracker.history.delete[0]?.bindings)
+					.toStrictEqual(['test-file-id-123']);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes a new file a files.delete hook refuses', async () => {
+				const hookedFilesService = new FilesService({
+					knex: db,
+					schema: new SchemaBuilder()
+						.collection('directus_files', (collection) => {
+							collection.field('id').string()
+								.primary();
+						})
+						.build(),
+				});
+
+				const refusingHook = vi.fn(() => {
+					throw new Error('hook refused');
+				});
+
+				emitter.onFilter('files.delete', refusingHook);
+				onTestFinished(() => emitter.offFilter('files.delete', refusingHook));
+
+				tracker.on.delete('directus_files').response(1);
+				const statError = new Error('stat failed');
+				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
+				mockDriver.delete = vi.fn();
+
+				await expect(hookedFilesService.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(statError);
+
+				expect(refusingHook.mock.calls).toStrictEqual([]);
+				expect(tracker.history.delete).toHaveLength(1);
+
+				expect(tracker.history.delete[0]?.sql).toBe(
+					'delete from "directus_files" where "id" in (?)',
+				);
+
+				expect(tracker.history.delete[0]?.bindings)
+					.toStrictEqual(['test-file-id-123']);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes the bytes of a new file whose row delete fails', async () => {
+				const statError = new Error('stat failed');
+				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
+				mockDriver.delete = vi.fn();
+				const rowDeleteError = new Error('transaction aborted');
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockRejectedValue(rowDeleteError);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(statError);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+
+				expect(vi.mocked(useLogger().warn).mock.calls).toStrictEqual([
+					[
+						rowDeleteError,
+						'Couldn\'t delete the row "test-file-id-123" of a failed upload',
+					],
+				]);
+			});
+
+			it('deletes the row of a new file whose bytes delete fails', async () => {
+				const statError = new Error('stat failed');
+				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
+				const bytesDeleteError = new Error('disk unreachable');
+				mockDriver.delete = vi.fn().mockRejectedValue(bytesDeleteError);
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(statError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123'], { emitEvents: false }]]);
+
+				expect(vi.mocked(useLogger().warn).mock.calls).toStrictEqual([
+					[
+						bytesDeleteError,
+						'Couldn\'t delete the file "test-file-id-123.txt" of a failed upload',
+					],
+				]);
+			});
+
+			it('logs the temp file a failed replacement cannot delete', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response({ filename_disk: 'test-file-id-123.txt' });
+
+				const writeError = new Error('disk full');
+				vi.mocked(mockDriver.write!).mockRejectedValue(writeError);
+				const tempDeleteError = new Error('disk unreachable');
+				mockDriver.delete = vi.fn().mockRejectedValue(tempDeleteError);
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(
+					new PassThrough(),
+					{
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+					},
+					sample.id,
+				)).rejects.toStrictEqual(new ServiceUnavailableError({
+					service: 'files',
+					reason: 'Couldn\'t save file test-file-id-123.txt',
+				}));
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['temp_test-file-id-123.txt'],
+				]);
+
+				expect(vi.mocked(useLogger().warn).mock.calls).toStrictEqual([
+					['Couldn\'t save file test-file-id-123.txt'],
+					[writeError],
+					['Couldn\'t delete temp file temp_test-file-id-123.txt'],
+					[tempDeleteError],
+				]);
+			});
+
+			it('keeps a replaced file whose metadata extraction fails', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response({ filename_disk: 'test-file-id-123.txt' });
+
+				const extractionError = new Error('extraction failed');
+				vi.mocked(extractMetadata).mockRejectedValueOnce(extractionError);
+				mockDriver.delete = vi.fn();
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(
+					new PassThrough(),
+					{
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+					},
+					sample.id,
+				)).rejects.toBe(extractionError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([]);
 			});
 		});
 
