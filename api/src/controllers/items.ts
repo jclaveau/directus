@@ -21,6 +21,7 @@ import { ItemsService } from '../services/items.js';
 import { MetaService } from '../services/meta.js';
 import asyncHandler from '../utils/async-handler.js';
 import { mutationBatchingFromQuery } from '../utils/mutation-batching-from-query.js';
+import { nestedUpdatesFromQuery } from '../utils/nested-updates-from-query.js';
 import { readMeta } from '../utils/read-meta.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
@@ -50,6 +51,7 @@ router.post(
 		const createOptions = {
 			allowFilterCancel: true,
 			mutationBatching: mutationBatchingFromQuery(req.query),
+			nestedUpdates: nestedUpdatesFromQuery(req.query),
 		} as const;
 
 		if (Array.isArray(req.body)) {
@@ -203,6 +205,7 @@ router.patch(
 		if (req.singleton === true) {
 			await service.upsertSingleton(req.body, {
 				mutationBatching: mutationBatchingFromQuery(req.query),
+				nestedUpdates: nestedUpdatesFromQuery(req.query),
 			});
 
 			const item = await service.readSingleton(req.sanitizedQuery);
@@ -228,6 +231,7 @@ router.patch(
 			allowFilterCancel: true,
 			onRepeatedPk: (onRepeatedPk ?? 'refuse') as RepeatedPkAnswer,
 			mutationBatching: mutationBatchingFromQuery(req.query),
+			nestedUpdates: nestedUpdatesFromQuery(req.query),
 		};
 
 		let keys: (PrimaryKey | null)[] = [];
@@ -298,6 +302,7 @@ router.patch(
 		const updatedPrimaryKey = await service.updateOne(req.params['pk']!, req.body, {
 			allowFilterCancel: true,
 			mutationBatching: mutationBatchingFromQuery(req.query),
+			nestedUpdates: nestedUpdatesFromQuery(req.query),
 		});
 
 		res.locals['scopedCachePurged'] = service.scopedCachePurged;

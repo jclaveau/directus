@@ -49,6 +49,15 @@ const RELATED_READ_CHUNK_SIZE = 10_000;
 // a record a row nests in one of its fields
 type NestedReference = { rowIndex: number; field: string };
 
+// a nested record carrying an existing row's key and more fields, under refuse
+function nestedUpdateRefusal(key: PrimaryKey, collection: string) {
+	return new InvalidPayloadError({
+		reason: `Record ${JSON.stringify(key)} of ${JSON.stringify(collection)}`
+			+ ' is nested with fields besides its key, refused by'
+			+ ' nestedUpdates=refuse',
+	});
+}
+
 type Transformers = {
 	[type: string]: (context: {
 		action: PayloadAction;
@@ -844,24 +853,34 @@ export class PayloadService {
 				: null;
 		};
 
-		const keyOnlyKeys = references.flatMap((reference) => {
-			const keyOnly = keyOnlyOf(reference);
+		const nestedUpdates = opts?.nestedUpdates ?? 'apply';
 
-			return keyOnly === null
+		// apply reads only the keys of key-only records: the others upsert anyway
+		const checkedKeys = references.flatMap((reference) => {
+			const relatedPrimaryKey = rowsResult
+				.payloads[reference.rowIndex]![reference.field][relatedPrimaryKeyField];
+
+			if (nestedUpdates === 'apply') {
+				return keyOnlyOf(reference) === null
+					? []
+					: [relatedPrimaryKey];
+			}
+
+			return isMissingPrimaryKey(relatedPrimaryKey)
 				? []
-				: [keyOnly];
+				: [relatedPrimaryKey];
 		});
 
 		validateKeys(
 			this.schema,
 			relatedCollection,
 			relatedPrimaryKeyField,
-			keyOnlyKeys,
+			checkedKeys,
 		);
 
 		const existingKeyNames = new Set<string>();
 
-		for (const keyChunk of chunk(keyOnlyKeys, RELATED_READ_CHUNK_SIZE)) {
+		for (const keyChunk of chunk(checkedKeys, RELATED_READ_CHUNK_SIZE)) {
 			const existingRows = await this.knex
 				.select(relatedPrimaryKeyField)
 				.from(relatedCollection)
@@ -890,10 +909,18 @@ export class PayloadService {
 				this.schema,
 			);
 
-			if (
-				keyOnlyOf({ rowIndex, field }) !== null
-				&& (existingKeyNames.has(keyName) || upsertedKeyNames.has(keyName))
-			) {
+			const namesExistingRow =
+				existingKeyNames.has(keyName) || upsertedKeyNames.has(keyName);
+
+			if (namesExistingRow && keyOnlyOf({ rowIndex, field }) !== null) {
+				return false;
+			}
+
+			if (namesExistingRow && nestedUpdates === 'refuse') {
+				throw nestedUpdateRefusal(relatedPrimaryKey, relatedCollection);
+			}
+
+			if (namesExistingRow && nestedUpdates === 'skip') {
 				return false;
 			}
 
@@ -904,11 +931,13 @@ export class PayloadService {
 
 		const upsertReferenceSet = new Set(upsertReferences);
 
+		// a record left out names its row by its key alone
 		for (const reference of references) {
-			const keyOnly = keyOnlyOf(reference);
+			const payload = rowsResult.payloads[reference.rowIndex]!;
 
-			if (keyOnly !== null && !upsertReferenceSet.has(reference)) {
-				rowsResult.payloads[reference.rowIndex]![reference.field] = keyOnly;
+			if (!upsertReferenceSet.has(reference)) {
+				payload[reference.field] =
+					payload[reference.field][relatedPrimaryKeyField];
 			}
 		}
 
@@ -951,6 +980,7 @@ export class PayloadService {
 				emitEvents: opts?.emitEvents,
 				mutationTracker: opts?.mutationTracker,
 				mutationBatching: opts?.mutationBatching,
+				nestedUpdates: opts?.nestedUpdates,
 			},
 		);
 
@@ -999,6 +1029,7 @@ export class PayloadService {
 			emitEvents: opts?.emitEvents,
 			mutationTracker: opts?.mutationTracker,
 			mutationBatching: opts?.mutationBatching,
+			nestedUpdates: opts?.nestedUpdates,
 		};
 
 		const relations = this.schema.relations.filter((relation) => {
@@ -1120,18 +1151,37 @@ export class PayloadService {
 						emitEvents: opts?.emitEvents,
 						mutationTracker: opts?.mutationTracker,
 						mutationBatching: opts?.mutationBatching,
+						nestedUpdates: opts?.nestedUpdates,
 					});
 				}
 
 				if (alterations.update) {
 					for (const item of alterations.update) {
-						const { [relatedPrimaryKeyField]: key, ...record } = item;
+						const { [relatedPrimaryKeyField]: key, ...fields } = item;
 
 						const existingRecord = await this.knex
 							.select(relatedPrimaryKeyField, relation.field)
 							.from(relation.collection)
 							.where({ [relatedPrimaryKeyField]: key })
 							.first();
+
+						// the child's key to this parent says what the alteration says
+						const updatesChild = Object.entries(fields).some(([field, value]) => {
+							return field !== relation.field || value != parent;
+						});
+
+						if (
+							existingRecord
+							&& updatesChild
+							&& opts?.nestedUpdates === 'refuse'
+						) {
+							throw nestedUpdateRefusal(key, relation.collection);
+						}
+
+						// skip only links the child to its parent
+						const record: Partial<Item> = opts?.nestedUpdates === 'skip'
+							? {}
+							: fields;
 
 						if (!existingRecord || existingRecord[relation.field] != parent) {
 							record[relation.field] = parent;
@@ -1145,6 +1195,7 @@ export class PayloadService {
 							emitEvents: opts?.emitEvents,
 							mutationTracker: opts?.mutationTracker,
 							mutationBatching: opts?.mutationBatching,
+							nestedUpdates: opts?.nestedUpdates,
 						});
 					}
 				}
@@ -1299,7 +1350,23 @@ export class PayloadService {
 					? undefined
 					: existingChildren.get(relatedKeyName);
 
-				if (isPrimaryKey(relatedRecord)) {
+				// the child's key to this parent says what the list says
+				const updatesChild = existingRecord !== undefined
+					&& !isPrimaryKey(relatedRecord)
+					&& Object.entries(relatedRecord).some(([recordField, value]) => {
+						return recordField !== relatedPrimaryKeyField
+							&& (recordField !== relation.field || value != parent);
+					});
+
+				if (updatesChild && nestedMutationOptions.nestedUpdates === 'refuse') {
+					throw nestedUpdateRefusal(relatedId, relation.collection);
+				}
+
+				// skip names the child by its key alone, as a bare key does
+				if (
+					isPrimaryKey(relatedRecord)
+					|| (updatesChild && nestedMutationOptions.nestedUpdates === 'skip')
+				) {
 					if (!existingRecord) {
 						// 404 / InvalidPayload?
 						throw new ForbiddenError({
@@ -1325,7 +1392,7 @@ export class PayloadService {
 					}
 
 					record = {
-						[relatedPrimaryKeyField]: relatedRecord,
+						[relatedPrimaryKeyField]: relatedId,
 					};
 				}
 

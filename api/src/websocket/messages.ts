@@ -1,5 +1,6 @@
 import {
 	MutationBatchingModes,
+	NestedUpdateAnswers,
 	WebSocketMessage,
 	type Item,
 	type Query,
@@ -78,6 +79,7 @@ export const WebSocketItemsMessage = z.union([
 		data: z.union([z.array(ZodItem), ZodItem]),
 		query: z.custom<Query>().optional(),
 		mutationBatching: z.enum(MutationBatchingModes).optional(),
+		nestedUpdates: z.enum(NestedUpdateAnswers).optional(),
 	}),
 	PartialItemsMessage.extend({
 		action: z.literal('read'),
@@ -92,6 +94,7 @@ export const WebSocketItemsMessage = z.union([
 		id: zodStringOrNumber.optional(),
 		query: z.custom<Query>().optional(),
 		mutationBatching: z.enum(MutationBatchingModes).optional(),
+		nestedUpdates: z.enum(NestedUpdateAnswers).optional(),
 	}),
 	PartialItemsMessage.extend({
 		action: z.literal('delete'),

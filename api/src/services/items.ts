@@ -335,6 +335,9 @@ function mergeUpdateGroups<Item extends AnyItem>(
 	return mergedGroups;
 }
 
+/** A row of the batch another row names, and whether a nested record does. */
+type BatchRowName = { rowIndex: number; byNestedRecord: boolean };
+
 export class ItemsService<Item extends AnyItem = AnyItem, Collection extends string = string>
 implements AbstractService<Item> {
 	collection: Collection;
@@ -492,7 +495,37 @@ implements AbstractService<Item> {
 			opts.mutationTracker.trackMutations(data.length);
 		}
 
-		if (resolveMutationBatching(opts) === 'disableBatching' && data.length > 1) {
+		const batchRowNames = data.length > 1
+			? this.batchRowNamesOf(data)
+			: [];
+
+		const writeOrder = this.writeOrderOf(batchRowNames);
+
+		// the rows a row names are written first; keys answer in payload order
+		if (writeOrder !== null) {
+			untrackRows();
+
+			// a subclass override already ran for the whole batch
+			const writtenKeys = await ItemsService.prototype.createMany.call(
+				this,
+				writeOrder.map((rowIndex) => data[rowIndex]!),
+				opts,
+			);
+
+			const keys: (PrimaryKey | null)[] = new Array(data.length);
+
+			for (const [writeIndex, rowIndex] of writeOrder.entries()) {
+				keys[rowIndex] = writtenKeys[writeIndex]!;
+			}
+
+			return keys;
+		}
+
+		// resolveMutationBatching refuses its conflicting options for one row too
+		if (
+			(resolveMutationBatching(opts) === 'disableBatching' && data.length > 1)
+			|| batchRowNames.flat().some((rowName) => rowName.byNestedRecord)
+		) {
 			untrackRows();
 
 			return await this.createRowByRow(data, opts, opts.mutationTracker);
@@ -1163,7 +1196,220 @@ implements AbstractService<Item> {
 	}
 
 	/**
-	 * `createMany` under `disableBatching`: one `createMany` per row, in one
+	 * Per row, the rows of the batch it names by the key they provide: through
+	 * its own M2O or A2O, or through a record it nests at any depth, naming
+	 * that row or carrying its key. A batch writes every nested M2O and A2O
+	 * record before its rows, so a nested record's name sends the batch row by
+	 * row, after the rows it names. Read off the payloads before the filter
+	 * hooks: a name a hook adds is not seen.
+	 */
+	private batchRowNamesOf(data: Partial<Item>[]): BatchRowName[][] {
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const rowIndexOfKey = new Map<string, number>();
+
+		for (const [rowIndex, row] of data.entries()) {
+			const key = row[primaryKeyField];
+
+			if (!isMissingPrimaryKey(key) && !rowIndexOfKey.has(String(key))) {
+				rowIndexOfKey.set(String(key), rowIndex);
+			}
+		}
+
+		if (rowIndexOfKey.size === 0) {
+			return data.map(() => []);
+		}
+
+		const nameRow = (
+			key: unknown,
+			byNestedRecord: boolean,
+			rowNames: BatchRowName[],
+		): void => {
+			const rowIndex = isMissingPrimaryKey(key)
+				? undefined
+				: rowIndexOfKey.get(String(key));
+
+			if (rowIndex !== undefined) {
+				rowNames.push({ rowIndex, byNestedRecord });
+			}
+		};
+
+		// the rows' own O2M records and keys are written after the rows
+		const collectRecordNames = (
+			collectionName: string,
+			record: unknown,
+			isNestedRecord: boolean,
+			rowNames: BatchRowName[],
+		): void => {
+			if (!isPlainObject(record)) {
+				return;
+			}
+
+			const recordFields = record as AnyItem;
+
+			// a nested record carrying a batch row's key is that row
+			if (isNestedRecord && collectionName === this.collection) {
+				nameRow(recordFields[primaryKeyField], true, rowNames);
+			}
+
+			for (const relation of this.schema.relations) {
+				// a M2O or an A2O of the record
+				if (
+					relation.collection === collectionName
+					&& relation.field in recordFields
+				) {
+					collectValueNames(
+						relation.related_collection
+						?? recordFields[relation.meta?.one_collection_field ?? ''],
+						recordFields[relation.field],
+						isNestedRecord,
+						rowNames,
+					);
+				}
+
+				const oneField = relation.meta?.one_field;
+
+				// an O2M of the record, a self relation's included
+				if (
+					isNestedRecord
+					&& relation.related_collection === collectionName
+					&& typeof oneField === 'string'
+					&& oneField in recordFields
+				) {
+					for (const child of childRecordsOf(recordFields[oneField])) {
+						collectRecordNames(relation.collection, child, true, rowNames);
+					}
+				}
+			}
+		};
+
+		const collectValueNames = (
+			relatedCollection: unknown,
+			value: unknown,
+			isNestedRecord: boolean,
+			rowNames: BatchRowName[],
+		): void => {
+			if (typeof relatedCollection !== 'string') {
+				return;
+			}
+
+			if (isPlainObject(value)) {
+				collectRecordNames(relatedCollection, value, true, rowNames);
+			}
+			else if (relatedCollection === this.collection) {
+				nameRow(value, isNestedRecord, rowNames);
+			}
+		};
+
+		// an O2M value is an array or a { create, update, delete } object
+		const childRecordsOf = (children: unknown): unknown[] => {
+			if (Array.isArray(children)) {
+				return children;
+			}
+
+			if (!isPlainObject(children)) {
+				return [];
+			}
+
+			const { create, update } = children as AnyItem;
+
+			// a list that is no array is refused by the one-to-many write
+			return [create, update].filter(Array.isArray).flat();
+		};
+
+		return data.map((row) => {
+			const rowNames: BatchRowName[] = [];
+			collectRecordNames(this.collection, row, false, rowNames);
+
+			return rowNames;
+		});
+	}
+
+	/**
+	 * The order to write a batch's rows in: each row after the rows it names,
+	 * otherwise in payload order. Rows naming each other in a cycle are written
+	 * together, in payload order, after the rows the cycle names. Null for the
+	 * payload order itself. Tarjan's strongly connected components, walked with
+	 * a stack of its own, so a long parent chain cannot overflow the call stack.
+	 */
+	private writeOrderOf(batchRowNames: BatchRowName[][]): number[] | null {
+		const writeOrder: number[] = [];
+		const visitIndexOfRow = new Map<number, number>();
+		const lowestVisitIndexOfRow = new Map<number, number>();
+		const unwrittenRows: number[] = [];
+		const unwrittenRowSet = new Set<number>();
+		const pendingRows: { rowIndex: number; nameIndex: number }[] = [];
+
+		const visitRow = (rowIndex: number): void => {
+			visitIndexOfRow.set(rowIndex, visitIndexOfRow.size);
+			lowestVisitIndexOfRow.set(rowIndex, visitIndexOfRow.get(rowIndex)!);
+			unwrittenRows.push(rowIndex);
+			unwrittenRowSet.add(rowIndex);
+			pendingRows.push({ rowIndex, nameIndex: 0 });
+		};
+
+		const lowerVisitIndex = (rowIndex: number, visitIndex: number): void => {
+			lowestVisitIndexOfRow.set(
+				rowIndex,
+				Math.min(lowestVisitIndexOfRow.get(rowIndex)!, visitIndex),
+			);
+		};
+
+		for (const startRowIndex of batchRowNames.keys()) {
+			if (visitIndexOfRow.has(startRowIndex)) {
+				continue;
+			}
+
+			visitRow(startRowIndex);
+
+			while (pendingRows.length > 0) {
+				const pendingRow = pendingRows.at(-1)!;
+				const rowIndex = pendingRow.rowIndex;
+				const rowNames = batchRowNames[rowIndex]!;
+
+				if (pendingRow.nameIndex < rowNames.length) {
+					const namedRowIndex = rowNames[pendingRow.nameIndex]!.rowIndex;
+					pendingRow.nameIndex += 1;
+
+					if (!visitIndexOfRow.has(namedRowIndex)) {
+						visitRow(namedRowIndex);
+					}
+					// a row of the cycle being walked
+					else if (unwrittenRowSet.has(namedRowIndex)) {
+						lowerVisitIndex(rowIndex, visitIndexOfRow.get(namedRowIndex)!);
+					}
+
+					continue;
+				}
+
+				pendingRows.pop();
+				const lowestVisitIndex = lowestVisitIndexOfRow.get(rowIndex)!;
+
+				if (pendingRows.length > 0) {
+					lowerVisitIndex(pendingRows.at(-1)!.rowIndex, lowestVisitIndex);
+				}
+
+				// the row first visited of its cycle writes the whole cycle
+				if (lowestVisitIndex === visitIndexOfRow.get(rowIndex)) {
+					const cycleRows = unwrittenRows.splice(
+						unwrittenRows.indexOf(rowIndex),
+					);
+
+					for (const cycleRow of cycleRows.sort((left, right) => left - right)) {
+						unwrittenRowSet.delete(cycleRow);
+						writeOrder.push(cycleRow);
+					}
+				}
+			}
+		}
+
+		return writeOrder.some((rowIndex, writeIndex) => rowIndex !== writeIndex)
+			? writeOrder
+			: null;
+	}
+
+	/**
+	 * `createMany` under `disableBatching`, or when a nested record names
+	 * another row of the batch: one `createMany` per row, in one
 	 * transaction, each row with its own filter and insert. As before batching,
 	 * the actions fire once the transaction commits and the user count is checked
 	 * once. Each row takes `ItemsService`'s `createMany`: a subclass override
