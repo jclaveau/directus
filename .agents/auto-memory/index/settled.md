@@ -36,3 +36,4 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [PR #682 quantifier content](../project_directus_pr682_quantifier_content.md) — empty content must stay null (flattenFilter check); 5 predating fixes; a slice can outlive a keying fix: gate on aliases, not `unkeyed`
 - [PR #691 mutation batching](../project_directus_pr691_mutation_batching.md) — disableBatching actions after the commit (jean's choice); takeovers purged on rollback; limit before hooks
 - [PR #686 batched M2O/A2O](../project_directus_pr686_batched_m2o_a2o.md) — key by spelling and cross-relation order accepted; `FOR NO KEY UPDATE` on Postgres, settled; a misfiling mutant stops the bb seeds
+- [PR #707/#710 nestedUpdates rulings](../project_directus_pr707_pr710_nested_updates_settled.md) — cycle Tarjan, refuse/skip semantics, WS takes nestedUpdates, #708 filed; #710 apply keeps `updateOne(key, {})` on a linked child; do not re-raise
