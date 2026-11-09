@@ -777,6 +777,11 @@ describe('Integration Tests', () => {
 
 				tracker.on.delete('directus_files').response(1);
 				vi.mocked(validateAccess).mockRejectedValue(new ForbiddenError());
+
+				onTestFinished(() => {
+					vi.mocked(validateAccess).mockResolvedValue(undefined);
+				});
+
 				const statError = new Error('stat failed');
 				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
 				mockDriver.delete = vi.fn();
