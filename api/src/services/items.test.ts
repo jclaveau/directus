@@ -9968,7 +9968,7 @@ describe('Services / Items / mutationBatching', () => {
 		]);
 	});
 
-	it('nestedUpdates apply: leaves a linked child named by its key alone', async () => {
+	it('nestedUpdates apply: leaves a linked child of a key alone', async () => {
 		await database.raw('PRAGMA foreign_keys = ON');
 
 		await database.schema.createTable('entries', (table) => {
