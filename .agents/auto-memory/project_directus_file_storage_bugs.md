@@ -14,6 +14,10 @@ Open points in #635:
 4. TUS on: `readMany` filtered by `tus_id _null` → deleting an in-flight upload leaves its chunk file
 5. tus replacement (`tus/data-store.ts:264`) never deletes its temp row
 6. `filename_disk` unique index (migration `20261017A`, added by #614) ignores `storage` → two storages holding `a.jpg` fail the migration (health 503); fix = unique `(storage, filename_disk)`. Moved here from #614 pt 5 by jean 2026-10-30.
+7. upload failing after its row is written (stat / extractMetadata / sudo update) leaves row + bytes → being fixed in PR #705 (new files only; finding 1 on how cleanUp deletes awaits jean).
+8. IPTC Headline/Caption/Keywords never reach the file: `parseIptc` emits lowercase keys, `get-metadata.ts:110-120` reads capitalised ones (filed 2026-11-09). A fix also needs the 255 cut for `title` (varchar 255); title is set from the filename on every upload path anyway, so only description/tags would change.
+
+No HTTP path makes an upload fail after its bytes are written (probed 2026-11-09 for #705: title never reaches the DB from IPTC, width/height fit int4, getMetadata resolves `{}` on any sharp error, local `stat` can't fail) → that failure is unit-test-only unless a test adds its own constraint.
 
 Related: thumbnail-shaped disk names (#614 pt 6) disappear with point 1's folder layout.
 
