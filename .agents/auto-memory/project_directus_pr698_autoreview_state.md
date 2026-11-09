@@ -58,3 +58,4 @@ FOLLOW-UPS 2026-11-09 (jean: "attack 647 in a dedicated pr ... same for 635 poin
 
 #706 finding 2 RULED B by jean 2026-11-09 (emitEvents false not forwarded to the mention notification); per-collection emitEvents list point filed on #696 (issuecomment-6739088595). Autoreview run 2 on #706 launched, no merge asked.
 #706 MERGED 2026-11-09 (5e2b8dd8cb, head 454663a060): run 2 found no code defect (only PR-body fix: no savepoint, the action fires inside the caller trx), 100% (331/331) over 2 runs, CI green. #647 point 2 fixed by it.
+Upstream private vulnerability report: handled by jean in another session (2026-11-09), nothing owed here. #696 mention question settled by #702 (emitEvents false = row written, no email); the #696 comment still asks it, edit offered to jean.
