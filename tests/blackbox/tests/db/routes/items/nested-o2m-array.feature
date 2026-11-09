@@ -201,7 +201,7 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
     And on postgres the requests ran these statements:
       | request | table                      | select | insert | update | delete |
       | 1       | directus_activity          | 0      | 4      | 0      | 0      |
-      | 1       | directus_revisions         | 0      | 4      | 2      | 0      |
+      | 1       | directus_revisions         | 0      | 4      | 1      | 0      |
       | 1       | directus_users             | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list       | 1      | 1      | 0      | 0      |
       | 1       | test_nested_o2m_list_entry | 5      | 2      | 1      | 0      |

@@ -1009,23 +1009,32 @@ implements AbstractService<Item> {
 						{ bypassEmitAction: holdActionEvent },
 					);
 
+					// The child revisions of every parent in one update, so linking them
+					// costs one statement whatever the batch size (#414).
+					const parentLinkGroups: UpdateGroup<AnyItem>[] = [];
+
 					for (let i = 0; i < postPrepared.length; i++) {
 						const p = postPrepared[i]!;
 						const revisionId = revisionIds[i]!;
-						// Make sure to set the parent field of the child-revision rows
 						const childrenRevisions = [...p.revisionsM2OAndA2O, ...p.revisionsO2M];
 
 						if (childrenRevisions.length > 0) {
-							await revisionsService.updateMany(
-								childrenRevisions,
-								{ parent: revisionId },
-								{ bypassEmitAction: holdActionEvent },
-							);
+							parentLinkGroups.push({
+								data: { parent: revisionId },
+								keys: childrenRevisions,
+							});
 						}
 
 						if (opts.onRevisionCreate) {
 							opts.onRevisionCreate(revisionId, p.primaryKey);
 						}
+					}
+
+					if (parentLinkGroups.length > 0) {
+						await revisionsService.updateGroups(
+							parentLinkGroups,
+							{ bypassEmitAction: holdActionEvent },
+						);
 					}
 				}
 			}
