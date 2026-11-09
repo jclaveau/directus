@@ -208,6 +208,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/items/nested-m2o-a2o.test.ts': 6_000,
 	'/tests/db/routes/items/nested-o2m-array.test.ts': 6_000,
 	'/tests/db/routes/items/nested-o2m-alterations.test.ts': 6_000,
+	'/tests/db/routes/items/nested-write-scaling.test.ts': 6_000,
 	'/tests/db/routes/items/write-cache-hook-failures.test.ts': 60_000,
 	'/tests/db/routes/items/write-cache-out-of-range-key.test.ts': 30_000,
 	'/tests/db/routes/users/write-url-allow-list.test.ts': 18_000,
