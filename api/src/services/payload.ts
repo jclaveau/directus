@@ -1187,6 +1187,14 @@ export class PayloadService {
 							record[relation.field] = parent;
 						}
 
+						// skip leaves a child already linked to this parent as it is
+						if (
+							opts?.nestedUpdates === 'skip'
+							&& Object.keys(record).length === 0
+						) {
+							continue;
+						}
+
 						await service.updateOne(key, record, {
 							onRevisionCreate: (pk) => revisions.push(pk),
 							onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),

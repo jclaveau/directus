@@ -1201,8 +1201,14 @@ implements AbstractService<Item> {
 		for (const [rowIndex, row] of data.entries()) {
 			const key = row[primaryKeyField];
 
-			if (!isMissingPrimaryKey(key) && !rowIndexOfKey.has(String(key))) {
-				rowIndexOfKey.set(String(key), rowIndex);
+			if (isMissingPrimaryKey(key)) {
+				continue;
+			}
+
+			const keyName = this.primaryKeyNameOf(key);
+
+			if (!rowIndexOfKey.has(keyName)) {
+				rowIndexOfKey.set(keyName, rowIndex);
 			}
 		}
 
@@ -1217,7 +1223,7 @@ implements AbstractService<Item> {
 		): void => {
 			const rowIndex = isMissingPrimaryKey(key)
 				? undefined
-				: rowIndexOfKey.get(String(key));
+				: rowIndexOfKey.get(this.primaryKeyNameOf(key as PrimaryKey));
 
 			if (rowIndex !== undefined) {
 				rowNames.push({ rowIndex, byNestedRecord });
