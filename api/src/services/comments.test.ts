@@ -231,7 +231,7 @@ Sam Sender has mentioned you in a comment:
 `,
 				collection: 'articles',
 				item: '42',
-			});
+			}, { bypassEmitAction: undefined });
 
 		expect(loggerWarn).not.toHaveBeenCalled();
 	});
@@ -340,7 +340,7 @@ Sam Sender has mentioned you in a comment:
 `,
 				collection: 'articles',
 				item: '42',
-			});
+			}, { bypassEmitAction: undefined });
 	});
 
 	it('notifies a user once whatever case spells the mention', async () => {
@@ -401,7 +401,7 @@ Sam Sender has mentioned you in a comment:
 `,
 				collection: 'articles',
 				item: '42',
-			});
+			}, { bypassEmitAction: undefined });
 
 		expect(vi.mocked(UsersService.prototype.readByQuery).mock.calls).toEqual([
 			[{
@@ -588,7 +588,7 @@ Sam Sender has mentioned you in a comment:
 `,
 					collection: 'articles',
 					item: '42',
-				});
+				}, { bypassEmitAction: undefined });
 
 			expect(loggerWarn).not.toHaveBeenCalled();
 		});
