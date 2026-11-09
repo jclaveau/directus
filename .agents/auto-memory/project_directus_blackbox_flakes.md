@@ -217,7 +217,10 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 - `cache-m2o-through-fk-no-key.test.ts:206` `expected 'HIT' to be 'MISS'` after a write (shard-3 rerun; the first run passed). Root cause undecided: test race vs real stale cache (HIGH if product). #655 touches no cache code.
 - The rerun relocated the failure to the second test; a push replaces a second rerun. jean: "fix both flakes in a dedicated pr".
 
-## 2026-11-05 (#678 `common`, sqlite): schedule-hook count
+## 2026-11-03 (#673 shard 1): invite statement-count flake
+- `singular-write-users-invite` expected 1 insert each into `directus_activity` / `directus_revisions` on request 3, saw 3. #673 touches neither the users service nor that test; not in the list above. Treated as flake, `gh run rerun --failed` unasked. If the rerun is red the same way (2+ identical), stop rerunning and diagnose (see the twice-red rule above).
+
+## 2026-11-05 to 2026-11-08 (#678 onward): schedule-hook count, assets/concurrency, statement-count tables
 - `flows/schedule-hook` `expected 4 to be 5` (4 scheduled hook fires, 5 expected) failed together with `assets/concurrency` on a tree identical to a run that passed `common`; one `--failed` rerun cleared both. Timing flake by assertion shape only, never root-caused. Second sighting after #427 (see [[project_directus_pr427_accepted_exceptions]]): a third means diagnose.
 - `common/assets/concurrency` again on #682, 2026-11-06: failed on d7e09ce793, 991859ae37 and e0cbb9cb55, passed on 170b475809 and ee7f4578c9 with no change to its path: still the known flake.
 - `common/assets/concurrency` on #691, 2026-11-07: sqlite3, `hasErrors` line 71, failed twice on 8835a49d15 (run then `--failed` rerun), no assets path in the diff. #683 also failed it twice on 8b51d69f0f: one rerun no longer clears it reliably, the second did on #691 (merged a24c774465), see #367.
@@ -233,9 +236,6 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 - DIAGNOSED 2026-11-08 (`update-batch-guards` + `singular-write-flows`, both shard 5, not #686's code): `event-flow-runs.seed.ts` (seeded by `seed-database` at shard start, same shard) writes 10 event flows `status: 'active'`. Blackbox has no Redis, so the bus is local: a flow write reloads only the server it reaches, and a server loads every active flow at boot. (1) `update-batch-guards` boots its audited instance in the parallel middle; if that lands before `event-flow-runs`' afterAll deletes the users flows 0f06/0f07 (seen: the two files finished 1 s apart), the instance holds the `items.update` filter+action flows for good, and each `/users` PATCH adds 1 activity + 1 revision per flow run (received +1, +2, +2, +4 = filter per row + action). (2) flows 01-05/08-10 are never deactivated; `FlowManager.reload()` is fire-and-forget (`publish` on the bus, JobQueue), its `flows` read lands before the audit closes at writeHead, its nested `operations` read (run only when an active flow exists, run-ast.ts:100) sometimes too: +1 `directus_operations` select. Fix proposed to jean: seed the flows inactive, deactivate all 10 in afterAll, run `event-flow-runs` sequentially.
 - `common/assets/concurrency` on #686 `b3a28e8c76` (tests-only), 2026-11-08: sqlite3, `expected true to be false`; the next push passed it.
 - `common/assets/concurrency` on #683, 2026-11-07: sqlite3, a43f19bd30, one `--failed` rerun cleared it (merged 05eeca0e73).
-
-## 2026-11-03 (#673 shard 1): invite statement-count flake
-- `singular-write-users-invite` expected 1 insert each into `directus_activity` / `directus_revisions` on request 3, saw 3. #673 touches neither the users service nor that test; not in the list above. Treated as flake, `gh run rerun --failed` unasked. If the rerun is red the same way (2+ identical), stop rerunning and diagnose (see the twice-red rule above).
 
 ## 2026-11-06 (#688 shard 1): query-audit-header rows
 - Fixed by #692, merged as `21de5319ac` on 2026-11-07: the GET filters out the POST's title, so commit order no longer changes `rows`. A branch without that merge can still hit it.
