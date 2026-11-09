@@ -18,8 +18,8 @@ import { summarise, summaryRow } from './measure.js';
  * Every child is scoped through its parent and the scoped cache is on, as the
  * planner's are, so the purge's scope reads are counted too.
  *
- * Dispatch only, and gates nothing: the blackbox guard
- * `nested-write-scaling.feature` holds the counts, this shows the time.
+ * Fails when a larger batch runs more statements than the smallest one; the
+ * time is shown, never judged.
  */
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -314,6 +314,7 @@ test('what a nested batch create costs per parent count', async () => {
 
 	const timeRows: string[] = [];
 	const countRows: string[] = [];
+	const scalingBreaches: string[] = [];
 	let smallestTotal: number | undefined;
 	let smallestCount = 0;
 
@@ -354,6 +355,16 @@ test('what a nested batch create costs per parent count', async () => {
 
 		const ratio = (total / smallestTotal).toFixed(2);
 
+		if (total > smallestTotal) {
+			scalingBreaches.push(
+				`nested batch create ran ${JSON.stringify(total)} statements`
+				+ ` at ${JSON.stringify(parentCount)} parents`
+				+ ` vs ${JSON.stringify(smallestTotal)}`
+				+ ` at ${JSON.stringify(smallestCount)} parents`
+				+ ` (${JSON.stringify(Number(ratio))}×)`,
+			);
+		}
+
 		countRows.push(
 			`| ${parentCount} | ${parentCount * (1 + CHILDREN_PER_PARENT)}`
 			+ ` | ${totalCell} vs ${smallestTotal} statements (${ratio}×)`
@@ -381,4 +392,8 @@ test('what a nested batch create costs per parent count', async () => {
 		...timeRows,
 		'',
 	);
+
+	if (scalingBreaches.length > 0) {
+		throw new Error(scalingBreaches.join('\n'));
+	}
 }, 30 * 60 * 1000);
