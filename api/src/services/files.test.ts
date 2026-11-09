@@ -2,6 +2,7 @@ import {
 	ForbiddenError,
 	InvalidPayloadError,
 	RecordNotUniqueError,
+	ServiceUnavailableError,
 } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { Driver, StorageManager } from '@directus/storage';
@@ -877,6 +878,77 @@ describe('Integration Tests', () => {
 						rowDeleteError,
 						'Couldn\'t delete the row "test-file-id-123" of a failed upload',
 					],
+				]);
+			});
+
+			it('deletes the row of a new file whose bytes delete fails', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response(null);
+
+				const statError = new Error('stat failed');
+				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
+				const bytesDeleteError = new Error('disk unreachable');
+				mockDriver.delete = vi.fn().mockRejectedValue(bytesDeleteError);
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(statError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123'], { emitEvents: false }]]);
+
+				expect(vi.mocked(useLogger().warn).mock.calls).toStrictEqual([
+					[
+						bytesDeleteError,
+						'Couldn\'t delete the file "test-file-id-123.txt" of a failed upload',
+					],
+				]);
+			});
+
+			it('logs the temp file a failed replacement cannot delete', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response({ filename_disk: 'test-file-id-123.txt' });
+
+				const writeError = new Error('disk full');
+				vi.mocked(mockDriver.write!).mockRejectedValue(writeError);
+				const tempDeleteError = new Error('disk unreachable');
+				mockDriver.delete = vi.fn().mockRejectedValue(tempDeleteError);
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(
+					new PassThrough(),
+					{
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+					},
+					sample.id,
+				)).rejects.toStrictEqual(new ServiceUnavailableError({
+					service: 'files',
+					reason: 'Couldn\'t save file test-file-id-123.txt',
+				}));
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['temp_test-file-id-123.txt'],
+				]);
+
+				expect(vi.mocked(useLogger().warn).mock.calls).toStrictEqual([
+					['Couldn\'t save file test-file-id-123.txt'],
+					[writeError],
+					['Couldn\'t delete temp file temp_test-file-id-123.txt'],
+					[tempDeleteError],
 				]);
 			});
 
