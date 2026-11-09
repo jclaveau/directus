@@ -1,4 +1,4 @@
-Feature: A nested write runs as many statements for six parents as for two
+Feature: A nested write runs the statements of two parents for six, but one
 
   - The planner creates a batch of parents together with their children; #414
     batched those nested writes so their statements no longer grow with the
@@ -17,8 +17,11 @@ Feature: A nested write runs as many statements for six parents as for two
     database, with the scoped cache on, that reports the statements each
     request ran (`QUERY_AUDIT_HEADER`). The last step counts a request's
     statements per table and kind, on postgres alone.
+  - One count still grows with the parents: each created parent with nested
+    children links its children's revisions in an update of its own on
+    `directus_revisions`, 2 for two parents and 6 for six (#414).
 
-  Scenario: a one-to-many create of six parents runs the statements of two
+  Scenario: a one-to-many create of six parents runs the statements of two, but one
     When these requests get these responses:
       | request                    | response  |
       | method: POST               | code: 200 |+
@@ -87,18 +90,18 @@ Feature: A nested write runs as many statements for six parents as for two
       | os-h2 | os-h |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
-      | 1       | directus_activity  | 0      | 0      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 0      | 0      | 0      |
-      | 1       | directus_users     | 0      | 0      | 0      | 0      |
-      | 1       | test_nws_card      | 0      | 0      | 0      | 0      |
-      | 1       | test_nws_deck      | 0      | 0      | 0      | 0      |
-      | 2       | directus_activity  | 0      | 0      | 0      | 0      |
-      | 2       | directus_revisions | 0      | 0      | 0      | 0      |
-      | 2       | directus_users     | 0      | 0      | 0      | 0      |
-      | 2       | test_nws_card      | 0      | 0      | 0      | 0      |
-      | 2       | test_nws_deck      | 0      | 0      | 0      | 0      |
+      | 1       | directus_activity  | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 2      | 2      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 1       | test_nws_card      | 6      | 1      | 0      | 0      |
+      | 1       | test_nws_deck      | 2      | 1      | 0      | 0      |
+      | 2       | directus_activity  | 0      | 2      | 0      | 0      |
+      | 2       | directus_revisions | 0      | 2      | 6      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | test_nws_card      | 6      | 1      | 0      | 0      |
+      | 2       | test_nws_deck      | 2      | 1      | 0      | 0      |
 
-  Scenario: a many-to-many create of six parents runs the statements of two
+  Scenario: a many-to-many create of six parents runs the statements of two, but one
     Given the rows of test_nws_tag:
       | id    |
       | ms-t1 |
@@ -187,13 +190,13 @@ Feature: A nested write runs as many statements for six parents as for two
       | ms-h2 | ms-h             | ms-t2           |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
-      | 1       | directus_activity  | 0      | 0      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 0      | 0      | 0      |
-      | 1       | directus_users     | 0      | 0      | 0      | 0      |
-      | 1       | test_nws_post      | 0      | 0      | 0      | 0      |
-      | 1       | test_nws_post_tag  | 0      | 0      | 0      | 0      |
-      | 2       | directus_activity  | 0      | 0      | 0      | 0      |
-      | 2       | directus_revisions | 0      | 0      | 0      | 0      |
-      | 2       | directus_users     | 0      | 0      | 0      | 0      |
-      | 2       | test_nws_post      | 0      | 0      | 0      | 0      |
-      | 2       | test_nws_post_tag  | 0      | 0      | 0      | 0      |
+      | 1       | directus_activity  | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 2      | 2      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 1       | test_nws_post      | 2      | 1      | 0      | 0      |
+      | 1       | test_nws_post_tag  | 6      | 1      | 0      | 0      |
+      | 2       | directus_activity  | 0      | 2      | 0      | 0      |
+      | 2       | directus_revisions | 0      | 2      | 6      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | test_nws_post      | 2      | 1      | 0      | 0      |
+      | 2       | test_nws_post_tag  | 6      | 1      | 0      | 0      |
