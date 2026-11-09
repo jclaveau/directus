@@ -1187,11 +1187,8 @@ export class PayloadService {
 							record[relation.field] = parent;
 						}
 
-						// skip leaves a child already linked to this parent as it is
-						if (
-							opts?.nestedUpdates === 'skip'
-							&& Object.keys(record).length === 0
-						) {
+						// a child already linked, with nothing to update, is left as it is
+						if (Object.keys(record).length === 0) {
 							continue;
 						}
 

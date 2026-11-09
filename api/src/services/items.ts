@@ -1386,6 +1386,7 @@ implements AbstractService<Item> {
 				}
 
 				// the row first visited of its cycle writes the whole cycle
+				// TODO(#610): MariaDB checks the keys row by row, refusing a cycle
 				if (lowestVisitIndex === visitIndexOfRow.get(rowIndex)) {
 					const cycleRows = unwrittenRows.splice(
 						unwrittenRows.indexOf(rowIndex),
