@@ -492,10 +492,10 @@ implements AbstractService<Item> {
 			opts.mutationTracker.trackMutations(data.length);
 		}
 
+		// resolveMutationBatching refuses its conflicting options for one row too
 		if (
-			data.length > 1
-			&& (resolveMutationBatching(opts) === 'disableBatching'
-				|| this.nestedRecordNamesBatchRow(data))
+			(resolveMutationBatching(opts) === 'disableBatching' && data.length > 1)
+			|| (data.length > 1 && this.nestedRecordNamesBatchRow(data))
 		) {
 			untrackRows();
 
@@ -1245,12 +1245,10 @@ implements AbstractService<Item> {
 				return [];
 			}
 
-			const { create = [], update = [] } = children as {
-				create?: unknown[];
-				update?: unknown[];
-			};
+			const { create, update } = children as AnyItem;
 
-			return [...create, ...update];
+			// a list that is no array is refused by the one-to-many write
+			return [create, update].filter(Array.isArray).flat();
 		};
 
 		return data.some((row) => {
