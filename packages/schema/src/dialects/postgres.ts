@@ -233,10 +233,22 @@ export default class Postgres implements SchemaInspector {
 		}
 
 		for (const { table_name, column_name } of uniqueIndexResult.rows) {
-			const uniqueColumn = overview[table_name]?.columns[column_name];
+			const uniqueTable = overview[table_name];
+			const uniqueColumn = uniqueTable?.columns[column_name];
 
 			if (uniqueColumn) {
 				uniqueColumn.in_unique_index = true;
+			}
+			// information_schema.columns hides a column the user holds no
+			// privilege on, pg_index does not
+			else if (uniqueTable) {
+				/* eslint-disable-next-line no-console */
+				console.error(
+					`Could not flag unique column ${JSON.stringify(column_name)}`
+					+ ` of table ${JSON.stringify(table_name)}:`
+					+ ' information_schema.columns lists only the columns'
+					+ ' the user holds a privilege on',
+				);
 			}
 			else {
 				/* eslint-disable-next-line no-console */
