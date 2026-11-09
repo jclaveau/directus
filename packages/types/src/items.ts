@@ -283,7 +283,18 @@ export type MutationOptions = {
 	 *
 	 * It holds at every depth, for M2O and A2O records, O2M lists and O2M
 	 * `update` alterations. A nested record naming no existing row is created
-	 * whatever the answer.
+	 * whatever the answer, unless an earlier record of the request created it:
+	 * a second record of that key is refused under `refuse`, and only names the
+	 * row under `skip`.
+	 *
+	 * Any field besides the key counts, an alias or an O2M list included; an
+	 * O2M child's key to the parent it is listed under does not. `skip` leaves
+	 * the whole record, the records it nests included:
+	 *
+	 * ```
+	 * { id: 1, parent: { id: 2, name: 'n', parent: { name: 'new' } } }
+	 * skip    row 1 created naming row 2; row 'new' not created
+	 * ```
 	 */
 	nestedUpdates?: NestedUpdateAnswer | undefined;
 

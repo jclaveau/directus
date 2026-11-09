@@ -1165,9 +1165,14 @@ export class PayloadService {
 							.where({ [relatedPrimaryKeyField]: key })
 							.first();
 
+						// the child's key to this parent says what the alteration says
+						const updatesChild = Object.entries(fields).some(([field, value]) => {
+							return field !== relation.field || value != parent;
+						});
+
 						if (
 							existingRecord
-							&& Object.keys(fields).length > 0
+							&& updatesChild
 							&& opts?.nestedUpdates === 'refuse'
 						) {
 							throw nestedUpdateRefusal(key, relation.collection);
@@ -1345,10 +1350,12 @@ export class PayloadService {
 					? undefined
 					: existingChildren.get(relatedKeyName);
 
+				// the child's key to this parent says what the list says
 				const updatesChild = existingRecord !== undefined
 					&& !isPrimaryKey(relatedRecord)
-					&& Object.keys(relatedRecord).some((recordField) => {
-						return recordField !== relatedPrimaryKeyField;
+					&& Object.entries(relatedRecord).some(([recordField, value]) => {
+						return recordField !== relatedPrimaryKeyField
+							&& (recordField !== relation.field || value != parent);
 					});
 
 				if (updatesChild && nestedMutationOptions.nestedUpdates === 'refuse') {

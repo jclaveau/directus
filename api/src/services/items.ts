@@ -1317,50 +1317,79 @@ implements AbstractService<Item> {
 
 	/**
 	 * The order to write a batch's rows in: each row after the rows it names,
-	 * otherwise in payload order. Null for the payload order itself, and for rows
-	 * naming each other in a cycle, which keep it. Walked with a stack of its
-	 * own, so a long parent chain cannot overflow the call stack.
+	 * otherwise in payload order. Rows naming each other in a cycle are written
+	 * together, in payload order, after the rows the cycle names. Null for the
+	 * payload order itself. Tarjan's strongly connected components, walked with
+	 * a stack of its own, so a long parent chain cannot overflow the call stack.
 	 */
 	private writeOrderOf(batchRowNames: BatchRowName[][]): number[] | null {
 		const writeOrder: number[] = [];
-		const visitStates = new Map<number, 'visiting' | 'written'>();
+		const visitIndexOfRow = new Map<number, number>();
+		const lowestVisitIndexOfRow = new Map<number, number>();
+		const unwrittenRows: number[] = [];
+		const unwrittenRowSet = new Set<number>();
+		const pendingRows: { rowIndex: number; nameIndex: number }[] = [];
+
+		const visitRow = (rowIndex: number): void => {
+			visitIndexOfRow.set(rowIndex, visitIndexOfRow.size);
+			lowestVisitIndexOfRow.set(rowIndex, visitIndexOfRow.get(rowIndex)!);
+			unwrittenRows.push(rowIndex);
+			unwrittenRowSet.add(rowIndex);
+			pendingRows.push({ rowIndex, nameIndex: 0 });
+		};
+
+		const lowerVisitIndex = (rowIndex: number, visitIndex: number): void => {
+			lowestVisitIndexOfRow.set(
+				rowIndex,
+				Math.min(lowestVisitIndexOfRow.get(rowIndex)!, visitIndex),
+			);
+		};
 
 		for (const startRowIndex of batchRowNames.keys()) {
-			if (visitStates.has(startRowIndex)) {
+			if (visitIndexOfRow.has(startRowIndex)) {
 				continue;
 			}
 
-			visitStates.set(startRowIndex, 'visiting');
-			const pendingRows = [{ rowIndex: startRowIndex, nameIndex: 0 }];
+			visitRow(startRowIndex);
 
 			while (pendingRows.length > 0) {
 				const pendingRow = pendingRows.at(-1)!;
-				const rowNames = batchRowNames[pendingRow.rowIndex]!;
+				const rowIndex = pendingRow.rowIndex;
+				const rowNames = batchRowNames[rowIndex]!;
 
-				if (pendingRow.nameIndex === rowNames.length) {
-					visitStates.set(pendingRow.rowIndex, 'written');
-					writeOrder.push(pendingRow.rowIndex);
-					pendingRows.pop();
+				if (pendingRow.nameIndex < rowNames.length) {
+					const namedRowIndex = rowNames[pendingRow.nameIndex]!.rowIndex;
+					pendingRow.nameIndex += 1;
+
+					if (!visitIndexOfRow.has(namedRowIndex)) {
+						visitRow(namedRowIndex);
+					}
+					// a row of the cycle being walked
+					else if (unwrittenRowSet.has(namedRowIndex)) {
+						lowerVisitIndex(rowIndex, visitIndexOfRow.get(namedRowIndex)!);
+					}
+
 					continue;
 				}
 
-				const namedRowIndex = rowNames[pendingRow.nameIndex]!.rowIndex;
-				pendingRow.nameIndex += 1;
-				const namedRowState = visitStates.get(namedRowIndex);
+				pendingRows.pop();
+				const lowestVisitIndex = lowestVisitIndexOfRow.get(rowIndex)!;
 
-				if (
-					namedRowIndex === pendingRow.rowIndex
-					|| namedRowState === 'written'
-				) {
-					continue;
+				if (pendingRows.length > 0) {
+					lowerVisitIndex(pendingRows.at(-1)!.rowIndex, lowestVisitIndex);
 				}
 
-				if (namedRowState === 'visiting') {
-					return null;
-				}
+				// the row first visited of its cycle writes the whole cycle
+				if (lowestVisitIndex === visitIndexOfRow.get(rowIndex)) {
+					const cycleRows = unwrittenRows.splice(
+						unwrittenRows.indexOf(rowIndex),
+					);
 
-				visitStates.set(namedRowIndex, 'visiting');
-				pendingRows.push({ rowIndex: namedRowIndex, nameIndex: 0 });
+					for (const cycleRow of cycleRows.sort((left, right) => left - right)) {
+						unwrittenRowSet.delete(cycleRow);
+						writeOrder.push(cycleRow);
+					}
+				}
 			}
 		}
 
