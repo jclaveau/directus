@@ -14,6 +14,8 @@ Left: (1) re-measure with `pg_stat_statements` on the 3-student EDN registration
 
 CI gap: ~30 blackbox `.feature` files pin statement counts but only on 2-3 parents; none checks flat count as parents grow, none with `scoped_cache_fields` on nested O2M; `bench.yml` has no write bench.
 
+Checked 2026-11-09: re-measure blocked, Planner `develop` lockfile pins dist `47146d370c` (built 11-05 01:19), older than every batching merge, so dev would measure the old code; needs a planner bump + dev deploy first (jean's call). Point 3 collapsed planner-side: the per-segment translations select came from `listDuplicates` reading `*`, which planner b9220704 (2026-10-18) narrowed to named fields. Point 4: planner `student_*` collections have `accountability: null`, so no activity/revisions there; the fork still runs one `directus_revisions` UPDATE (parent link) per created parent that has nested children (items.ts createMany revision loop). Permission checks run per row but `fetchPolicies`/`fetchRawPermissions` are `withCache`d, so no extra statements.
+
 Guard written 2026-11-09: PR #711 `nested-write-scaling.feature` (O2M + M2M, 2 then 6 parents, scoped through parent, placeholder counts filled from CI's printed tables).
 
 **Why:** jean asked "what has not been done in 414" then said "go write the guard".
