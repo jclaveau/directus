@@ -1,14 +1,26 @@
+import { SchemaBuilder } from '@directus/schema-builder';
 import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import {
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	test,
+	vi,
+} from 'vitest';
 import getDatabase from '../database/index.js';
+import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import { withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
-import { ItemsService } from './items.js';
 import { MailService } from './mail/index.js';
-import { NotificationsService } from './notifications.js';
+import {
+	NotificationsService,
+	initNotificationEmails,
+} from './notifications.js';
 import { UsersService } from './users.js';
 
 vi.mock('../database/index.js', () => {
@@ -16,7 +28,22 @@ vi.mock('../database/index.js', () => {
 });
 
 vi.mock('@directus/env', () => {
-	return { useEnv: vi.fn(() => ({ PUBLIC_URL: 'http://example.com' })) };
+	return {
+		useEnv: vi.fn(() => {
+			return {
+				PUBLIC_URL: 'http://example.com',
+				CACHE_AUTO_PURGE: false,
+				MAX_BATCH_MUTATION: 100000,
+			};
+		}),
+	};
+});
+
+vi.mock('../cache.js', () => {
+	return {
+		getCache: () => ({ cache: undefined }),
+		clearSystemCache: vi.fn(),
+	};
 });
 
 vi.mock('../permissions/lib/fetch-roles-tree.js', () => {
@@ -46,14 +73,24 @@ vi.mock('./users.js', () => {
 	return { UsersService };
 });
 
-const schema = { collections: {}, relations: {} } as any;
+const schema = new SchemaBuilder()
+	.collection('directus_notifications', (c) => {
+		c.field('id').id();
+		c.field('recipient').string();
+		c.field('subject').string();
+	})
+	.build();
 
-describe('NotificationsService.createMany', () => {
+const database = knex.default({ client: MockClient });
+const tracker = createTracker(database);
+
+describe('notification emails', () => {
+	beforeAll(() => {
+		initNotificationEmails();
+	});
+
 	beforeEach(() => {
-		vi.clearAllMocks();
-
-		vi.spyOn(ItemsService.prototype, 'createMany')
-			.mockResolvedValue(['notification-a']);
+		vi.mocked(getDatabase).mockReturnValue(database);
 
 		vi.mocked(UsersService.prototype.readOne).mockResolvedValue(withMeta({
 			id: 'user-a',
@@ -63,36 +100,18 @@ describe('NotificationsService.createMany', () => {
 		}, { scopedCacheFingerprints: [] }));
 	});
 
-	test(oneLine`
-		sends no email for a notification whose transaction rolls back
-	`, async () => {
-		const database = knex.default({ client: MockClient });
-		createTracker(database);
-		vi.mocked(getDatabase).mockReturnValue(database);
-
-		await expect(transaction(database, async (trx) => {
-			await new NotificationsService({ knex: trx, schema })
-				.createMany([{ recipient: 'user-a', subject: 'Hi' }]);
-
-			throw new Error('second file refused');
-		})).rejects.toEqual(new Error('second file refused'));
-
-		expect(MailService.prototype.send).not.toHaveBeenCalled();
+	afterEach(() => {
+		tracker.reset();
+		vi.clearAllMocks();
 	});
 
 	test(oneLine`
-		sends the email of a notification once its transaction commits
+		emails a notification once the create that wrote it commits
 	`, async () => {
-		const database = knex.default({ client: MockClient });
-		createTracker(database);
-		vi.mocked(getDatabase).mockReturnValue(database);
+		tracker.on.insert('directus_notifications').response([1]);
 
-		await transaction(database, async (trx) => {
-			await new NotificationsService({ knex: trx, schema })
-				.createMany([{ recipient: 'user-a', subject: 'Hi' }]);
-
-			expect(MailService.prototype.send).not.toHaveBeenCalled();
-		});
+		await new NotificationsService({ knex: database, schema })
+			.createMany([{ recipient: 'user-a', subject: 'Hi' }]);
 
 		// the transaction is complete by then: its email reads on the database
 		expect(vi.mocked(UsersService).mock.calls).toEqual([
@@ -107,30 +126,97 @@ describe('NotificationsService.createMany', () => {
 	});
 
 	test(oneLine`
-		sends the email of a notification created outside a transaction
+		sends no email for a notification whose caller's transaction rolls back
 	`, async () => {
-		const database = knex.default({ client: MockClient });
+		tracker.on.insert('directus_notifications').response([1]);
 
-		await new NotificationsService({ knex: database, schema })
-			.createMany([{ recipient: 'user-a', subject: 'Hi' }]);
+		await expect(transaction(database, async (trx) => {
+			await new NotificationsService({ knex: trx, schema })
+				.createMany([{ recipient: 'user-a', subject: 'Hi' }]);
 
-		expect(MailService.prototype.send).toHaveBeenCalledWith({
-			template: { name: 'base', data: { html: '' } },
-			to: 'user-a@example.com',
-			subject: 'Hi',
-		});
+			throw new Error('title refused');
+		})).rejects.toEqual(new Error('title refused'));
+
+		expect(MailService.prototype.send).not.toHaveBeenCalled();
 	});
 
 	test(oneLine`
-		emails the later notifications of a transaction when an earlier one fails
+		holds the email of a notification until its caller's transaction commits
 	`, async () => {
-		const database = knex.default({ client: MockClient });
-		createTracker(database);
-		vi.mocked(getDatabase).mockReturnValue(database);
-		const readError = new Error('user-a deleted');
+		tracker.on.insert('directus_notifications').response([1]);
 
-		vi.spyOn(ItemsService.prototype, 'createMany')
-			.mockResolvedValue(['notification-a', 'notification-b']);
+		await transaction(database, async (trx) => {
+			await new NotificationsService({ knex: trx, schema })
+				.createMany([{ recipient: 'user-a', subject: 'Hi' }]);
+
+			expect(MailService.prototype.send).not.toHaveBeenCalled();
+		});
+
+		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
+			template: { name: 'base', data: { html: '' } },
+			to: 'user-a@example.com',
+			subject: 'Hi',
+		}]]);
+	});
+
+	test(oneLine`
+		emails only the rows a create wrote, as written: none for a row a filter
+		hook took over, pointed at another or cancelled
+	`, async () => {
+		tracker.on.insert('directus_notifications').response([1]);
+
+		const reshapeRows = () => {
+			return [
+				{ data: { recipient: 'user-b', subject: 'A' } },
+				{ key: 9 },
+				{ sameRowAs: 0 },
+				null,
+			];
+		};
+
+		emitter.onFilter('notifications.create', reshapeRows);
+
+		vi.mocked(UsersService.prototype.readOne).mockResolvedValue(withMeta({
+			id: 'user-b',
+			email: 'user-b@example.com',
+			email_notifications: true,
+			role: null,
+		}, { scopedCacheFingerprints: [] }));
+
+		try {
+			const keys = await new NotificationsService({ knex: database, schema })
+				.createMany(
+					[
+						{ recipient: 'user-a', subject: 'A' },
+						{ recipient: 'user-a', subject: 'Stored' },
+						{ recipient: 'user-a', subject: 'A' },
+						{ recipient: 'user-a', subject: 'B' },
+					],
+					{ allowFilterCancel: true },
+				);
+
+			expect(keys).toEqual([1, 9, 1, null]);
+		}
+		finally {
+			emitter.offFilter('notifications.create', reshapeRows);
+		}
+
+		expect(vi.mocked(UsersService.prototype.readOne).mock.calls).toEqual([
+			['user-b', { fields: ['id', 'email', 'email_notifications', 'role'] }],
+		]);
+
+		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
+			template: { name: 'base', data: { html: '' } },
+			to: 'user-b@example.com',
+			subject: 'A',
+		}]]);
+	});
+
+	test(oneLine`
+		emails the later notifications of a create when an earlier one fails
+	`, async () => {
+		tracker.on.insert('directus_notifications').response([1, 2]);
+		const readError = new Error('user-a deleted');
 
 		vi.mocked(UsersService.prototype.readOne)
 			.mockRejectedValueOnce(readError)
@@ -141,12 +227,10 @@ describe('NotificationsService.createMany', () => {
 				role: null,
 			}, { scopedCacheFingerprints: [] }));
 
-		await transaction(database, async (trx) => {
-			await new NotificationsService({ knex: trx, schema }).createMany([
-				{ recipient: 'user-a', subject: 'A' },
-				{ recipient: 'user-b', subject: 'B' },
-			]);
-		});
+		await new NotificationsService({ knex: database, schema }).createMany([
+			{ recipient: 'user-a', subject: 'A' },
+			{ recipient: 'user-b', subject: 'B' },
+		]);
 
 		const userFields = ['id', 'email', 'email_notifications', 'role'];
 
@@ -167,26 +251,58 @@ describe('NotificationsService.createMany', () => {
 	});
 
 	test(oneLine`
-		sends no email for a notification a filter hook cancelled
+		emails a notification whose recipient is sent as an object
 	`, async () => {
-		const database = knex.default({ client: MockClient });
+		tracker.on.insert('directus_notifications').response([1]);
 
-		vi.spyOn(ItemsService.prototype, 'createMany')
-			// the spy is typed off the overload without allowFilterCancel
-			.mockResolvedValue([null, 'notification-b'] as never);
+		await new NotificationsService({ knex: database, schema })
+			.createMany([{ recipient: { id: 'user-a' } as never, subject: 'A' }]);
+
+		expect(vi.mocked(UsersService.prototype.readOne).mock.calls).toEqual([
+			['user-a', { fields: ['id', 'email', 'email_notifications', 'role'] }],
+		]);
+
+		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
+			template: { name: 'base', data: { html: '' } },
+			to: 'user-a@example.com',
+			subject: 'A',
+		}]]);
+	});
+
+	test(oneLine`
+		sends no email for a create that emits no events
+	`, async () => {
+		tracker.on.insert('directus_notifications').response([1]);
 
 		await new NotificationsService({ knex: database, schema }).createMany(
-			[
-				{ recipient: 'user-a', subject: 'A' },
-				{ recipient: 'user-a', subject: 'B' },
-			],
-			{ allowFilterCancel: true },
+			[{ recipient: 'user-a', subject: 'Hi' }],
+			{ emitEvents: false },
+		);
+
+		expect(MailService.prototype.send).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		emails at once the notifications a created hook is handed outside a
+		transaction
+	`, async () => {
+		await emitter.emitWrittenFilter(
+			'notifications.created',
+			[{ id: 1, recipient: 'user-a', subject: 'Hi' }],
+			{ keys: [1], collection: 'directus_notifications' },
+			{
+				transaction: database,
+				database,
+				schema,
+				accountability: null,
+				scopedCache: { purgeBy: vi.fn() },
+			},
 		);
 
 		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
 			template: { name: 'base', data: { html: '' } },
 			to: 'user-a@example.com',
-			subject: 'B',
+			subject: 'Hi',
 		}]]);
 	});
 });
