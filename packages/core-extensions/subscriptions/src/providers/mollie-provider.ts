@@ -148,13 +148,14 @@ async function getMollieSubscription(
 		});
 }
 
+// A deleted customer answers 410 on its subscriptions.
 function mapMollieNotFound(
 	mollieError: unknown,
 	resourceId: string,
 	subscriptionId: string | null,
 ): unknown {
 	return mollieError instanceof MollieApiError
-		&& mollieError.statusCode === 404
+		&& (mollieError.statusCode === 404 || mollieError.statusCode === 410)
 		? new MissingProviderSubscriptionError(
 			{ resourceId, subscriptionId },
 			{ cause: mollieError },
