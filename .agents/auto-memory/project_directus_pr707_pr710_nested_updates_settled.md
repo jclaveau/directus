@@ -6,6 +6,7 @@ metadata:
 ---
 
 jean's rulings, 2026-11-09. #710 is based on #707's branch (`nestedUpdates` only exists there).
+Both merged into v11.10.1-hhh-dev: #707 (9c563869dd), #710 on 2026-11-10 (9343d04fcd) at 95.9% autoreviewed, jean ruling the 32-line chunk size fix needed no second review.
 
 ```
 #707
