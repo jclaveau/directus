@@ -2751,10 +2751,14 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								};
 							}
 
+							// the junction rows a list sends back as they are count for nothing,
+							// so the rows it creates alone cross the limit
+							const countCreateInList = 10;
+
 							for (const food of foods2) {
 								food.ingredients = [
 									...food.ingredients,
-									...Array(countCreate)
+									...Array(countCreateInList)
 										.fill(0)
 										.map(() => {
 											return { [`${localCollectionIngredients}_id`]: createIngredient(pkType) };

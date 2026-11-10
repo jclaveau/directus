@@ -14,6 +14,7 @@ export const collectionBinEntry = 'test_nested_o2m_bin_entry';
 export const collectionPost = 'test_nested_o2m_post';
 export const collectionTag = 'test_nested_o2m_tag';
 export const collectionPostTag = 'test_nested_o2m_post_tag';
+export const collectionTree = 'test_nested_o2m_tree';
 
 export const seedDBStructure = () => {
 	it.each(vendors)(
@@ -29,6 +30,7 @@ export const seedDBStructure = () => {
 					collectionPostTag,
 					collectionPost,
 					collectionTag,
+					collectionTree,
 				]) {
 					await DeleteCollectionIfPresent(vendor, { collection });
 				}
@@ -49,6 +51,11 @@ export const seedDBStructure = () => {
 						// Created ahead of CreateFieldM2M, which reuses it, so the
 						// junction rows carry keys a scenario names too.
 						{ collection: collectionPostTag, primaryKeyType: 'string' },
+						{
+							collection: collectionTree,
+							primaryKeyType: 'string',
+							fields: [{ field: 'name', type: 'string', meta: {} }],
+						},
 					],
 				});
 
@@ -67,6 +74,14 @@ export const seedDBStructure = () => {
 					otherCollection: collectionBinEntry,
 					otherField: 'bin',
 					relationMeta: { one_deselect_action: 'delete' },
+				});
+
+				await CreateFieldO2M(vendor, {
+					collection: collectionTree,
+					field: 'children',
+					primaryKeyType: 'string',
+					otherCollection: collectionTree,
+					otherField: 'parent',
 				});
 
 				await CreateFieldM2M(vendor, {
