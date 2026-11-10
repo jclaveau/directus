@@ -514,11 +514,19 @@ implements AbstractService<Item> {
 		}
 
 		const batchRowNames = data.length > 1
-			? this.batchRowNamesOf(data)
+			? this.batchRowNamesOf(data, false)
 			: [];
 
+		// resolveMutationBatching refuses its conflicting options for one row too
+		const writesRowByRow =
+			(resolveMutationBatching(opts) === 'disableBatching' && data.length > 1)
+			|| batchRowNames.flat().some((rowName) => rowName.byNestedRecord);
+
 		const writeGroups = this.writeGroupsOf(batchRowNames);
-		const writeOrder = writeGroups.flat();
+
+		const writeOrder = writesRowByRow
+			? this.rowByRowWriteOrderOf(data, writeGroups)
+			: writeGroups.flat();
 
 		// the rows a row names are written first; keys answer in payload order
 		if (writeOrder.some((rowIndex, writeIndex) => rowIndex !== writeIndex)) {
@@ -540,11 +548,7 @@ implements AbstractService<Item> {
 			return keys;
 		}
 
-		// resolveMutationBatching refuses its conflicting options for one row too
-		if (
-			(resolveMutationBatching(opts) === 'disableBatching' && data.length > 1)
-			|| batchRowNames.flat().some((rowName) => rowName.byNestedRecord)
-		) {
+		if (writesRowByRow) {
 			untrackRows();
 
 			return await this.createRowByRow(data, opts, opts.mutationTracker);
@@ -1308,10 +1312,15 @@ implements AbstractService<Item> {
 	 * that row or carrying its key. A batch writes every nested M2O and A2O
 	 * record before its rows, so a nested record's name sends the batch row by
 	 * row, after the rows it names. A row's own O2M records are written after
-	 * every row of a batch: their names only order it. Read off the payloads
-	 * before the filter hooks: a name a hook adds is not seen.
+	 * every row of a batch, or right after their row when written row by row:
+	 * their names are read only `withOwnChildren`, never by a nested record.
+	 * Read off the payloads before the filter hooks: a name a hook adds is not
+	 * seen.
 	 */
-	private batchRowNamesOf(data: Partial<Item>[]): BatchRowName[][] {
+	private batchRowNamesOf(
+		data: Partial<Item>[],
+		withOwnChildren: boolean,
+	): BatchRowName[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const rowIndexOfKey = new Map<string, number>();
 
@@ -1383,7 +1392,8 @@ implements AbstractService<Item> {
 
 				// an O2M of the record, a self relation's included
 				if (
-					relation.related_collection === collectionName
+					(isNestedRecord || withOwnChildren)
+					&& relation.related_collection === collectionName
 					&& typeof oneField === 'string'
 					&& oneField in recordFields
 				) {
@@ -1452,6 +1462,28 @@ implements AbstractService<Item> {
 
 			return rowNames;
 		});
+	}
+
+	/**
+	 * The order to write the batch row by row: a row's own O2M records follow
+	 * it, so the rows they name go first too. Rows those names put in a cycle
+	 * keep their order in `writeGroups`, so a child's name never overrides an
+	 * M2O, an A2O or a nested record's.
+	 */
+	private rowByRowWriteOrderOf(
+		data: Partial<Item>[],
+		writeGroups: number[][],
+	): number[] {
+		const writeRankOfRow = new Map(writeGroups.flat().map((rowIndex, writeRank) => {
+			return [rowIndex, writeRank];
+		}));
+
+		return this.writeGroupsOf(this.batchRowNamesOf(data, true))
+			.flatMap((writeGroup) => {
+				return writeGroup.sort((left, right) => {
+					return writeRankOfRow.get(left)! - writeRankOfRow.get(right)!;
+				});
+			});
 	}
 
 	/**
