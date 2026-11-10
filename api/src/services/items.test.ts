@@ -10305,6 +10305,7 @@ describe('Services / Items / mutationBatching', () => {
 						c.field('id')
 							.uuid()
 							.primary();
+
 						c.field('parent').m2o('entries');
 						c.field('children').o2m('entries', 'parent');
 					})
