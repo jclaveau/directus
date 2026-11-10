@@ -8,6 +8,9 @@
 // The read runs on the mutation's transaction, so a segment inserted earlier in
 // the same request counts as stored. test_nwdc_segment does the same, and a
 // stored row whose label differs is updated (updateIfDuplicated).
+// Bounds, no scenario reaches them: the first row of a name wins (a later row's
+// other fields are dropped), rows without a `name` count as one name, and a
+// stored row whose payload leaves `label` out reaches an empty update.
 
 const SEGMENT_COLLECTION = 'test_nwd_segment';
 const COURSE_SEGMENT_COLLECTION = 'test_nwd_course_segment';
@@ -36,16 +39,16 @@ export default function registerHooks({ filter }, { services }) {
 				? entry.data.segment?.name
 				: undefined;
 
-			const link = JSON.stringify([entry?.data?.course, nestedName]);
+			const courseSegmentLink = JSON.stringify([entry?.data?.course, nestedName]);
 
 			if (
 				typeof nestedName === 'string'
-				&& JUNCTION_HOOK_PREFIXES.some((prefix) => {
-					return nestedName.startsWith(prefix);
+				&& JUNCTION_HOOK_PREFIXES.some((junctionPrefix) => {
+					return nestedName.startsWith(junctionPrefix);
 				})
-				&& !firstIndexByLink.has(link)
+				&& !firstIndexByLink.has(courseSegmentLink)
 			) {
-				firstIndexByLink.set(link, index);
+				firstIndexByLink.set(courseSegmentLink, index);
 			}
 		}
 
@@ -53,8 +56,8 @@ export default function registerHooks({ filter }, { services }) {
 			return entries;
 		}
 
-		const nestedNames = [...firstIndexByLink.keys()].map((link) => {
-			return JSON.parse(link)[1];
+		const nestedNames = [...firstIndexByLink.keys()].map((courseSegmentLink) => {
+			return JSON.parse(courseSegmentLink)[1];
 		});
 
 		const storedSegments = await new services.ItemsService(SEGMENT_COLLECTION, {
