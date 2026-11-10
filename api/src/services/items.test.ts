@@ -9537,6 +9537,34 @@ describe('Services / Items / mutationBatching', () => {
 		await expect(database('entries')).resolves.toStrictEqual([]);
 	});
 
+	it('refuses a DB_BATCH_INSERT_CHUNK_SIZE below 1', async () => {
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+		});
+
+		env['DB_BATCH_INSERT_CHUNK_SIZE'] = 0;
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+					})
+					.build(),
+			})
+				.createMany([{ id: 1 }, { id: 2 }]))
+				.rejects.toMatchObject({
+					message: 'DB_BATCH_INSERT_CHUNK_SIZE is 0, it must be 1 or more',
+				});
+		}
+		finally {
+			delete env['DB_BATCH_INSERT_CHUNK_SIZE'];
+		}
+
+		await expect(database('entries')).resolves.toStrictEqual([]);
+	});
+
 	it('runs a subclass createMany once for a reordered batch', async () => {
 		await database.schema.createTable('entries', (table) => {
 			table.integer('id').primary();
