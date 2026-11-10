@@ -10270,6 +10270,71 @@ describe('Services / Items / mutationBatching', () => {
 		]);
 	});
 
+	it.each([
+		{ children: ['00000000-0000-4000-8000-00000000000b'] },
+		{
+			children: [{
+				id: '00000000-0000-4000-8000-00000000000b',
+				parent: '00000000-0000-4000-8000-00000000000a',
+			}],
+		},
+	])(oneLine`
+		nestedUpdates refuse: leaves a child linked to a uuid parent the route
+		names in capitals: %o
+	`, async (payload) => {
+		await database.schema.createTable('entries', (table) => {
+			table.string('id').primary();
+			table.string('parent');
+		});
+
+		await database('entries').insert([
+			{ id: '00000000-0000-4000-8000-00000000000a' },
+			{
+				id: '00000000-0000-4000-8000-00000000000b',
+				parent: '00000000-0000-4000-8000-00000000000a',
+			},
+		]);
+
+		emitter.onFilter('entries.items.update', recordUpdateFilter);
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').uuid();
+						c.field('parent').m2o('entries');
+						c.field('children').o2m('entries', 'parent');
+					})
+					.build(),
+			})
+				.updateOne(
+					'00000000-0000-4000-8000-00000000000A',
+					payload,
+					{ nestedUpdates: 'refuse' },
+				))
+				.resolves.toStrictEqual('00000000-0000-4000-8000-00000000000A');
+		}
+		finally {
+			emitter.offFilter('entries.items.update', recordUpdateFilter);
+		}
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [{
+				data: payload,
+				keys: ['00000000-0000-4000-8000-00000000000A'],
+			}]],
+		]);
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: '00000000-0000-4000-8000-00000000000a', parent: null },
+			{
+				id: '00000000-0000-4000-8000-00000000000b',
+				parent: '00000000-0000-4000-8000-00000000000a',
+			},
+		]);
+	});
+
 	it(oneLine`
 		writes a row a child of an earlier row carries the key of before that
 		earlier row under disableBatching
