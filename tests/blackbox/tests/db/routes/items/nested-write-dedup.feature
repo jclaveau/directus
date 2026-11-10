@@ -217,8 +217,13 @@ Feature: A create hook deduplicating nested records links every row to one recor
       | dp-a1 | dp-a   |
       | dp-a2 | dp-a   |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_activity       | 0      | 4      | 0      | 0      |
+      | 1       | directus_revisions      | 0      | 4      | 2      | 0      |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_nwd_course         | 1      | 1      | 0      | 0      |
+      | 1       | test_nwd_course_segment | 5      | 2      | 0      | 0      |
+      | 1       | test_nwd_segment        | 4      | 1      | 0      | 0      |
 
   Scenario: twenty courses sharing two segments run statements per course
     Given the rows of test_nwd_segment:

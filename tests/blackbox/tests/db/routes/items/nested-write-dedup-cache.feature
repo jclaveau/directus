@@ -205,8 +205,11 @@ Feature: A create hook taking over nested records purges what it changed
       |   filter[discipline][_eq]: d7                |     - name: cr-s1  |
       |                                              |       label: two   |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_nwdc_course         | 1      | 1      | 0      | 0      |
+      | 1       | test_nwdc_course_segment | 7      | 2      | 0      | 0      |
+      | 1       | test_nwdc_segment        | 4      | 1      | 1      | 0      |
 
   Scenario: twenty courses sharing two segments run statements per course
     When these requests get these responses:
