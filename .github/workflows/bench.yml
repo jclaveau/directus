@@ -15,17 +15,13 @@ on:
       - '*-dist'
 
   # The nested-write job only: its statement count is exact, not noise, so it gates
-  # every trunk commit without waiting for Check, and a PR that edits the bench runs
-  # it before it lands.
+  # every trunk commit without waiting for Check, and every PR into the trunk runs it
+  # before it lands: a count regression comes from api code, which no paths filter
+  # could list.
   push:
     branches: [v11.10.1-hhh-dev]
   pull_request:
     branches: [v11.10.1-hhh-dev]
-    paths:
-      - tests/perf/nested-write.perf.test.ts
-      - tests/perf/measure.ts
-      - tests/perf/package.json
-      - .github/workflows/bench.yml
 
   # Measure an arbitrary ref on demand: a tag, an old commit, a branch nobody pushed to
   # today.
