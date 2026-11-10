@@ -293,7 +293,10 @@ beforeAll(async () => {
 }, 10 * 60 * 1000);
 
 afterAll(async () => {
-	if (instance !== undefined) {
+	// An instance that died mid-measurement already closed: waiting for its
+	// close again would hold the job until the 10 min hook timeout.
+	if (instance !== undefined && instance.exitCode === null
+		&& instance.signalCode === null) {
 		instance.kill('SIGTERM');
 		await new Promise((closed) => instance!.on('close', closed));
 	}
