@@ -4254,7 +4254,10 @@ implements AbstractService<Item> {
 			return [...nestingFields].some((field) => {
 				const value = payload[field];
 
-				return (isPlainObject(value) && !isKeylessFlatRecord(field, value))
+				return (
+					isPlainObject(value)
+					&& !isKeylessFlatRecord(field, value as Partial<Item>)
+				)
 					|| (Array.isArray(value) && value.some(isPlainObject));
 			})
 				|| [...childrenFields].some((field) => {
