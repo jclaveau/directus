@@ -1302,6 +1302,13 @@ export class PayloadService {
 			return primaryKeyNameOf(parentKey, this.collection, this.schema);
 		};
 
+		// a uuid the route names in capitals is the parent its children hold in
+		// lowercase
+		const namesParent = (value: unknown, parent: PrimaryKey) => {
+			return !isNil(value)
+				&& parentKeyNameOf(value as PrimaryKey) === parentKeyNameOf(parent);
+		};
+
 		// treat falsey values as removing all children
 		const listsOfParents: (PrimaryKey | Partial<Item>)[][] = listedParents
 			.map((parentRow) => parentRow.data[oneField] || []);
@@ -1376,7 +1383,10 @@ export class PayloadService {
 					&& !isPrimaryKey(relatedRecord)
 					&& Object.entries(relatedRecord).some(([recordField, value]) => {
 						return recordField !== relatedPrimaryKeyField
-							&& (recordField !== relation.field || value != parent);
+							&& (
+								recordField !== relation.field
+								|| !namesParent(value, parent)
+							);
 					});
 
 				if (updatesChild && nestedMutationOptions.nestedUpdates === 'refuse') {
@@ -1405,13 +1415,8 @@ export class PayloadService {
 					// there's no other updates (which is indicated by the fact that this
 					// is just the PK, we can ignore updating this item. This makes sure we
 					// don't trigger any update logic for items that aren't actually being
-					// updated. NOTE: We use == here, as the primary key might be reported
-					// as a string instead of number, coming from the http route, and or a
-					// bigInteger in the DB
-					if (
-						isNil(existingRecord.heldParent) === false
-						&& existingRecord.heldParent == parent
-					) {
+					// updated.
+					if (namesParent(existingRecord.heldParent, parent)) {
 						savedKeysOfParents[parentIndex]!.push(existingRecord.childKey);
 						continue;
 					}
@@ -1421,7 +1426,10 @@ export class PayloadService {
 					};
 				}
 
-				if (!existingRecord || existingRecord.heldParent != parent) {
+				if (
+					!existingRecord
+					|| !namesParent(existingRecord.heldParent, parent)
+				) {
 					record[relation.field] = parent;
 				}
 
