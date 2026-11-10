@@ -630,7 +630,7 @@ describe('Integration Tests', () => {
 		});
 
 		describe('createMany', () => {
-			// A schema without relations so batchInsert is the only query path under test.
+			// A schema without relations so the insert is the only query path under test.
 			const batchSchema = new SchemaBuilder()
 				.collection('test', (c) => {
 					c.field('id').id();
@@ -658,21 +658,32 @@ describe('Integration Tests', () => {
 				filterSpy.mockRestore();
 			});
 
-			it('uses a single batchInsert and maps the returned keys positionally when the dialect preserves RETURNING order', async () => {
+			it(oneLine`
+				uses a single insert and maps the returned keys positionally when the
+				dialect preserves RETURNING order
+			`, async () => {
 				// postgres preserves insert order in RETURNING -> the batch path is taken for >1 row
 				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
 				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 20 }]);
-				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insertInto = vi.fn().mockReturnValue({ insert });
 
 				const transactionSpy = vi
 					.spyOn(db, 'transaction')
-					.mockImplementation(async (callback) => callback({ ...db, batchInsert } as any));
+					.mockImplementation(async (callback) => {
+						return callback(Object.assign(insertInto, db) as any);
+					});
 
 				const result = await batchService().createMany([{ name: 'a' }, { name: 'b' }]);
 
-				expect(batchInsert).toHaveBeenCalledTimes(1);
-				expect(batchInsert.mock.calls[0]![1]).toEqual([{ name: 'a' }, { name: 'b' }]);
+				expect(insertInto).toHaveBeenCalledExactlyOnceWith('test');
+
+				expect(insert).toHaveBeenCalledExactlyOnceWith([
+					{ name: 'a' },
+					{ name: 'b' },
+				]);
+
 				expect(result).toEqual([10, 20]);
 
 				transactionSpy.mockRestore();
@@ -688,7 +699,8 @@ describe('Integration Tests', () => {
 					.mockResolvedValue(undefined);
 
 				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 11 }]);
-				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insertInto = vi.fn().mockReturnValue({ insert });
 				// The end-of-transaction reset runs raw SQL the spread
 				// transaction does not carry.
 				const raw = vi.fn();
@@ -696,12 +708,12 @@ describe('Integration Tests', () => {
 				const transactionSpy = vi
 					.spyOn(db, 'transaction')
 					.mockImplementation(async (callback) =>
-						callback({ ...db, batchInsert, raw } as any));
+						callback(Object.assign(insertInto, db, { raw }) as any));
 
 				await batchService().createMany([{ id: 10, name: 'a' }, { name: 'b' }]);
 
 				expect(raiseSpy).toHaveBeenCalledWith('test', 'id', 10);
-				expect(batchInsert).toHaveBeenCalledTimes(1);
+				expect(insert).toHaveBeenCalledTimes(1);
 
 				raiseSpy.mockRestore();
 				transactionSpy.mockRestore();
@@ -717,13 +729,14 @@ describe('Integration Tests', () => {
 					.mockResolvedValue(undefined);
 
 				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 11 }]);
-				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insertInto = vi.fn().mockReturnValue({ insert });
 				const raw = vi.fn();
 
 				const transactionSpy = vi
 					.spyOn(db, 'transaction')
 					.mockImplementation(async (callback) =>
-						callback({ ...db, batchInsert, raw } as any));
+						callback(Object.assign(insertInto, db, { raw }) as any));
 
 				await batchService().createMany([
 					{ id: 10, name: 'a' },
@@ -771,16 +784,22 @@ describe('Integration Tests', () => {
 				transactionSpy.mockRestore();
 			});
 
-			it('throws when batchInsert returns fewer rows than prepared (positional mapping would be wrong)', async () => {
+			it(oneLine`
+				throws when the insert returns fewer rows than prepared (positional
+				mapping would be wrong)
+			`, async () => {
 				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
 				// two rows in, only one key back -> the positional row->key mapping is unsafe
 				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }]);
-				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insertInto = vi.fn().mockReturnValue({ insert });
 
 				const transactionSpy = vi
 					.spyOn(db, 'transaction')
-					.mockImplementation(async (callback) => callback({ ...db, batchInsert } as any));
+					.mockImplementation(async (callback) => {
+						return callback(Object.assign(insertInto, db) as any);
+					});
 
 				await expect(batchService().createMany([{ name: 'a' }, { name: 'b' }])).rejects.toThrow(/expected 2/);
 
@@ -790,12 +809,12 @@ describe('Integration Tests', () => {
 			it(oneLine`
 				refuses sparse grouped entries carrying a property of their own
 			`, async () => {
-				const batchInsert = vi.fn();
+				const insertInto = vi.fn();
 
 				vi
 					.spyOn(db, 'transaction')
 					.mockImplementation(async (callback) => {
-						return callback({ ...db, batchInsert } as any);
+						return callback(Object.assign(insertInto, db) as any);
 					});
 
 				vi
@@ -810,19 +829,20 @@ describe('Integration Tests', () => {
 					batchService().createMany([{ name: 'a' }, { name: 'b' }, { name: 'c' }]),
 				).rejects.toThrow(InvalidPayloadError);
 
-				expect(batchInsert).not.toHaveBeenCalled();
+				expect(insertInto).not.toHaveBeenCalled();
 			});
 
 			it('refuses a grouped hook deleting a field off the entries', async () => {
 				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
 				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 20 }]);
-				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insertInto = vi.fn().mockReturnValue({ insert });
 
 				const transactionSpy = vi
 					.spyOn(db, 'transaction')
 					.mockImplementation(async (callback) => {
-						return callback({ ...db, batchInsert } as any);
+						return callback(Object.assign(insertInto, db) as any);
 					});
 
 				const groupHook = (entries: any) => {
@@ -844,7 +864,7 @@ describe('Integration Tests', () => {
 							+ 'a hook that handles one row maps them with mapCreateRows.',
 					});
 
-					expect(batchInsert).not.toHaveBeenCalled();
+					expect(insertInto).not.toHaveBeenCalled();
 				}
 				finally {
 					emitter.offFilter('items.create', groupHook);
@@ -856,12 +876,13 @@ describe('Integration Tests', () => {
 				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
 				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 20 }]);
-				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insertInto = vi.fn().mockReturnValue({ insert });
 
 				const transactionSpy = vi
 					.spyOn(db, 'transaction')
 					.mockImplementation(async (callback) => {
-						return callback({ ...db, batchInsert } as any);
+						return callback(Object.assign(insertInto, db) as any);
 					});
 
 				const groupHook = (entries: any) => {
@@ -885,7 +906,7 @@ describe('Integration Tests', () => {
 							+ 'a hook that handles one row maps them with mapCreateRows.',
 					});
 
-					expect(batchInsert).not.toHaveBeenCalled();
+					expect(insertInto).not.toHaveBeenCalled();
 				}
 				finally {
 					emitter.offFilter('items.create', groupHook);
@@ -3044,9 +3065,11 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it(oneLine`
-			createMany formats uuid PKs through the batchInsert path (postgres returns in order)
+			createMany formats uuid PKs through the batch insert path (postgres returns
+			in order)
 		`, async () => {
-			// >1 row + postgres preservesInsertOrderInReturning() → the batchInsert branch, where
+			// >1 row + postgres preservesInsertOrderInReturning() → the batch insert
+			// branch, where
 			// each returned uuid is run through formatUUID.
 			tracker.on.insert('uuid_coll').response([
 				{ id: '11111111-1111-1111-1111-111111111111' },
@@ -3060,7 +3083,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(keys[1]).toMatch(uuidPattern);
 		});
 
-		it('createMany batchInsert reads a bare scalar returning value', async () => {
+		it('createMany batch insert reads a bare scalar returning value', async () => {
 			// A driver that returns bare PKs (not `{ id }` objects) exercises the `: row` arm.
 			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
 			tracker.on.insert('test').response([1, 2]);
@@ -6281,10 +6304,8 @@ describe('Services / Items / a batched upsert', () => {
 			'update `test` set `name` = ? where `id` in (?)',
 			'update `test` set `name` = ? where `id` in (?)',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `test` (`id`, `name`) select ? as `id`, ? as `name`'
 				+ ' union all select ? as `id`, ? as `name` returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 
@@ -6805,10 +6826,8 @@ describe('Services / Items / a batched upsert', () => {
 		expect(sqlStatements).toStrictEqual([
 			'BEGIN;',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `test` (`name`) select ? as `name`'
 				+ ' union all select ? as `name` returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 	});
@@ -7102,10 +7121,8 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 		expect(sqlStatements).toStrictEqual([
 			'BEGIN;',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `test` (`id`) select ? as `id` union all select ? as `id`'
 				+ ' returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'select `id`, `parent_id` from `children` where `id` in (?, ?, ?)',
 			'select `id` from `children` where `id` in (?, ?, ?)',
 			'update `children` set `parent_id` = ? where `id` in (?)',
@@ -7511,17 +7528,13 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 			'select `id` from `country` where `id` in (?, ?)',
 			'update `country` set `name` = ? where `id` in (?)',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `country` (`id`, `name`) select ? as `id`, ? as `name`'
 				+ ' union all select ? as `id`, ? as `name` returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `test` (`country`, `id`) select ? as `country`, ? as `id`'
 				+ ' union all select ? as `country`, ? as `id`'
 				+ ' union all select ? as `country`, ? as `id`'
 				+ ' union all select ? as `country`, ? as `id` returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 	});
@@ -7544,12 +7557,10 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 			'select `id` from `country` where `id` in (?)',
 			'insert into `country` (`id`) values (?) returning `id`',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `test` (`country`, `id`) select ? as `country`, ? as `id`'
 				+ ' union all select ? as `country`, ? as `id`'
 				+ ' union all select ? as `country`, ? as `id`'
 				+ ' union all select ? as `country`, ? as `id` returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 	});
@@ -7570,13 +7581,11 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 			'insert into `post` (`title`) values (?) returning `id`',
 			'insert into `page` (`title`) values (?) returning `id`',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `test` (`collection`, `id`, `item`)'
 				+ ' select ? as `collection`, ? as `id`, ? as `item`'
 				+ ' union all select ? as `collection`, ? as `id`, ? as `item`'
 				+ ' union all select ? as `collection`, ? as `id`, ? as `item`'
 				+ ' returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 
@@ -8760,10 +8769,8 @@ describe('Services / Items / mutationBatching', () => {
 			'update `test` set `name` = ? where `id` in (?)',
 			'update `test` set `name` = ? where `id` in (?)',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `test` (`id`, `name`) select ? as `id`, ? as `name` '
 			+ 'union all select ? as `id`, ? as `name` returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 
@@ -9066,10 +9073,8 @@ describe('Services / Items / mutationBatching', () => {
 			'select `id` from `refs` where `id` in (?)',
 			'insert into `refs` (`id`) values (?) returning `id`',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `entries` (`id`, `ref`) select ? as `id`, ? as `ref` '
 			+ 'union all select ? as `id`, ? as `ref` returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 	});
@@ -9465,6 +9470,8 @@ describe('Services / Items / mutationBatching', () => {
 	});
 
 	it('refuses a cycle past the Postgres bind parameters', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
 		await database.schema.createTable('entries', (table) => {
 			table.integer('id').primary();
 			table.integer('parent');
@@ -9494,6 +9501,8 @@ describe('Services / Items / mutationBatching', () => {
 	});
 
 	it('refuses a chunk past the Postgres bind parameters', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
 		await database.schema.createTable('entries', (table) => {
 			table.integer('id').primary();
 			table.integer('parent');

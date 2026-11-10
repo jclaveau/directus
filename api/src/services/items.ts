@@ -487,8 +487,9 @@ implements AbstractService<Item> {
 	}
 
 	/**
-	 * Create one or more new items at once, wrapped in a transaction. Uses a single batchInsert
-	 * where the vendor preserves RETURNING order, otherwise falls back to per-row inserts.
+	 * Create one or more new items at once, wrapped in a transaction. Uses one
+	 * insert per chunk where the vendor preserves RETURNING order, otherwise
+	 * falls back to per-row inserts.
 	 */
 	async createMany(
 		data: Partial<Item>[],
@@ -966,7 +967,9 @@ implements AbstractService<Item> {
 					}
 
 					if (insertedRows.length !== prepared.length) {
-						throw new Error(`batchInsert returned ${insertedRows.length} rows but expected ${prepared.length}`);
+						throw new Error('The insert returned'
+							+ ` ${JSON.stringify(insertedRows.length)}`
+							+ ` rows but expected ${JSON.stringify(prepared.length)}`);
 					}
 
 					for (let i = 0; i < prepared.length; i++) {
