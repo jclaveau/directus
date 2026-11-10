@@ -10174,6 +10174,115 @@ describe('Services / Items / mutationBatching', () => {
 		]);
 	});
 
+	it('nestedUpdates apply: leaves a child of a uuid in capitals', async () => {
+		await database.schema.createTable('pages', (table) => {
+			table.string('id').primary();
+		});
+
+		await database.schema.createTable('blocks', (table) => {
+			table.integer('id').primary();
+			table.string('page');
+		});
+
+		// the uuid stored in lowercase, as Postgres returns it
+		await database('pages').insert({ id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' });
+
+		await database('blocks').insert({
+			id: 2,
+			page: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+		});
+
+		emitter.onFilter('pages.items.update', recordUpdateFilter);
+		emitter.onFilter('blocks.items.update', recordUpdateFilter);
+
+		try {
+			await expect(new ItemsService('pages', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('pages', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('blocks').o2m('blocks', 'page');
+					})
+					.collection('blocks', (c) => {
+						c.field('id').id();
+						c.field('page').m2o('pages');
+					})
+					.build(),
+			})
+				.updateOne(
+					'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11',
+					{ blocks: { update: [{ id: 2 }] } },
+				))
+				.resolves.toStrictEqual('A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11');
+		}
+		finally {
+			emitter.offFilter('pages.items.update', recordUpdateFilter);
+			emitter.offFilter('blocks.items.update', recordUpdateFilter);
+		}
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [{
+				data: { blocks: { update: [{ id: 2 }] } },
+				keys: ['A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11'],
+			}]],
+		]);
+
+		await expect(database('blocks')).resolves.toStrictEqual([
+			{ id: 2, page: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' },
+		]);
+	});
+
+	it('nestedUpdates refuse: takes a child naming a uuid in capitals', async () => {
+		await database.schema.createTable('pages', (table) => {
+			table.string('id').primary();
+		});
+
+		await database.schema.createTable('blocks', (table) => {
+			table.integer('id').primary();
+			table.string('page');
+		});
+
+		// the uuid stored in lowercase, as Postgres returns it
+		await database('pages').insert({ id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' });
+
+		await database('blocks').insert({
+			id: 2,
+			page: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+		});
+
+		await expect(new ItemsService('pages', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('pages', (c) => {
+					c.field('id').uuid()
+						.primary();
+
+					c.field('blocks').o2m('blocks', 'page');
+				})
+				.collection('blocks', (c) => {
+					c.field('id').id();
+					c.field('page').m2o('pages');
+				})
+				.build(),
+		})
+			.updateOne(
+				'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11',
+				{
+					blocks: {
+						update: [{ id: 2, page: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' }],
+					},
+				},
+				{ nestedUpdates: 'refuse' },
+			))
+			.resolves.toStrictEqual('A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11');
+
+		await expect(database('blocks')).resolves.toStrictEqual([
+			{ id: 2, page: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' },
+		]);
+	});
+
 	it('nestedUpdates refuse: refuses a nested any-to-one record', async () => {
 		await database.schema.createTable('entries', (table) => {
 			table.integer('id').primary();
