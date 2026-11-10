@@ -926,6 +926,7 @@ implements AbstractService<Item> {
 					for (const insertChunk of insertChunks) {
 						const chunkParameterCount = bindParameterCountOf(insertChunk.flat());
 
+						// TODO(#610): CockroachDB binds at most 65535 parameters too
 						if (
 							getDatabaseClient(trx) === 'postgres'
 							&& chunkParameterCount > POSTGRES_BIND_PARAMETER_LIMIT

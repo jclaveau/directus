@@ -1156,6 +1156,20 @@ export class PayloadService {
 				}
 
 				if (alterations.update) {
+					const parentKeyName = primaryKeyNameOf(
+						parent,
+						this.collection,
+						this.schema,
+					);
+
+					// a uuid sent in capitals names the parent Postgres returns in lowercase
+					const namesParent = (value: PrimaryKey | null) => {
+						return value !== null
+							&& value !== undefined
+							&& primaryKeyNameOf(value, this.collection, this.schema)
+								=== parentKeyName;
+					};
+
 					for (const item of alterations.update) {
 						const { [relatedPrimaryKeyField]: key, ...fields } = item;
 
@@ -1167,7 +1181,7 @@ export class PayloadService {
 
 						// the child's key to this parent says what the alteration says
 						const updatesChild = Object.entries(fields).some(([field, value]) => {
-							return field !== relation.field || value != parent;
+							return field !== relation.field || !namesParent(value);
 						});
 
 						if (
@@ -1183,7 +1197,7 @@ export class PayloadService {
 							? {}
 							: fields;
 
-						if (!existingRecord || existingRecord[relation.field] != parent) {
+						if (!existingRecord || !namesParent(existingRecord[relation.field])) {
 							record[relation.field] = parent;
 						}
 
