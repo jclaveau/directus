@@ -49,6 +49,14 @@ describe.each(vendors)('%s', (vendor) => {
 				a many-to-many list links junction rows and nullifies the ones left
 				out
 			`,
+			oneLine`
+				children already in the list, sent as objects, are left as they
+				are
+			`,
+			oneLine`
+				a create written row by row writes first a row an earlier row's
+				child names
+			`,
 		]) {
 			scenario(title, (steps) => {
 				defineNestedWriteSteps(steps, vendor, instanceUrl);
