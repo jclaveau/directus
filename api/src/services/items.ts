@@ -2940,12 +2940,18 @@ implements AbstractService<Item> {
 			.filter((takenOverName) => skippedKeyNames.has(takenOverName)));
 	}
 
+	/**
+	 * The rows of this collection a hook took over, from the `firstIndex`-th
+	 * take-over recorded on.
+	 */
 	private takenOverKeysOf(
 		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+		firstIndex = 0,
 	): PrimaryKey[] {
 		const takenOverPrefix = takenOverScopedCacheKey(this.collection, '');
 
 		return [...declarations.takenOverKeys]
+			.slice(firstIndex)
 			.filter((takenOverName) => takenOverName.startsWith(takenOverPrefix))
 			.map((takenOverName) => takenOverName.slice(takenOverPrefix.length));
 	}
@@ -3821,6 +3827,7 @@ implements AbstractService<Item> {
 			hookAddedKeys,
 			hookAddedSnapshots,
 			payloadActionEvents,
+			runWrittenKeyNames,
 		} = await transaction(
 			this.knex,
 			async (knex) => {
@@ -3830,6 +3837,7 @@ implements AbstractService<Item> {
 				const hookAddedKeys: PrimaryKey[] = [];
 				const hookAddedSnapshots: ScopedCacheSnapshot[] = [];
 				const payloadActionEvents: ActionEventParams[] = [];
+				const runWrittenKeyNames = new Set<string>();
 				let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
 
 				const childOpts: DeferredPurgeOptions = {
@@ -3883,8 +3891,25 @@ implements AbstractService<Item> {
 							?.slice(runOffset, runOffset + run.length),
 					};
 
-					for (const primaryKey of await service.upsertRun(run, runOpts)) {
+					const takeoverCountBefore = scopedCacheHookDeclarations.takenOverKeys.size;
+					const runKeys = await service.upsertRun(run, runOpts);
+
+					const runTakenOverNames = new Set(this.takenOverKeysOf(
+						scopedCacheHookDeclarations,
+						takeoverCountBefore,
+					).map((takenOverKey) => this.primaryKeyNameOf(takenOverKey)));
+
+					for (const primaryKey of runKeys) {
 						primaryKeys.push(primaryKey);
+
+						// A key a later run takes over inert is still a row this run wrote.
+						if (
+							primaryKey !== null
+							&& primaryKey !== undefined
+							&& !runTakenOverNames.has(this.primaryKeyNameOf(primaryKey))
+						) {
+							runWrittenKeyNames.add(this.primaryKeyNameOf(primaryKey));
+						}
 					}
 				}
 
@@ -3905,6 +3930,7 @@ implements AbstractService<Item> {
 					hookAddedKeys,
 					hookAddedSnapshots,
 					payloadActionEvents,
+					runWrittenKeyNames,
 				};
 			},
 			opts.mutationTracker.snapshot(),
@@ -3958,7 +3984,9 @@ implements AbstractService<Item> {
 		const writtenKeys = returnedKeys.filter((key) => {
 			const keyName = this.primaryKeyNameOf(key);
 
-			return inputKeyNames.has(keyName) || !inertKeyNames.has(keyName);
+			return inputKeyNames.has(keyName)
+				|| runWrittenKeyNames.has(keyName)
+				|| !inertKeyNames.has(keyName);
 		});
 
 		// Every row an inert take-over: no entry can have gone stale, and purging

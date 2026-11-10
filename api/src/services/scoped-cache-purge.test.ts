@@ -3330,6 +3330,51 @@ describe(oneLine`
 		});
 
 		it(oneLine`
+			an upsert still reads back a row one run inserts that a later run's create
+			takes over and declares inert
+		`, async () => {
+			tracker.on.insert('test').response([100]);
+			tracker.on.select('test').response([{ id: 100, student: 'A' }]);
+
+			let createCount = 0;
+
+			const takeOverSecondInert = (entries: any, _meta: any, ctx: any) => {
+				createCount += 1;
+
+				if (createCount === 1) {
+					return entries;
+				}
+
+				return mapCreateRows(entries, async () => {
+					ctx.scopedCache.skipPurgeFor(100);
+					return 100;
+				});
+			};
+
+			emitter.onFilter('test.items.create', takeOverSecondInert);
+
+			try {
+				await expect(service().upsertMany(
+					[{ name: 'x', student: 'A' }, { name: 'x', student: 'A' }],
+					{ mutationBatching: 'disableBatching' },
+				))
+					.resolves
+					.toEqual([100, 100]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[{ collection: 'test', pinnedScope: { id: ['100'], student: ['a'] } }],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOverSecondInert);
+			}
+		});
+
+		it(oneLine`
 			an upsert whose create a hook takes over and declares by key reads the
 			taken-over row back
 		`, async () => {
