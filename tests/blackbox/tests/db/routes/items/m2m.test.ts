@@ -2720,8 +2720,8 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								fields: [
 									'*',
 									'ingredients.id',
-									`ingredients.${localCollectionIngredients}.id`,
-									`ingredients.${localCollectionIngredients}.name`,
+									`ingredients.${localCollectionIngredients}_id.id`,
+									`ingredients.${localCollectionIngredients}_id.name`,
 								],
 								filter: { id: { _in: foodsID } },
 							});

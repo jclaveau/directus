@@ -53,7 +53,10 @@ import { isUniqueViolation } from '../database/errors/dialects/postgres.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';
-import getDatabase, { getDatabaseForAccountability } from '../database/index.js';
+import getDatabase, {
+	getDatabaseClient,
+	getDatabaseForAccountability,
+} from '../database/index.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
@@ -93,6 +96,20 @@ const env = useEnv();
 
 // Keys per existence probe, well under Postgres' 65535 bind parameters.
 const UPSERT_PROBE_CHUNK_SIZE = 10_000;
+
+// Postgres' protocol counts a statement's bind parameters on 2 bytes.
+const POSTGRES_BIND_PARAMETER_LIMIT = 65_535;
+
+// The keys a cycle past the bind parameters is named by.
+const NAMED_CYCLE_KEYS = 10;
+
+function bindParameterCountOf(insertRows: Record<string, unknown>[]): number {
+	return insertRows.reduce((parameterCount, insertRow) => {
+		return parameterCount + Object.values(insertRow)
+			.filter((rowValue) => rowValue !== undefined)
+			.length;
+	}, 0);
+}
 
 /**
  * The options `upsertMany` hands the updates it defers its purge for. Only the
@@ -470,8 +487,9 @@ implements AbstractService<Item> {
 	}
 
 	/**
-	 * Create one or more new items at once, wrapped in a transaction. Uses a single batchInsert
-	 * where the vendor preserves RETURNING order, otherwise falls back to per-row inserts.
+	 * Create one or more new items at once, wrapped in a transaction. Uses one
+	 * insert per chunk where the vendor preserves RETURNING order, otherwise
+	 * falls back to per-row inserts.
 	 */
 	async createMany(
 		data: Partial<Item>[],
@@ -499,10 +517,11 @@ implements AbstractService<Item> {
 			? this.batchRowNamesOf(data)
 			: [];
 
-		const writeOrder = this.writeOrderOf(batchRowNames);
+		const writeGroups = this.writeGroupsOf(batchRowNames);
+		const writeOrder = writeGroups.flat();
 
 		// the rows a row names are written first; keys answer in payload order
-		if (writeOrder !== null) {
+		if (writeOrder.some((rowIndex, writeIndex) => rowIndex !== writeIndex)) {
 			untrackRows();
 
 			// a subclass override already ran for the whole batch
@@ -853,7 +872,14 @@ implements AbstractService<Item> {
 
 			try {
 				if (useBatchInsert) {
-					const chunkSize = env['DB_BATCH_INSERT_CHUNK_SIZE'] as number | undefined;
+					// knex's batchInsert default
+					const chunkSize = env['DB_BATCH_INSERT_CHUNK_SIZE'] as number | undefined
+						?? 1000;
+
+					if (!(chunkSize >= 1)) {
+						throw new Error('DB_BATCH_INSERT_CHUNK_SIZE is'
+							+ ` ${JSON.stringify(chunkSize)}, it must be 1 or more`);
+					}
 
 					const rowsToInsert = getHelpers(trx).capabilities.padRowsForBatchInsert(
 						prepared.map((p) => p.payloadWithoutAliases),
@@ -863,12 +889,93 @@ implements AbstractService<Item> {
 						},
 					);
 
-					const insertedRows = (await trx
-						.batchInsert(this.collection, rowsToInsert, chunkSize)
-						.returning(primaryKeyField)) as unknown as Array<Record<string, unknown> | PrimaryKey>;
+					const writeGroupOfRow = new Map(writeGroups.flatMap((writeGroup) => {
+						return writeGroup.map((rowIndex) => [rowIndex, writeGroup] as const);
+					}));
+
+					// a cycle's rows share a statement, the keys being checked at its end
+					const insertChunks: Record<string, unknown>[][][] = [];
+					let previousWriteGroup: number[] | undefined;
+					let lastChunkRowCount = 0;
+
+					for (const [rowPosition, preparedRow] of prepared.entries()) {
+						const rowToInsert = rowsToInsert[rowPosition]!;
+						const writeGroup = writeGroupOfRow.get(preparedRow.index);
+						const lastChunk = insertChunks.at(-1);
+
+						if (
+							lastChunk !== undefined
+							&& writeGroup !== undefined
+							&& writeGroup === previousWriteGroup
+						) {
+							lastChunk.at(-1)!.push(rowToInsert);
+							lastChunkRowCount++;
+						}
+						else if (
+							lastChunk !== undefined
+							&& lastChunkRowCount + (writeGroup?.length ?? 1) <= chunkSize
+						) {
+							lastChunk.push([rowToInsert]);
+							lastChunkRowCount++;
+						}
+						else {
+							insertChunks.push([[rowToInsert]]);
+							lastChunkRowCount = 1;
+						}
+
+						previousWriteGroup = writeGroup;
+					}
+
+					const insertedRows: Array<Record<string, unknown> | PrimaryKey> = [];
+
+					for (const insertChunk of insertChunks) {
+						const chunkParameterCount = bindParameterCountOf(insertChunk.flat());
+
+						// TODO(#610): CockroachDB binds at most 65535 parameters too
+						if (
+							getDatabaseClient(trx) === 'postgres'
+							&& chunkParameterCount > POSTGRES_BIND_PARAMETER_LIMIT
+						) {
+							// a cycle's rows cannot be cut apart: it is named
+							const overflowingCycle = insertChunk.find((groupRows) => {
+								return bindParameterCountOf(groupRows)
+									> POSTGRES_BIND_PARAMETER_LIMIT;
+							});
+
+							throw new InvalidPayloadError({
+								reason: overflowingCycle === undefined
+									? `Inserting ${JSON.stringify(insertChunk.flat().length)}`
+										+ ' rows in one statement takes'
+										+ ` ${JSON.stringify(chunkParameterCount)} bind`
+										+ ' parameters, past the'
+										+ ` ${JSON.stringify(POSTGRES_BIND_PARAMETER_LIMIT)}`
+										+ ' of Postgres; send fewer rows or lower'
+										+ ' DB_BATCH_INSERT_CHUNK_SIZE'
+									// a Postgres row holds up to 1600 values: over 40 rows here
+									: `Rows ${overflowingCycle
+										.slice(0, NAMED_CYCLE_KEYS)
+										.map((cycleRow) => JSON.stringify(cycleRow[primaryKeyField]))
+										.join(', ')} and ${JSON.stringify(
+										overflowingCycle.length - NAMED_CYCLE_KEYS,
+									)} more`
+										+ ' name each other in a cycle, so they are inserted'
+										+ ' in one statement, whose'
+										+ ` ${JSON.stringify(chunkParameterCount)} bind`
+										+ ' parameters pass the'
+										+ ` ${JSON.stringify(POSTGRES_BIND_PARAMETER_LIMIT)}`
+										+ ' of Postgres',
+							});
+						}
+
+						insertedRows.push(...await trx(this.collection)
+							.insert(insertChunk.flat())
+							.returning(primaryKeyField));
+					}
 
 					if (insertedRows.length !== prepared.length) {
-						throw new Error(`batchInsert returned ${insertedRows.length} rows but expected ${prepared.length}`);
+						throw new Error('The insert returned'
+							+ ` ${JSON.stringify(insertedRows.length)}`
+							+ ` rows but expected ${JSON.stringify(prepared.length)}`);
 					}
 
 					for (let i = 0; i < prepared.length; i++) {
@@ -1210,8 +1317,14 @@ implements AbstractService<Item> {
 		for (const [rowIndex, row] of data.entries()) {
 			const key = row[primaryKeyField];
 
-			if (!isMissingPrimaryKey(key) && !rowIndexOfKey.has(String(key))) {
-				rowIndexOfKey.set(String(key), rowIndex);
+			if (isMissingPrimaryKey(key)) {
+				continue;
+			}
+
+			const keyName = this.primaryKeyNameOf(key);
+
+			if (!rowIndexOfKey.has(keyName)) {
+				rowIndexOfKey.set(keyName, rowIndex);
 			}
 		}
 
@@ -1226,7 +1339,7 @@ implements AbstractService<Item> {
 		): void => {
 			const rowIndex = isMissingPrimaryKey(key)
 				? undefined
-				: rowIndexOfKey.get(String(key));
+				: rowIndexOfKey.get(this.primaryKeyNameOf(key as PrimaryKey));
 
 			if (rowIndex !== undefined) {
 				rowNames.push({ rowIndex, byNestedRecord });
@@ -1325,14 +1438,15 @@ implements AbstractService<Item> {
 	}
 
 	/**
-	 * The order to write a batch's rows in: each row after the rows it names,
-	 * otherwise in payload order. Rows naming each other in a cycle are written
-	 * together, in payload order, after the rows the cycle names. Null for the
-	 * payload order itself. Tarjan's strongly connected components, walked with
-	 * a stack of its own, so a long parent chain cannot overflow the call stack.
+	 * The batch's rows in the order to write them, grouped: each row after the
+	 * rows it names, otherwise in payload order. Rows naming each other in a
+	 * cycle form one group, in payload order, after the rows the cycle names;
+	 * every other row is a group of its own. Tarjan's strongly connected
+	 * components, walked with a stack of its own, so a long parent chain cannot
+	 * overflow the call stack.
 	 */
-	private writeOrderOf(batchRowNames: BatchRowName[][]): number[] | null {
-		const writeOrder: number[] = [];
+	private writeGroupsOf(batchRowNames: BatchRowName[][]): number[][] {
+		const writeGroups: number[][] = [];
 		const visitIndexOfRow = new Map<number, number>();
 		const lowestVisitIndexOfRow = new Map<number, number>();
 		const unwrittenRows: number[] = [];
@@ -1389,22 +1503,22 @@ implements AbstractService<Item> {
 				}
 
 				// the row first visited of its cycle writes the whole cycle
+				// TODO(#610): MariaDB checks the keys row by row, refusing a cycle
 				if (lowestVisitIndex === visitIndexOfRow.get(rowIndex)) {
 					const cycleRows = unwrittenRows.splice(
 						unwrittenRows.indexOf(rowIndex),
 					);
 
-					for (const cycleRow of cycleRows.sort((left, right) => left - right)) {
+					for (const cycleRow of cycleRows) {
 						unwrittenRowSet.delete(cycleRow);
-						writeOrder.push(cycleRow);
 					}
+
+					writeGroups.push(cycleRows.sort((left, right) => left - right));
 				}
 			}
 		}
 
-		return writeOrder.some((rowIndex, writeIndex) => rowIndex !== writeIndex)
-			? writeOrder
-			: null;
+		return writeGroups;
 	}
 
 	/**

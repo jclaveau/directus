@@ -641,7 +641,7 @@ describe('Integration Tests', () => {
 		});
 
 		describe('createMany', () => {
-			// A schema without relations so batchInsert is the only query path under test.
+			// A schema without relations so the insert is the only query path under test.
 			const batchSchema = new SchemaBuilder()
 				.collection('test', (c) => {
 					c.field('id').id();
@@ -669,21 +669,32 @@ describe('Integration Tests', () => {
 				filterSpy.mockRestore();
 			});
 
-			it('uses a single batchInsert and maps the returned keys positionally when the dialect preserves RETURNING order', async () => {
+			it(oneLine`
+				uses a single insert and maps the returned keys positionally when the
+				dialect preserves RETURNING order
+			`, async () => {
 				// postgres preserves insert order in RETURNING -> the batch path is taken for >1 row
 				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
 				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 20 }]);
-				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insertInto = vi.fn().mockReturnValue({ insert });
 
 				const transactionSpy = vi
 					.spyOn(db, 'transaction')
-					.mockImplementation(async (callback) => callback({ ...db, batchInsert } as any));
+					.mockImplementation(async (callback) => {
+						return callback(Object.assign(insertInto, db) as any);
+					});
 
 				const result = await batchService().createMany([{ name: 'a' }, { name: 'b' }]);
 
-				expect(batchInsert).toHaveBeenCalledTimes(1);
-				expect(batchInsert.mock.calls[0]![1]).toEqual([{ name: 'a' }, { name: 'b' }]);
+				expect(insertInto).toHaveBeenCalledExactlyOnceWith('test');
+
+				expect(insert).toHaveBeenCalledExactlyOnceWith([
+					{ name: 'a' },
+					{ name: 'b' },
+				]);
+
 				expect(result).toEqual([10, 20]);
 
 				transactionSpy.mockRestore();
@@ -699,7 +710,8 @@ describe('Integration Tests', () => {
 					.mockResolvedValue(undefined);
 
 				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 11 }]);
-				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insertInto = vi.fn().mockReturnValue({ insert });
 				// The end-of-transaction reset runs raw SQL the spread
 				// transaction does not carry.
 				const raw = vi.fn();
@@ -707,12 +719,12 @@ describe('Integration Tests', () => {
 				const transactionSpy = vi
 					.spyOn(db, 'transaction')
 					.mockImplementation(async (callback) =>
-						callback({ ...db, batchInsert, raw } as any));
+						callback(Object.assign(insertInto, db, { raw }) as any));
 
 				await batchService().createMany([{ id: 10, name: 'a' }, { name: 'b' }]);
 
 				expect(raiseSpy).toHaveBeenCalledWith('test', 'id', 10);
-				expect(batchInsert).toHaveBeenCalledTimes(1);
+				expect(insert).toHaveBeenCalledTimes(1);
 
 				raiseSpy.mockRestore();
 				transactionSpy.mockRestore();
@@ -728,13 +740,14 @@ describe('Integration Tests', () => {
 					.mockResolvedValue(undefined);
 
 				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 11 }]);
-				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insertInto = vi.fn().mockReturnValue({ insert });
 				const raw = vi.fn();
 
 				const transactionSpy = vi
 					.spyOn(db, 'transaction')
 					.mockImplementation(async (callback) =>
-						callback({ ...db, batchInsert, raw } as any));
+						callback(Object.assign(insertInto, db, { raw }) as any));
 
 				await batchService().createMany([
 					{ id: 10, name: 'a' },
@@ -782,16 +795,22 @@ describe('Integration Tests', () => {
 				transactionSpy.mockRestore();
 			});
 
-			it('throws when batchInsert returns fewer rows than prepared (positional mapping would be wrong)', async () => {
+			it(oneLine`
+				throws when the insert returns fewer rows than prepared (positional
+				mapping would be wrong)
+			`, async () => {
 				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
 				// two rows in, only one key back -> the positional row->key mapping is unsafe
 				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }]);
-				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insertInto = vi.fn().mockReturnValue({ insert });
 
 				const transactionSpy = vi
 					.spyOn(db, 'transaction')
-					.mockImplementation(async (callback) => callback({ ...db, batchInsert } as any));
+					.mockImplementation(async (callback) => {
+						return callback(Object.assign(insertInto, db) as any);
+					});
 
 				await expect(batchService().createMany([{ name: 'a' }, { name: 'b' }])).rejects.toThrow(/expected 2/);
 
@@ -801,12 +820,12 @@ describe('Integration Tests', () => {
 			it(oneLine`
 				refuses sparse grouped entries carrying a property of their own
 			`, async () => {
-				const batchInsert = vi.fn();
+				const insertInto = vi.fn();
 
 				vi
 					.spyOn(db, 'transaction')
 					.mockImplementation(async (callback) => {
-						return callback({ ...db, batchInsert } as any);
+						return callback(Object.assign(insertInto, db) as any);
 					});
 
 				vi
@@ -821,19 +840,20 @@ describe('Integration Tests', () => {
 					batchService().createMany([{ name: 'a' }, { name: 'b' }, { name: 'c' }]),
 				).rejects.toThrow(InvalidPayloadError);
 
-				expect(batchInsert).not.toHaveBeenCalled();
+				expect(insertInto).not.toHaveBeenCalled();
 			});
 
 			it('refuses a grouped hook deleting a field off the entries', async () => {
 				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
 				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 20 }]);
-				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insertInto = vi.fn().mockReturnValue({ insert });
 
 				const transactionSpy = vi
 					.spyOn(db, 'transaction')
 					.mockImplementation(async (callback) => {
-						return callback({ ...db, batchInsert } as any);
+						return callback(Object.assign(insertInto, db) as any);
 					});
 
 				const groupHook = (entries: any) => {
@@ -855,7 +875,7 @@ describe('Integration Tests', () => {
 							+ 'a hook that handles one row maps them with mapCreateRows.',
 					});
 
-					expect(batchInsert).not.toHaveBeenCalled();
+					expect(insertInto).not.toHaveBeenCalled();
 				}
 				finally {
 					emitter.offFilter('items.create', groupHook);
@@ -867,12 +887,13 @@ describe('Integration Tests', () => {
 				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
 				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 20 }]);
-				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const insertInto = vi.fn().mockReturnValue({ insert });
 
 				const transactionSpy = vi
 					.spyOn(db, 'transaction')
 					.mockImplementation(async (callback) => {
-						return callback({ ...db, batchInsert } as any);
+						return callback(Object.assign(insertInto, db) as any);
 					});
 
 				const groupHook = (entries: any) => {
@@ -896,7 +917,7 @@ describe('Integration Tests', () => {
 							+ 'a hook that handles one row maps them with mapCreateRows.',
 					});
 
-					expect(batchInsert).not.toHaveBeenCalled();
+					expect(insertInto).not.toHaveBeenCalled();
 				}
 				finally {
 					emitter.offFilter('items.create', groupHook);
@@ -3056,9 +3077,11 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it(oneLine`
-			createMany formats uuid PKs through the batchInsert path (postgres returns in order)
+			createMany formats uuid PKs through the batch insert path (postgres returns
+			in order)
 		`, async () => {
-			// >1 row + postgres preservesInsertOrderInReturning() → the batchInsert branch, where
+			// >1 row + postgres preservesInsertOrderInReturning() → the batch insert
+			// branch, where
 			// each returned uuid is run through formatUUID.
 			tracker.on.insert('uuid_coll').response([
 				{ id: '11111111-1111-1111-1111-111111111111' },
@@ -3072,7 +3095,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(keys[1]).toMatch(uuidPattern);
 		});
 
-		it('createMany batchInsert reads a bare scalar returning value', async () => {
+		it('createMany batch insert reads a bare scalar returning value', async () => {
 			// A driver that returns bare PKs (not `{ id }` objects) exercises the `: row` arm.
 			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
 			tracker.on.insert('test').response([1, 2]);
@@ -6293,10 +6316,8 @@ describe('Services / Items / a batched upsert', () => {
 			'update `test` set `name` = ? where `id` in (?)',
 			'update `test` set `name` = ? where `id` in (?)',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `test` (`id`, `name`) select ? as `id`, ? as `name`'
 				+ ' union all select ? as `id`, ? as `name` returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 
@@ -6817,10 +6838,8 @@ describe('Services / Items / a batched upsert', () => {
 		expect(sqlStatements).toStrictEqual([
 			'BEGIN;',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `test` (`name`) select ? as `name`'
 				+ ' union all select ? as `name` returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 	});
@@ -7115,10 +7134,8 @@ describe('Services / Items / the nested O2M rows of several parents', () => {
 		expect(sqlStatements).toStrictEqual([
 			'BEGIN;',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `test` (`id`) select ? as `id` union all select ? as `id`'
 				+ ' returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'select `id`, `parent_id` from `children` where `id` in (?, ?, ?)',
 			'select `id` from `children` where `id` in (?, ?, ?)',
 			'update `children` set `parent_id` = ? where `id` in (?)',
@@ -7526,17 +7543,13 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 			'select `id` from `country` where `id` in (?, ?)',
 			'update `country` set `name` = ? where `id` in (?)',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `country` (`id`, `name`) select ? as `id`, ? as `name`'
 				+ ' union all select ? as `id`, ? as `name` returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `test` (`country`, `id`) select ? as `country`, ? as `id`'
 				+ ' union all select ? as `country`, ? as `id`'
 				+ ' union all select ? as `country`, ? as `id`'
 				+ ' union all select ? as `country`, ? as `id` returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 	});
@@ -7559,12 +7572,10 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 			'select `id` from `country` where `id` in (?)',
 			'insert into `country` (`id`) values (?) returning `id`',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `test` (`country`, `id`) select ? as `country`, ? as `id`'
 				+ ' union all select ? as `country`, ? as `id`'
 				+ ' union all select ? as `country`, ? as `id`'
 				+ ' union all select ? as `country`, ? as `id` returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 	});
@@ -7585,13 +7596,11 @@ describe('Services / Items / the nested M2O and A2O rows of several rows', () =>
 			'insert into `post` (`title`) values (?) returning `id`',
 			'insert into `page` (`title`) values (?) returning `id`',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `test` (`collection`, `id`, `item`)'
 				+ ' select ? as `collection`, ? as `id`, ? as `item`'
 				+ ' union all select ? as `collection`, ? as `id`, ? as `item`'
 				+ ' union all select ? as `collection`, ? as `id`, ? as `item`'
 				+ ' returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 
@@ -8775,10 +8784,8 @@ describe('Services / Items / mutationBatching', () => {
 			'update `test` set `name` = ? where `id` in (?)',
 			'update `test` set `name` = ? where `id` in (?)',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `test` (`id`, `name`) select ? as `id`, ? as `name` '
 			+ 'union all select ? as `id`, ? as `name` returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 
@@ -9081,10 +9088,8 @@ describe('Services / Items / mutationBatching', () => {
 			'select `id` from `refs` where `id` in (?)',
 			'insert into `refs` (`id`) values (?) returning `id`',
 			'select sqlite_version() as version limit ?',
-			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
 			'insert into `entries` (`id`, `ref`) select ? as `id`, ? as `ref` '
 			+ 'union all select ? as `id`, ? as `ref` returning `id`',
-			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
 			'COMMIT;',
 		]);
 	});
@@ -9214,6 +9219,42 @@ describe('Services / Items / mutationBatching', () => {
 					.build(),
 			})
 				.createMany([{ id: 1, parent: 2 }, { id: 2 }]))
+				.resolves.toStrictEqual([1, 2]);
+		}
+		finally {
+			delete env['DB_BATCH_INSERT_CHUNK_SIZE'];
+		}
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, parent: 2 },
+			{ id: 2, parent: null },
+		]);
+	});
+
+	it('inserts first a later row named by another spelling of its key', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		env['DB_BATCH_INSERT_CHUNK_SIZE'] = 1;
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+						c.field('parent').m2o('entries');
+					})
+					.build(),
+			})
+				.createMany([{ id: 1, parent: '02' }, { id: 2 }]))
 				.resolves.toStrictEqual([1, 2]);
 		}
 		finally {
@@ -9359,6 +9400,184 @@ describe('Services / Items / mutationBatching', () => {
 			{ id: 3, parent: 4 },
 			{ id: 4, parent: null },
 		]);
+	});
+
+	it('inserts a cycle a chunk would cut in the next chunk', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		env['DB_BATCH_INSERT_CHUNK_SIZE'] = 2;
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+						c.field('parent').m2o('entries');
+					})
+					.build(),
+			})
+				.createMany([
+					{ id: 5 },
+					{ id: 1, parent: 2 },
+					{ id: 2, parent: 1 },
+				]))
+				.resolves.toStrictEqual([5, 1, 2]);
+		}
+		finally {
+			delete env['DB_BATCH_INSERT_CHUNK_SIZE'];
+		}
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, parent: 2 },
+			{ id: 2, parent: 1 },
+			{ id: 5, parent: null },
+		]);
+	});
+
+	it('inserts a cycle longer than a chunk in one statement', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		env['DB_BATCH_INSERT_CHUNK_SIZE'] = 2;
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+						c.field('parent').m2o('entries');
+					})
+					.build(),
+			})
+				.createMany([
+					{ id: 1, parent: 2 },
+					{ id: 2, parent: 3 },
+					{ id: 3, parent: 1 },
+				]))
+				.resolves.toStrictEqual([1, 2, 3]);
+		}
+		finally {
+			delete env['DB_BATCH_INSERT_CHUNK_SIZE'];
+		}
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, parent: 2 },
+			{ id: 2, parent: 3 },
+			{ id: 3, parent: 1 },
+		]);
+	});
+
+	it('refuses a cycle past the Postgres bind parameters', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.integer('parent');
+		});
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('parent').m2o('entries');
+				})
+				.build(),
+		})
+			// a cycle of 32768 rows, 2 values each
+			.createMany(Array.from({ length: 32768 }, (_, rowIndex) => {
+				return { id: rowIndex + 1, parent: (rowIndex + 1) % 32768 + 1 };
+			})))
+			.rejects.toMatchObject({
+				message: 'Invalid payload. Rows 1, 2, 3, 4, 5, 6, 7, 8, 9, 10'
+					+ ' and 32758 more name each other in a cycle, so they are'
+					+ ' inserted in one statement, whose 65536 bind parameters'
+					+ ' pass the 65535 of Postgres.',
+			});
+
+		await expect(database('entries')).resolves.toStrictEqual([]);
+	});
+
+	it('refuses a chunk past the Postgres bind parameters', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.integer('parent');
+		});
+
+		env['DB_BATCH_INSERT_CHUNK_SIZE'] = 40000;
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+						c.field('parent').m2o('entries');
+					})
+					.build(),
+			})
+				// 32768 rows, 2 values each
+				.createMany(Array.from({ length: 32768 }, (_, rowIndex) => {
+					return { id: rowIndex + 1, parent: null };
+				})))
+				.rejects.toMatchObject({
+					message: 'Invalid payload. Inserting 32768 rows in one statement'
+						+ ' takes 65536 bind parameters, past the 65535 of Postgres;'
+						+ ' send fewer rows or lower DB_BATCH_INSERT_CHUNK_SIZE.',
+				});
+		}
+		finally {
+			delete env['DB_BATCH_INSERT_CHUNK_SIZE'];
+		}
+
+		await expect(database('entries')).resolves.toStrictEqual([]);
+	});
+
+	it('refuses a DB_BATCH_INSERT_CHUNK_SIZE below 1', async () => {
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+		});
+
+		env['DB_BATCH_INSERT_CHUNK_SIZE'] = 0;
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+					})
+					.build(),
+			})
+				.createMany([{ id: 1 }, { id: 2 }]))
+				.rejects.toMatchObject({
+					message: 'DB_BATCH_INSERT_CHUNK_SIZE is 0, it must be 1 or more',
+				});
+		}
+		finally {
+			delete env['DB_BATCH_INSERT_CHUNK_SIZE'];
+		}
+
+		await expect(database('entries')).resolves.toStrictEqual([]);
 	});
 
 	it('runs a subclass createMany once for a reordered batch', async () => {
@@ -9889,6 +10108,352 @@ describe('Services / Items / mutationBatching', () => {
 		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
 			{ id: 1, name: null, parent: null },
 			{ id: 2, name: 'row', parent: 1 },
+		]);
+	});
+
+	it('nestedUpdates skip: leaves an altered child already linked', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.string('name');
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		await database('entries').insert([
+			{ id: 1 },
+			{ id: 2, name: 'row', parent: 1 },
+		]);
+
+		emitter.onFilter('entries.items.update', recordUpdateFilter);
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+						c.field('name').string();
+						c.field('parent').m2o('entries');
+						c.field('children').o2m('entries', 'parent');
+					})
+					.build(),
+			})
+				.updateOne(
+					1,
+					{ children: { update: [{ id: 2, name: 'nested' }] } },
+					{ nestedUpdates: 'skip' },
+				))
+				.resolves.toStrictEqual(1);
+		}
+		finally {
+			emitter.offFilter('entries.items.update', recordUpdateFilter);
+		}
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [{
+				data: { children: { update: [{ id: 2, name: 'nested' }] } },
+				keys: [1],
+			}]],
+		]);
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: null, parent: null },
+			{ id: 2, name: 'row', parent: 1 },
+		]);
+	});
+
+	it('nestedUpdates apply: leaves a linked child of a key alone', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.string('name');
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		await database('entries').insert([
+			{ id: 1 },
+			{ id: 2, name: 'row', parent: 1 },
+		]);
+
+		emitter.onFilter('entries.items.update', recordUpdateFilter);
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+						c.field('name').string();
+						c.field('parent').m2o('entries');
+						c.field('children').o2m('entries', 'parent');
+					})
+					.build(),
+			})
+				.updateOne(1, { children: { update: [{ id: 2 }] } }))
+				.resolves.toStrictEqual(1);
+		}
+		finally {
+			emitter.offFilter('entries.items.update', recordUpdateFilter);
+		}
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [{
+				data: { children: { update: [{ id: 2 }] } },
+				keys: [1],
+			}]],
+		]);
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: null, parent: null },
+			{ id: 2, name: 'row', parent: 1 },
+		]);
+	});
+
+	it('nestedUpdates apply: leaves a child of a uuid in capitals', async () => {
+		await database.schema.createTable('pages', (table) => {
+			table.string('id').primary();
+		});
+
+		await database.schema.createTable('blocks', (table) => {
+			table.integer('id').primary();
+			table.string('page');
+		});
+
+		// the uuid stored in lowercase, as Postgres returns it
+		await database('pages').insert({ id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' });
+
+		await database('blocks').insert({
+			id: 2,
+			page: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+		});
+
+		emitter.onFilter('pages.items.update', recordUpdateFilter);
+		emitter.onFilter('blocks.items.update', recordUpdateFilter);
+
+		try {
+			await expect(new ItemsService('pages', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('pages', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('blocks').o2m('blocks', 'page');
+					})
+					.collection('blocks', (c) => {
+						c.field('id').id();
+						c.field('page').m2o('pages');
+					})
+					.build(),
+			})
+				.updateOne(
+					'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11',
+					{ blocks: { update: [{ id: 2 }] } },
+				))
+				.resolves.toStrictEqual('A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11');
+		}
+		finally {
+			emitter.offFilter('pages.items.update', recordUpdateFilter);
+			emitter.offFilter('blocks.items.update', recordUpdateFilter);
+		}
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [{
+				data: { blocks: { update: [{ id: 2 }] } },
+				keys: ['A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11'],
+			}]],
+		]);
+
+		await expect(database('blocks')).resolves.toStrictEqual([
+			{ id: 2, page: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' },
+		]);
+	});
+
+	it('nestedUpdates refuse: takes a child naming a uuid in capitals', async () => {
+		await database.schema.createTable('pages', (table) => {
+			table.string('id').primary();
+		});
+
+		await database.schema.createTable('blocks', (table) => {
+			table.integer('id').primary();
+			table.string('page');
+		});
+
+		// the uuid stored in lowercase, as Postgres returns it
+		await database('pages').insert({ id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' });
+
+		await database('blocks').insert({
+			id: 2,
+			page: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+		});
+
+		await expect(new ItemsService('pages', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('pages', (c) => {
+					c.field('id').uuid()
+						.primary();
+
+					c.field('blocks').o2m('blocks', 'page');
+				})
+				.collection('blocks', (c) => {
+					c.field('id').id();
+					c.field('page').m2o('pages');
+				})
+				.build(),
+		})
+			.updateOne(
+				'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11',
+				{
+					blocks: {
+						update: [{ id: 2, page: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' }],
+					},
+				},
+				{ nestedUpdates: 'refuse' },
+			))
+			.resolves.toStrictEqual('A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11');
+
+		await expect(database('blocks')).resolves.toStrictEqual([
+			{ id: 2, page: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' },
+		]);
+	});
+
+	it('nestedUpdates refuse: refuses a nested any-to-one record', async () => {
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.string('collection');
+			table.string('item');
+		});
+
+		await database.schema.createTable('pages', (table) => {
+			table.integer('id').primary();
+			table.string('title');
+		});
+
+		await database('pages').insert({ id: 2, title: 'row' });
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('collection').string();
+					c.field('item').a2o(['pages']);
+				})
+				.collection('pages', (c) => {
+					c.field('id').id();
+					c.field('title').string();
+				})
+				.build(),
+		})
+			.createMany(
+				[{ id: 1, collection: 'pages', item: { id: 2, title: 'nested' } }],
+				{ nestedUpdates: 'refuse' },
+			))
+			.rejects
+			.toThrow(new InvalidPayloadError({
+				reason: 'Record 2 of "pages" is nested with fields besides its key,'
+					+ ' refused by nestedUpdates=refuse',
+			}));
+
+		await expect(database('entries')).resolves.toStrictEqual([]);
+
+		await expect(database('pages')).resolves.toStrictEqual([
+			{ id: 2, title: 'row' },
+		]);
+	});
+
+	it('nestedUpdates skip: names the row of a nested any-to-one record', async () => {
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.string('collection');
+			table.string('item');
+		});
+
+		await database.schema.createTable('pages', (table) => {
+			table.integer('id').primary();
+			table.string('title');
+		});
+
+		await database('pages').insert({ id: 2, title: 'row' });
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('collection').string();
+					c.field('item').a2o(['pages']);
+				})
+				.collection('pages', (c) => {
+					c.field('id').id();
+					c.field('title').string();
+				})
+				.build(),
+		})
+			.createMany(
+				[{ id: 1, collection: 'pages', item: { id: 2, title: 'nested' } }],
+				{ nestedUpdates: 'skip' },
+			))
+			.resolves.toStrictEqual([1]);
+
+		await expect(database('entries')).resolves.toStrictEqual([
+			{ id: 1, collection: 'pages', item: '2' },
+		]);
+
+		await expect(database('pages')).resolves.toStrictEqual([
+			{ id: 2, title: 'row' },
+		]);
+	});
+
+	it('nestedUpdates refuse: refuses a listed child two levels deep', async () => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.string('name');
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		await database('entries').insert({ id: 2, name: 'row' });
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('parent').m2o('entries');
+					c.field('children').o2m('entries', 'parent');
+				})
+				.build(),
+		})
+			.createMany(
+				[{
+					id: 1,
+					children: [{ id: 3, children: [{ id: 2, name: 'nested' }] }],
+				}],
+				{ nestedUpdates: 'refuse' },
+			))
+			.rejects
+			.toThrow(new InvalidPayloadError({
+				reason: 'Record 2 of "entries" is nested with fields besides its key,'
+					+ ' refused by nestedUpdates=refuse',
+			}));
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 2, name: 'row', parent: null },
 		]);
 	});
 
