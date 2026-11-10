@@ -16,7 +16,6 @@
 	},
 	"devDependencies": {
 		"@directus/env": "workspace:*",
-		"@directus/errors": "workspace:*",
 		"@directus/schema": "workspace:*",
 		"@directus/tsconfig": "catalog:",
 		"@directus/types": "workspace:*",
