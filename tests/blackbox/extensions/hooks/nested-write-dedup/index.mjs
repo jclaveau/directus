@@ -6,6 +6,9 @@
 //      the whole create (updateIfDuplicated, nothing to update here).
 // The read runs on the mutation's transaction, so a segment inserted earlier in
 // the same request counts as stored.
+// On this trunk each nested segment reaches the filter in a create of its own,
+// so no scenario reaches the refusal of 1; once nested M2O records batch (#717)
+// the third scenario answers 400 RECORD_NOT_UNIQUE (#720), see #721 (sameRowAs).
 
 import { RecordNotUniqueError } from '@directus/errors';
 
