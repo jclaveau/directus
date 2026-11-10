@@ -876,6 +876,11 @@ implements AbstractService<Item> {
 					const chunkSize = env['DB_BATCH_INSERT_CHUNK_SIZE'] as number | undefined
 						?? 1000;
 
+					if (!(chunkSize >= 1)) {
+						throw new Error('DB_BATCH_INSERT_CHUNK_SIZE is'
+							+ ` ${JSON.stringify(chunkSize)}, it must be 1 or more`);
+					}
+
 					const rowsToInsert = getHelpers(trx).capabilities.padRowsForBatchInsert(
 						prepared.map((p) => p.payloadWithoutAliases),
 						{
