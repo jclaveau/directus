@@ -4180,6 +4180,10 @@ implements AbstractService<Item> {
 	 * collections, may not exist yet, a row a nested write creates would be
 	 * created again, and of two payloads naming one child by key the first would
 	 * keep it, where the last does in payload order.
+	 *
+	 * An m2o record a run may create along with its rows stays in the run:
+	 * `{ tag: { name: 'x' } }` carries no key, so no other payload can name it or
+	 * create it again, and it names no row of this collection and nests none.
 	 */
 	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -4187,6 +4191,8 @@ implements AbstractService<Item> {
 		const selfRelationFields = new Set<string>();
 		// an o2m alias rewrites its children's foreign key, `null` and `[]` included
 		const childrenFields = new Set<string>();
+		// m2o field → its related collection, other than this one
+		const recordCollections = new Map<string, string>();
 
 		for (const relation of this.schema.relations) {
 			if (relation.collection === this.collection) {
@@ -4197,6 +4203,9 @@ implements AbstractService<Item> {
 					|| relation.meta?.one_allowed_collections?.includes(this.collection)
 				) {
 					selfRelationFields.add(relation.field);
+				}
+				else if (relation.related_collection) {
+					recordCollections.set(relation.field, relation.related_collection);
 				}
 			}
 
@@ -4209,11 +4218,39 @@ implements AbstractService<Item> {
 			}
 		}
 
+		const namesThisCollection = (recordCollection: string, recordField: string) => {
+			return this.schema.relations.some((relation) => {
+				return relation.collection === recordCollection
+					&& relation.field === recordField
+					&& (
+						relation.related_collection === this.collection
+						|| relation.meta?.one_allowed_collections?.includes(this.collection)
+					);
+			});
+		};
+
+		const isKeylessFlatRecord = (field: string, record: Partial<Item>) => {
+			const recordCollection = recordCollections.get(field);
+
+			if (recordCollection === undefined) {
+				return false;
+			}
+
+			const { primary } = this.schema.collections[recordCollection]!;
+
+			return isMissingPrimaryKey(record[primary])
+				&& Object.entries(record).every(([recordField, value]) => {
+					return !isPlainObject(value)
+						&& !Array.isArray(value)
+						&& !namesThisCollection(recordCollection, recordField);
+				});
+		};
+
 		const runsAlone = (payload: Partial<Item>) => {
 			return [...nestingFields].some((field) => {
 				const value = payload[field];
 
-				return isPlainObject(value)
+				return (isPlainObject(value) && !isKeylessFlatRecord(field, value))
 					|| (Array.isArray(value) && value.some(isPlainObject));
 			})
 				|| [...childrenFields].some((field) => {

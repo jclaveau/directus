@@ -6799,6 +6799,152 @@ describe('Services / Items / a batched upsert', () => {
 		]);
 	});
 
+	it('upserts the payloads nesting a new keyless record in one run', async () => {
+		const taggedSchema = new SchemaBuilder()
+			.collection('test', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('tag').m2o('tags');
+			})
+			.collection('tags', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.build();
+
+		await database.schema.alterTable('test', (table) => {
+			table.integer('tag');
+		});
+
+		await database.schema.createTable('tags', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		sqlStatements = [];
+
+		await expect(new ItemsService('test', { knex: database, schema: taggedSchema })
+			.upsertMany([
+				{ name: 'a', tag: { name: 'x' } },
+				{ name: 'b', tag: { name: 'y' } },
+				{ name: 'c', tag: { name: 'x' } },
+			])).resolves.toStrictEqual([3, 4, 5]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select sqlite_version() as version limit ?',
+			'insert into `tags` (`name`) select ? as `name`'
+				+ ' union all select ? as `name` union all select ? as `name`'
+				+ ' returning `id`',
+			'select sqlite_version() as version limit ?',
+			'insert into `test` (`name`, `tag`) select ? as `name`, ? as `tag`'
+				+ ' union all select ? as `name`, ? as `tag`'
+				+ ' union all select ? as `name`, ? as `tag` returning `id`',
+			'COMMIT;',
+		]);
+
+		await expect(database('test').select('id', 'name', 'tag')
+			.where('id', '>', 2)
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 3, name: 'a', tag: 1 },
+			{ id: 4, name: 'b', tag: 2 },
+			{ id: 5, name: 'c', tag: 3 },
+		]);
+	});
+
+	it(oneLine`
+		creates a row before the payload after it nests a keyless row pointing
+		back at it
+	`, async () => {
+		const cycleSchema = new SchemaBuilder()
+			.collection('a', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('b').m2o('b');
+			})
+			.collection('b', (c) => {
+				c.field('id').id();
+				c.field('a').m2o('a');
+			})
+			.build();
+
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('a', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('b');
+		});
+
+		await database.schema.createTable('b', (table) => {
+			table.increments('id');
+
+			table.integer('a').references('id')
+				.inTable('a');
+		});
+
+		await expect(new ItemsService('a', { knex: database, schema: cycleSchema })
+			.upsertMany([
+				{ name: 'new', b: null },
+				{ name: 'next', b: { a: 1 } },
+			])).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('b').select('id', 'a')).resolves.toStrictEqual([
+			{ id: 1, a: 1 },
+		]);
+	});
+
+	it(oneLine`
+		creates a row before the payload after it nests a keyless row nesting
+		another
+	`, async () => {
+		const chainSchema = new SchemaBuilder()
+			.collection('a', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('b').m2o('b');
+			})
+			.collection('b', (c) => {
+				c.field('id').id();
+				c.field('c').m2o('c');
+			})
+			.collection('c', (c) => {
+				c.field('id').id();
+				c.field('a').m2o('a');
+			})
+			.build();
+
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('a', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('b');
+		});
+
+		await database.schema.createTable('b', (table) => {
+			table.increments('id');
+			table.integer('c');
+		});
+
+		await database.schema.createTable('c', (table) => {
+			table.increments('id');
+
+			table.integer('a').references('id')
+				.inTable('a');
+		});
+
+		await expect(new ItemsService('a', { knex: database, schema: chainSchema })
+			.upsertMany([
+				{ name: 'new', b: null },
+				{ name: 'next', b: { c: { a: 1 } } },
+			])).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('c').select('id', 'a')).resolves.toStrictEqual([
+			{ id: 1, a: 1 },
+		]);
+	});
+
 	it('creates a row before the payload after it names it as its child', async () => {
 		const nodesSchema = new SchemaBuilder()
 			.collection('nodes', (c) => {
