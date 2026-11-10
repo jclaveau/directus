@@ -7,9 +7,11 @@ Feature: A create hook deduplicating nested records links every row to one recor
     `nested-write-dedup` hook extension does the same on test_nwd_segment,
     unique by `name`.
   - The extension also filters test_nwd_course_segment creates as the
-    planner's junction hook does, for segments named `jn-…` only: one read on
-    the mutation's transaction, and a nested segment whose name is stored
-    becomes its key; a new one stays nested, for the test_nwd_segment filter.
+    planner's junction hooks do, for segments named `jn-…` or `dp-…` only: a
+    row repeating an earlier row's course and segment name answers
+    `sameRowAs` that row; one read on the mutation's transaction, and a nested
+    segment whose name is stored becomes its key; a new one stays nested, for
+    the test_nwd_segment filter.
   - A course links its segments through test_nwd_course_segment rows, as the
     planner's student_course does. A segment's key is generated, so the
     responses read each segment by name.
@@ -151,3 +153,29 @@ Feature: A create hook deduplicating nested records links every row to one recor
       | jn-a2 | jn-a   |
       | jn-b1 | jn-b   |
       | jn-b2 | jn-b   |
+
+  Scenario: a course nesting the same new segment twice links it once
+    When these requests get these responses:
+      | request                                        | response                |
+      | method: POST                                   | code: 200               |+
+      | path: /items/test_nwd_course                   | body:                   |
+      | query:                                         |   data:                 |
+      |   fields: id,segments.id,segments.segment.name |     id: dp-a            |
+      | payload:                                       |     segments:           |
+      |   id: dp-a                                     |       - id: dp-a1       |
+      |   segments:                                    |         segment:        |
+      |     - id: dp-a1                                |           name: dp-s1   |
+      |       segment:                                 |                         |
+      |         name: dp-s1                            |                         |
+      |     - id: dp-a2                                |                         |
+      |       segment:                                 |                         |
+      |         name: dp-s1                            |                         |
+      | method: GET                                    | code: 200               |+
+      | path: /items/test_nwd_segment                  | body:                   |
+      | query:                                         |   data:                 |
+      |   filter[name][_starts_with]: dp-              |     - name: dp-s1       |
+      |   fields: name                                 |                         |
+      |   sort: name                                   |                         |
+    Then the rows of test_nwd_course_segment whose key starts with "dp-" are:
+      | id    | course |
+      | dp-a1 | dp-a   |
