@@ -10302,7 +10302,9 @@ describe('Services / Items / mutationBatching', () => {
 				knex: database,
 				schema: new SchemaBuilder()
 					.collection('entries', (c) => {
-						c.field('id').uuid();
+						c.field('id')
+							.uuid()
+							.primary();
 						c.field('parent').m2o('entries');
 						c.field('children').o2m('entries', 'parent');
 					})
