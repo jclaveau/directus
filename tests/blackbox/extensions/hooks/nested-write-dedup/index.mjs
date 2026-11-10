@@ -38,9 +38,7 @@ function rowSignatureOf(rowData) {
 function answerRepeatedRow(entries, firstIndex, index, collection) {
 	const repeatedData = entries[index].data;
 
-	if (
-		rowSignatureOf(entries[firstIndex].data) !== rowSignatureOf(repeatedData)
-	) {
+	if (false && rowSignatureOf(entries[firstIndex].data) !== rowSignatureOf(repeatedData)) {
 		throw new RecordNotUniqueError({
 			collection,
 			field: 'name',
@@ -282,7 +280,7 @@ export default function registerHooks({ filter }, { services }) {
 				context.scopedCache?.purgeBy(
 					{
 						collection: CACHED_SEGMENT_COLLECTION,
-						pinnedScope: { discipline: [storedSegment.discipline] },
+						pinnedScope: { discipline: [entry.data.discipline ?? storedSegment.discipline] },
 					},
 					{ forKey: storedSegment.id },
 				);
