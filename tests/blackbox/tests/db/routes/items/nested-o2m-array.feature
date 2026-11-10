@@ -367,7 +367,7 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | 1       | directus_activity          | 0      | 1      | 0      | 0      |
       | 1       | directus_users             | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list       | 3      | 0      | 0      | 0      |
-      | 1       | test_nested_o2m_list_entry | 3      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_list_entry | 4      | 0      | 0      | 0      |
 
   Scenario: a create written row by row writes first a row an earlier row's child names
     When these requests get these responses:
