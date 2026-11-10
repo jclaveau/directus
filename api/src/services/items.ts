@@ -4184,6 +4184,10 @@ implements AbstractService<Item> {
 	 * An m2o record a run may create along with its rows stays in the run:
 	 * `{ tag: { name: 'x' } }` carries no key, so no other payload can name it or
 	 * create it again, and it names no row of this collection and nests none.
+	 * Its collection's filter hooks then see the run's records together, before
+	 * any is written, as a `createMany` hook does; only the fields the payload
+	 * carries are checked, so a preset or hook setting a field that names a row
+	 * of the run may see that row written after the record.
 	 */
 	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;

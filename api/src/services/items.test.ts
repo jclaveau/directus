@@ -6945,6 +6945,45 @@ describe('Services / Items / a batched upsert', () => {
 		]);
 	});
 
+	it(oneLine`
+		creates a row before the payload after it nests a keyless row listing it
+		as a child
+	`, async () => {
+		const listSchema = new SchemaBuilder()
+			.collection('a', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('b').m2o('b');
+			})
+			.collection('b', (c) => {
+				c.field('id').id();
+				c.field('as').o2m('a', 'b');
+			})
+			.build();
+
+		await database.schema.createTable('a', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('b');
+		});
+
+		await database.schema.createTable('b', (table) => {
+			table.increments('id');
+		});
+
+		await expect(new ItemsService('a', { knex: database, schema: listSchema })
+			.upsertMany([
+				{ name: 'new', b: null },
+				{ name: 'next', b: { as: [1] } },
+			])).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('a').select('id', 'name', 'b')).resolves
+			.toStrictEqual([
+				{ id: 1, name: 'new', b: 1 },
+				{ id: 2, name: 'next', b: 1 },
+			]);
+	});
+
 	it('creates a row before the payload after it names it as its child', async () => {
 		const nodesSchema = new SchemaBuilder()
 			.collection('nodes', (c) => {
