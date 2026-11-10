@@ -7,6 +7,7 @@ import {
 import type { Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { load as loadYaml } from 'js-yaml';
+import { set } from 'lodash-es';
 import request, { type Response } from 'supertest';
 import { expect } from 'vitest';
 import { defineStatementCountsStep } from '@common/query-audit-steps';
@@ -120,8 +121,16 @@ export function defineNestedWriteSteps(
 				})
 				.set('Authorization', AUTH);
 
+			// A dotted column, `label.name`, reads a related field nested.
+			const expectedRows = parseGherkinTable(table).map((row) => {
+				return Object.entries(row).reduce(
+					(nestedRow, [column, value]) => set(nestedRow, column, value),
+					{},
+				);
+			});
+
 			expect(response.statusCode).toEqual(200);
-			expect(response.body.data).toEqual(parseGherkinTable(table));
+			expect(response.body.data).toEqual(expectedRows);
 		},
 	);
 

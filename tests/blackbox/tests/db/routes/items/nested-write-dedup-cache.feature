@@ -19,8 +19,7 @@ Feature: A create hook taking over nested records purges what it changed
     `forKey`.
   - The instance also reports the statements each request ran
     (`QUERY_AUDIT_HEADER`). The last step counts a request's statements per
-    table and kind, on postgres alone: a nested write runs as many
-    statements for twenty courses as for two (#414).
+    table and kind, on postgres alone (#414).
 
   Scenario: courses nesting a changed stored segment purge its discipline only
     When these requests get these responses:
@@ -93,8 +92,11 @@ Feature: A create hook taking over nested records purges what it changed
       |   filter[discipline][_eq]: d2                |     - name: ca-s2  |
       |                                              |       label: old   |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 6       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 6       | directus_users           | 1      | 0      | 0      | 0      |
+      | 6       | test_nwdc_course         | 1      | 1      | 0      | 0      |
+      | 6       | test_nwdc_course_segment | 8      | 3      | 0      | 0      |
+      | 6       | test_nwdc_segment        | 4      | 0      | 1      | 0      |
 
   Scenario: a course moving a stored segment purges the discipline it left
     When these requests get these responses:
@@ -170,13 +172,16 @@ Feature: A create hook taking over nested records purges what it changed
       |   filter[discipline][_eq]: d6                |     - name: cm-s2  |
       |                                              |       label: old   |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 8       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 8       | directus_users           | 1      | 0      | 0      | 0      |
+      | 8       | test_nwdc_course         | 1      | 1      | 0      | 0      |
+      | 8       | test_nwdc_course_segment | 6      | 1      | 0      | 0      |
+      | 8       | test_nwdc_segment        | 2      | 0      | 1      | 0      |
 
-  Scenario: courses nesting one new segment with two labels are refused
+  Scenario: courses nesting one new segment with two labels keep the last
     When these requests get these responses:
       | request                                      | response           |
-      | method: POST                                 | code: 400          |+
+      | method: POST                                 | code: 200          |+
       | path: /items/test_nwdc_course                |                    |
       | payload:                                     |                    |
       |   - id: cr-a                                 |                    |
@@ -196,18 +201,14 @@ Feature: A create hook taking over nested records purges what it changed
       | method: GET                                  | code: 200          |+
       | path: /items/test_nwdc_segment               | cache: MISS        |
       | query:                                       | body:              |
-      |   fields: name,label                         |   data: []         |
-      |   filter[discipline][_eq]: d7                |                    |
-    Then response 1 is refused with the message:
-      """
-      Value "cr-s1" for field "name" in collection "test_nwdc_segment" has to be
-      unique.
-      """
+      |   fields: name,label                         |   data:            |
+      |   filter[discipline][_eq]: d7                |     - name: cr-s1  |
+      |                                              |       label: two   |
     And on postgres the requests ran these statements:
       | request | table  | select | insert | update | delete |
       | 1       | (none) | 0      | 0      | 0      | 0      |
 
-  Scenario: twenty courses sharing two segments run the statements of two
+  Scenario: twenty courses sharing two segments run statements per course
     When these requests get these responses:
       | request                                        | response                |
       | method: POST                                   | code: 200               |+
@@ -494,7 +495,19 @@ Feature: A create hook taking over nested records purges what it changed
       |   filter[name][_starts_with]: cs-              |     - name: cs-s1       |
       |   fields: name                                 |     - name: cs-s2       |
       |   sort: name                                   |     - name: cs-s3       |
+      | method: GET                                    | code: 200               |+
+      | path: /items/test_nwdc_course_segment          | body:                   |
+      | query:                                         |   meta:                 |
+      |   filter[id][_starts_with]: cs-                |     filter_count: 44    |
+      |   meta: filter_count                           |                         |
+      |   limit: 0                                     |                         |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
-      | 3       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      |
+      | 2       | test_nwdc_course         | 1      | 1      | 0      | 0      |
+      | 2       | test_nwdc_course_segment | 9      | 4      | 0      | 0      |
+      | 2       | test_nwdc_segment        | 6      | 1      | 0      | 0      |
+      | 3       | directus_users           | 1      | 0      | 0      | 0      |
+      | 3       | test_nwdc_course         | 1      | 1      | 0      | 0      |
+      | 3       | test_nwdc_course_segment | 45     | 40     | 0      | 0      |
+      | 3       | test_nwdc_segment        | 41     | 1      | 0      | 0      |

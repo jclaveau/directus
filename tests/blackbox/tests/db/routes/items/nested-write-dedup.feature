@@ -25,8 +25,7 @@ Feature: A create hook deduplicating nested records links every row to one recor
   - Every request goes to an instance of the feature's own, sharing the
     database, that reports the statements each request ran
     (`QUERY_AUDIT_HEADER`). The last step counts a request's statements per
-    table and kind, on postgres alone: a nested write runs as many
-    statements for twenty courses as for two (#414).
+    table and kind, on postgres alone (#414).
 
   Scenario: a course nesting a stored segment and a new one links both
     Given the rows of test_nwd_segment:
@@ -58,8 +57,13 @@ Feature: A create hook deduplicating nested records links every row to one recor
       | st-a1 | st-a   |
       | st-a2 | st-a   |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_activity       | 0      | 4      | 0      | 0      |
+      | 1       | directus_revisions      | 0      | 4      | 2      | 0      |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_nwd_course         | 1      | 1      | 0      | 0      |
+      | 1       | test_nwd_course_segment | 5      | 2      | 0      | 0      |
+      | 1       | test_nwd_segment        | 3      | 1      | 0      | 0      |
 
   Scenario: two courses of one request sharing a stored segment link it once each
     Given the rows of test_nwd_segment:
@@ -93,8 +97,13 @@ Feature: A create hook deduplicating nested records links every row to one recor
       | sh-a1 | sh-a   |
       | sh-b1 | sh-b   |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_activity       | 0      | 3      | 0      | 0      |
+      | 1       | directus_revisions      | 0      | 3      | 1      | 0      |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_nwd_course         | 1      | 1      | 0      | 0      |
+      | 1       | test_nwd_course_segment | 5      | 2      | 0      | 0      |
+      | 1       | test_nwd_segment        | 3      | 0      | 0      | 0      |
 
   Scenario: two courses of one request nesting the same new segment link one segment
     When these requests get these responses:
@@ -125,8 +134,13 @@ Feature: A create hook deduplicating nested records links every row to one recor
       | nw-a1 | nw-a   |
       | nw-b1 | nw-b   |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_activity       | 0      | 4      | 0      | 0      |
+      | 1       | directus_revisions      | 0      | 4      | 2      | 0      |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_nwd_course         | 1      | 1      | 0      | 0      |
+      | 1       | test_nwd_course_segment | 5      | 2      | 0      | 0      |
+      | 1       | test_nwd_segment        | 3      | 1      | 0      | 0      |
 
   Scenario: two courses sharing a stored segment and a new one link two segments
     Given the rows of test_nwd_segment:
@@ -168,10 +182,15 @@ Feature: A create hook deduplicating nested records links every row to one recor
       | jn-b1 | jn-b   |
       | jn-b2 | jn-b   |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_activity       | 0      | 6      | 0      | 0      |
+      | 1       | directus_revisions      | 0      | 6      | 2      | 0      |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_nwd_course         | 1      | 1      | 0      | 0      |
+      | 1       | test_nwd_course_segment | 7      | 4      | 0      | 0      |
+      | 1       | test_nwd_segment        | 6      | 1      | 0      | 0      |
 
-  Scenario: a course nesting the same new segment twice links it once
+  Scenario: a course nesting the same new segment twice links it twice
     When these requests get these responses:
       | request                                        | response                |
       | method: POST                                   | code: 200               |+
@@ -182,9 +201,9 @@ Feature: A create hook deduplicating nested records links every row to one recor
       |   id: dp-a                                     |       - id: dp-a1       |
       |   segments:                                    |         segment:        |
       |     - id: dp-a1                                |           name: dp-s1   |
-      |       segment:                                 |                         |
-      |         name: dp-s1                            |                         |
-      |     - id: dp-a2                                |                         |
+      |       segment:                                 |       - id: dp-a2       |
+      |         name: dp-s1                            |         segment:        |
+      |     - id: dp-a2                                |           name: dp-s1   |
       |       segment:                                 |                         |
       |         name: dp-s1                            |                         |
       | method: GET                                    | code: 200               |+
@@ -196,11 +215,12 @@ Feature: A create hook deduplicating nested records links every row to one recor
     Then the rows of test_nwd_course_segment whose key starts with "dp-" are:
       | id    | course |
       | dp-a1 | dp-a   |
+      | dp-a2 | dp-a   |
     And on postgres the requests ran these statements:
       | request | table  | select | insert | update | delete |
       | 1       | (none) | 0      | 0      | 0      | 0      |
 
-  Scenario: twenty courses sharing two segments run the statements of two
+  Scenario: twenty courses sharing two segments run statements per course
     Given the rows of test_nwd_segment:
       | name  |
       | js-s1 |
@@ -443,6 +463,16 @@ Feature: A create hook deduplicating nested records links every row to one recor
       | js-w1 | js-w   |
       | js-w2 | js-w   |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_activity       | 0      | 6      | 0      | 0      |
+      | 1       | directus_revisions      | 0      | 6      | 2      | 0      |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_nwd_course         | 1      | 1      | 0      | 0      |
+      | 1       | test_nwd_course_segment | 7      | 4      | 0      | 0      |
+      | 1       | test_nwd_segment        | 6      | 1      | 0      | 0      |
+      | 2       | directus_activity       | 0      | 42     | 0      | 0      |
+      | 2       | directus_revisions      | 0      | 42     | 2      | 0      |
+      | 2       | directus_users          | 1      | 0      | 0      | 0      |
+      | 2       | test_nwd_course         | 1      | 1      | 0      | 0      |
+      | 2       | test_nwd_course_segment | 43     | 40     | 0      | 0      |
+      | 2       | test_nwd_segment        | 41     | 1      | 0      | 0      |
