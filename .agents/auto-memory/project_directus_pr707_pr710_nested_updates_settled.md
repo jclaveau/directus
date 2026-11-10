@@ -32,6 +32,7 @@ Both merged into v11.10.1-hhh-dev: #707 (9c563869dd), #710 on 2026-11-10 (9343d0
                                 → A (2026-11-10): left as is like the `update` alteration,
                                    0 writes, 0 revisions, 0 counted mutations; the m2m
                                    MAX_BATCH_MUTATION list-form blackbox creates 10 rows/food.
+                                   #716 merged 2026-11-10 as 96c10a0823 (closes #708).
 ```
 
 **Why:** each was a behaviour choice put to jean as a gherkin block in the autoreview results comment.
