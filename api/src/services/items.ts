@@ -2919,15 +2919,35 @@ implements AbstractService<Item> {
 	private changedTakenOverKeys(
 		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
 	): PrimaryKey[] {
-		const takenOverPrefix = takenOverScopedCacheKey(this.collection, '');
+		const inertKeyNames = this.inertTakenOverKeyNames(declarations);
+
+		return this.takenOverKeysOf(declarations).filter((takenOverKey) => {
+			return !inertKeyNames.has(this.primaryKeyNameOf(takenOverKey));
+		});
+	}
+
+	/**
+	 * The rows of this collection a hook took over and declared inert through
+	 * `skipPurgeFor`, named as primaryKeyNameOf names them.
+	 */
+	private inertTakenOverKeyNames(
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+	): Set<string> {
 		const skippedKeyNames = this.purgeSkippedKeyNames(declarations);
+
+		return new Set(this.takenOverKeysOf(declarations)
+			.map((takenOverKey) => this.primaryKeyNameOf(takenOverKey))
+			.filter((takenOverName) => skippedKeyNames.has(takenOverName)));
+	}
+
+	private takenOverKeysOf(
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+	): PrimaryKey[] {
+		const takenOverPrefix = takenOverScopedCacheKey(this.collection, '');
 
 		return [...declarations.takenOverKeys]
 			.filter((takenOverName) => takenOverName.startsWith(takenOverPrefix))
-			.map((takenOverName) => takenOverName.slice(takenOverPrefix.length))
-			.filter((takenOverKey) => {
-				return !skippedKeyNames.has(this.primaryKeyNameOf(takenOverKey));
-			});
+			.map((takenOverName) => takenOverName.slice(takenOverPrefix.length));
 	}
 
 	/**
@@ -3926,19 +3946,41 @@ implements AbstractService<Item> {
 
 		await flushDeferredResponseCache();
 
-		if (shouldClearCache(this.cache, opts, this.collection)) {
-			const takenOverKeys = changedTakenOverKeys();
+		const takenOverKeys = changedTakenOverKeys();
+		const inertKeyNames = this.inertTakenOverKeyNames(scopedCacheHookDeclarations);
 
+		const returnedKeys = primaryKeys.filter((key): key is PrimaryKey => {
+			return key !== null && key !== undefined;
+		});
+
+		// A take-over the hook declared inert wrote nothing, as createMany reads it;
+		// a row a payload sent as an update was written whatever was declared.
+		const writtenKeys = returnedKeys.filter((key) => {
+			const keyName = this.primaryKeyNameOf(key);
+
+			return inputKeyNames.has(keyName) || !inertKeyNames.has(keyName);
+		});
+
+		// Every row an inert take-over: no entry can have gone stale, and purging
+		// nothing would still drop this collection's global reads, as createMany
+		// says.
+		const nothingWrittenOrDeclared = returnedKeys.length > 0
+			&& returnedKeys.length === primaryKeys.length
+			&& writtenKeys.length === 0
+			&& hookAddedKeys.length === 0
+			&& takenOverKeys.length === 0
+			&& scopedCacheHookDeclarations.purgeFingerprints.length === 0;
+
+		if (
+			shouldClearCache(this.cache, opts, this.collection)
+			&& !nothingWrittenOrDeclared
+		) {
 			// New scope values for every committed row (inserts + moved updates), re-read
 			// by returned key so a hook's take-over shows as whatever is now stored,
 			// plus the rows an update filter added or took over, which no returned key
 			// names. A read that fails leaves the slices unknown: purged whole.
 			const newScopedCacheSnapshot = await this.scopedCache
-				.snapshot(
-					primaryKeys
-						.filter((key): key is PrimaryKey => key !== null && key !== undefined)
-						.concat(hookAddedKeys, takenOverKeys),
-				)
+				.snapshot(writtenKeys.concat(hookAddedKeys, takenOverKeys))
 				.catch(() => null);
 
 			const oldSnapshots = [oldScopedCacheSnapshot, ...hookAddedSnapshots];

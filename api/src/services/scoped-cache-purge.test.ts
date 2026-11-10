@@ -3263,6 +3263,111 @@ describe(oneLine`
 		});
 
 		it(oneLine`
+			an upsert whose create a hook takes over and declares inert reads no row
+			back and purges nothing
+		`, async () => {
+			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
+
+			const takeOverInert = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async () => {
+					ctx.scopedCache.skipPurgeFor(99);
+					return 99;
+				});
+			};
+
+			emitter.onFilter('test.items.create', takeOverInert);
+
+			try {
+				await expect(service().upsertMany([{ name: 'x', student: 'A' }]))
+					.resolves
+					.toEqual([99]);
+
+				expect(tracker.history.all).toEqual([]);
+				expect(purgeScopedCache).not.toHaveBeenCalled();
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOverInert);
+			}
+		});
+
+		it(oneLine`
+			an upsert still reads back a row it updates that another of its creates
+			takes over and declares inert
+		`, async () => {
+			tracker.on.select('test').responseOnce([{ id: 99, student: 'A' }]);
+			tracker.on.select('test').response([{ id: 99, student: 'B' }]);
+			tracker.on.update('test').response(1);
+
+			const takeOverInert = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async () => {
+					ctx.scopedCache.skipPurgeFor(99);
+					return 99;
+				});
+			};
+
+			emitter.onFilter('test.items.create', takeOverInert);
+
+			try {
+				await service().upsertMany([
+					{ id: 99, student: 'B' },
+					{ name: 'x', student: 'B' },
+				]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{ collection: 'test', pinnedScope: { id: ['99'], student: ['a'] } },
+						{ collection: 'test', pinnedScope: { id: ['99'], student: ['b'] } },
+					],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOverInert);
+			}
+		});
+
+		it(oneLine`
+			an upsert whose create a hook takes over and declares by key reads the
+			taken-over row back
+		`, async () => {
+			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
+
+			const takeOverDeclared = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async () => {
+					ctx.scopedCache.purgeBy({
+						collection: 'test',
+						pinnedScope: { student: ['A'] },
+					}, { forKey: 99 });
+
+					return 99;
+				});
+			};
+
+			emitter.onFilter('test.items.create', takeOverDeclared);
+
+			try {
+				await service().upsertMany([{ name: 'x', student: 'A' }]);
+
+				expect(tracker.history.select).toHaveLength(1);
+				expect(tracker.history.select[0]!.bindings).toEqual([99, '99']);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[{ collection: 'test', pinnedScope: { id: ['99'], student: ['z'] } }],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOverDeclared);
+			}
+		});
+
+		it(oneLine`
 			an upsert whose update hook takes over a row the upsert did not send falls
 			back to a coarse purge
 		`, async () => {
