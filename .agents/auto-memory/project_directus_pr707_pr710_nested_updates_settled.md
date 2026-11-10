@@ -24,6 +24,9 @@ jean's rulings, 2026-11-09. #710 is based on #707's branch (`nestedUpdates` only
                                    (breaks NOT NULL FKs, exposes a transient null); MariaDB → #610 pt 22.
                                    Past Postgres' 65535 bind params → 400 naming the cycle's first
                                    keys ("Rows 1, …, 10 and N more name each other in a cycle…").
+-  DB_BATCH_INSERT_CHUNK_SIZE < 1  → A (2026-11-10): refused in createMany with a plain Error
+                                   "DB_BATCH_INSERT_CHUNK_SIZE is 0, it must be 1 or more" (500),
+                                   as knex's batchInsert threw; not a boot check, not a silent 1.
 ```
 
 **Why:** each was a behaviour choice put to jean as a gherkin block in the autoreview results comment.
