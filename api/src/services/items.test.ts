@@ -10217,6 +10217,147 @@ describe('Services / Items / mutationBatching', () => {
 		]);
 	});
 
+	it.each([
+		{ children: { update: [{ id: 2, parent: 1 }] } },
+		{ children: [{ id: 2, parent: 1 }] },
+	])('nestedUpdates apply: leaves a linked child naming its parent: %o', async (
+		payload,
+	) => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.string('name');
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		await database('entries').insert([
+			{ id: 1 },
+			{ id: 2, name: 'row', parent: 1 },
+		]);
+
+		emitter.onFilter('entries.items.update', recordUpdateFilter);
+
+		try {
+			await expect(new ItemsService('entries', {
+				knex: database,
+				schema: new SchemaBuilder()
+					.collection('entries', (c) => {
+						c.field('id').id();
+						c.field('name').string();
+						c.field('parent').m2o('entries');
+						c.field('children').o2m('entries', 'parent');
+					})
+					.build(),
+			})
+				.updateOne(1, payload))
+				.resolves.toStrictEqual(1);
+		}
+		finally {
+			emitter.offFilter('entries.items.update', recordUpdateFilter);
+		}
+
+		expect(hookCalls).toStrictEqual([
+			['update filter', [{ data: payload, keys: [1] }]],
+		]);
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: null, parent: null },
+			{ id: 2, name: 'row', parent: 1 },
+		]);
+	});
+
+	it.each([
+		'preserveMutationOrder',
+		'minimizeMutations',
+		'disableBatching',
+	] as const)(oneLine`
+		writes a row a child of an earlier row carries the key of before that
+		earlier row: %s
+	`, async (mutationBatching) => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+			table.string('name');
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+		});
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('parent').m2o('entries');
+					c.field('children').o2m('entries', 'parent');
+				})
+				.build(),
+		})
+			.createMany([
+				{ id: 1, children: [{ id: 2 }] },
+				{ id: 2, name: 'x' },
+			], { mutationBatching }))
+			.resolves.toStrictEqual([1, 2]);
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: null, parent: null },
+			{ id: 2, name: 'x', parent: 1 },
+		]);
+	});
+
+	it.each([
+		'preserveMutationOrder',
+		'minimizeMutations',
+		'disableBatching',
+	] as const)(oneLine`
+		writes a row a child of an earlier row names before that earlier row:
+		%s
+	`, async (mutationBatching) => {
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('entries', (table) => {
+			table.integer('id').primary();
+
+			table.integer('parent')
+				.references('id')
+				.inTable('entries');
+
+			table.integer('sibling')
+				.references('id')
+				.inTable('entries');
+		});
+
+		await expect(new ItemsService('entries', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('entries', (c) => {
+					c.field('id').id();
+					c.field('parent').m2o('entries');
+					c.field('sibling').m2o('entries');
+					c.field('children').o2m('entries', 'parent');
+				})
+				.build(),
+		})
+			.createMany([
+				{ id: 1, children: [{ id: 9, sibling: 2 }] },
+				{ id: 2 },
+			], { mutationBatching }))
+			.resolves.toStrictEqual([1, 2]);
+
+		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, parent: null, sibling: null },
+			{ id: 2, parent: null, sibling: null },
+			{ id: 9, parent: 1, sibling: 2 },
+		]);
+	});
+
 	it('nestedUpdates apply: leaves a child of a uuid in capitals', async () => {
 		await database.schema.createTable('pages', (table) => {
 			table.string('id').primary();
