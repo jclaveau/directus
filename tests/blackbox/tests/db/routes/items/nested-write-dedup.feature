@@ -1,9 +1,9 @@
 Feature: A create hook deduplicating nested records links every row to one record
 
   - The planner's Model deduplicates a schedule segment a junction row nests by
-    its fields alone: its create filter refuses rows of one create sharing a
-    unicity value (`refuseRowsSharingUnicity`), and answers a row whose value
-    is stored with the stored row's key (`updateIfDuplicated`). The
+    its fields alone: its create filter answers a row repeating an earlier
+    row's unicity value with `sameRowAs` that row, and a row whose value is
+    stored with the stored row's key (`updateIfDuplicated`). The
     `nested-write-dedup` hook extension does the same on test_nwd_segment,
     unique by `name`.
   - A course links its segments through test_nwd_course_segment rows, as the
