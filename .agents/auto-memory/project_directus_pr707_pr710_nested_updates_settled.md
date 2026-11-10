@@ -28,6 +28,10 @@ Both merged into v11.10.1-hhh-dev: #707 (9c563869dd), #710 on 2026-11-10 (9343d0
 -  DB_BATCH_INSERT_CHUNK_SIZE < 1  → A (2026-11-10): refused in createMany with a plain Error
                                    "DB_BATCH_INSERT_CHUNK_SIZE is 0, it must be 1 or more" (500),
                                    as knex's batchInsert threw; not a boot check, not a silent 1.
+#716 choice 7: O2M list form, child already linked sent as { id } or { id, parent }
+                                → A (2026-11-10): left as is like the `update` alteration,
+                                   0 writes, 0 revisions, 0 counted mutations; the m2m
+                                   MAX_BATCH_MUTATION list-form blackbox creates 10 rows/food.
 ```
 
 **Why:** each was a behaviour choice put to jean as a gherkin block in the autoreview results comment.
