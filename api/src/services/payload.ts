@@ -1192,8 +1192,10 @@ export class PayloadService {
 							throw nestedUpdateRefusal(key, relation.collection);
 						}
 
-						// skip only links the child to its parent
+						// skip only links the child to its parent, as does a child
+						// naming only that parent
 						const record: Partial<Item> = opts?.nestedUpdates === 'skip'
+							|| !updatesChild
 							? {}
 							: fields;
 
@@ -1381,10 +1383,14 @@ export class PayloadService {
 					throw nestedUpdateRefusal(relatedId, relation.collection);
 				}
 
-				// skip names the child by its key alone, as a bare key does
+				// skip names the child by its key alone, as a bare key does, and
+				// so does a child naming only this parent
 				if (
 					isPrimaryKey(relatedRecord)
-					|| (updatesChild && nestedMutationOptions.nestedUpdates === 'skip')
+					|| (
+						existingRecord !== undefined
+						&& (!updatesChild || nestedMutationOptions.nestedUpdates === 'skip')
+					)
 				) {
 					if (!existingRecord) {
 						// 404 / InvalidPayload?

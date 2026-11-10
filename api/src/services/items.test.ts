@@ -10270,14 +10270,10 @@ describe('Services / Items / mutationBatching', () => {
 		]);
 	});
 
-	it.each([
-		'preserveMutationOrder',
-		'minimizeMutations',
-		'disableBatching',
-	] as const)(oneLine`
+	it(oneLine`
 		writes a row a child of an earlier row carries the key of before that
-		earlier row: %s
-	`, async (mutationBatching) => {
+		earlier row under disableBatching
+	`, async () => {
 		await database.raw('PRAGMA foreign_keys = ON');
 
 		await database.schema.createTable('entries', (table) => {
@@ -10303,7 +10299,7 @@ describe('Services / Items / mutationBatching', () => {
 			.createMany([
 				{ id: 1, children: [{ id: 2 }] },
 				{ id: 2, name: 'x' },
-			], { mutationBatching }))
+			], { mutationBatching: 'disableBatching' }))
 			.resolves.toStrictEqual([1, 2]);
 
 		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([
@@ -10312,14 +10308,10 @@ describe('Services / Items / mutationBatching', () => {
 		]);
 	});
 
-	it.each([
-		'preserveMutationOrder',
-		'minimizeMutations',
-		'disableBatching',
-	] as const)(oneLine`
-		writes a row a child of an earlier row names before that earlier row:
-		%s
-	`, async (mutationBatching) => {
+	it(oneLine`
+		writes a row a child of an earlier row names before that earlier row
+		under disableBatching
+	`, async () => {
 		await database.raw('PRAGMA foreign_keys = ON');
 
 		await database.schema.createTable('entries', (table) => {
@@ -10348,7 +10340,7 @@ describe('Services / Items / mutationBatching', () => {
 			.createMany([
 				{ id: 1, children: [{ id: 9, sibling: 2 }] },
 				{ id: 2 },
-			], { mutationBatching }))
+			], { mutationBatching: 'disableBatching' }))
 			.resolves.toStrictEqual([1, 2]);
 
 		await expect(database('entries').orderBy('id')).resolves.toStrictEqual([

@@ -1307,8 +1307,9 @@ implements AbstractService<Item> {
 	 * its own M2O or A2O, or through a record it nests at any depth, naming
 	 * that row or carrying its key. A batch writes every nested M2O and A2O
 	 * record before its rows, so a nested record's name sends the batch row by
-	 * row, after the rows it names. Read off the payloads before the filter
-	 * hooks: a name a hook adds is not seen.
+	 * row, after the rows it names. A row's own O2M records are written after
+	 * every row of a batch: their names only order it. Read off the payloads
+	 * before the filter hooks: a name a hook adds is not seen.
 	 */
 	private batchRowNamesOf(data: Partial<Item>[]): BatchRowName[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -1346,7 +1347,6 @@ implements AbstractService<Item> {
 			}
 		};
 
-		// the rows' own O2M records and keys are written after the rows
 		const collectRecordNames = (
 			collectionName: string,
 			record: unknown,
@@ -1383,13 +1383,30 @@ implements AbstractService<Item> {
 
 				// an O2M of the record, a self relation's included
 				if (
-					isNestedRecord
-					&& relation.related_collection === collectionName
+					relation.related_collection === collectionName
 					&& typeof oneField === 'string'
 					&& oneField in recordFields
 				) {
+					const childNames: BatchRowName[] = [];
+
 					for (const child of childRecordsOf(recordFields[oneField])) {
-						collectRecordNames(relation.collection, child, true, rowNames);
+						// a child by its key alone
+						if (
+							relation.collection === this.collection
+							&& !isPlainObject(child)
+						) {
+							nameRow(child, true, childNames);
+						}
+						else {
+							collectRecordNames(relation.collection, child, true, childNames);
+						}
+					}
+
+					for (const { rowIndex, byNestedRecord } of childNames) {
+						rowNames.push({
+							rowIndex,
+							byNestedRecord: isNestedRecord && byNestedRecord,
+						});
 					}
 				}
 			}
