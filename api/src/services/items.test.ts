@@ -6853,6 +6853,90 @@ describe('Services / Items / a batched upsert', () => {
 	});
 
 	it(oneLine`
+		upserts a payload nesting a record of its any-to-one field alone
+	`, async () => {
+		const itemSchema = new SchemaBuilder()
+			.collection('test', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('item').a2o(['post']);
+			})
+			.collection('post', (c) => {
+				c.field('id').id();
+				c.field('title').string();
+			})
+			.build();
+
+		await database.schema.alterTable('test', (table) => {
+			table.string('item');
+			table.string('collection');
+		});
+
+		await database.schema.createTable('post', (table) => {
+			table.increments('id');
+			table.string('title');
+		});
+
+		await expect(new ItemsService('test', { knex: database, schema: itemSchema })
+			.upsertMany([
+				{ name: 'a', item: { title: 'x' }, collection: 'post' },
+				{ name: 'b', item: { title: 'y' }, collection: 'post' },
+			])).resolves.toStrictEqual([3, 4]);
+
+		await expect(database('test').select('id', 'name', 'item', 'collection')
+			.where('id', '>', 2)
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 3, name: 'a', item: '1', collection: 'post' },
+			{ id: 4, name: 'b', item: '2', collection: 'post' },
+		]);
+	});
+
+	it(oneLine`
+		creates a row before the payload after it nests a keyless row naming it
+		through an any-to-one field
+	`, async () => {
+		const pointerSchema = new SchemaBuilder()
+			.collection('a', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('b').m2o('b');
+			})
+			.collection('b', (c) => {
+				c.field('id').id();
+				c.field('item').a2o(['a']);
+			})
+			.build();
+
+		await database.schema.createTable('a', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('b');
+		});
+
+		await database.schema.createTable('b', (table) => {
+			table.increments('id');
+			table.string('item');
+			table.string('collection');
+		});
+
+		sqlStatements = [];
+
+		await expect(new ItemsService('a', { knex: database, schema: pointerSchema })
+			.upsertMany([
+				{ name: 'new', b: null },
+				{ name: 'next', b: { item: '1', collection: 'a' } },
+			])).resolves.toStrictEqual([1, 2]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'insert into `a` (`b`, `name`) values (?, ?) returning `id`',
+			'insert into `b` (`collection`, `item`) values (?, ?) returning `id`',
+			'insert into `a` (`b`, `name`) values (?, ?) returning `id`',
+			'COMMIT;',
+		]);
+	});
+
+	it(oneLine`
 		creates a row before the payload after it nests a keyless row pointing
 		back at it
 	`, async () => {

@@ -4234,9 +4234,12 @@ implements AbstractService<Item> {
 	 * `{ tag: { name: 'x' } }` carries no key, so no other payload can name it or
 	 * create it again, and it names no row of this collection and nests none.
 	 * Its collection's filter hooks then see the run's records together, before
-	 * any is written, as a `createMany` hook does; only the fields the payload
-	 * carries are checked, so a preset or hook setting a field that names a row
-	 * of the run may see that row written after the record.
+	 * any is written, as a `createMany` hook does, and so do this collection's:
+	 * a hook taking a stored row over by its unique fields, where each payload
+	 * used to run alone, now meets two equal records in one call. Only the
+	 * fields the payload carries are checked, so a preset or hook setting a
+	 * field that names a row of the run may see that row written after the
+	 * record.
 	 */
 	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
