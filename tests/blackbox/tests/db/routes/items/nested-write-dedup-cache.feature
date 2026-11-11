@@ -19,7 +19,8 @@ Feature: A create hook taking over nested records purges what it changed
     `forKey`.
   - The instance also reports the statements each request ran
     (`QUERY_AUDIT_HEADER`). The last step counts a request's statements per
-    table and kind, on postgres alone (#414).
+    table and kind, on postgres alone: a nested write runs no more
+    statements for twenty courses than for two (#414).
 
   Scenario: courses nesting a changed stored segment purge its discipline only
     When these requests get these responses:
@@ -95,8 +96,8 @@ Feature: A create hook taking over nested records purges what it changed
       | request | table                    | select | insert | update | delete |
       | 6       | directus_users           | 1      | 0      | 0      | 0      |
       | 6       | test_nwdc_course         | 1      | 1      | 0      | 0      |
-      | 6       | test_nwdc_course_segment | 8      | 3      | 0      | 0      |
-      | 6       | test_nwdc_segment        | 4      | 0      | 1      | 0      |
+      | 6       | test_nwdc_course_segment | 6      | 1      | 0      | 0      |
+      | 6       | test_nwdc_segment        | 2      | 0      | 1      | 0      |
 
   Scenario: a course moving a stored segment purges the discipline it left
     When these requests get these responses:
@@ -178,40 +179,39 @@ Feature: A create hook taking over nested records purges what it changed
       | 8       | test_nwdc_course_segment | 6      | 1      | 0      | 0      |
       | 8       | test_nwdc_segment        | 2      | 0      | 1      | 0      |
 
-  Scenario: courses nesting one new segment with two labels keep the last
+  Scenario: courses nesting one new segment with two labels are refused
     When these requests get these responses:
-      | request                                      | response           |
-      | method: POST                                 | code: 200          |+
-      | path: /items/test_nwdc_course                |                    |
-      | payload:                                     |                    |
-      |   - id: cr-a                                 |                    |
-      |     segments:                                |                    |
-      |       - id: cr-a1                            |                    |
-      |         segment:                             |                    |
-      |           name: cr-s1                        |                    |
-      |           discipline: d7                     |                    |
-      |           label: one                         |                    |
-      |   - id: cr-b                                 |                    |
-      |     segments:                                |                    |
-      |       - id: cr-b1                            |                    |
-      |         segment:                             |                    |
-      |           name: cr-s1                        |                    |
-      |           discipline: d7                     |                    |
-      |           label: two                         |                    |
-      | method: GET                                  | code: 200          |+
-      | path: /items/test_nwdc_segment               | cache: MISS        |
-      | query:                                       | body:              |
-      |   fields: name,label                         |   data:            |
-      |   filter[discipline][_eq]: d7                |     - name: cr-s1  |
-      |                                              |       label: two   |
+      | request                        | response                                  |
+      | method: POST                   | code: 400                                 |+
+      | path: /items/test_nwdc_course  | body:                                     |
+      | payload:                       |   errors:                                 |
+      |   - id: cr-a                   |     - message: >-                         |
+      |     segments:                  |         Value "cr-s1" for field "name" in |
+      |       - id: cr-a1              |         collection "test_nwdc_segment"    |
+      |         segment:               |         has to be unique.                 |
+      |           name: cr-s1          |                                           |
+      |           discipline: d7       |                                           |
+      |           label: one           |                                           |
+      |   - id: cr-b                   |                                           |
+      |     segments:                  |                                           |
+      |       - id: cr-b1              |                                           |
+      |         segment:               |                                           |
+      |           name: cr-s1          |                                           |
+      |           discipline: d7       |                                           |
+      |           label: two           |                                           |
+      | method: GET                    | code: 200                                 |+
+      | path: /items/test_nwdc_segment | cache: MISS                               |
+      | query:                         | body:                                     |
+      |   fields: name,label           |   data: []                                |
+      |   filter[discipline][_eq]: d7  |                                           |
     And on postgres the requests ran these statements:
       | request | table                    | select | insert | update | delete |
       | 1       | directus_users           | 1      | 0      | 0      | 0      |
-      | 1       | test_nwdc_course         | 1      | 1      | 0      | 0      |
-      | 1       | test_nwdc_course_segment | 7      | 2      | 0      | 0      |
-      | 1       | test_nwdc_segment        | 4      | 1      | 1      | 0      |
+      | 1       | test_nwdc_course         | 0      | 1      | 0      | 0      |
+      | 1       | test_nwdc_course_segment | 3      | 0      | 0      | 0      |
+      | 1       | test_nwdc_segment        | 1      | 0      | 0      | 0      |
 
-  Scenario: twenty courses sharing two segments run statements per course
+  Scenario: twenty courses sharing two segments run no more statements than two
     When these requests get these responses:
       | request                                        | response                |
       | method: POST                                   | code: 200               |+
@@ -508,9 +508,9 @@ Feature: A create hook taking over nested records purges what it changed
       | request | table                    | select | insert | update | delete |
       | 2       | directus_users           | 1      | 0      | 0      | 0      |
       | 2       | test_nwdc_course         | 1      | 1      | 0      | 0      |
-      | 2       | test_nwdc_course_segment | 9      | 4      | 0      | 0      |
-      | 2       | test_nwdc_segment        | 6      | 1      | 0      | 0      |
+      | 2       | test_nwdc_course_segment | 6      | 1      | 0      | 0      |
+      | 2       | test_nwdc_segment        | 3      | 1      | 0      | 0      |
       | 3       | directus_users           | 1      | 0      | 0      | 0      |
       | 3       | test_nwdc_course         | 1      | 1      | 0      | 0      |
-      | 3       | test_nwdc_course_segment | 45     | 40     | 0      | 0      |
-      | 3       | test_nwdc_segment        | 41     | 1      | 0      | 0      |
+      | 3       | test_nwdc_course_segment | 6      | 1      | 0      | 0      |
+      | 3       | test_nwdc_segment        | 2      | 1      | 0      | 0      |

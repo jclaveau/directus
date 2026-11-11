@@ -4379,6 +4379,183 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			}
 		});
 
+		it(oneLine`
+			answers null for a row naming the key of a cancelled row it is pointed
+			sameRowAs
+		`, async () => {
+			const cancelBoth = async () => {
+				return [null, { sameRowAs: 0 }];
+			};
+
+			emitter.onFilter('test.items.create', cancelBoth);
+
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			try {
+				const keys = await new ItemsService('test', {
+					knex: db,
+					schema: shapesSchema,
+				}).createMany(
+					[{ id: 1, name: 'a' }, { id: '1', name: 'a' }],
+					{ allowFilterCancel: true },
+				);
+
+				expect(keys).toEqual([null, null]);
+				expect(tracker.history.insert).toHaveLength(0);
+				expect(actionSpy).not.toHaveBeenCalled();
+			}
+			finally {
+				emitter.offFilter('test.items.create', cancelBoth);
+			}
+		});
+
+		it.each([
+			[
+				'a row of another key',
+				[{ id: 1, name: 'a' }, { id: 2, name: 'a' }],
+				[{ data: { id: 1, name: 'a' } }, { sameRowAs: 0 }],
+				'Invalid payload. A filter hook answered row 1 of "test" as the same row '
+				+ 'as row 0, but row 1 names the key 2 and row 0 the key 1.',
+			],
+			[
+				'a row of a generated key',
+				[{ name: 'a' }, { id: 2, name: 'a' }],
+				[{ data: { name: 'a' } }, { sameRowAs: 0 }],
+				'Invalid payload. A filter hook answered row 1 of "test" as the same row '
+				+ 'as row 0, but row 1 names the key 2 and row 0 none.',
+			],
+			[
+				'a row a hook cancelled',
+				[{ id: 1, name: 'a' }, { id: 2, name: 'a' }],
+				[null, { sameRowAs: 0 }],
+				'Invalid payload. A filter hook answered row 1 of "test" as the same row '
+				+ 'as row 0, but row 1 names the key 2 and row 0 the key 1, cancelled by '
+				+ 'a hook.',
+			],
+			[
+				'a keyless row a hook cancelled',
+				[{ name: 'a' }, { id: 2, name: 'a' }],
+				[null, { sameRowAs: 0 }],
+				'Invalid payload. A filter hook answered row 1 of "test" as the same row '
+				+ 'as row 0, but row 1 names the key 2 and row 0 none, cancelled by a '
+				+ 'hook.',
+			],
+			[
+				'a stored row of another key, through a twin',
+				[{ name: 'a' }, { name: 'a' }, { id: 2, name: 'a' }],
+				[{ key: 9 }, { sameRowAs: 0 }, { sameRowAs: 1 }],
+				'Invalid payload. A filter hook answered row 2 of "test" as the same row '
+				+ 'as row 0, but row 2 names the key 2 and row 0 the key 9.',
+			],
+		])(
+			'refuses a row naming its key answered sameRowAs %s',
+			async (_case, rows, answeredEntries, message) => {
+				const answerTwins = async () => answeredEntries;
+
+				emitter.onFilter('test.items.create', answerTwins);
+
+				try {
+					await expect(new ItemsService('test', {
+						knex: db,
+						schema: shapesSchema,
+					}).createMany(rows)).rejects.toHaveProperty('message', message);
+
+					expect(tracker.history.insert).toHaveLength(0);
+				}
+				finally {
+					emitter.offFilter('test.items.create', answerTwins);
+				}
+			},
+		);
+
+		it(oneLine`
+			answers a row naming its key sameRowAs a stored row of that key
+		`, async () => {
+			const answerStored = async () => {
+				return [{ key: 9 }, { sameRowAs: 0 }, { sameRowAs: 1 }];
+			};
+
+			emitter.onFilter('test.items.create', answerStored);
+
+			try {
+				const keys = await new ItemsService('test', {
+					knex: db,
+					schema: shapesSchema,
+				}).createMany([
+					{ name: 'a' },
+					{ id: 9, name: 'a' },
+					{ id: 9, name: 'a' },
+				]);
+
+				expect(keys).toEqual([9, 9, 9]);
+				expect(tracker.history.insert).toHaveLength(0);
+			}
+			finally {
+				emitter.offFilter('test.items.create', answerStored);
+			}
+		});
+
+		it(oneLine`
+			answers a row naming its integer key as a string sameRowAs a stored row
+			of that key
+		`, async () => {
+			const answerStored = async () => {
+				return [{ key: 9 }, { sameRowAs: 0 }];
+			};
+
+			emitter.onFilter('test.items.create', answerStored);
+
+			try {
+				const keys = await new ItemsService('test', {
+					knex: db,
+					schema: shapesSchema,
+				}).createMany([
+					{ name: 'a' },
+					{ id: '9', name: 'a' },
+				]);
+
+				expect(keys).toEqual([9, 9]);
+				expect(tracker.history.insert).toHaveLength(0);
+			}
+			finally {
+				emitter.offFilter('test.items.create', answerStored);
+			}
+		});
+
+		it(oneLine`
+			answers a row naming its uuid in another case sameRowAs a stored row of
+			that uuid
+		`, async () => {
+			const answerStored = async () => {
+				return [
+					{ key: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA' },
+					{ sameRowAs: 0 },
+				];
+			};
+
+			emitter.onFilter('uuid_coll.items.create', answerStored);
+
+			try {
+				const keys = await new ItemsService('uuid_coll', {
+					knex: db,
+					schema: shapesSchema,
+				}).createMany([
+					{ name: 'a' },
+					{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'a' },
+				]);
+
+				expect(keys).toEqual([
+					'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
+					'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
+				]);
+
+				expect(tracker.history.insert).toHaveLength(0);
+			}
+			finally {
+				emitter.offFilter('uuid_coll.items.create', answerStored);
+			}
+		});
+
 		it.each([
 			['a single payload', { data: { name: 'a' } }],
 			['one entry short', [{ data: { name: 'a' } }]],
@@ -6797,6 +6974,275 @@ describe('Services / Items / a batched upsert', () => {
 			{ id: 3, name: 'three', tag: null },
 			{ id: 4, name: null, tag: 7 },
 		]);
+	});
+
+	it('upserts the payloads nesting a new keyless record in one run', async () => {
+		const taggedSchema = new SchemaBuilder()
+			.collection('test', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('tag').m2o('tags');
+			})
+			.collection('tags', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.build();
+
+		await database.schema.alterTable('test', (table) => {
+			table.integer('tag');
+		});
+
+		await database.schema.createTable('tags', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		sqlStatements = [];
+
+		await expect(new ItemsService('test', { knex: database, schema: taggedSchema })
+			.upsertMany([
+				{ name: 'a', tag: { name: 'x' } },
+				{ name: 'b', tag: { name: 'y' } },
+				{ name: 'c', tag: { name: 'x' } },
+			])).resolves.toStrictEqual([3, 4, 5]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select sqlite_version() as version limit ?',
+			'insert into `tags` (`name`) select ? as `name`'
+				+ ' union all select ? as `name` union all select ? as `name`'
+				+ ' returning `id`',
+			'select sqlite_version() as version limit ?',
+			'insert into `test` (`name`, `tag`) select ? as `name`, ? as `tag`'
+				+ ' union all select ? as `name`, ? as `tag`'
+				+ ' union all select ? as `name`, ? as `tag` returning `id`',
+			'COMMIT;',
+		]);
+
+		await expect(database('test').select('id', 'name', 'tag')
+			.where('id', '>', 2)
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 3, name: 'a', tag: 1 },
+			{ id: 4, name: 'b', tag: 2 },
+			{ id: 5, name: 'c', tag: 3 },
+		]);
+	});
+
+	it(oneLine`
+		upserts a payload nesting a record of its any-to-one field alone
+	`, async () => {
+		const itemSchema = new SchemaBuilder()
+			.collection('test', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('item').a2o(['post']);
+			})
+			.collection('post', (c) => {
+				c.field('id').id();
+				c.field('title').string();
+			})
+			.build();
+
+		await database.schema.alterTable('test', (table) => {
+			table.string('item');
+			table.string('collection');
+		});
+
+		await database.schema.createTable('post', (table) => {
+			table.increments('id');
+			table.string('title');
+		});
+
+		await expect(new ItemsService('test', { knex: database, schema: itemSchema })
+			.upsertMany([
+				{ name: 'a', item: { title: 'x' }, collection: 'post' },
+				{ name: 'b', item: { title: 'y' }, collection: 'post' },
+			])).resolves.toStrictEqual([3, 4]);
+
+		await expect(database('test').select('id', 'name', 'item', 'collection')
+			.where('id', '>', 2)
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 3, name: 'a', item: '1', collection: 'post' },
+			{ id: 4, name: 'b', item: '2', collection: 'post' },
+		]);
+	});
+
+	it(oneLine`
+		creates a row before the payload after it nests a keyless row naming it
+		through an any-to-one field
+	`, async () => {
+		const pointerSchema = new SchemaBuilder()
+			.collection('a', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('b').m2o('b');
+			})
+			.collection('b', (c) => {
+				c.field('id').id();
+				c.field('item').a2o(['a']);
+			})
+			.build();
+
+		await database.schema.createTable('a', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('b');
+		});
+
+		await database.schema.createTable('b', (table) => {
+			table.increments('id');
+			table.string('item');
+			table.string('collection');
+		});
+
+		sqlStatements = [];
+
+		await expect(new ItemsService('a', { knex: database, schema: pointerSchema })
+			.upsertMany([
+				{ name: 'new', b: null },
+				{ name: 'next', b: { item: '1', collection: 'a' } },
+			])).resolves.toStrictEqual([1, 2]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'insert into `a` (`b`, `name`) values (?, ?) returning `id`',
+			'insert into `b` (`collection`, `item`) values (?, ?) returning `id`',
+			'insert into `a` (`b`, `name`) values (?, ?) returning `id`',
+			'COMMIT;',
+		]);
+	});
+
+	it(oneLine`
+		creates a row before the payload after it nests a keyless row pointing
+		back at it
+	`, async () => {
+		const cycleSchema = new SchemaBuilder()
+			.collection('a', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('b').m2o('b');
+			})
+			.collection('b', (c) => {
+				c.field('id').id();
+				c.field('a').m2o('a');
+			})
+			.build();
+
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('a', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('b');
+		});
+
+		await database.schema.createTable('b', (table) => {
+			table.increments('id');
+
+			table.integer('a').references('id')
+				.inTable('a');
+		});
+
+		await expect(new ItemsService('a', { knex: database, schema: cycleSchema })
+			.upsertMany([
+				{ name: 'new', b: null },
+				{ name: 'next', b: { a: 1 } },
+			])).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('b').select('id', 'a')).resolves.toStrictEqual([
+			{ id: 1, a: 1 },
+		]);
+	});
+
+	it(oneLine`
+		creates a row before the payload after it nests a keyless row nesting
+		another
+	`, async () => {
+		const chainSchema = new SchemaBuilder()
+			.collection('a', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('b').m2o('b');
+			})
+			.collection('b', (c) => {
+				c.field('id').id();
+				c.field('c').m2o('c');
+			})
+			.collection('c', (c) => {
+				c.field('id').id();
+				c.field('a').m2o('a');
+			})
+			.build();
+
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('a', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('b');
+		});
+
+		await database.schema.createTable('b', (table) => {
+			table.increments('id');
+			table.integer('c');
+		});
+
+		await database.schema.createTable('c', (table) => {
+			table.increments('id');
+
+			table.integer('a').references('id')
+				.inTable('a');
+		});
+
+		await expect(new ItemsService('a', { knex: database, schema: chainSchema })
+			.upsertMany([
+				{ name: 'new', b: null },
+				{ name: 'next', b: { c: { a: 1 } } },
+			])).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('c').select('id', 'a')).resolves.toStrictEqual([
+			{ id: 1, a: 1 },
+		]);
+	});
+
+	it(oneLine`
+		creates a row before the payload after it nests a keyless row listing it
+		as a child
+	`, async () => {
+		const listSchema = new SchemaBuilder()
+			.collection('a', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('b').m2o('b');
+			})
+			.collection('b', (c) => {
+				c.field('id').id();
+				c.field('as').o2m('a', 'b');
+			})
+			.build();
+
+		await database.schema.createTable('a', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('b');
+		});
+
+		await database.schema.createTable('b', (table) => {
+			table.increments('id');
+		});
+
+		await expect(new ItemsService('a', { knex: database, schema: listSchema })
+			.upsertMany([
+				{ name: 'new', b: null },
+				{ name: 'next', b: { as: [1] } },
+			])).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('a').select('id', 'name', 'b')).resolves
+			.toStrictEqual([
+				{ id: 1, name: 'new', b: 1 },
+				{ id: 2, name: 'next', b: 1 },
+			]);
 	});
 
 	it('creates a row before the payload after it names it as its child', async () => {

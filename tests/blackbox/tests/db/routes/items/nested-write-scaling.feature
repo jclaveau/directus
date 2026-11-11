@@ -3,8 +3,7 @@ Feature: A nested write runs the statements of two parents for twenty
   - The planner creates a batch of parents together with their children; #414
     batched those nested writes so their statements no longer grow with the
     batch. Each scenario sends the same nested create twice, first with two
-    parents, then with twenty, and holds both requests to the same counts,
-    but for the last scenario.
+    parents, then with twenty, and holds both requests to the same counts.
   - Every child collection holding its parent's key is scoped through it
     (`scoped_cache_fields` on a relational path), as the planner's are, so
     the purge's scope reads are counted too. Activity and revisions are
@@ -25,10 +24,7 @@ Feature: A nested write runs the statements of two parents for twenty
     statements per table and kind, on postgres alone.
   - The children's revisions of every created parent are linked to their
     parent's revision in one update on `directus_revisions`, whatever the
-    number of parents (#414), when the children nest nothing.
-  - A label nested in a child is still written per book: its inserts, the
-    books' selects and the revisions' updates grow with the books, as the
-    last scenario counts.
+    number of parents (#414).
 
   Scenario: a one-to-many create of twenty parents runs the statements of two
     When these requests get these responses:
@@ -434,7 +430,7 @@ Feature: A nested write runs the statements of two parents for twenty
       | 2       | test_nws_post      | 2      | 1      | 0      | 0      |
       | 2       | test_nws_post_tag  | 6      | 1      | 0      | 0      |
 
-  Scenario: parents whose children nest new labels run statements per parent
+  Scenario: twenty parents whose children nest new labels run the statements of two
     When these requests get these responses:
       | request                                | response                |
       | method: POST                           | code: 200               |+
@@ -693,15 +689,15 @@ Feature: A nested write runs the statements of two parents for twenty
       | nr-w2 | nr-w  | nr-w2      |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
-      | 1       | directus_activity  | 0      | 9      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 9      | 5      | 0      |
+      | 1       | directus_activity  | 0      | 3      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 3      | 2      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
-      | 1       | test_nws_book      | 9      | 4      | 0      | 0      |
-      | 1       | test_nws_label     | 1      | 4      | 0      | 0      |
+      | 1       | test_nws_book      | 6      | 1      | 0      | 0      |
+      | 1       | test_nws_label     | 1      | 1      | 0      | 0      |
       | 1       | test_nws_shelf     | 2      | 1      | 0      | 0      |
-      | 2       | directus_activity  | 0      | 81     | 0      | 0      |
-      | 2       | directus_revisions | 0      | 81     | 41     | 0      |
+      | 2       | directus_activity  | 0      | 3      | 0      | 0      |
+      | 2       | directus_revisions | 0      | 3      | 2      | 0      |
       | 2       | directus_users     | 1      | 0      | 0      | 0      |
-      | 2       | test_nws_book      | 45     | 40     | 0      | 0      |
-      | 2       | test_nws_label     | 1      | 40     | 0      | 0      |
+      | 2       | test_nws_book      | 6      | 1      | 0      | 0      |
+      | 2       | test_nws_label     | 1      | 1      | 0      | 0      |
       | 2       | test_nws_shelf     | 2      | 1      | 0      | 0      |
