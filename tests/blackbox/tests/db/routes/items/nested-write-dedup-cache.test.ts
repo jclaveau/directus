@@ -1,6 +1,10 @@
-import config, { paths } from '@common/config';
+import config, { getUrl, paths } from '@common/config';
 import { defineFeature, loadFeature } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
+import {
+	auditEnvForFeature,
+	warmUpAuditedInstance,
+} from '@common/query-audit-steps';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
@@ -28,6 +32,8 @@ describe.each(vendors)('%s', (vendor) => {
 	cacheEnv[vendor]['CACHE_NAMESPACE']
 		= `directus-nested-write-dedup-cache-${vendor}-${randomUUID()}`;
 
+	Object.assign(cacheEnv[vendor], auditEnvForFeature(feature, vendor));
+
 	let cacheInstance: ChildProcess;
 
 	beforeAll(async () => {
@@ -39,6 +45,7 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 
 		await awaitDirectusConnection(Number(cacheEnv[vendor].PORT));
+		await warmUpAuditedInstance(feature, vendor, getUrl(vendor, cacheEnv));
 	}, 60_000);
 
 	afterAll(() => {

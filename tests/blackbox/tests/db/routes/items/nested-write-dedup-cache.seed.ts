@@ -23,7 +23,8 @@ export const seedDBStructure = () => {
 
 				// The planner's student_schedule_segment scopes its cache on its
 				// discipline and keeps no revisions; its `name` is unique, its
-				// `label` what a takeover updates.
+				// `label` what a takeover updates. Its junction to student_course
+				// scopes on the course it links.
 				await CreateCollections(vendor, {
 					collections: [
 						{
@@ -34,7 +35,10 @@ export const seedDBStructure = () => {
 						{
 							collection: 'test_nwdc_course_segment',
 							primaryKeyType: 'string',
-							meta: { accountability: null },
+							meta: {
+								scoped_cache_fields: ['course'],
+								accountability: null,
+							},
 						},
 						{
 							collection: 'test_nwdc_segment',

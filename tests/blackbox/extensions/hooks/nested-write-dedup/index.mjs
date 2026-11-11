@@ -21,7 +21,7 @@ const UPDATABLE_SEGMENT_FIELDS = ['discipline', 'label'];
 
 // Only the junction-hook scenarios' segments, so the other scenarios still hand
 // every nested segment to the segment filter.
-const JUNCTION_HOOK_PREFIXES = ['jn-', 'dp-'];
+const JUNCTION_HOOK_PREFIXES = ['jn-', 'dp-', 'js-'];
 
 // A row's fields in key order, so two rows listing one payload in another
 // order sign the same.
