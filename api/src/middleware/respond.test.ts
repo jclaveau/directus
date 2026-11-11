@@ -183,6 +183,7 @@ import { setCacheValue } from '../cache.js';
 import emitter from '../emitter.js';
 import { isCacheAuditReplay } from '../utils/cache-audit-replay.js';
 import { readScopedCacheEpochs } from '../scoped-cache/fill-guard.js';
+import { scopedCachePurgedStore } from '../scoped-cache/purged-record.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import { withMeta } from '../utils/read-meta.js';
 import { respond } from './respond.js';
@@ -1499,19 +1500,19 @@ describe('respond middleware', () => {
 	test('CACHE_PURGED_TAGS_HEADER emits purged pins on a mutation', async () => {
 		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
 
-		const res = makeRes(
-			{ data: { id: 1 } },
+		const res = makeRes({ data: { id: 1 } });
+
+		await scopedCachePurgedStore.run(
 			{
-				scopedCachePurged: [
+				purged: [
 					{
 						collection: 'articles',
 						pinnedScope: { owner: ['U2'] },
 					},
 				],
 			},
+			() => respond(makeReq({ method: 'PATCH' }), res, next),
 		);
-
-		await respond(makeReq({ method: 'PATCH' }), res, next);
 
 		expect(res.setHeader).toHaveBeenCalledWith(
 			'X-Scoped-Cache-Purged-Tags',
@@ -1524,19 +1525,19 @@ describe('respond middleware', () => {
 	test('escapes a control byte on its way into the header', async () => {
 		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
 
-		const res = makeRes(
-			{ data: { id: 1 } },
+		const res = makeRes({ data: { id: 1 } });
+
+		await scopedCachePurgedStore.run(
 			{
-				scopedCachePurged: [
+				purged: [
 					{
 						collection: 'articles',
 						pinnedScope: { owner: ['\x00null'] },
 					},
 				],
 			},
+			() => respond(makeReq({ method: 'PATCH' }), res, next),
 		);
-
-		await respond(makeReq({ method: 'PATCH' }), res, next);
 
 		expect(res.setHeader).toHaveBeenCalledWith(
 			'X-Scoped-Cache-Purged-Tags',
@@ -1562,11 +1563,13 @@ describe('respond middleware', () => {
 				scopedCacheFingerprints: [
 					{ collection: 'a', pinnedScope: { b: ['1', '2'] } },
 				],
-				scopedCachePurged: purgedFingerprints,
 			},
 		);
 
-		await respond(makeReq(), res, next);
+		await scopedCachePurgedStore.run(
+			{ purged: purgedFingerprints },
+			() => respond(makeReq(), res, next),
+		);
 
 		expect(res.setHeader).toHaveBeenCalledWith('X-Scoped-Cache-Tags', 'a:b=1');
 		expect(res.setHeader).toHaveBeenCalledWith('X-Scoped-Cache-Tags-omitted', '1');
@@ -1596,11 +1599,13 @@ describe('respond middleware', () => {
 				scopedCacheFingerprints: [{
 					collection: 'articles',
 				}],
-				scopedCachePurged: [{ collection: 'articles' }],
 			},
 		);
 
-		await respond(makeReq(), res, next);
+		await scopedCachePurgedStore.run(
+			{ purged: [{ collection: 'articles' }] },
+			() => respond(makeReq(), res, next),
+		);
 
 		const names = vi.mocked(res.setHeader).mock.calls.map((call) => call[0]);
 		expect(names).not.toContain('X-Scoped-Cache-Tags');

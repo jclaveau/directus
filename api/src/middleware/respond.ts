@@ -28,6 +28,7 @@ import {
 	type ScopedCacheEpochs,
 } from '../scoped-cache/index.js';
 import { readWhileServingOff } from '../scoped-cache/fill-guard.js';
+import { scopedCachePurgedStore } from '../scoped-cache/purged-record.js';
 import {
 	recordPendingScopedCachePurge,
 } from '../scoped-cache-pending-purges.js';
@@ -97,7 +98,9 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	}
 
 	if (env['CACHE_PURGED_TAGS_HEADER']) {
-		const purged = res.locals['scopedCachePurged'];
+		// Every purge of the request: its own service's and those of the services
+		// its nested writes and hooks built.
+		const purged = scopedCachePurgedStore.getStore()?.purged;
 
 		if (Array.isArray(purged) && purged.length) {
 			setScopedCachePinsHeader(

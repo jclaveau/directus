@@ -12,6 +12,7 @@ import type { AST } from '../types/ast.js';
 import { transaction } from '../utils/transaction.js';
 import { ItemScopedCacheService } from './item-scoped-cache-service.js';
 import { purgeScopedCache } from './purge.js';
+import { scopedCachePurgedStore } from './purged-record.js';
 
 vi.mock('./purge.js', async (importOriginal) => {
 	return {
@@ -465,6 +466,49 @@ describe('purge', () => {
 			{ database: db, schema, accountability: null },
 			{ declaredFingerprints: [], changedCollections: [] },
 		);
+	});
+
+	it(oneLine`
+		records in the request's purged list what a purge reached once its nested
+		write's transaction committed, the write itself having answered none
+	`, async () => {
+		vi.mocked(purgeScopedCache).mockResolvedValueOnce([
+			{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+		]);
+
+		const purgedRecord = { purged: [] };
+
+		await scopedCachePurgedStore.run(purgedRecord, () => {
+			return transaction(db, async (trx) => {
+				await new ItemScopedCacheService('item', schema, trx, {} as Keyv, null)
+					.purge([{ collection: 'item', pinnedScope: { owner: ['alpha'] } }]);
+			});
+		});
+
+		expect(purgedRecord).toEqual({
+			purged: [{ collection: 'item', pinnedScope: { owner: ['alpha'] } }],
+		});
+	});
+
+	it(oneLine`
+		records the request's purged list as a whole-namespace flush once one of its
+		purges flushed it
+	`, async () => {
+		vi.mocked(purgeScopedCache)
+			.mockResolvedValueOnce([{ collection: 'zone' }])
+			.mockResolvedValueOnce(null);
+
+		const purgedRecord = { purged: [] };
+
+		await scopedCachePurgedStore.run(purgedRecord, async () => {
+			await new ItemScopedCacheService('zone', schema, db, {} as Keyv, null)
+				.purge([{ collection: 'zone' }]);
+
+			await new ItemScopedCacheService('item', schema, db, {} as Keyv, null)
+				.purge(null);
+		});
+
+		expect(purgedRecord).toEqual({ purged: null });
 	});
 
 	it(oneLine`
