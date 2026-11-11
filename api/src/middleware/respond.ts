@@ -98,8 +98,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	}
 
 	if (env['CACHE_PURGED_TAGS_HEADER']) {
-		// Every purge of the request: its own service's and those of the services
-		// its nested writes and hooks built.
+		// The purges of the request's own service and of the services its nested
+		// writes and hooks built (see ScopedCachePurgedRecord for what is left out).
 		const purged = scopedCachePurgedStore.getStore()?.purged;
 
 		if (Array.isArray(purged) && purged.length) {

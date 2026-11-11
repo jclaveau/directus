@@ -480,8 +480,14 @@ describe('purge', () => {
 
 		await scopedCachePurgedStore.run(purgedRecord, () => {
 			return transaction(db, async (trx) => {
-				await new ItemScopedCacheService('item', schema, trx, {} as Keyv, null)
-					.purge([{ collection: 'item', pinnedScope: { owner: ['alpha'] } }]);
+				expect(await new ItemScopedCacheService(
+					'item',
+					schema,
+					trx,
+					{} as Keyv,
+					null,
+				).purge([{ collection: 'item', pinnedScope: { owner: ['alpha'] } }]))
+					.toEqual([]);
 			});
 		});
 
@@ -496,7 +502,8 @@ describe('purge', () => {
 	`, async () => {
 		vi.mocked(purgeScopedCache)
 			.mockResolvedValueOnce([{ collection: 'zone' }])
-			.mockResolvedValueOnce(null);
+			.mockResolvedValueOnce(null)
+			.mockResolvedValueOnce([{ collection: 'item' }]);
 
 		const purgedRecord = { purged: [] };
 
@@ -506,6 +513,9 @@ describe('purge', () => {
 
 			await new ItemScopedCacheService('item', schema, db, {} as Keyv, null)
 				.purge(null);
+
+			await new ItemScopedCacheService('item', schema, db, {} as Keyv, null)
+				.purge([{ collection: 'item' }]);
 		});
 
 		expect(purgedRecord).toEqual({ purged: null });
