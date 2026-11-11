@@ -4449,6 +4449,40 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			}
 		});
 
+		it(oneLine`
+			answers a row naming its uuid in another case sameRowAs a stored row of
+			that uuid
+		`, async () => {
+			const answerStored = async () => {
+				return [
+					{ key: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA' },
+					{ sameRowAs: 0 },
+				];
+			};
+
+			emitter.onFilter('uuid_coll.items.create', answerStored);
+
+			try {
+				const keys = await new ItemsService('uuid_coll', {
+					knex: db,
+					schema: shapesSchema,
+				}).createMany([
+					{ name: 'a' },
+					{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'a' },
+				]);
+
+				expect(keys).toEqual([
+					'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
+					'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
+				]);
+
+				expect(tracker.history.insert).toHaveLength(0);
+			}
+			finally {
+				emitter.offFilter('uuid_coll.items.create', answerStored);
+			}
+		});
+
 		it.each([
 			['a single payload', { data: { name: 'a' } }],
 			['one entry short', [{ data: { name: 'a' } }]],

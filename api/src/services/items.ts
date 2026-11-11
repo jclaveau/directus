@@ -2093,7 +2093,11 @@ implements AbstractService<Item> {
 				targetKey = targetEntry.data[primaryKeyField];
 			}
 
-			if (targetKey != null && String(targetKey) === String(namedKey)) {
+			if (
+				targetKey != null
+				&& this.primaryKeyNameOf(targetKey as PrimaryKey)
+				=== this.primaryKeyNameOf(namedKey as PrimaryKey)
+			) {
 				continue;
 			}
 
