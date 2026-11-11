@@ -4403,6 +4403,14 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				+ 'a hook.',
 			],
 			[
+				'a keyless row a hook cancelled',
+				[{ name: 'a' }, { id: 2, name: 'a' }],
+				[null, { sameRowAs: 0 }],
+				'Invalid payload. A filter hook answered row 1 of "test" as the same row '
+				+ 'as row 0, but row 1 names the key 2 and row 0 none, cancelled by a '
+				+ 'hook.',
+			],
+			[
 				'a stored row of another key, through a twin',
 				[{ name: 'a' }, { name: 'a' }, { id: 2, name: 'a' }],
 				[{ key: 9 }, { sameRowAs: 0 }, { sameRowAs: 1 }],
@@ -4450,6 +4458,33 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				]);
 
 				expect(keys).toEqual([9, 9, 9]);
+				expect(tracker.history.insert).toHaveLength(0);
+			}
+			finally {
+				emitter.offFilter('test.items.create', answerStored);
+			}
+		});
+
+		it(oneLine`
+			answers a row naming its integer key as a string sameRowAs a stored row
+			of that key
+		`, async () => {
+			const answerStored = async () => {
+				return [{ key: 9 }, { sameRowAs: 0 }];
+			};
+
+			emitter.onFilter('test.items.create', answerStored);
+
+			try {
+				const keys = await new ItemsService('test', {
+					knex: db,
+					schema: shapesSchema,
+				}).createMany([
+					{ name: 'a' },
+					{ id: '9', name: 'a' },
+				]);
+
+				expect(keys).toEqual([9, 9]);
 				expect(tracker.history.insert).toHaveLength(0);
 			}
 			finally {

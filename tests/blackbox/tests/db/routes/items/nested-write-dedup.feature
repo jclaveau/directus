@@ -25,8 +25,8 @@ Feature: A create hook deduplicating nested records links every row to one recor
   - Every request goes to an instance of the feature's own, sharing the
     database, that reports the statements each request ran
     (`QUERY_AUDIT_HEADER`). The last step counts a request's statements per
-    table and kind, on postgres alone: a nested write runs as many
-    statements for twenty courses as for two (#414).
+    table and kind, on postgres alone: a nested write runs no more
+    statements for twenty courses than for two (#414).
 
   Scenario: a course nesting a stored segment and a new one links both
     Given the rows of test_nwd_segment:
@@ -254,7 +254,7 @@ Feature: A create hook deduplicating nested records links every row to one recor
       | 1       | test_nwd_course_segment | 6      | 1      | 1      | 0      |
       | 1       | test_nwd_segment        | 4      | 1      | 0      | 0      |
 
-  Scenario: twenty courses sharing two segments run the statements of two
+  Scenario: twenty courses sharing two segments run no more statements than two
     Given the rows of test_nwd_segment:
       | name  |
       | js-s1 |

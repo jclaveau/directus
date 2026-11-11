@@ -19,8 +19,8 @@ Feature: A create hook taking over nested records purges what it changed
     `forKey`.
   - The instance also reports the statements each request ran
     (`QUERY_AUDIT_HEADER`). The last step counts a request's statements per
-    table and kind, on postgres alone: a nested write runs as many
-    statements for twenty courses as for two (#414).
+    table and kind, on postgres alone: a nested write runs no more
+    statements for twenty courses than for two (#414).
 
   Scenario: courses nesting a changed stored segment purge its discipline only
     When these requests get these responses:
@@ -211,7 +211,7 @@ Feature: A create hook taking over nested records purges what it changed
       | 1       | test_nwdc_course_segment | 3      | 0      | 0      | 0      |
       | 1       | test_nwdc_segment        | 1      | 0      | 0      | 0      |
 
-  Scenario: twenty courses sharing two segments run the statements of two
+  Scenario: twenty courses sharing two segments run no more statements than two
     When these requests get these responses:
       | request                                        | response                |
       | method: POST                                   | code: 200               |+
