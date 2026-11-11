@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=(t,n,r)=>()=>(e(t,`Collection cannot be empty`),{path:`/collections/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`}),n=(e,t)=>()=>({path:`/collections`,params:t??{},body:JSON.stringify(e),method:`PATCH`});export{t as updateCollection,n as updateCollectionsBatch};
+//# sourceMappingURL=collections.js.map
