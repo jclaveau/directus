@@ -96,8 +96,8 @@ Feature: A create hook taking over nested records purges what it changed
       | request | table                    | select | insert | update | delete |
       | 6       | directus_users           | 1      | 0      | 0      | 0      |
       | 6       | test_nwdc_course         | 1      | 1      | 0      | 0      |
-      | 6       | test_nwdc_course_segment | 8      | 3      | 0      | 0      |
-      | 6       | test_nwdc_segment        | 4      | 0      | 1      | 0      |
+      | 6       | test_nwdc_course_segment | 6      | 1      | 0      | 0      |
+      | 6       | test_nwdc_segment        | 2      | 0      | 1      | 0      |
 
   Scenario: a course moving a stored segment purges the discipline it left
     When these requests get these responses:
@@ -212,9 +212,9 @@ Feature: A create hook taking over nested records purges what it changed
     And on postgres the requests ran these statements:
       | request | table                    | select | insert | update | delete |
       | 1       | directus_users           | 1      | 0      | 0      | 0      |
-      | 1       | test_nwdc_course         | 1      | 1      | 0      | 0      |
-      | 1       | test_nwdc_course_segment | 7      | 2      | 0      | 0      |
-      | 1       | test_nwdc_segment        | 4      | 1      | 1      | 0      |
+      | 1       | test_nwdc_course         | 0      | 1      | 0      | 0      |
+      | 1       | test_nwdc_course_segment | 3      | 0      | 0      | 0      |
+      | 1       | test_nwdc_segment        | 1      | 0      | 0      | 0      |
 
   Scenario: twenty courses sharing two segments run the statements of two
     When these requests get these responses:
@@ -513,9 +513,9 @@ Feature: A create hook taking over nested records purges what it changed
       | request | table                    | select | insert | update | delete |
       | 2       | directus_users           | 1      | 0      | 0      | 0      |
       | 2       | test_nwdc_course         | 1      | 1      | 0      | 0      |
-      | 2       | test_nwdc_course_segment | 9      | 4      | 0      | 0      |
-      | 2       | test_nwdc_segment        | 6      | 1      | 0      | 0      |
+      | 2       | test_nwdc_course_segment | 6      | 1      | 0      | 0      |
+      | 2       | test_nwdc_segment        | 3      | 1      | 0      | 0      |
       | 3       | directus_users           | 1      | 0      | 0      | 0      |
       | 3       | test_nwdc_course         | 1      | 1      | 0      | 0      |
-      | 3       | test_nwdc_course_segment | 45     | 40     | 0      | 0      |
-      | 3       | test_nwdc_segment        | 41     | 1      | 0      | 0      |
+      | 3       | test_nwdc_course_segment | 6      | 1      | 0      | 0      |
+      | 3       | test_nwdc_segment        | 2      | 1      | 0      | 0      |
