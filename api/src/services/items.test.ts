@@ -4380,6 +4380,76 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it.each([
+			[
+				'a row of another key',
+				[{ id: 1, name: 'a' }, { id: 2, name: 'a' }],
+				[{ data: { id: 1, name: 'a' } }, { sameRowAs: 0 }],
+				'Invalid payload. A filter hook answered row 1 of "test" as the same row '
+				+ 'as row 0, but row 1 names the key 2 and row 0 the key 1.',
+			],
+			[
+				'a row of a generated key',
+				[{ name: 'a' }, { id: 2, name: 'a' }],
+				[{ data: { name: 'a' } }, { sameRowAs: 0 }],
+				'Invalid payload. A filter hook answered row 1 of "test" as the same row '
+				+ 'as row 0, but row 1 names the key 2 and row 0 none.',
+			],
+			[
+				'a stored row of another key, through a twin',
+				[{ name: 'a' }, { name: 'a' }, { id: 2, name: 'a' }],
+				[{ key: 9 }, { sameRowAs: 0 }, { sameRowAs: 1 }],
+				'Invalid payload. A filter hook answered row 2 of "test" as the same row '
+				+ 'as row 0, but row 2 names the key 2 and row 0 the key 9.',
+			],
+		])(
+			'refuses a row naming its key answered sameRowAs %s',
+			async (_case, rows, answeredEntries, message) => {
+				const answerTwins = async () => answeredEntries;
+
+				emitter.onFilter('test.items.create', answerTwins);
+
+				try {
+					await expect(new ItemsService('test', {
+						knex: db,
+						schema: shapesSchema,
+					}).createMany(rows)).rejects.toHaveProperty('message', message);
+
+					expect(tracker.history.insert).toHaveLength(0);
+				}
+				finally {
+					emitter.offFilter('test.items.create', answerTwins);
+				}
+			},
+		);
+
+		it(oneLine`
+			answers a row naming its key sameRowAs a stored row of that key
+		`, async () => {
+			const answerStored = async () => {
+				return [{ key: 9 }, { sameRowAs: 0 }, { sameRowAs: 1 }];
+			};
+
+			emitter.onFilter('test.items.create', answerStored);
+
+			try {
+				const keys = await new ItemsService('test', {
+					knex: db,
+					schema: shapesSchema,
+				}).createMany([
+					{ name: 'a' },
+					{ id: 9, name: 'a' },
+					{ id: 9, name: 'a' },
+				]);
+
+				expect(keys).toEqual([9, 9, 9]);
+				expect(tracker.history.insert).toHaveLength(0);
+			}
+			finally {
+				emitter.offFilter('test.items.create', answerStored);
+			}
+		});
+
+		it.each([
 			['a single payload', { data: { name: 'a' } }],
 			['one entry short', [{ data: { name: 'a' } }]],
 			['a sameRowAs pointing forward', [{ sameRowAs: 1 }, { sameRowAs: 0 }]],

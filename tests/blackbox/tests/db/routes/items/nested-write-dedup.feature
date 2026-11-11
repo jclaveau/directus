@@ -7,9 +7,9 @@ Feature: A create hook deduplicating nested records links every row to one recor
     `nested-write-dedup` hook extension does the same on test_nwd_segment,
     unique by `name`.
   - The extension also filters test_nwd_course_segment creates as the
-    planner's junction hooks do, for segments named `jn-…`, `dp-…` or `js-…`
-    only: a row repeating an earlier row's course and segment name answers
-    `sameRowAs` that row; one read on the mutation's transaction, and a nested
+    planner's junction hooks do, for segments named `jn-…`, `dp-…`, `dq-…` or
+    `js-…` only: a row repeating an earlier row's course and segment name
+    answers `sameRowAs` that row; one read on the mutation's transaction, and a nested
     segment whose name is stored becomes its key; a new one stays nested, for
     the test_nwd_segment filter.
   - A course links its segments through test_nwd_course_segment rows, as the
@@ -191,39 +191,66 @@ Feature: A create hook deduplicating nested records links every row to one recor
       | 1       | test_nwd_course_segment | 4      | 1      | 0      | 0      |
       | 1       | test_nwd_segment        | 3      | 1      | 0      | 0      |
 
-  Scenario: a course nesting the same new segment twice links it once
+  Scenario: a course nesting the same new segment under two keys is refused
     When these requests get these responses:
       | request                                        | response                |
-      | method: POST                                   | code: 200               |+
-      | path: /items/test_nwd_course                   | body:                   |
-      | query:                                         |   data:                 |
-      |   fields: id,segments.id,segments.segment.name |     id: dp-a            |
-      | payload:                                       |     segments:           |
-      |   id: dp-a                                     |       - id: dp-a1       |
-      |   segments:                                    |         segment:        |
-      |     - id: dp-a1                                |           name: dp-s1   |
+      | method: POST                                   | code: 400               |+
+      | path: /items/test_nwd_course                   |                         |
+      | payload:                                       |                         |
+      |   id: dp-a                                     |                         |
+      |   segments:                                    |                         |
+      |     - id: dp-a1                                |                         |
       |       segment:                                 |                         |
       |         name: dp-s1                            |                         |
       |     - id: dp-a2                                |                         |
       |       segment:                                 |                         |
       |         name: dp-s1                            |                         |
       | method: GET                                    | code: 200               |+
+      | path: /items/test_nwd_course                   | body:                   |
+      | query:                                         |   data: []              |
+      |   filter[id][_starts_with]: dp-                |                         |
+      | method: GET                                    | code: 200               |+
       | path: /items/test_nwd_segment                  | body:                   |
-      | query:                                         |   data:                 |
-      |   filter[name][_starts_with]: dp-              |     - name: dp-s1       |
-      |   fields: name                                 |                         |
-      |   sort: name                                   |                         |
-    Then the rows of test_nwd_course_segment whose key starts with "dp-" are:
-      | id    | course |
-      | dp-a1 | dp-a   |
+      | query:                                         |   data: []              |
+      |   filter[name][_starts_with]: dp-              |                         |
+    Then response 1 is refused with the message:
+      """
+      Invalid payload. A filter hook answered row 1 of "test_nwd_course_segment"
+      as the same row as row 0, but row 1 names the key "dp-a2" and row 0 the key
+      "dp-a1".
+      """
     And on postgres the requests ran these statements:
       | request | table                   | select | insert | update | delete |
-      | 1       | directus_activity       | 0      | 3      | 0      | 0      |
-      | 1       | directus_revisions      | 0      | 3      | 2      | 0      |
       | 1       | directus_users          | 1      | 0      | 0      | 0      |
-      | 1       | test_nwd_course         | 1      | 1      | 0      | 0      |
-      | 1       | test_nwd_course_segment | 4      | 1      | 0      | 0      |
-      | 1       | test_nwd_segment        | 3      | 1      | 0      | 0      |
+
+  Scenario: a course nesting the same new segment twice under one key links it once
+    When these requests get these responses:
+      | request                                        | response                |
+      | method: POST                                   | code: 200               |+
+      | path: /items/test_nwd_course                   | body:                   |
+      | query:                                         |   data:                 |
+      |   fields: id,segments.id,segments.segment.name |     id: dq-a            |
+      | payload:                                       |     segments:           |
+      |   id: dq-a                                     |       - id: dq-a1       |
+      |   segments:                                    |         segment:        |
+      |     - id: dq-a1                                |           name: dq-s1   |
+      |       segment:                                 |                         |
+      |         name: dq-s1                            |                         |
+      |     - id: dq-a1                                |                         |
+      |       segment:                                 |                         |
+      |         name: dq-s1                            |                         |
+      | method: GET                                    | code: 200               |+
+      | path: /items/test_nwd_segment                  | body:                   |
+      | query:                                         |   data:                 |
+      |   filter[name][_starts_with]: dq-              |     - name: dq-s1       |
+      |   fields: name                                 |                         |
+      |   sort: name                                   |                         |
+    Then the rows of test_nwd_course_segment whose key starts with "dq-" are:
+      | id    | course |
+      | dq-a1 | dq-a   |
+    And on postgres the requests ran these statements:
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
 
   Scenario: twenty courses sharing two segments run the statements of two
     Given the rows of test_nwd_segment:

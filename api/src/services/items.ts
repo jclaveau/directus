@@ -695,6 +695,8 @@ implements AbstractService<Item> {
 				));
 			}
 
+			this.refuseSameRowNamingAnotherKey(createEntries, data, primaryKeyField);
+
 			for (const [index, entry] of createEntries.entries()) {
 				if (entry !== null && 'sameRowAs' in entry) {
 					sameRowPositions.push({ index, sameRowAs: entry.sameRowAs });
@@ -2054,6 +2056,61 @@ implements AbstractService<Item> {
 		// Nothing to write: no transaction, no activity or revision rows, and no
 		// integrity check.
 		return Object.keys(payloadAfterHooks ?? {}).every(changesNothing);
+	}
+
+	/**
+	 * Refuses a create filter answering `sameRowAs` for a row that names a key its
+	 * target row does not hold: the row the caller named would never be written.
+	 */
+	private refuseSameRowNamingAnotherKey(
+		createEntries: CreateEntries,
+		rows: Partial<Item>[],
+		primaryKeyField: string,
+	): void {
+		for (const [index, entry] of createEntries.entries()) {
+			const namedKey = rows[index]?.[primaryKeyField];
+
+			if (entry === null || !('sameRowAs' in entry) || namedKey == null) {
+				continue;
+			}
+
+			// A target answered `sameRowAs` itself points at an earlier row: the
+			// chain ends on a row that is written, taken over or cancelled.
+			let targetIndex = entry.sameRowAs;
+			let targetEntry = createEntries[targetIndex]!;
+
+			while (targetEntry !== null && 'sameRowAs' in targetEntry) {
+				targetIndex = targetEntry.sameRowAs;
+				targetEntry = createEntries[targetIndex]!;
+			}
+
+			let targetKey: unknown = undefined;
+
+			if (targetEntry !== null && 'key' in targetEntry) {
+				targetKey = targetEntry.key;
+			}
+			else if (targetEntry !== null) {
+				targetKey = targetEntry.data[primaryKeyField];
+			}
+
+			if (targetKey != null && String(targetKey) === String(namedKey)) {
+				continue;
+			}
+
+			const targetKeyWording = targetKey == null
+				? 'none'
+				: `the key ${JSON.stringify(targetKey)}`;
+
+			throw new InvalidPayloadError({
+				reason: oneLine`
+					A filter hook answered row ${JSON.stringify(index)} of
+					${JSON.stringify(this.collection)} as the same row as row
+					${JSON.stringify(targetIndex)}, but row ${JSON.stringify(index)}
+					names the key ${JSON.stringify(namedKey)} and row
+					${JSON.stringify(targetIndex)} ${targetKeyWording}
+				`,
+			});
+		}
 	}
 
 	/**
