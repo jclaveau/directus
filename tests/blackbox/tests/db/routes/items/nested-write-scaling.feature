@@ -3,14 +3,18 @@ Feature: A nested write runs the statements of two parents for twenty
   - The planner creates a batch of parents together with their children; #414
     batched those nested writes so their statements no longer grow with the
     batch. Each scenario sends the same nested create twice, first with two
-    parents, then with twenty, and holds both requests to the same counts.
-  - Every child collection is scoped through its parent (`scoped_cache_fields`
-    on a relational path), as the planner's are, so the purge's scope reads
-    are counted too. Activity and revisions are kept, which the planner's
-    `student_*` collections turn off, so their counts show the core's cost.
+    parents, then with twenty, and holds both requests to the same counts,
+    but for the last scenario.
+  - Every child collection holding its parent's key is scoped through it
+    (`scoped_cache_fields` on a relational path), as the planner's are, so
+    the purge's scope reads are counted too. Activity and revisions are
+    kept, which the planner's `student_*` collections turn off, so their
+    counts show the core's cost.
   - Every key is a string the scenario chooses, all of one scenario's keys
     sharing a prefix of its own. Parent letters skip `t`, the many-to-many
-    scenario's tags.
+    scenario's tags. A label's key is generated: a book names its new label
+    by its fields alone, as a planner junction row names its schedule
+    segment, so the create's response reads each book's label by name.
   - A Given creates its table's rows in one request. A request authenticates
     as the admin. A response cell states the keys it checks.
   - A Then reads back every row whose key starts with the prefix, sorted by
@@ -21,7 +25,10 @@ Feature: A nested write runs the statements of two parents for twenty
     statements per table and kind, on postgres alone.
   - The children's revisions of every created parent are linked to their
     parent's revision in one update on `directus_revisions`, whatever the
-    number of parents (#414).
+    number of parents (#414), when the children nest nothing.
+  - A label nested in a child is still written per book: its inserts, the
+    books' selects and the revisions' updates grow with the books, as the
+    last scenario counts.
 
   Scenario: a one-to-many create of twenty parents runs the statements of two
     When these requests get these responses:
@@ -426,3 +433,275 @@ Feature: A nested write runs the statements of two parents for twenty
       | 2       | directus_users     | 1      | 0      | 0      | 0      |
       | 2       | test_nws_post      | 2      | 1      | 0      | 0      |
       | 2       | test_nws_post_tag  | 6      | 1      | 0      | 0      |
+
+  Scenario: parents whose children nest new labels run statements per parent
+    When these requests get these responses:
+      | request                                | response                |
+      | method: POST                           | code: 200               |+
+      | path: /items/test_nws_shelf            | body:                   |
+      | query:                                 |   data:                 |
+      |   fields: id,books.id,books.label.name |     - id: nr-a          |
+      | payload:                               |       books:            |
+      |   - id: nr-a                           |         - id: nr-a1     |
+      |     owner: u1                          |           label:        |
+      |     books:                             |             name: nr-a1 |
+      |       - id: nr-a1                      |         - id: nr-a2     |
+      |         label:                         |           label:        |
+      |           name: nr-a1                  |             name: nr-a2 |
+      |       - id: nr-a2                      |     - id: nr-b          |
+      |         label:                         |       books:            |
+      |           name: nr-a2                  |         - id: nr-b1     |
+      |   - id: nr-b                           |           label:        |
+      |     owner: u2                          |             name: nr-b1 |
+      |     books:                             |         - id: nr-b2     |
+      |       - id: nr-b1                      |           label:        |
+      |         label:                         |             name: nr-b2 |
+      |           name: nr-b1                  |                         |
+      |       - id: nr-b2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-b2                  |                         |
+      | method: POST                           | code: 200               |+
+      | path: /items/test_nws_shelf            |                         |
+      | query:                                 |                         |
+      |   fields: id,books.id,books.label.name |                         |
+      | payload:                               |                         |
+      |   - id: nr-c                           |                         |
+      |     owner: u1                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-c1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-c1                  |                         |
+      |       - id: nr-c2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-c2                  |                         |
+      |   - id: nr-d                           |                         |
+      |     owner: u2                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-d1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-d1                  |                         |
+      |       - id: nr-d2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-d2                  |                         |
+      |   - id: nr-e                           |                         |
+      |     owner: u1                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-e1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-e1                  |                         |
+      |       - id: nr-e2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-e2                  |                         |
+      |   - id: nr-f                           |                         |
+      |     owner: u2                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-f1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-f1                  |                         |
+      |       - id: nr-f2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-f2                  |                         |
+      |   - id: nr-g                           |                         |
+      |     owner: u1                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-g1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-g1                  |                         |
+      |       - id: nr-g2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-g2                  |                         |
+      |   - id: nr-h                           |                         |
+      |     owner: u2                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-h1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-h1                  |                         |
+      |       - id: nr-h2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-h2                  |                         |
+      |   - id: nr-i                           |                         |
+      |     owner: u1                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-i1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-i1                  |                         |
+      |       - id: nr-i2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-i2                  |                         |
+      |   - id: nr-j                           |                         |
+      |     owner: u2                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-j1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-j1                  |                         |
+      |       - id: nr-j2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-j2                  |                         |
+      |   - id: nr-k                           |                         |
+      |     owner: u1                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-k1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-k1                  |                         |
+      |       - id: nr-k2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-k2                  |                         |
+      |   - id: nr-l                           |                         |
+      |     owner: u2                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-l1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-l1                  |                         |
+      |       - id: nr-l2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-l2                  |                         |
+      |   - id: nr-m                           |                         |
+      |     owner: u1                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-m1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-m1                  |                         |
+      |       - id: nr-m2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-m2                  |                         |
+      |   - id: nr-n                           |                         |
+      |     owner: u2                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-n1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-n1                  |                         |
+      |       - id: nr-n2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-n2                  |                         |
+      |   - id: nr-o                           |                         |
+      |     owner: u1                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-o1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-o1                  |                         |
+      |       - id: nr-o2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-o2                  |                         |
+      |   - id: nr-p                           |                         |
+      |     owner: u2                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-p1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-p1                  |                         |
+      |       - id: nr-p2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-p2                  |                         |
+      |   - id: nr-q                           |                         |
+      |     owner: u1                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-q1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-q1                  |                         |
+      |       - id: nr-q2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-q2                  |                         |
+      |   - id: nr-r                           |                         |
+      |     owner: u2                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-r1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-r1                  |                         |
+      |       - id: nr-r2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-r2                  |                         |
+      |   - id: nr-s                           |                         |
+      |     owner: u1                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-s1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-s1                  |                         |
+      |       - id: nr-s2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-s2                  |                         |
+      |   - id: nr-u                           |                         |
+      |     owner: u2                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-u1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-u1                  |                         |
+      |       - id: nr-u2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-u2                  |                         |
+      |   - id: nr-v                           |                         |
+      |     owner: u1                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-v1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-v1                  |                         |
+      |       - id: nr-v2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-v2                  |                         |
+      |   - id: nr-w                           |                         |
+      |     owner: u2                          |                         |
+      |     books:                             |                         |
+      |       - id: nr-w1                      |                         |
+      |         label:                         |                         |
+      |           name: nr-w1                  |                         |
+      |       - id: nr-w2                      |                         |
+      |         label:                         |                         |
+      |           name: nr-w2                  |                         |
+    Then the rows of test_nws_book whose key starts with "nr-" are:
+      | id    | shelf | label.name |
+      | nr-a1 | nr-a  | nr-a1      |
+      | nr-a2 | nr-a  | nr-a2      |
+      | nr-b1 | nr-b  | nr-b1      |
+      | nr-b2 | nr-b  | nr-b2      |
+      | nr-c1 | nr-c  | nr-c1      |
+      | nr-c2 | nr-c  | nr-c2      |
+      | nr-d1 | nr-d  | nr-d1      |
+      | nr-d2 | nr-d  | nr-d2      |
+      | nr-e1 | nr-e  | nr-e1      |
+      | nr-e2 | nr-e  | nr-e2      |
+      | nr-f1 | nr-f  | nr-f1      |
+      | nr-f2 | nr-f  | nr-f2      |
+      | nr-g1 | nr-g  | nr-g1      |
+      | nr-g2 | nr-g  | nr-g2      |
+      | nr-h1 | nr-h  | nr-h1      |
+      | nr-h2 | nr-h  | nr-h2      |
+      | nr-i1 | nr-i  | nr-i1      |
+      | nr-i2 | nr-i  | nr-i2      |
+      | nr-j1 | nr-j  | nr-j1      |
+      | nr-j2 | nr-j  | nr-j2      |
+      | nr-k1 | nr-k  | nr-k1      |
+      | nr-k2 | nr-k  | nr-k2      |
+      | nr-l1 | nr-l  | nr-l1      |
+      | nr-l2 | nr-l  | nr-l2      |
+      | nr-m1 | nr-m  | nr-m1      |
+      | nr-m2 | nr-m  | nr-m2      |
+      | nr-n1 | nr-n  | nr-n1      |
+      | nr-n2 | nr-n  | nr-n2      |
+      | nr-o1 | nr-o  | nr-o1      |
+      | nr-o2 | nr-o  | nr-o2      |
+      | nr-p1 | nr-p  | nr-p1      |
+      | nr-p2 | nr-p  | nr-p2      |
+      | nr-q1 | nr-q  | nr-q1      |
+      | nr-q2 | nr-q  | nr-q2      |
+      | nr-r1 | nr-r  | nr-r1      |
+      | nr-r2 | nr-r  | nr-r2      |
+      | nr-s1 | nr-s  | nr-s1      |
+      | nr-s2 | nr-s  | nr-s2      |
+      | nr-u1 | nr-u  | nr-u1      |
+      | nr-u2 | nr-u  | nr-u2      |
+      | nr-v1 | nr-v  | nr-v1      |
+      | nr-v2 | nr-v  | nr-v2      |
+      | nr-w1 | nr-w  | nr-w1      |
+      | nr-w2 | nr-w  | nr-w2      |
+    And on postgres the requests ran these statements:
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 9      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 9      | 5      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 1       | test_nws_book      | 9      | 4      | 0      | 0      |
+      | 1       | test_nws_label     | 1      | 4      | 0      | 0      |
+      | 1       | test_nws_shelf     | 2      | 1      | 0      | 0      |
+      | 2       | directus_activity  | 0      | 81     | 0      | 0      |
+      | 2       | directus_revisions | 0      | 81     | 41     | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | test_nws_book      | 45     | 40     | 0      | 0      |
+      | 2       | test_nws_label     | 1      | 40     | 0      | 0      |
+      | 2       | test_nws_shelf     | 2      | 1      | 0      | 0      |

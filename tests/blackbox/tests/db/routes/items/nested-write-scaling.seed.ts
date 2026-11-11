@@ -1,6 +1,7 @@
 import {
 	CreateCollections,
 	CreateFieldM2M,
+	CreateFieldM2O,
 	CreateFieldO2M,
 	DeleteCollectionIfPresent,
 } from '@common/functions';
@@ -21,6 +22,9 @@ export const seedDBStructure = () => {
 					'test_nws_post_tag',
 					'test_nws_post',
 					'test_nws_tag',
+					'test_nws_book',
+					'test_nws_shelf',
+					'test_nws_label',
 				]) {
 					await DeleteCollectionIfPresent(vendor, { collection });
 				}
@@ -54,6 +58,21 @@ export const seedDBStructure = () => {
 							primaryKeyType: 'string',
 							meta: { scoped_cache_fields: ['test_nws_post_id.owner'] },
 						},
+						{
+							collection: 'test_nws_shelf',
+							primaryKeyType: 'string',
+							meta: { scoped_cache_fields: ['owner'] },
+							fields: [ownerField],
+						},
+						{
+							collection: 'test_nws_book',
+							primaryKeyType: 'string',
+							meta: { scoped_cache_fields: ['shelf.owner'] },
+						},
+						{
+							collection: 'test_nws_label',
+							fields: [{ field: 'name', type: 'string', meta: {} }],
+						},
 					],
 				});
 
@@ -72,6 +91,20 @@ export const seedDBStructure = () => {
 					otherCollection: 'test_nws_tag',
 					otherField: 'posts',
 					junctionCollection: 'test_nws_post_tag',
+				});
+
+				await CreateFieldO2M(vendor, {
+					collection: 'test_nws_shelf',
+					field: 'books',
+					primaryKeyType: 'string',
+					otherCollection: 'test_nws_book',
+					otherField: 'shelf',
+				});
+
+				await CreateFieldM2O(vendor, {
+					collection: 'test_nws_book',
+					field: 'label',
+					otherCollection: 'test_nws_label',
 				});
 
 				expect(true).toBeTruthy();
