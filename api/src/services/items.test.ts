@@ -4379,6 +4379,36 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			}
 		});
 
+		it(oneLine`
+			answers null for a row naming the key of a cancelled row it is pointed
+			sameRowAs
+		`, async () => {
+			const cancelBoth = async () => {
+				return [null, { sameRowAs: 0 }];
+			};
+
+			emitter.onFilter('test.items.create', cancelBoth);
+
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			try {
+				const keys = await new ItemsService('test', {
+					knex: db,
+					schema: shapesSchema,
+				}).createMany(
+					[{ id: 1, name: 'a' }, { id: '1', name: 'a' }],
+					{ allowFilterCancel: true },
+				);
+
+				expect(keys).toEqual([null, null]);
+				expect(tracker.history.insert).toHaveLength(0);
+				expect(actionSpy).not.toHaveBeenCalled();
+			}
+			finally {
+				emitter.offFilter('test.items.create', cancelBoth);
+			}
+		});
+
 		it.each([
 			[
 				'a row of another key',

@@ -2092,6 +2092,11 @@ implements AbstractService<Item> {
 			else if (targetEntry !== null) {
 				targetKey = targetEntry.data[primaryKeyField];
 			}
+			// A cancelled target keeps the key its payload named: a row naming that
+			// key follows it into the cancel, as a keyless row does.
+			else {
+				targetKey = rows[targetIndex]?.[primaryKeyField];
+			}
 
 			if (
 				targetKey != null
@@ -2101,20 +2106,12 @@ implements AbstractService<Item> {
 				continue;
 			}
 
-			// A cancelled target is never written: the key it names comes from the
-			// payload, and no key of row 1 can make it whole.
-			const cancelledKey = targetEntry === null
-				? rows[targetIndex]?.[primaryKeyField]
-				: undefined;
-
 			let targetKeyWording = targetKey == null
 				? 'none'
 				: `the key ${JSON.stringify(targetKey)}`;
 
 			if (targetEntry === null) {
-				targetKeyWording = cancelledKey == null
-					? 'none, cancelled by a hook'
-					: `the key ${JSON.stringify(cancelledKey)}, cancelled by a hook`;
+				targetKeyWording += ', cancelled by a hook';
 			}
 
 			throw new InvalidPayloadError({
