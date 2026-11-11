@@ -181,34 +181,29 @@ Feature: A create hook taking over nested records purges what it changed
 
   Scenario: courses nesting one new segment with two labels are refused
     When these requests get these responses:
-      | request                                      | response           |
-      | method: POST                                 | code: 400          |+
-      | path: /items/test_nwdc_course                |                    |
-      | payload:                                     |                    |
-      |   - id: cr-a                                 |                    |
-      |     segments:                                |                    |
-      |       - id: cr-a1                            |                    |
-      |         segment:                             |                    |
-      |           name: cr-s1                        |                    |
-      |           discipline: d7                     |                    |
-      |           label: one                         |                    |
-      |   - id: cr-b                                 |                    |
-      |     segments:                                |                    |
-      |       - id: cr-b1                            |                    |
-      |         segment:                             |                    |
-      |           name: cr-s1                        |                    |
-      |           discipline: d7                     |                    |
-      |           label: two                         |                    |
-      | method: GET                                  | code: 200          |+
-      | path: /items/test_nwdc_segment               | cache: MISS        |
-      | query:                                       | body:              |
-      |   fields: name,label                         |   data: []         |
-      |   filter[discipline][_eq]: d7                |                    |
-    Then response 1 is refused with the message:
-      """
-      Value "cr-s1" for field "name" in collection "test_nwdc_segment" has to be
-      unique.
-      """
+      | request                        | response                                  |
+      | method: POST                   | code: 400                                 |+
+      | path: /items/test_nwdc_course  | body:                                     |
+      | payload:                       |   errors:                                 |
+      |   - id: cr-a                   |     - message: >-                         |
+      |     segments:                  |         Value "cr-s1" for field "name" in |
+      |       - id: cr-a1              |         collection "test_nwdc_segment"    |
+      |         segment:               |         has to be unique.                 |
+      |           name: cr-s1          |                                           |
+      |           discipline: d7       |                                           |
+      |           label: one           |                                           |
+      |   - id: cr-b                   |                                           |
+      |     segments:                  |                                           |
+      |       - id: cr-b1              |                                           |
+      |         segment:               |                                           |
+      |           name: cr-s1          |                                           |
+      |           discipline: d7       |                                           |
+      |           label: two           |                                           |
+      | method: GET                    | code: 200                                 |+
+      | path: /items/test_nwdc_segment | cache: MISS                               |
+      | query:                         | body:                                     |
+      |   fields: name,label           |   data: []                                |
+      |   filter[discipline][_eq]: d7  |                                           |
     And on postgres the requests ran these statements:
       | request | table                    | select | insert | update | delete |
       | 1       | directus_users           | 1      | 0      | 0      | 0      |

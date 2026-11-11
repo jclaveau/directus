@@ -1,6 +1,5 @@
 import {
 	cellOfKnownKeys,
-	messageOfDocString,
 	parseGherkinTable,
 	responseCellOf,
 	type StepFunctions,
@@ -132,15 +131,6 @@ export function defineNestedWriteSteps(
 
 			expect(response.statusCode).toEqual(200);
 			expect(response.body.data).toEqual(expectedRows);
-		},
-	);
-
-	then.optional(
-		/^response (\d+) is refused with the message:$/,
-		(responsePosition: string, docString: string) => {
-			expect(
-				receivedResponses[Number(responsePosition) - 1]!.body.errors,
-			).toMatchObject([{ message: messageOfDocString(docString) }]);
 		},
 	);
 

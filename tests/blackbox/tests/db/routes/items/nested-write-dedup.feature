@@ -193,32 +193,26 @@ Feature: A create hook deduplicating nested records links every row to one recor
 
   Scenario: a course nesting the same new segment under two keys is refused
     When these requests get these responses:
-      | request                                        | response                |
-      | method: POST                                   | code: 400               |+
-      | path: /items/test_nwd_course                   |                         |
-      | payload:                                       |                         |
-      |   id: dp-a                                     |                         |
-      |   segments:                                    |                         |
-      |     - id: dp-a1                                |                         |
-      |       segment:                                 |                         |
-      |         name: dp-s1                            |                         |
-      |     - id: dp-a2                                |                         |
-      |       segment:                                 |                         |
-      |         name: dp-s1                            |                         |
-      | method: GET                                    | code: 200               |+
-      | path: /items/test_nwd_course                   | body:                   |
-      | query:                                         |   data: []              |
-      |   filter[id][_starts_with]: dp-                |                         |
-      | method: GET                                    | code: 200               |+
-      | path: /items/test_nwd_segment                  | body:                   |
-      | query:                                         |   data: []              |
-      |   filter[name][_starts_with]: dp-              |                         |
-    Then response 1 is refused with the message:
-      """
-      Invalid payload. A filter hook answered row 1 of "test_nwd_course_segment"
-      as the same row as row 0, but row 1 names the key "dp-a2" and row 0 the key
-      "dp-a1".
-      """
+      | request                           | response                                 |
+      | method: POST                      | code: 400                                |+
+      | path: /items/test_nwd_course      | body:                                    |
+      | payload:                          |   errors:                                |
+      |   id: dp-a                        |     - message: >-                        |
+      |   segments:                       |         Invalid payload. A filter hook   |
+      |     - id: dp-a1                   |         answered row 1 of                |
+      |       segment:                    |         "test_nwd_course_segment" as the |
+      |         name: dp-s1               |         same row as row 0, but row 1     |
+      |     - id: dp-a2                   |         names the key "dp-a2" and row 0  |
+      |       segment:                    |         the key "dp-a1".                 |
+      |         name: dp-s1               |                                          |
+      | method: GET                       | code: 200                                |+
+      | path: /items/test_nwd_course      | body:                                    |
+      | query:                            |   data: []                               |
+      |   filter[id][_starts_with]: dp-   |                                          |
+      | method: GET                       | code: 200                                |+
+      | path: /items/test_nwd_segment     | body:                                    |
+      | query:                            |   data: []                               |
+      |   filter[name][_starts_with]: dp- |                                          |
     And on postgres the requests ran these statements:
       | request | table                   | select | insert | update | delete |
       | 1       | directus_users          | 1      | 0      | 0      | 0      |
