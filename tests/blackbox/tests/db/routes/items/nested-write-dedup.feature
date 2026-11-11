@@ -222,6 +222,9 @@ Feature: A create hook deduplicating nested records links every row to one recor
     And on postgres the requests ran these statements:
       | request | table                   | select | insert | update | delete |
       | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_nwd_course         | 0      | 1      | 0      | 0      |
+      | 1       | test_nwd_course_segment | 2      | 0      | 0      | 0      |
+      | 1       | test_nwd_segment        | 1      | 0      | 0      | 0      |
 
   Scenario: a course nesting the same new segment twice under one key links it once
     When these requests get these responses:
@@ -250,7 +253,12 @@ Feature: A create hook deduplicating nested records links every row to one recor
       | dq-a1 | dq-a   |
     And on postgres the requests ran these statements:
       | request | table                   | select | insert | update | delete |
+      | 1       | directus_activity       | 0      | 4      | 0      | 0      |
+      | 1       | directus_revisions      | 0      | 4      | 2      | 0      |
       | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_nwd_course         | 1      | 1      | 0      | 0      |
+      | 1       | test_nwd_course_segment | 6      | 1      | 1      | 0      |
+      | 1       | test_nwd_segment        | 4      | 1      | 0      | 0      |
 
   Scenario: twenty courses sharing two segments run the statements of two
     Given the rows of test_nwd_segment:
