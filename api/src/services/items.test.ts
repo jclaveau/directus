@@ -4395,6 +4395,14 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				+ 'as row 0, but row 1 names the key 2 and row 0 none.',
 			],
 			[
+				'a row a hook cancelled',
+				[{ id: 1, name: 'a' }, { id: 2, name: 'a' }],
+				[null, { sameRowAs: 0 }],
+				'Invalid payload. A filter hook answered row 1 of "test" as the same row '
+				+ 'as row 0, but row 1 names the key 2 and row 0 the key 1, cancelled by '
+				+ 'a hook.',
+			],
+			[
 				'a stored row of another key, through a twin',
 				[{ name: 'a' }, { name: 'a' }, { id: 2, name: 'a' }],
 				[{ key: 9 }, { sameRowAs: 0 }, { sameRowAs: 1 }],
