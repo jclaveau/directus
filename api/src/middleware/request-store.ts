@@ -6,9 +6,20 @@ import { emptyRequestState, requestStore } from '../utils/request-store.js';
  * name their scoped-cache purges in it beside its own service's (read by the
  * CACHE_PURGED_TAGS_HEADER and an extension's `scopedCache.readRequestPurges`),
  * and the query audit records its SQL there.
+ *
+ * Emptied once the response closed: a socket the request opened (a new pool
+ * connection, a keep-alive agent) keeps the store alive as long as it stays
+ * open, and nothing reads the list or the audit after the response.
  */
-const openRequestStore: RequestHandler = (_req, _res, next) => {
-	requestStore.run(emptyRequestState(), next);
+const openRequestStore: RequestHandler = (_req, res, next) => {
+	const requestState = emptyRequestState();
+
+	res.once('close', () => {
+		requestState.scopedCachePurged = undefined;
+		requestState.queryAudit = undefined;
+	});
+
+	requestStore.run(requestState, next);
 };
 
 export default openRequestStore;

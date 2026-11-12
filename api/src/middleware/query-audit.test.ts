@@ -60,7 +60,7 @@ test('writes the audit of the request when its headers flush', () => {
 	});
 });
 
-test('keeps the purged list of the request it audits', () => {
+test('adds its audit to the store of the request it audits', () => {
 	vi.mocked(useEnv).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
@@ -87,8 +87,7 @@ test('keeps the purged list of the request it audits', () => {
 		scopedCachePurged: { purged: [], queuedPurges: [] },
 	});
 
-	expect(auditedState!.scopedCachePurged)
-		.toBe(requestState.scopedCachePurged);
+	expect(auditedState).toBe(requestState);
 });
 
 test('takes the level the request sends over QUERY_AUDIT_LEVEL', () => {

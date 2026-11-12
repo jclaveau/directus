@@ -7,7 +7,8 @@ import type { ScopedCachePurgedRecord } from '../scoped-cache/purged-record.js';
  * QUERY_AUDIT_HEADER asked for, and the list of the scoped-cache purges it
  * reached. Opened once per HTTP request by `openRequestStore`, per websocket
  * message, per GraphQL websocket operation, per schedule tick, and per flow run
- * with none open; let go with the last async work it started.
+ * with none open; let go with the last async work it started, and an HTTP
+ * request's emptied once its response closed.
  */
 export type RequestState = {
 	queryAudit?: QueryAudit;
