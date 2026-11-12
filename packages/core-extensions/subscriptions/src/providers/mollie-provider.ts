@@ -22,6 +22,8 @@ const MOLLIE_INTERVAL = /^(\d+) (month|week|day)s?$/;
 /** Mollie's recurring guide: a `pending` mandate can already be charged. */
 const USABLE_MANDATE_STATUSES = ['valid', 'pending'];
 
+const ENDED_MOLLIE_STATUSES = ['canceled', 'completed'];
+
 /** Mollie's `completed` is a fixed-term subscription past its last payment. */
 const NORMALIZED_STATUSES: Record<string, string> = {
 	pending: 'pending',
@@ -94,19 +96,29 @@ export function createMollieProvider(
 		async resumeCancel({ customerId, subscriptionId, periodEnd }) {
 			// A resume whose commit failed after this create, or whose sync has not
 			// stored the new row yet, is found by its metadata, past the hour the
-			// idempotency key lasts.
+			// idempotency key lasts. An ended one was a resume the user canceled.
+			let endedResumeCount = 0;
+
 			for await (const customerSubscription of mollieClient
 				.customerSubscriptions.iterate({ customerId })) {
 				if (readMetadataText(customerSubscription, 'resumes')
-					=== subscriptionId) {
-					return {
-						resourceId: composeMollieResourceId({
-							customerId,
-							subscriptionId: customerSubscription.id,
-						}),
-						isNewSubscription: true,
-					};
+					!== subscriptionId) {
+					continue;
 				}
+
+				if (ENDED_MOLLIE_STATUSES.includes(customerSubscription.status)) {
+					endedResumeCount += 1;
+
+					continue;
+				}
+
+				return {
+					resourceId: composeMollieResourceId({
+						customerId,
+						subscriptionId: customerSubscription.id,
+					}),
+					isNewSubscription: true,
+				};
 			}
 
 			const canceledSubscription = await mollieClient.customerSubscriptions
@@ -133,7 +145,9 @@ export function createMollieProvider(
 						...readMetadataObject(canceledSubscription),
 						resumes: subscriptionId,
 					},
-					idempotencyKey: `resume-${subscriptionId}`,
+					idempotencyKey: endedResumeCount === 0
+						? `resume-${subscriptionId}`
+						: `resume-${subscriptionId}-${endedResumeCount + 1}`,
 				});
 
 			return {

@@ -73,7 +73,11 @@ export function createStripeProvider(
 					: stripeCustomer.id,
 				status: stripeSubscription.status,
 				currentPeriodEnd: new Date(firstItem.current_period_end * 1000),
-				cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
+				// Stripe's `canceled` is over, even past a scheduled end: its flag
+				// would otherwise keep the access until the period end.
+				cancelAtPeriodEnd: stripeSubscription.status === 'canceled'
+					? false
+					: stripeSubscription.cancel_at_period_end,
 				planReference: otherItems.length === 0
 					? firstItem.price.id
 					: null,

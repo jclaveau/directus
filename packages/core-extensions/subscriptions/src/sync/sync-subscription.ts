@@ -470,12 +470,16 @@ async function keepAccess({
 			.where('id', storedAccess)
 			.first();
 
-		if (accessRow.user === grantedUser
-			&& accessRow.policy === planPolicy) {
-			return storedAccess;
+		if (accessRow.user !== grantedUser
+			|| accessRow.policy !== planPolicy) {
+			// Moved, not replaced: a resumed subscription shares this row.
+			await accessService.updateOne(storedAccess, {
+				user: grantedUser,
+				policy: planPolicy,
+			});
 		}
 
-		await accessService.deleteOne(storedAccess);
+		return storedAccess;
 	}
 
 	const createdAccess = await accessService.createOne({

@@ -1,5 +1,6 @@
 import { ForbiddenError } from '@directus/errors';
 import type { Knex } from 'knex';
+import { TERMINAL_STATUSES } from '../constants.js';
 import {
 	ArchivedPlanResumeError,
 	NoSubscriptionToResumeError,
@@ -69,13 +70,24 @@ export async function resumeOwnSubscription({
 					.where('subscriptions.provider', 'stripe')
 					.where('subscriptions.status', 'canceled');
 			})
+			// A resume canceled before its first charge gives the row back: the
+			// user may change their mind again without paying a day twice.
 			.whereNotExists(
 				trx('subscriptions as resuming_subscriptions')
 					.select('resuming_subscriptions.id')
 					.whereColumn(
 						'resuming_subscriptions.resumes',
 						'subscriptions.id',
-					),
+					)
+					.where((resumeOngoing) => {
+						resumeOngoing
+							.whereNotIn('resuming_subscriptions.status', TERMINAL_STATUSES)
+							.orWhere(
+								'resuming_subscriptions.current_period_end',
+								'>',
+								resumedAt,
+							);
+					}),
 			);
 
 		// Two resumes of one row would each create a Mollie subscription.
