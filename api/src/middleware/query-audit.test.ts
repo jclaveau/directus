@@ -7,7 +7,11 @@ import { afterEach, expect, test, vi } from 'vitest';
 import {
 	auditStatementStart,
 } from '../database/query-audit.js';
-import { requestStore } from '../utils/request-store.js';
+import {
+	emptyRequestState,
+	requestStore,
+	type RequestState,
+} from '../utils/request-store.js';
 import auditRequestQueries from './query-audit.js';
 
 vi.mock('@directus/env');
@@ -54,6 +58,37 @@ test('writes the audit of the request when its headers flush', () => {
 	expect(writeHead).toHaveBeenCalledWith(500, {
 		'Content-Type': 'application/json',
 	});
+});
+
+test('keeps the purged list of the request it audits', () => {
+	vi.mocked(useEnv).mockReturnValue({
+		QUERY_AUDIT_HEADER: 'X-Query-Audit',
+		QUERY_AUDIT_LEVEL: 'statements',
+		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
+	});
+
+	const res = Object.assign(new EventEmitter(), {
+		writeHead: vi.fn(),
+		setHeader: vi.fn(),
+	}) as unknown as Response;
+
+	const req = { get: vi.fn() } as unknown as Request;
+	const requestState = emptyRequestState();
+	let auditedState: RequestState | undefined;
+
+	requestStore.run(requestState, () => {
+		auditRequestQueries(req, res, () => {
+			auditedState = requestStore.getStore();
+		});
+	});
+
+	expect(auditedState).toEqual({
+		queryAudit: expect.any(Object),
+		scopedCachePurged: { purged: [], queuedPurges: [] },
+	});
+
+	expect(auditedState!.scopedCachePurged)
+		.toBe(requestState.scopedCachePurged);
 });
 
 test('takes the level the request sends over QUERY_AUDIT_LEVEL', () => {

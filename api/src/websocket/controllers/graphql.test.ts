@@ -40,7 +40,10 @@ vi.mock('graphql-ws', async (importOriginal) => {
 	return { ...actual, makeServer: vi.fn(actual.makeServer) };
 });
 
-import { readRequestScopedCachePurges } from '../../scoped-cache/purged-record.js';
+import {
+	readRequestScopedCachePurges,
+	recordScopedCachePurged,
+} from '../../scoped-cache/purged-record.js';
 import { executingService } from '../../services/graphql/schema-cache.js';
 import { GraphQLService } from '../../services/index.js';
 import type { UpgradeContext } from '../types.js';
@@ -108,13 +111,18 @@ describe('GraphQLSubscriptionController', () => {
 		const options = vi.mocked(makeServer).mock.lastCall![0] as ServerOptions;
 		const args = { contextValue: { service: {} } } as unknown as ExecutionArgs;
 
-		vi.mocked(execute)
-			.mockImplementation(() => readRequestScopedCachePurges() as any);
+		vi.mocked(execute).mockImplementation(() => {
+			recordScopedCachePurged([{ collection: 'articles' }]);
+
+			return readRequestScopedCachePurges() as any;
+		});
 
 		vi.mocked(subscribe)
 			.mockImplementation(() => readRequestScopedCachePurges() as any);
 
-		await expect(options.execute!(args)).resolves.toEqual([]);
+		await expect(options.execute!(args)).resolves
+			.toEqual([{ collection: 'articles' }]);
+
 		await expect(options.subscribe!(args)).resolves.toEqual([]);
 	});
 
