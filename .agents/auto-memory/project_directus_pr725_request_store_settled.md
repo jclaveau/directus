@@ -36,6 +36,9 @@ not typed): jean must type it here.
 MERGED 2026-11-12T19:47Z as de82057ba1 on jean's "merge on the numbers": `codecov/patch`
 hung `in_progress` 70+ min (11 untouched-package flags never closed) while its own number
 read 97.41% (gate 95%). A hung codecov check is not green: ask, don't merge on it unasked.
+Stacked #731 MERGED 2026-11-12T22:03Z as 71eeee3845 ("go merge 731"): autoreview fixed
+`upsertRunsOf` keeping only the last field's record kind (b1a4cd27af); jean ruled to obey
+`local/no-single-use-const` on PR-added consts only (a633dd63fe), older ones left as-is.
 
 **Why:** retention bounded only by pool max / idle timeout / third-party sockets is not
 reliable; an empty object held is.
