@@ -12,6 +12,6 @@ metadata:
 
 Live ones: #651 (flows), #657 (shares), #627 (runtime extension reloads), #622 (SSO), #619 (ldapjs), #647 (Comments: `user_updated`/`sender` hand-nulling on user delete → `ON DELETE SET NULL` migration; upstream only lacked it for SQL Server, dropped here), #646 (Redis cluster: SCAN one node, CROSSSLOT, FLUSHDB, readiness, startup message once #644 removes full mode), #610 (non-PG).
 
-**Why:** jean 2026-10-28: "make ONE issue gathering all the comments feature identified issues as comments are oos for now", then "same reshape needed for the unused oos Redis cluster feature". I had first filed a per-point issue (#647 for the user-delete loop, #646 for cluster) — he wanted them reshaped, not duplicated.
+**Why:** jean 2026-10-28: "make ONE issue gathering all the comments feature identified issues as comments are oos for now", then "same reshape needed for the unused oos Redis cluster feature". I had first filed a per-point issue (#647 for the user-delete loop, #646 for cluster) — jean wanted them reshaped, not duplicated.
 
 **How to apply:** a finding on an unused feature → read the feature's gathered issue, PATCH a numbered point in (keep `Assisted-by:` footer last); if none exists yet, open it with that title. REWRITE an existing narrow issue into the gathered one rather than opening a second. Search code AND session history for other points before saying "none". Link from the PR risk line, not a fix in the PR. See [[feedback_directus_non_pg_review_points_to_610]].

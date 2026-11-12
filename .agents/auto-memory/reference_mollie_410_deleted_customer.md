@@ -1,5 +1,5 @@
 ---
-name: reference-mollie-410-deleted-customer
+name: reference_mollie_410_deleted_customer
 description: Mollie answers 410 Gone (not 404) on the subscriptions of a deleted customer; treat 404 and 410 alike as "provider no longer holds it"
 metadata:
   type: reference
@@ -14,4 +14,4 @@ An unknown subscription id on a live customer still answers 404.
 (fixed on #680, commit 36aec32ba0).
 
 **How to apply:** any Mollie read that means "is it gone?" checks 404 **and** 410.
-See [[project-directus-pr680-merge-gate]].
+See [[project_directus_pr680_merge_gate]].
