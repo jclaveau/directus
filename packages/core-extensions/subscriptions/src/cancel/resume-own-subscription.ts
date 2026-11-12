@@ -63,6 +63,12 @@ export async function resumeOwnSubscription({
 			.where('subscribers.user', userId)
 			.where('subscriptions.cancel_at_period_end', true)
 			.where('subscriptions.current_period_end', '>', resumedAt)
+			// A Stripe subscription canceled at Stripe is over: nothing to take back.
+			.whereNot((stripeEnded) => {
+				stripeEnded
+					.where('subscriptions.provider', 'stripe')
+					.where('subscriptions.status', 'canceled');
+			})
 			.whereNotExists(
 				trx('subscriptions as resuming_subscriptions')
 					.select('resuming_subscriptions.id')
@@ -112,24 +118,23 @@ export async function resumeOwnSubscription({
 			resourceId: resumedSubscription.resourceId,
 		});
 
-		// The new Mollie row is the sync's to write, from what Mollie holds.
-		if (resumedSubscription.isNewSubscription) {
-			return;
+		// The new Mollie row is the sync's to write, from what Mollie holds: the
+		// canceled row stays canceled, its event names who resumed it.
+		if (!resumedSubscription.isNewSubscription) {
+			await trx('subscriptions')
+				.where('id', canceledSubscription.id)
+				.update({
+					cancel_at_period_end: false,
+					user_updated: userId,
+					date_updated: resumedAt,
+				});
 		}
-
-		await trx('subscriptions')
-			.where('id', canceledSubscription.id)
-			.update({
-				cancel_at_period_end: false,
-				user_updated: userId,
-				date_updated: resumedAt,
-			});
 
 		await recordSubscriptionEvent(trx, {
 			subscriptionId: canceledSubscription.id,
 			status: canceledSubscription.status,
 			currentPeriodEnd: canceledSubscription.current_period_end,
-			cancelAtPeriodEnd: false,
+			cancelAtPeriodEnd: resumedSubscription.isNewSubscription,
 			source: 'user',
 			userId,
 			recordedAt: resumedAt,
