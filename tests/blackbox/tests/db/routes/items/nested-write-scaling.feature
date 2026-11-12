@@ -701,3 +701,306 @@ Feature: A nested write runs the statements of two parents for twenty
       | 2       | test_nws_book      | 6      | 1      | 0      | 0      |
       | 2       | test_nws_label     | 1      | 1      | 0      | 0      |
       | 2       | test_nws_shelf     | 2      | 1      | 0      | 0      |
+
+  Scenario: twenty parents naming their tags as records by key run the statements of two
+    Given the rows of test_nws_tag:
+      | id    |
+      | mk-t1 |
+      | mk-t2 |
+    When these requests get these responses:
+      | request                    | response  |
+      | method: POST               | code: 200 |+
+      | path: /items/test_nws_post |           |
+      | payload:                   |           |
+      |   - id: mk-a               |           |
+      |     owner: u1              |           |
+      |     tags:                  |           |
+      |       - id: mk-a1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-a2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-b               |           |
+      |     owner: u2              |           |
+      |     tags:                  |           |
+      |       - id: mk-b1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-b2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      | method: POST               | code: 200 |+
+      | path: /items/test_nws_post |           |
+      | payload:                   |           |
+      |   - id: mk-c               |           |
+      |     owner: u1              |           |
+      |     tags:                  |           |
+      |       - id: mk-c1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-c2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-d               |           |
+      |     owner: u2              |           |
+      |     tags:                  |           |
+      |       - id: mk-d1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-d2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-e               |           |
+      |     owner: u1              |           |
+      |     tags:                  |           |
+      |       - id: mk-e1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-e2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-f               |           |
+      |     owner: u2              |           |
+      |     tags:                  |           |
+      |       - id: mk-f1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-f2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-g               |           |
+      |     owner: u1              |           |
+      |     tags:                  |           |
+      |       - id: mk-g1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-g2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-h               |           |
+      |     owner: u2              |           |
+      |     tags:                  |           |
+      |       - id: mk-h1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-h2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-i               |           |
+      |     owner: u1              |           |
+      |     tags:                  |           |
+      |       - id: mk-i1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-i2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-j               |           |
+      |     owner: u2              |           |
+      |     tags:                  |           |
+      |       - id: mk-j1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-j2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-k               |           |
+      |     owner: u1              |           |
+      |     tags:                  |           |
+      |       - id: mk-k1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-k2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-l               |           |
+      |     owner: u2              |           |
+      |     tags:                  |           |
+      |       - id: mk-l1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-l2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-m               |           |
+      |     owner: u1              |           |
+      |     tags:                  |           |
+      |       - id: mk-m1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-m2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-n               |           |
+      |     owner: u2              |           |
+      |     tags:                  |           |
+      |       - id: mk-n1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-n2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-o               |           |
+      |     owner: u1              |           |
+      |     tags:                  |           |
+      |       - id: mk-o1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-o2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-p               |           |
+      |     owner: u2              |           |
+      |     tags:                  |           |
+      |       - id: mk-p1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-p2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-q               |           |
+      |     owner: u1              |           |
+      |     tags:                  |           |
+      |       - id: mk-q1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-q2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-r               |           |
+      |     owner: u2              |           |
+      |     tags:                  |           |
+      |       - id: mk-r1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-r2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-s               |           |
+      |     owner: u1              |           |
+      |     tags:                  |           |
+      |       - id: mk-s1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-s2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-u               |           |
+      |     owner: u2              |           |
+      |     tags:                  |           |
+      |       - id: mk-u1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-u2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-v               |           |
+      |     owner: u1              |           |
+      |     tags:                  |           |
+      |       - id: mk-v1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-v2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+      |   - id: mk-w               |           |
+      |     owner: u2              |           |
+      |     tags:                  |           |
+      |       - id: mk-w1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t1        |           |
+      |       - id: mk-w2          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mk-t2        |           |
+    Then the rows of test_nws_post_tag whose key starts with "mk-" are:
+      | id    | test_nws_post_id | test_nws_tag_id |
+      | mk-a1 | mk-a             | mk-t1           |
+      | mk-a2 | mk-a             | mk-t2           |
+      | mk-b1 | mk-b             | mk-t1           |
+      | mk-b2 | mk-b             | mk-t2           |
+      | mk-c1 | mk-c             | mk-t1           |
+      | mk-c2 | mk-c             | mk-t2           |
+      | mk-d1 | mk-d             | mk-t1           |
+      | mk-d2 | mk-d             | mk-t2           |
+      | mk-e1 | mk-e             | mk-t1           |
+      | mk-e2 | mk-e             | mk-t2           |
+      | mk-f1 | mk-f             | mk-t1           |
+      | mk-f2 | mk-f             | mk-t2           |
+      | mk-g1 | mk-g             | mk-t1           |
+      | mk-g2 | mk-g             | mk-t2           |
+      | mk-h1 | mk-h             | mk-t1           |
+      | mk-h2 | mk-h             | mk-t2           |
+      | mk-i1 | mk-i             | mk-t1           |
+      | mk-i2 | mk-i             | mk-t2           |
+      | mk-j1 | mk-j             | mk-t1           |
+      | mk-j2 | mk-j             | mk-t2           |
+      | mk-k1 | mk-k             | mk-t1           |
+      | mk-k2 | mk-k             | mk-t2           |
+      | mk-l1 | mk-l             | mk-t1           |
+      | mk-l2 | mk-l             | mk-t2           |
+      | mk-m1 | mk-m             | mk-t1           |
+      | mk-m2 | mk-m             | mk-t2           |
+      | mk-n1 | mk-n             | mk-t1           |
+      | mk-n2 | mk-n             | mk-t2           |
+      | mk-o1 | mk-o             | mk-t1           |
+      | mk-o2 | mk-o             | mk-t2           |
+      | mk-p1 | mk-p             | mk-t1           |
+      | mk-p2 | mk-p             | mk-t2           |
+      | mk-q1 | mk-q             | mk-t1           |
+      | mk-q2 | mk-q             | mk-t2           |
+      | mk-r1 | mk-r             | mk-t1           |
+      | mk-r2 | mk-r             | mk-t2           |
+      | mk-s1 | mk-s             | mk-t1           |
+      | mk-s2 | mk-s             | mk-t2           |
+      | mk-u1 | mk-u             | mk-t1           |
+      | mk-u2 | mk-u             | mk-t2           |
+      | mk-v1 | mk-v             | mk-t1           |
+      | mk-v2 | mk-v             | mk-t2           |
+      | mk-w1 | mk-w             | mk-t1           |
+      | mk-w2 | mk-w             | mk-t2           |
+    And on postgres the requests ran these statements:
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 2      | 1      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 1       | test_nws_post      | 2      | 1      | 0      | 0      |
+      | 1       | test_nws_post_tag  | 6      | 1      | 0      | 0      |
+      | 1       | test_nws_tag       | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity  | 0      | 2      | 0      | 0      |
+      | 2       | directus_revisions | 0      | 2      | 1      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | test_nws_post      | 2      | 1      | 0      | 0      |
+      | 2       | test_nws_post_tag  | 6      | 1      | 0      | 0      |
+      | 2       | test_nws_tag       | 1      | 0      | 0      | 0      |
+
+  Scenario: two parents naming one missing tag by key create it once
+    When these requests get these responses:
+      | request                    | response  |
+      | method: POST               | code: 200 |+
+      | path: /items/test_nws_post |           |
+      | payload:                   |           |
+      |   - id: mn-a               |           |
+      |     owner: u1              |           |
+      |     tags:                  |           |
+      |       - id: mn-a1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mn-t1        |           |
+      |   - id: mn-b               |           |
+      |     owner: u2              |           |
+      |     tags:                  |           |
+      |       - id: mn-b1          |           |
+      |         test_nws_tag_id:   |           |
+      |           id: mn-t1        |           |
+    Then the rows of test_nws_post_tag whose key starts with "mn-" are:
+      | id    | test_nws_post_id | test_nws_tag_id.id |
+      | mn-a1 | mn-a             | mn-t1              |
+      | mn-b1 | mn-b             | mn-t1              |
+    And on postgres the requests ran these statements:
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 3      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 3      | 2      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 1       | test_nws_post      | 2      | 1      | 0      | 0      |
+      | 1       | test_nws_post_tag  | 6      | 1      | 0      | 0      |
+      | 1       | test_nws_tag       | 1      | 1      | 0      | 0      |
