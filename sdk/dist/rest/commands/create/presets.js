@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/presets`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/presets`,params:t??{},body:JSON.stringify(e),method:`POST`});export{t as createPreset,e as createPresets};
+//# sourceMappingURL=presets.js.map

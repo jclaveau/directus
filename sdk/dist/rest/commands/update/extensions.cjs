@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n,r)=>()=>(t!==null&&e.throwIfEmpty(t,`Bundle cannot be an empty string`),e.throwIfEmpty(n,`Name cannot be empty`),{path:t?`/extensions/${t}/${n}`:`/extensions/${n}`,params:{},body:JSON.stringify(r),method:`PATCH`});exports.updateExtension=t;
+//# sourceMappingURL=extensions.cjs.map

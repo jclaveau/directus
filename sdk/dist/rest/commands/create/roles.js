@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/roles`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/roles`,params:t??{},body:JSON.stringify(e),method:`POST`});export{t as createRole,e as createRoles};
+//# sourceMappingURL=roles.js.map
