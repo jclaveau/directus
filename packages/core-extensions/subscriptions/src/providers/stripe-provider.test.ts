@@ -281,7 +281,8 @@ describe('fetchSubscription', () => {
 			customerId: 'cus_2',
 			status: 'canceled',
 			currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
-			cancelAtPeriodEnd: true,
+			// Ended at Stripe, even when a cancel at period end was scheduled.
+			cancelAtPeriodEnd: false,
 			planReference: 'price_1',
 		});
 	});
