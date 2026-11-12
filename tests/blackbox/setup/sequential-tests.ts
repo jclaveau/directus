@@ -5,8 +5,9 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 		firstShardOnly: [],
 		after: [
 			// Fires 100 concurrent connections at one instance and fails on a
-			// single timeout or non-2xx: left in the parallel pool, the files
-			// beside it on a 4-core runner starve it into one (#367).
+			// single timeout, broken connection or non-2xx: left in the parallel
+			// pool, the files beside it on a 4-core runner starve it into one
+			// (#367).
 			'/tests/common/assets/concurrency.test.ts',
 		],
 		// If specified, only run these tests sequentially
