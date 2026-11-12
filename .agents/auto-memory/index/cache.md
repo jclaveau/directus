@@ -35,3 +35,4 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [Permissions cache namespace](../project_directus_permissions_cache_namespace.md) — fixed `permissions` namespace on shared Redis ignored CACHE_NAMESPACE: cross-deployment clears + stale risk, root cause of the redis-commands flake (#602)
 - [PR #643 deny list for cache tables](../project_directus_pr643_graphql_deny_cache_tables.md) — 9 raw-written tables denied in /graphql; autoreview added unregistered scoped_cache_pending_purges + 3 raw system writes needing a purge; MERGED ddcc750441
 - [Gate closed routes before the cache](../project_directus_gate_routes_before_cache.md) — router-level 404 gate runs after app.use(cache): a cached 200 leaks through; mount in app.ts first
+- [Directus filter `_eq` shorthand](../reference_directus_filter_eq_shorthand.md) — `{field: value}` and a list `fields` sanitize to the same query, so the cache key does not move

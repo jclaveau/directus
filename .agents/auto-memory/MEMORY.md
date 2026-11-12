@@ -26,7 +26,7 @@ line appended below.
 - [PR #605 row-helpers](project_directus_pr605_row_helpers.md) — mapUpdateRows/mapCreateRows replace `.one` events
 - [PR #600 query-audit header](project_directus_pr600_query_audit.md) — counts in knex `_query`; ONE map header
 
-## scoped-cache (18) — tag derivation, pins, purges, value slices
+## scoped-cache (23) — tag derivation, pins, purges, value slices
 `.agents/auto-memory/index/scoped-cache.md`
 
 - [Scoped cache tag derivation](project_directus_scoped_cache_tag_derivation.md) — what a read gets tagged with; only stale vector = enrichment outside the AST
@@ -34,14 +34,14 @@ line appended below.
 - [scopedCache hook API](reference_directus_scopedcache_api.md) — scopeTo/dependOn on reads, purgeBy on mutations
 - [Query-filter $NOW is NOT a cache poison](reference_directus_query_now_not_cache_poison.md) — mis-analysed ≥2×; keys differ per request
 
-## cache (32) — tiers, namespaces, keys, telemetry, audit, admin page, Redis
+## cache (33) — tiers, namespaces, keys, telemetry, audit, admin page, Redis
 `.agents/auto-memory/index/cache.md`
 
 - [Cache key identities](project_directus_cache_key_identities.md) — cacheKey digest vs redisKey; a wrong one fails SILENTLY as a cold cache
 - [Cache layers fail differently](project_directus_cache_failure_semantics.md) — ioredis raises, Keyv swallows, bus fire-and-forget
 - [Cache tier switches](project_directus_cache_tier_switches.md) — only response+schema switchable
 
-## blackbox (26) — seeds, sharding, flakes, spawned instances
+## blackbox (29) — seeds, sharding, flakes, spawned instances
 `.agents/auto-memory/index/blackbox.md`
 
 - [Directus blackbox run + logs](project_directus_blackbox_run_and_logs.md) — bb runs on every code PR; the label is NOT required and cancels the run
@@ -49,7 +49,7 @@ line appended below.
 - [Isolate new blackbox fixtures](project_directus_bb_fixture_isolation.md) — `fields=*` splices every alias; new scenarios get own collections
 - [bb pins its own toolchain](reference_directus_blackbox_pins_own_toolchain.md) — CI resolved vitest 4.1.11; check the run log before relying on `expect.poll`
 
-## ci (25) — workflows, codecov, lint gates, bench, preview
+## ci (30) — workflows, codecov, lint gates, bench, preview
 `.agents/auto-memory/index/ci.md`
 
 - [Two eslint configs](project_directus_two_eslint_configs.md) — Lint vs Style (changes); run both before push

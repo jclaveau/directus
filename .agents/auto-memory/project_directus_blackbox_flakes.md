@@ -262,3 +262,50 @@ Run 37846335608 (2026-10-08, shard 8, slot "one") and run 42213640914 (2026-11-0
 - **Fix:** `CACHE_SCOPED_INDEX_REAP_SCHEDULE = '0 0 1 1 *'` in the test env, like the other reap-sensitive bb files. **Any bb file that spawns a scoped-cache instance and checks HIT after a fill should pin the schedule off**; the 360k decoys made the pass 8-10 s, so crossing an hour went from negligible to ~0.5%/run.
 - **Deterministic red:** schedule `* * * * * *` → both fill tests MISS×5 (run 41837755574, job 126601122705, `counter moved after 19ms`).
 - **Survey (Check runs 10-09→11-04, 217 failed bb jobs, 8 hits):** 1 revert-proof branch (intended), 6 `expected <900 to be greater than 900` calibration (all before #656's 360k), 1 this one — the only HIT×5 failure, and the only one since #656.
+
+**Eighth signature recurred WITH the `.expect(200)` seed (2026-09-25, PR #534 head
+`202648d510`, postgres shard 2, run 36181738808).** Same `featured_comment` null at
+`:162`, MISS assertion passing; cleared on `--failed` rerun. The seed PATCH now asserts
+200, so "the seed write did not land" is REFUTED as the cause — something between the
+seed and the post-write read leaves the M2O null (the two earlier reads' bodies are not
+asserted). **Cause (inferred from code, fixed in #545, merged e2c81425f3):** the seed
+PATCH hit the cache server, whose schema can predate `CreateFieldM2O`; `updateMany`
+keeps only `Object.keys(schema…fields)` (`pick(payload, fields)`), so an unknown field is
+DROPPED with a 200. Seed now goes through `getNoCacheUrl(vendor)` and asserts the value
+came back; the first read asserts it before the write. General rule: a raw seed write
+of a JUST-CREATED field must go to the no-cache instance AND assert the echoed value —
+`.expect(200)` proves nothing on a stale schema.
+
+**`cache-audit-under-pressure` settle flake — ROOT CAUSE FOUND 2026-09-26 (dead96ffa7):**
+failed at test.ts:168 in the SETTLE loop (`scanned` 4, 0, 0, 0 after 30 x 500 ms) 4x on
+PR #534. NOT drain lag: `cache-entry-envelope.test.ts` ran beside it in the parallel
+middle of postgres shard 8 on all four failing runs (windows overlap: job 108289531916
+under-pressure 23:40:45-23:41:37, envelope 23:40:57-23:41:45), and POSTed `/utils/cache/audit` with NO collection from its own
+`CACHE_NAMESPACE`. The descriptor table is the shard's; `auditCache` retires
+(`gone_at`) every descriptor whose entry `cache.hasMany` in ITS namespace does not
+hold → under-pressure's 8 warmed rows retired; only a fill clears `gone_at`, its
+entries are HITs → `scanned 0` forever (4 = the half that drained after the foreign
+run). Shard reshuffle by the new composite suites put the two together. Fix = the
+envelope suite sends `{ collection: COLLECTION }` on both its audit calls. Rule: a
+blackbox audit outside the serialised audit chain MUST be collection-bound (the
+"two namespaces on one DB UNSUPPORTED" design, see
+[[project_directus_issue498_cache_audit]]); a flake of `scanned` below warmed →
+grep the shard for another unfiltered `/utils/cache/audit` first. The Acceptance latency check
+failed once (watch only).
+
+**Shard-reshuffle race: `graphql-ip-gated-read` (#578, 2026-09-30).** Websocket
+read fails `Cannot query field "ip_gated" on type "Query"` when a system-cache
+flush (`/utils/cache/clear`, or ANY collection-creating suite → `schemaChanged`
+→ empties the GraphQL schema cache) lands between the HTTP read from 10.10.10.1
+and the websocket read from 10.10.10.2. The schema cache key
+(`${scope}_${type}_${role}_${user}`, schema/index.ts:72) has no IP but the
+fields do, so the rebuilt schema as the outside IP lacks the field. Not caused
+by the PR: it went green→red only because new files moved it into a shard
+beside `cache-read-inflight-system-flush`. Moving files is no fix. Fixes:
+accept `/permission|Cannot query field/` (as the subscription step does, #554)
+or retry from the allowed IP. Awaiting jean's pick; not edited.
+
+**Bb harness traps:** scenarios match steps to definitions BY POSITION, so a
+scenario that reorders steps must not share definitions with one that doesn't
+(first unmatched step fails the file, and later files time out at 10 min as
+knock-on); `expect.poll` refuses to run in `beforeAll` → use `vi.waitFor`.
