@@ -21,7 +21,7 @@ import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
 import request, { type Response } from 'supertest';
-import { afterAll, beforeAll, describe, expect } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect } from 'vitest';
 
 type RequestCell = {
 	as?: string;
@@ -93,6 +93,16 @@ export function defineSpawnedWriteFeature(
 	describe.each(vendors)('%s', (vendor) => {
 		const env = cloneDeep(config.envs);
 		let instance: ChildProcess;
+		const instanceLog: string[] = [];
+
+		// The instance's own trace of a failed step: a MISS where a HIT was due
+		// says nothing else about which fill path skipped or evicted the entry.
+		afterEach(({ task }) => {
+			if (task.result?.state === 'fail') {
+				// eslint-disable-next-line no-console
+				console.log(instanceLog.join('').slice(-20_000));
+			}
+		});
 
 		beforeAll(async () => {
 			const port = await freePortOfWorker();
@@ -109,6 +119,9 @@ export function defineSpawnedWriteFeature(
 				cwd: paths.cwd,
 				env: env[vendor],
 			});
+
+			instance.stdout?.on('data', (chunk) => instanceLog.push(String(chunk)));
+			instance.stderr?.on('data', (chunk) => instanceLog.push(String(chunk)));
 
 			await awaitDirectusConnection(port);
 			await featureOptions.beforeFeature?.(vendor);

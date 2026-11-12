@@ -18,7 +18,7 @@ import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect } from 'vitest';
 
 const cacheStatusHeader = 'x-cache-status';
 const COLLECTION = 'request_state';
@@ -37,8 +37,20 @@ describe.each(vendors)('%s', (vendor) => {
 	env[vendor]['REDIS_HOST'] = 'localhost';
 	env[vendor]['REDIS_PORT'] = '6108';
 	env[vendor]['CACHE_NAMESPACE'] = `directus-graphql-request-state-${vendor}`;
+	// Logs the fill eviction behind a rare MISS for HIT.
+	env[vendor]['LOG_LEVEL'] = 'debug';
 
 	let instance: ChildProcess;
+	const instanceLog: string[] = [];
+
+	// The instance's own trace of a failed step: a MISS where a HIT was due says
+	// nothing else about which fill path skipped or evicted the entry.
+	afterEach(({ task }) => {
+		if (task.result?.state === 'fail') {
+			// eslint-disable-next-line no-console
+			console.log(instanceLog.join('').slice(-20_000));
+		}
+	});
 
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -73,6 +85,9 @@ describe.each(vendors)('%s', (vendor) => {
 			cwd: paths.cwd,
 			env: env[vendor],
 		});
+
+		instance.stdout?.on('data', (chunk) => instanceLog.push(String(chunk)));
+		instance.stderr?.on('data', (chunk) => instanceLog.push(String(chunk)));
 
 		await awaitDirectusConnection(port);
 
