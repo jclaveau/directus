@@ -285,6 +285,113 @@ describe('resumeOwnSubscription', () => {
 		})).rejects.toThrow(new NoSubscriptionToResumeError());
 	});
 
+	test(oneLine`
+		resumes a canceled row again at its own period end once its resume was
+		canceled before its first charge
+	`, async () => {
+		await database('subscriptions').insert([
+			{
+				subscriber: 1,
+				customer: 1,
+				plan_reference: 1,
+				provider: 'mollie',
+				provider_subscription_id: 'sub_1',
+				status: 'canceled',
+				current_period_end: new Date('2026-12-01T00:00:00Z'),
+				cancel_at_period_end: true,
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+			{
+				subscriber: 1,
+				customer: 1,
+				plan_reference: 1,
+				provider: 'mollie',
+				provider_subscription_id: 'sub_2',
+				status: 'canceled',
+				current_period_end: null,
+				cancel_at_period_end: true,
+				resumes: 1,
+				date_created: new Date('2026-11-01T00:00:00Z'),
+				date_updated: new Date('2026-11-02T00:00:00Z'),
+			},
+		]);
+
+		const resumeCancel = vi.fn().mockResolvedValue({
+			resourceId: 'cst_1/sub_3',
+			isNewSubscription: true,
+		});
+
+		await resumeOwnSubscription({
+			database,
+			enabledProviders: new Map([
+				['mollie', { resumeCancel } as unknown as SubscriptionProvider],
+			]),
+			userId: 'user-1',
+		});
+
+		expect(resumeCancel).toHaveBeenCalledWith({
+			subscriptionId: 'sub_1',
+			customerId: 'cst_1',
+			periodEnd: new Date('2026-12-01T00:00:00Z'),
+		});
+
+		expect(await database('subscription_sync_queue')
+			.select('provider', 'resource_id', 'pending'))
+			.toEqual([{ provider: 'mollie', resource_id: 'cst_1/sub_3', pending: 1 }]);
+	});
+
+	test(oneLine`
+		resumes a canceled resume once it was charged, not the row it resumes
+	`, async () => {
+		await database('subscriptions').insert([
+			{
+				subscriber: 1,
+				customer: 1,
+				plan_reference: 1,
+				provider: 'mollie',
+				provider_subscription_id: 'sub_1',
+				status: 'canceled',
+				current_period_end: new Date('2026-12-01T00:00:00Z'),
+				cancel_at_period_end: true,
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+			{
+				subscriber: 1,
+				customer: 1,
+				plan_reference: 1,
+				provider: 'mollie',
+				provider_subscription_id: 'sub_2',
+				status: 'canceled',
+				current_period_end: new Date('2027-01-01T00:00:00Z'),
+				cancel_at_period_end: true,
+				resumes: 1,
+				date_created: new Date('2026-11-01T00:00:00Z'),
+				date_updated: new Date('2026-11-02T00:00:00Z'),
+			},
+		]);
+
+		const resumeCancel = vi.fn().mockResolvedValue({
+			resourceId: 'cst_1/sub_3',
+			isNewSubscription: true,
+		});
+
+		await resumeOwnSubscription({
+			database,
+			enabledProviders: new Map([
+				['mollie', { resumeCancel } as unknown as SubscriptionProvider],
+			]),
+			userId: 'user-1',
+		});
+
+		expect(resumeCancel).toHaveBeenCalledWith({
+			subscriptionId: 'sub_2',
+			customerId: 'cst_1',
+			periodEnd: new Date('2027-01-01T00:00:00Z'),
+		});
+	});
+
 	test('refuses a user with several canceled subscriptions', async () => {
 		await database('subscriptions').insert([
 			{
