@@ -101,6 +101,10 @@ export const MutationBatchingModes = [
 
 export type MutationBatchingMode = (typeof MutationBatchingModes)[number];
 
+export const NestedUpdateAnswers = ['apply', 'refuse', 'skip'] as const;
+
+export type NestedUpdateAnswer = (typeof NestedUpdateAnswers)[number];
+
 export type MutationOptions = {
 	/**
 	 * Callback function that's fired whenever a revision is made in the mutation,
@@ -266,6 +270,33 @@ export type MutationOptions = {
 	 * a time in `updateGroups`.
 	 */
 	mutationBatching?: MutationBatchingMode | undefined;
+
+	/**
+	 * What a nested record carrying an existing row's key and more fields does:
+	 *
+	 * ```
+	 * { id: 1, parent: { id: 2, name: 'nested' } }    row 2 exists
+	 * apply   row 2 updated to name nested, then row 1 created (the default)
+	 * refuse  400, nothing written
+	 * skip    row 1 created naming row 2, row 2 left as it is
+	 * ```
+	 *
+	 * It holds at every depth, for M2O and A2O records, O2M lists and O2M
+	 * `update` alterations. A nested record naming no existing row is created
+	 * whatever the answer, unless an earlier record of the request created it:
+	 * a second record of that key is refused under `refuse`, and only names the
+	 * row under `skip`.
+	 *
+	 * Any field besides the key counts, an alias or an O2M list included; an
+	 * O2M child's key to the parent it is listed under does not. `skip` leaves
+	 * the whole record, the records it nests included:
+	 *
+	 * ```
+	 * { id: 1, parent: { id: 2, name: 'n', parent: { name: 'new' } } }
+	 * skip    row 1 created naming row 2; row 'new' not created
+	 * ```
+	 */
+	nestedUpdates?: NestedUpdateAnswer | undefined;
 
 	/**
 	 * Shared scoped-cache hook declarations injected by a batch/upsert parent so

@@ -3232,6 +3232,9 @@ importers:
       '@directus/env':
         specifier: workspace:*
         version: link:../../packages/env
+      '@directus/errors':
+        specifier: workspace:*
+        version: link:../../packages/errors
       '@directus/schema':
         specifier: workspace:*
         version: link:../../packages/schema

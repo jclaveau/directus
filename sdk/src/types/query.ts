@@ -40,11 +40,18 @@ export type MutationBatching =
 	| 'disableBatching';
 
 /**
- * All query options with an additional mutationBatching option for the
- * create and update commands.
+ * All query options with additional mutationBatching and nestedUpdates options
+ * for the create and update commands.
  */
 export interface QueryMutation<Schema, Item> extends Query<Schema, Item> {
 	readonly mutationBatching?: MutationBatching | undefined;
+
+	/**
+	 * What a nested record carrying an existing row's key and more fields does:
+	 * `apply`, the default, updates that row; `refuse` refuses the mutation with
+	 * a 400; `skip` only names the row, leaving its fields as they are.
+	 */
+	readonly nestedUpdates?: 'apply' | 'refuse' | 'skip' | undefined;
 }
 
 /**

@@ -53,7 +53,10 @@ import { isUniqueViolation } from '../database/errors/dialects/postgres.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';
-import getDatabase, { getDatabaseForAccountability } from '../database/index.js';
+import getDatabase, {
+	getDatabaseClient,
+	getDatabaseForAccountability,
+} from '../database/index.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
@@ -93,6 +96,20 @@ const env = useEnv();
 
 // Keys per existence probe, well under Postgres' 65535 bind parameters.
 const UPSERT_PROBE_CHUNK_SIZE = 10_000;
+
+// Postgres' protocol counts a statement's bind parameters on 2 bytes.
+const POSTGRES_BIND_PARAMETER_LIMIT = 65_535;
+
+// The keys a cycle past the bind parameters is named by.
+const NAMED_CYCLE_KEYS = 10;
+
+function bindParameterCountOf(insertRows: Record<string, unknown>[]): number {
+	return insertRows.reduce((parameterCount, insertRow) => {
+		return parameterCount + Object.values(insertRow)
+			.filter((rowValue) => rowValue !== undefined)
+			.length;
+	}, 0);
+}
 
 /**
  * The options `upsertMany` hands the updates it defers its purge for. Only the
@@ -335,6 +352,9 @@ function mergeUpdateGroups<Item extends AnyItem>(
 	return mergedGroups;
 }
 
+/** A row of the batch another row names, and whether a nested record does. */
+type BatchRowName = { rowIndex: number; byNestedRecord: boolean };
+
 export class ItemsService<Item extends AnyItem = AnyItem, Collection extends string = string>
 implements AbstractService<Item> {
 	collection: Collection;
@@ -467,8 +487,9 @@ implements AbstractService<Item> {
 	}
 
 	/**
-	 * Create one or more new items at once, wrapped in a transaction. Uses a single batchInsert
-	 * where the vendor preserves RETURNING order, otherwise falls back to per-row inserts.
+	 * Create one or more new items at once, wrapped in a transaction. Uses one
+	 * insert per chunk where the vendor preserves RETURNING order, otherwise
+	 * falls back to per-row inserts.
 	 */
 	async createMany(
 		data: Partial<Item>[],
@@ -492,7 +513,42 @@ implements AbstractService<Item> {
 			opts.mutationTracker.trackMutations(data.length);
 		}
 
-		if (resolveMutationBatching(opts) === 'disableBatching' && data.length > 1) {
+		const batchRowNames = data.length > 1
+			? this.batchRowNamesOf(data, false)
+			: [];
+
+		// resolveMutationBatching refuses its conflicting options for one row too
+		const writesRowByRow =
+			(resolveMutationBatching(opts) === 'disableBatching' && data.length > 1)
+			|| batchRowNames.flat().some((rowName) => rowName.byNestedRecord);
+
+		const writeGroups = this.writeGroupsOf(batchRowNames);
+
+		const writeOrder = writesRowByRow
+			? this.rowByRowWriteOrderOf(data, writeGroups)
+			: writeGroups.flat();
+
+		// the rows a row names are written first; keys answer in payload order
+		if (writeOrder.some((rowIndex, writeIndex) => rowIndex !== writeIndex)) {
+			untrackRows();
+
+			// a subclass override already ran for the whole batch
+			const writtenKeys = await ItemsService.prototype.createMany.call(
+				this,
+				writeOrder.map((rowIndex) => data[rowIndex]!),
+				opts,
+			);
+
+			const keys: (PrimaryKey | null)[] = new Array(data.length);
+
+			for (const [writeIndex, rowIndex] of writeOrder.entries()) {
+				keys[rowIndex] = writtenKeys[writeIndex]!;
+			}
+
+			return keys;
+		}
+
+		if (writesRowByRow) {
 			untrackRows();
 
 			return await this.createRowByRow(data, opts, opts.mutationTracker);
@@ -638,6 +694,8 @@ implements AbstractService<Item> {
 					},
 				));
 			}
+
+			this.refuseSameRowNamingAnotherKey(createEntries, data, primaryKeyField);
 
 			for (const [index, entry] of createEntries.entries()) {
 				if (entry !== null && 'sameRowAs' in entry) {
@@ -820,7 +878,14 @@ implements AbstractService<Item> {
 
 			try {
 				if (useBatchInsert) {
-					const chunkSize = env['DB_BATCH_INSERT_CHUNK_SIZE'] as number | undefined;
+					// knex's batchInsert default
+					const chunkSize = env['DB_BATCH_INSERT_CHUNK_SIZE'] as number | undefined
+						?? 1000;
+
+					if (!(chunkSize >= 1)) {
+						throw new Error('DB_BATCH_INSERT_CHUNK_SIZE is'
+							+ ` ${JSON.stringify(chunkSize)}, it must be 1 or more`);
+					}
 
 					const rowsToInsert = getHelpers(trx).capabilities.padRowsForBatchInsert(
 						prepared.map((p) => p.payloadWithoutAliases),
@@ -830,12 +895,93 @@ implements AbstractService<Item> {
 						},
 					);
 
-					const insertedRows = (await trx
-						.batchInsert(this.collection, rowsToInsert, chunkSize)
-						.returning(primaryKeyField)) as unknown as Array<Record<string, unknown> | PrimaryKey>;
+					const writeGroupOfRow = new Map(writeGroups.flatMap((writeGroup) => {
+						return writeGroup.map((rowIndex) => [rowIndex, writeGroup] as const);
+					}));
+
+					// a cycle's rows share a statement, the keys being checked at its end
+					const insertChunks: Record<string, unknown>[][][] = [];
+					let previousWriteGroup: number[] | undefined;
+					let lastChunkRowCount = 0;
+
+					for (const [rowPosition, preparedRow] of prepared.entries()) {
+						const rowToInsert = rowsToInsert[rowPosition]!;
+						const writeGroup = writeGroupOfRow.get(preparedRow.index);
+						const lastChunk = insertChunks.at(-1);
+
+						if (
+							lastChunk !== undefined
+							&& writeGroup !== undefined
+							&& writeGroup === previousWriteGroup
+						) {
+							lastChunk.at(-1)!.push(rowToInsert);
+							lastChunkRowCount++;
+						}
+						else if (
+							lastChunk !== undefined
+							&& lastChunkRowCount + (writeGroup?.length ?? 1) <= chunkSize
+						) {
+							lastChunk.push([rowToInsert]);
+							lastChunkRowCount++;
+						}
+						else {
+							insertChunks.push([[rowToInsert]]);
+							lastChunkRowCount = 1;
+						}
+
+						previousWriteGroup = writeGroup;
+					}
+
+					const insertedRows: Array<Record<string, unknown> | PrimaryKey> = [];
+
+					for (const insertChunk of insertChunks) {
+						const chunkParameterCount = bindParameterCountOf(insertChunk.flat());
+
+						// TODO(#610): CockroachDB binds at most 65535 parameters too
+						if (
+							getDatabaseClient(trx) === 'postgres'
+							&& chunkParameterCount > POSTGRES_BIND_PARAMETER_LIMIT
+						) {
+							// a cycle's rows cannot be cut apart: it is named
+							const overflowingCycle = insertChunk.find((groupRows) => {
+								return bindParameterCountOf(groupRows)
+									> POSTGRES_BIND_PARAMETER_LIMIT;
+							});
+
+							throw new InvalidPayloadError({
+								reason: overflowingCycle === undefined
+									? `Inserting ${JSON.stringify(insertChunk.flat().length)}`
+										+ ' rows in one statement takes'
+										+ ` ${JSON.stringify(chunkParameterCount)} bind`
+										+ ' parameters, past the'
+										+ ` ${JSON.stringify(POSTGRES_BIND_PARAMETER_LIMIT)}`
+										+ ' of Postgres; send fewer rows or lower'
+										+ ' DB_BATCH_INSERT_CHUNK_SIZE'
+									// a Postgres row holds up to 1600 values: over 40 rows here
+									: `Rows ${overflowingCycle
+										.slice(0, NAMED_CYCLE_KEYS)
+										.map((cycleRow) => JSON.stringify(cycleRow[primaryKeyField]))
+										.join(', ')} and ${JSON.stringify(
+										overflowingCycle.length - NAMED_CYCLE_KEYS,
+									)} more`
+										+ ' name each other in a cycle, so they are inserted'
+										+ ' in one statement, whose'
+										+ ` ${JSON.stringify(chunkParameterCount)} bind`
+										+ ' parameters pass the'
+										+ ` ${JSON.stringify(POSTGRES_BIND_PARAMETER_LIMIT)}`
+										+ ' of Postgres',
+							});
+						}
+
+						insertedRows.push(...await trx(this.collection)
+							.insert(insertChunk.flat())
+							.returning(primaryKeyField));
+					}
 
 					if (insertedRows.length !== prepared.length) {
-						throw new Error(`batchInsert returned ${insertedRows.length} rows but expected ${prepared.length}`);
+						throw new Error('The insert returned'
+							+ ` ${JSON.stringify(insertedRows.length)}`
+							+ ` rows but expected ${JSON.stringify(prepared.length)}`);
 					}
 
 					for (let i = 0; i < prepared.length; i++) {
@@ -1009,23 +1155,32 @@ implements AbstractService<Item> {
 						{ bypassEmitAction: holdActionEvent },
 					);
 
+					// The child revisions of every parent in one update, so linking them
+					// costs one statement whatever the batch size (#414).
+					const parentLinkGroups: UpdateGroup<AnyItem>[] = [];
+
 					for (let i = 0; i < postPrepared.length; i++) {
 						const p = postPrepared[i]!;
 						const revisionId = revisionIds[i]!;
-						// Make sure to set the parent field of the child-revision rows
 						const childrenRevisions = [...p.revisionsM2OAndA2O, ...p.revisionsO2M];
 
 						if (childrenRevisions.length > 0) {
-							await revisionsService.updateMany(
-								childrenRevisions,
-								{ parent: revisionId },
-								{ bypassEmitAction: holdActionEvent },
-							);
+							parentLinkGroups.push({
+								data: { parent: revisionId },
+								keys: childrenRevisions,
+							});
 						}
 
 						if (opts.onRevisionCreate) {
 							opts.onRevisionCreate(revisionId, p.primaryKey);
 						}
+					}
+
+					if (parentLinkGroups.length > 0) {
+						await revisionsService.updateGroups(
+							parentLinkGroups,
+							{ bypassEmitAction: holdActionEvent },
+						);
 					}
 				}
 			}
@@ -1154,7 +1309,272 @@ implements AbstractService<Item> {
 	}
 
 	/**
-	 * `createMany` under `disableBatching`: one `createMany` per row, in one
+	 * Per row, the rows of the batch it names by the key they provide: through
+	 * its own M2O or A2O, or through a record it nests at any depth, naming
+	 * that row or carrying its key. A batch writes every nested M2O and A2O
+	 * record before its rows, so a nested record's name sends the batch row by
+	 * row, after the rows it names. A row's own O2M records are written after
+	 * every row of a batch, or right after their row when written row by row:
+	 * their names are read only `withOwnChildren`, never by a nested record.
+	 * Read off the payloads before the filter hooks: a name a hook adds is not
+	 * seen.
+	 */
+	private batchRowNamesOf(
+		data: Partial<Item>[],
+		withOwnChildren: boolean,
+	): BatchRowName[][] {
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const rowIndexOfKey = new Map<string, number>();
+
+		for (const [rowIndex, row] of data.entries()) {
+			const key = row[primaryKeyField];
+
+			if (isMissingPrimaryKey(key)) {
+				continue;
+			}
+
+			const keyName = this.primaryKeyNameOf(key);
+
+			if (!rowIndexOfKey.has(keyName)) {
+				rowIndexOfKey.set(keyName, rowIndex);
+			}
+		}
+
+		if (rowIndexOfKey.size === 0) {
+			return data.map(() => []);
+		}
+
+		const nameRow = (
+			key: unknown,
+			byNestedRecord: boolean,
+			rowNames: BatchRowName[],
+		): void => {
+			const rowIndex = isMissingPrimaryKey(key)
+				? undefined
+				: rowIndexOfKey.get(this.primaryKeyNameOf(key as PrimaryKey));
+
+			if (rowIndex !== undefined) {
+				rowNames.push({ rowIndex, byNestedRecord });
+			}
+		};
+
+		const collectRecordNames = (
+			collectionName: string,
+			record: unknown,
+			isNestedRecord: boolean,
+			rowNames: BatchRowName[],
+		): void => {
+			if (!isPlainObject(record)) {
+				return;
+			}
+
+			const recordFields = record as AnyItem;
+
+			// a nested record carrying a batch row's key is that row
+			if (isNestedRecord && collectionName === this.collection) {
+				nameRow(recordFields[primaryKeyField], true, rowNames);
+			}
+
+			for (const relation of this.schema.relations) {
+				// a M2O or an A2O of the record
+				if (
+					relation.collection === collectionName
+					&& relation.field in recordFields
+				) {
+					collectValueNames(
+						relation.related_collection
+						?? recordFields[relation.meta?.one_collection_field ?? ''],
+						recordFields[relation.field],
+						isNestedRecord,
+						rowNames,
+					);
+				}
+
+				const oneField = relation.meta?.one_field;
+
+				// an O2M of the record, a self relation's included
+				if (
+					(isNestedRecord || withOwnChildren)
+					&& relation.related_collection === collectionName
+					&& typeof oneField === 'string'
+					&& oneField in recordFields
+				) {
+					const childNames: BatchRowName[] = [];
+
+					for (const child of childRecordsOf(recordFields[oneField])) {
+						// a child by its key alone
+						if (
+							relation.collection === this.collection
+							&& !isPlainObject(child)
+						) {
+							nameRow(child, true, childNames);
+						}
+						else {
+							collectRecordNames(relation.collection, child, true, childNames);
+						}
+					}
+
+					for (const { rowIndex, byNestedRecord } of childNames) {
+						rowNames.push({
+							rowIndex,
+							byNestedRecord: isNestedRecord && byNestedRecord,
+						});
+					}
+				}
+			}
+		};
+
+		const collectValueNames = (
+			relatedCollection: unknown,
+			value: unknown,
+			isNestedRecord: boolean,
+			rowNames: BatchRowName[],
+		): void => {
+			if (typeof relatedCollection !== 'string') {
+				return;
+			}
+
+			if (isPlainObject(value)) {
+				collectRecordNames(relatedCollection, value, true, rowNames);
+			}
+			else if (relatedCollection === this.collection) {
+				nameRow(value, isNestedRecord, rowNames);
+			}
+		};
+
+		// an O2M value is an array or a { create, update, delete } object
+		const childRecordsOf = (children: unknown): unknown[] => {
+			if (Array.isArray(children)) {
+				return children;
+			}
+
+			if (!isPlainObject(children)) {
+				return [];
+			}
+
+			const { create, update } = children as AnyItem;
+
+			// a list that is no array is refused by the one-to-many write
+			return [create, update].filter(Array.isArray).flat();
+		};
+
+		return data.map((row) => {
+			const rowNames: BatchRowName[] = [];
+			collectRecordNames(this.collection, row, false, rowNames);
+
+			return rowNames;
+		});
+	}
+
+	/**
+	 * The order to write the batch row by row: a row's own O2M records follow
+	 * it, so the rows they name go first too. Rows those names put in a cycle
+	 * keep their order in `writeGroups`, so a child's name never overrides an
+	 * M2O, an A2O or a nested record's.
+	 */
+	private rowByRowWriteOrderOf(
+		data: Partial<Item>[],
+		writeGroups: number[][],
+	): number[] {
+		const writeRankOfRow = new Map(writeGroups.flat().map((rowIndex, writeRank) => {
+			return [rowIndex, writeRank];
+		}));
+
+		return this.writeGroupsOf(this.batchRowNamesOf(data, true))
+			.flatMap((writeGroup) => {
+				return writeGroup.sort((left, right) => {
+					return writeRankOfRow.get(left)! - writeRankOfRow.get(right)!;
+				});
+			});
+	}
+
+	/**
+	 * The batch's rows in the order to write them, grouped: each row after the
+	 * rows it names, otherwise in payload order. Rows naming each other in a
+	 * cycle form one group, in payload order, after the rows the cycle names;
+	 * every other row is a group of its own. Tarjan's strongly connected
+	 * components, walked with a stack of its own, so a long parent chain cannot
+	 * overflow the call stack.
+	 */
+	private writeGroupsOf(batchRowNames: BatchRowName[][]): number[][] {
+		const writeGroups: number[][] = [];
+		const visitIndexOfRow = new Map<number, number>();
+		const lowestVisitIndexOfRow = new Map<number, number>();
+		const unwrittenRows: number[] = [];
+		const unwrittenRowSet = new Set<number>();
+		const pendingRows: { rowIndex: number; nameIndex: number }[] = [];
+
+		const visitRow = (rowIndex: number): void => {
+			visitIndexOfRow.set(rowIndex, visitIndexOfRow.size);
+			lowestVisitIndexOfRow.set(rowIndex, visitIndexOfRow.get(rowIndex)!);
+			unwrittenRows.push(rowIndex);
+			unwrittenRowSet.add(rowIndex);
+			pendingRows.push({ rowIndex, nameIndex: 0 });
+		};
+
+		const lowerVisitIndex = (rowIndex: number, visitIndex: number): void => {
+			lowestVisitIndexOfRow.set(
+				rowIndex,
+				Math.min(lowestVisitIndexOfRow.get(rowIndex)!, visitIndex),
+			);
+		};
+
+		for (const startRowIndex of batchRowNames.keys()) {
+			if (visitIndexOfRow.has(startRowIndex)) {
+				continue;
+			}
+
+			visitRow(startRowIndex);
+
+			while (pendingRows.length > 0) {
+				const pendingRow = pendingRows.at(-1)!;
+				const rowIndex = pendingRow.rowIndex;
+				const rowNames = batchRowNames[rowIndex]!;
+
+				if (pendingRow.nameIndex < rowNames.length) {
+					const namedRowIndex = rowNames[pendingRow.nameIndex]!.rowIndex;
+					pendingRow.nameIndex += 1;
+
+					if (!visitIndexOfRow.has(namedRowIndex)) {
+						visitRow(namedRowIndex);
+					}
+					// a row of the cycle being walked
+					else if (unwrittenRowSet.has(namedRowIndex)) {
+						lowerVisitIndex(rowIndex, visitIndexOfRow.get(namedRowIndex)!);
+					}
+
+					continue;
+				}
+
+				pendingRows.pop();
+				const lowestVisitIndex = lowestVisitIndexOfRow.get(rowIndex)!;
+
+				if (pendingRows.length > 0) {
+					lowerVisitIndex(pendingRows.at(-1)!.rowIndex, lowestVisitIndex);
+				}
+
+				// the row first visited of its cycle writes the whole cycle
+				// TODO(#610): MariaDB checks the keys row by row, refusing a cycle
+				if (lowestVisitIndex === visitIndexOfRow.get(rowIndex)) {
+					const cycleRows = unwrittenRows.splice(
+						unwrittenRows.indexOf(rowIndex),
+					);
+
+					for (const cycleRow of cycleRows) {
+						unwrittenRowSet.delete(cycleRow);
+					}
+
+					writeGroups.push(cycleRows.sort((left, right) => left - right));
+				}
+			}
+		}
+
+		return writeGroups;
+	}
+
+	/**
+	 * `createMany` under `disableBatching`, or when a nested record names
+	 * another row of the batch: one `createMany` per row, in one
 	 * transaction, each row with its own filter and insert. As before batching,
 	 * the actions fire once the transaction commits and the user count is checked
 	 * once. Each row takes `ItemsService`'s `createMany`: a subclass override
@@ -1636,6 +2056,74 @@ implements AbstractService<Item> {
 		// Nothing to write: no transaction, no activity or revision rows, and no
 		// integrity check.
 		return Object.keys(payloadAfterHooks ?? {}).every(changesNothing);
+	}
+
+	/**
+	 * Refuses a create filter answering `sameRowAs` for a row that names a key its
+	 * target row does not hold: the row the caller named would never be written.
+	 */
+	private refuseSameRowNamingAnotherKey(
+		createEntries: CreateEntries,
+		rows: Partial<Item>[],
+		primaryKeyField: string,
+	): void {
+		for (const [index, entry] of createEntries.entries()) {
+			const namedKey = rows[index]?.[primaryKeyField];
+
+			if (entry === null || !('sameRowAs' in entry) || namedKey == null) {
+				continue;
+			}
+
+			// A target answered `sameRowAs` itself points at an earlier row: the
+			// chain ends on a row that is written, taken over or cancelled.
+			let targetIndex = entry.sameRowAs;
+			let targetEntry = createEntries[targetIndex]!;
+
+			while (targetEntry !== null && 'sameRowAs' in targetEntry) {
+				targetIndex = targetEntry.sameRowAs;
+				targetEntry = createEntries[targetIndex]!;
+			}
+
+			let targetKey: unknown = undefined;
+
+			if (targetEntry !== null && 'key' in targetEntry) {
+				targetKey = targetEntry.key;
+			}
+			else if (targetEntry !== null) {
+				targetKey = targetEntry.data[primaryKeyField];
+			}
+			// A cancelled target keeps the key its payload named: a row naming that
+			// key follows it into the cancel, as a keyless row does.
+			else {
+				targetKey = rows[targetIndex]?.[primaryKeyField];
+			}
+
+			if (
+				targetKey != null
+				&& this.primaryKeyNameOf(targetKey as PrimaryKey)
+				=== this.primaryKeyNameOf(namedKey as PrimaryKey)
+			) {
+				continue;
+			}
+
+			let targetKeyWording = targetKey == null
+				? 'none'
+				: `the key ${JSON.stringify(targetKey)}`;
+
+			if (targetEntry === null) {
+				targetKeyWording += ', cancelled by a hook';
+			}
+
+			throw new InvalidPayloadError({
+				reason: oneLine`
+					A filter hook answered row ${JSON.stringify(index)} of
+					${JSON.stringify(this.collection)} as the same row as row
+					${JSON.stringify(targetIndex)}, but row ${JSON.stringify(index)}
+					names the key ${JSON.stringify(namedKey)} and row
+					${JSON.stringify(targetIndex)} ${targetKeyWording}
+				`,
+			});
+		}
 	}
 
 	/**
@@ -2664,15 +3152,41 @@ implements AbstractService<Item> {
 	private changedTakenOverKeys(
 		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
 	): PrimaryKey[] {
-		const takenOverPrefix = takenOverScopedCacheKey(this.collection, '');
+		const inertKeyNames = this.inertTakenOverKeyNames(declarations);
+
+		return this.takenOverKeysOf(declarations).filter((takenOverKey) => {
+			return !inertKeyNames.has(this.primaryKeyNameOf(takenOverKey));
+		});
+	}
+
+	/**
+	 * The rows of this collection a hook took over and declared inert through
+	 * `skipPurgeFor`, named as primaryKeyNameOf names them.
+	 */
+	private inertTakenOverKeyNames(
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+	): Set<string> {
 		const skippedKeyNames = this.purgeSkippedKeyNames(declarations);
 
+		return new Set(this.takenOverKeysOf(declarations)
+			.map((takenOverKey) => this.primaryKeyNameOf(takenOverKey))
+			.filter((takenOverName) => skippedKeyNames.has(takenOverName)));
+	}
+
+	/**
+	 * The rows of this collection a hook took over, from the `firstIndex`-th
+	 * take-over recorded on.
+	 */
+	private takenOverKeysOf(
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+		firstIndex = 0,
+	): PrimaryKey[] {
+		const takenOverPrefix = takenOverScopedCacheKey(this.collection, '');
+
 		return [...declarations.takenOverKeys]
+			.slice(firstIndex)
 			.filter((takenOverName) => takenOverName.startsWith(takenOverPrefix))
-			.map((takenOverName) => takenOverName.slice(takenOverPrefix.length))
-			.filter((takenOverKey) => {
-				return !skippedKeyNames.has(this.primaryKeyNameOf(takenOverKey));
-			});
+			.map((takenOverName) => takenOverName.slice(takenOverPrefix.length));
 	}
 
 	/**
@@ -3546,6 +4060,7 @@ implements AbstractService<Item> {
 			hookAddedKeys,
 			hookAddedSnapshots,
 			payloadActionEvents,
+			runWrittenKeyNames,
 		} = await transaction(
 			this.knex,
 			async (knex) => {
@@ -3555,6 +4070,7 @@ implements AbstractService<Item> {
 				const hookAddedKeys: PrimaryKey[] = [];
 				const hookAddedSnapshots: ScopedCacheSnapshot[] = [];
 				const payloadActionEvents: ActionEventParams[] = [];
+				const runWrittenKeyNames = new Set<string>();
 				let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
 
 				const childOpts: DeferredPurgeOptions = {
@@ -3608,8 +4124,25 @@ implements AbstractService<Item> {
 							?.slice(runOffset, runOffset + run.length),
 					};
 
-					for (const primaryKey of await service.upsertRun(run, runOpts)) {
+					const takeoverCountBefore = scopedCacheHookDeclarations.takenOverKeys.size;
+					const runKeys = await service.upsertRun(run, runOpts);
+
+					const runTakenOverNames = new Set(this.takenOverKeysOf(
+						scopedCacheHookDeclarations,
+						takeoverCountBefore,
+					).map((takenOverKey) => this.primaryKeyNameOf(takenOverKey)));
+
+					for (const primaryKey of runKeys) {
 						primaryKeys.push(primaryKey);
+
+						// A key a later run takes over inert is still a row this run wrote.
+						if (
+							primaryKey !== null
+							&& primaryKey !== undefined
+							&& !runTakenOverNames.has(this.primaryKeyNameOf(primaryKey))
+						) {
+							runWrittenKeyNames.add(this.primaryKeyNameOf(primaryKey));
+						}
 					}
 				}
 
@@ -3630,6 +4163,7 @@ implements AbstractService<Item> {
 					hookAddedKeys,
 					hookAddedSnapshots,
 					payloadActionEvents,
+					runWrittenKeyNames,
 				};
 			},
 			opts.mutationTracker.snapshot(),
@@ -3671,19 +4205,43 @@ implements AbstractService<Item> {
 
 		await flushDeferredResponseCache();
 
-		if (shouldClearCache(this.cache, opts, this.collection)) {
-			const takenOverKeys = changedTakenOverKeys();
+		const takenOverKeys = changedTakenOverKeys();
+		const inertKeyNames = this.inertTakenOverKeyNames(scopedCacheHookDeclarations);
 
+		const returnedKeys = primaryKeys.filter((key): key is PrimaryKey => {
+			return key !== null && key !== undefined;
+		});
+
+		// A take-over the hook declared inert wrote nothing, as createMany reads it;
+		// a row a payload sent as an update was written whatever was declared.
+		const writtenKeys = returnedKeys.filter((key) => {
+			const keyName = this.primaryKeyNameOf(key);
+
+			return inputKeyNames.has(keyName)
+				|| runWrittenKeyNames.has(keyName)
+				|| !inertKeyNames.has(keyName);
+		});
+
+		// Every row an inert take-over: no entry can have gone stale, and purging
+		// nothing would still drop this collection's global reads, as createMany
+		// says.
+		const nothingWrittenOrDeclared = returnedKeys.length > 0
+			&& returnedKeys.length === primaryKeys.length
+			&& writtenKeys.length === 0
+			&& hookAddedKeys.length === 0
+			&& takenOverKeys.length === 0
+			&& scopedCacheHookDeclarations.purgeFingerprints.length === 0;
+
+		if (
+			shouldClearCache(this.cache, opts, this.collection)
+			&& !nothingWrittenOrDeclared
+		) {
 			// New scope values for every committed row (inserts + moved updates), re-read
 			// by returned key so a hook's take-over shows as whatever is now stored,
 			// plus the rows an update filter added or took over, which no returned key
 			// names. A read that fails leaves the slices unknown: purged whole.
 			const newScopedCacheSnapshot = await this.scopedCache
-				.snapshot(
-					primaryKeys
-						.filter((key): key is PrimaryKey => key !== null && key !== undefined)
-						.concat(hookAddedKeys, takenOverKeys),
-				)
+				.snapshot(writtenKeys.concat(hookAddedKeys, takenOverKeys))
 				.catch(() => null);
 
 			const oldSnapshots = [oldScopedCacheSnapshot, ...hookAddedSnapshots];
@@ -3741,6 +4299,17 @@ implements AbstractService<Item> {
 	 * collections, may not exist yet, a row a nested write creates would be
 	 * created again, and of two payloads naming one child by key the first would
 	 * keep it, where the last does in payload order.
+	 *
+	 * An m2o record a run may create along with its rows stays in the run:
+	 * `{ tag: { name: 'x' } }` carries no key, so no other payload can name it or
+	 * create it again, and it names no row of this collection and nests none.
+	 * Its collection's filter hooks then see the run's records together, before
+	 * any is written, as a `createMany` hook does, and so do this collection's:
+	 * a hook taking a stored row over by its unique fields, where each payload
+	 * used to run alone, now meets two equal records in one call. Only the
+	 * fields the payload carries are checked, so a preset or hook setting a
+	 * field that names a row of the run may see that row written after the
+	 * record.
 	 */
 	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -3748,6 +4317,8 @@ implements AbstractService<Item> {
 		const selfRelationFields = new Set<string>();
 		// an o2m alias rewrites its children's foreign key, `null` and `[]` included
 		const childrenFields = new Set<string>();
+		// m2o field → its related collection, other than this one
+		const recordCollections = new Map<string, string>();
 
 		for (const relation of this.schema.relations) {
 			if (relation.collection === this.collection) {
@@ -3758,6 +4329,9 @@ implements AbstractService<Item> {
 					|| relation.meta?.one_allowed_collections?.includes(this.collection)
 				) {
 					selfRelationFields.add(relation.field);
+				}
+				else if (relation.related_collection) {
+					recordCollections.set(relation.field, relation.related_collection);
 				}
 			}
 
@@ -3770,11 +4344,42 @@ implements AbstractService<Item> {
 			}
 		}
 
+		const namesThisCollection = (recordCollection: string, recordField: string) => {
+			return this.schema.relations.some((relation) => {
+				return relation.collection === recordCollection
+					&& relation.field === recordField
+					&& (
+						relation.related_collection === this.collection
+						|| relation.meta?.one_allowed_collections?.includes(this.collection)
+					);
+			});
+		};
+
+		const isKeylessFlatRecord = (field: string, record: Partial<Item>) => {
+			const recordCollection = recordCollections.get(field);
+
+			if (recordCollection === undefined) {
+				return false;
+			}
+
+			const { primary } = this.schema.collections[recordCollection]!;
+
+			return isMissingPrimaryKey(record[primary])
+				&& Object.entries(record).every(([recordField, value]) => {
+					return !isPlainObject(value)
+						&& !Array.isArray(value)
+						&& !namesThisCollection(recordCollection, recordField);
+				});
+		};
+
 		const runsAlone = (payload: Partial<Item>) => {
 			return [...nestingFields].some((field) => {
 				const value = payload[field];
 
-				return isPlainObject(value)
+				return (
+					isPlainObject(value)
+					&& !isKeylessFlatRecord(field, value as Partial<Item>)
+				)
 					|| (Array.isArray(value) && value.some(isPlainObject));
 			})
 				|| [...childrenFields].some((field) => {

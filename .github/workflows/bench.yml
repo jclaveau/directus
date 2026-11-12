@@ -14,6 +14,15 @@ on:
       - ci-dialect-*
       - '*-dist'
 
+  # The nested-write job only: its statement count is exact, not noise, so it gates
+  # every trunk commit without waiting for Check, and every PR into the trunk runs it
+  # before it lands: a count regression comes from api code, which no paths filter
+  # could list.
+  push:
+    branches: [v11.10.1-hhh-dev]
+  pull_request:
+    branches: [v11.10.1-hhh-dev]
+
   # Measure an arbitrary ref on demand: a tag, an old commit, a branch nobody pushed to
   # today.
   workflow_dispatch:
@@ -29,7 +38,8 @@ on:
         required: false
         default: all
         type: choice
-        options: [all, startup, cache, pin-fanout, pending-retry, purge-walk]
+        options:
+          [all, startup, cache, pin-fanout, pending-retry, purge-walk, nested-write]
       baseline:
         description: 'What to measure it against (default: the ref before it)'
         required: false
@@ -52,7 +62,11 @@ permissions:
 # One measurement per ref at a time — two on the same runner pool would measure each
 # other. Queue rather than cancel: a bench that was asked for was asked for on purpose.
 concurrency:
-  group: bench-${{ inputs.ref || github.event.workflow_run.head_sha || github.ref }}
+  # A push is keyed by its commit: two trunk pushes in a row would otherwise share
+  # the branch's group, and the newer would cancel the older while it waits.
+  group: >-
+    bench-${{ inputs.ref || github.event.workflow_run.head_sha
+    || (github.event_name == 'push' && github.sha) || github.ref }}
   cancel-in-progress: false
 
 env:
@@ -83,7 +97,8 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.suite != 'cache'
        && inputs.suite != 'pin-fanout'
        && inputs.suite != 'pending-retry'
-       && inputs.suite != 'purge-walk') ||
+       && inputs.suite != 'purge-walk'
+       && inputs.suite != 'nested-write') ||
       (github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
@@ -251,7 +266,8 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.suite != 'startup'
        && inputs.suite != 'pin-fanout'
        && inputs.suite != 'pending-retry'
-       && inputs.suite != 'purge-walk') ||
+       && inputs.suite != 'purge-walk'
+       && inputs.suite != 'nested-write') ||
       (github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
@@ -906,5 +922,54 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bench-purge-walk-${{ github.sha }}
+          path: tests/perf/results/
+          if-no-files-found: warn
+
+  nested-write:
+    name: Nested write
+    # What one nested batch create costs per parent count (#414). Fails when a
+    # larger batch runs more statements than the smallest; the time is shown only.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.suite == 'nested-write')
+      || github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+        with:
+          build: true
+
+      - name: Start database and cache
+        run: docker compose -f tests/blackbox/docker-compose.yml up postgres redis -d --quiet-pull --wait
+
+      - name: Build the bundle
+        run: |
+          pnpm --filter directus deploy --legacy --prod dist
+          pnpm install
+
+      - name: Bootstrap the database
+        run: node dist/cli bootstrap
+
+      - name: Measure the nested write
+        run: pnpm --filter tests-perf bench:nested-write
+        env:
+          PERF_CLI: ${{ github.workspace }}/dist/cli
+
+      - name: Write the summary
+        if: always()
+        run: cat tests/perf/results/nested-write.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-nested-write-${{ github.sha }}
           path: tests/perf/results/
           if-no-files-found: warn

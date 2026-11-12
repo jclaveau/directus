@@ -87,7 +87,7 @@ Feature: A parent's o2m field given as { create, update, delete } alters what it
     And on postgres the requests ran these statements:
       | request | table                | select | insert | update | delete |
       | 1       | directus_activity    | 0      | 3      | 0      | 0      |
-      | 1       | directus_revisions   | 0      | 3      | 2      | 0      |
+      | 1       | directus_revisions   | 0      | 3      | 1      | 0      |
       | 1       | directus_users       | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_card | 3      | 2      | 0      | 0      |
       | 1       | test_nested_o2m_deck | 1      | 1      | 0      | 0      |

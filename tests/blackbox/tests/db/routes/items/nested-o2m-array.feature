@@ -13,6 +13,8 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
   - `test_nested_o2m_list` keeps the default deselect action,
     `test_nested_o2m_bin` deletes. `test_nested_o2m_post` reaches
     `test_nested_o2m_tag` through the junction `test_nested_o2m_post_tag`.
+    `test_nested_o2m_tree` lists its own rows as `children`, each naming its
+    `parent`.
   - Every request goes to an instance of the feature's own, sharing the
     database, that reports the statements each request ran
     (`QUERY_AUDIT_HEADER`). The last step counts a request's statements per
@@ -201,7 +203,7 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
     And on postgres the requests ran these statements:
       | request | table                      | select | insert | update | delete |
       | 1       | directus_activity          | 0      | 4      | 0      | 0      |
-      | 1       | directus_revisions         | 0      | 4      | 2      | 0      |
+      | 1       | directus_revisions         | 0      | 4      | 1      | 0      |
       | 1       | directus_users             | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list       | 1      | 1      | 0      | 0      |
       | 1       | test_nested_o2m_list_entry | 5      | 2      | 1      | 0      |
@@ -338,3 +340,49 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | 2       | directus_users           | 1      | 0      | 0      | 0      |
       | 2       | test_nested_o2m_post     | 3      | 0      | 0      | 0      |
       | 2       | test_nested_o2m_post_tag | 6      | 1      | 1      | 0      |
+
+  Scenario: children already in the list, sent as objects, are left as they are
+    Given the rows of test_nested_o2m_list:
+      | id   |
+      | lf-a |
+    And their children in test_nested_o2m_list_entry:
+      | id    | list |
+      | lf-a1 | lf-a |
+      | lf-a2 | lf-a |
+    When these requests get these responses:
+      | request                                | response  |
+      | method: PATCH                          | code: 200 |+
+      | path: /items/test_nested_o2m_list/lf-a |           |
+      | payload:                               |           |
+      |   entries:                             |           |
+      |     - id: lf-a1                        |           |
+      |     - id: lf-a2                        |           |
+      |       list: lf-a                       |           |
+    Then the rows of test_nested_o2m_list_entry whose key starts with "lf-" are:
+      | id    | list |
+      | lf-a1 | lf-a |
+      | lf-a2 | lf-a |
+    And on postgres the requests ran these statements:
+      | request | table                      | select | insert | update | delete |
+      | 1       | directus_activity          | 0      | 1      | 0      | 0      |
+      | 1       | directus_users             | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_list       | 3      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_list_entry | 4      | 0      | 0      | 0      |
+
+  Scenario: a create written row by row writes first a row an earlier row's child names
+    When these requests get these responses:
+      | request                              | response  |
+      | method: POST                         | code: 200 |+
+      | path: /items/test_nested_o2m_tree    |           |
+      | query:                               |           |
+      |   mutationBatching: disableBatching  |           |
+      | payload:                             |           |
+      |   - id: ro-a                         |           |
+      |     children:                        |           |
+      |       - id: ro-b                     |           |
+      |   - id: ro-b                         |           |
+      |     name: x                          |           |
+    Then the rows of test_nested_o2m_tree whose key starts with "ro-" are:
+      | id   | parent | name |
+      | ro-a |        |      |
+      | ro-b | ro-a   | x    |

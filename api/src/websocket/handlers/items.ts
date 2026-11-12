@@ -53,6 +53,7 @@ export class ItemsHandler {
 				const keys = await service.createMany(message.data, {
 					allowFilterCancel: true,
 					mutationBatching: message.mutationBatching,
+					nestedUpdates: message.nestedUpdates,
 				});
 
 				result = await service.readMany(
@@ -63,6 +64,7 @@ export class ItemsHandler {
 				const key = await service.createOne(message.data, {
 					allowFilterCancel: true,
 					mutationBatching: message.mutationBatching,
+					nestedUpdates: message.nestedUpdates,
 				});
 
 				// A filter hook may cancel the create (null key); there is then no item to read back.
@@ -93,6 +95,7 @@ export class ItemsHandler {
 				const key = await service.updateOne(message.id, message.data, {
 					allowFilterCancel: true,
 					mutationBatching: message.mutationBatching,
+					nestedUpdates: message.nestedUpdates,
 				});
 
 				result = await service.readOne(key);
@@ -100,6 +103,7 @@ export class ItemsHandler {
 				const keys = await service.updateMany(message.ids, message.data, {
 					allowFilterCancel: true,
 					mutationBatching: message.mutationBatching,
+					nestedUpdates: message.nestedUpdates,
 				});
 
 				meta = await metaService.getMetaForQuery(message.collection, query);
@@ -111,12 +115,14 @@ export class ItemsHandler {
 			} else if (isSingleton) {
 				await service.upsertSingleton(message.data, {
 					mutationBatching: message.mutationBatching,
+					nestedUpdates: message.nestedUpdates,
 				});
 
 				result = await service.readSingleton(query);
 			} else if (Array.isArray(message.data)) {
 				const keys = await service.updateBatch(message.data, {
 					mutationBatching: message.mutationBatching,
+					nestedUpdates: message.nestedUpdates,
 				});
 
 				meta = await metaService.getMetaForQuery(message.collection, query);
@@ -125,6 +131,7 @@ export class ItemsHandler {
 				const keys = await service.updateByQuery(query, message.data, {
 					allowFilterCancel: true,
 					mutationBatching: message.mutationBatching,
+					nestedUpdates: message.nestedUpdates,
 				});
 
 				meta = await metaService.getMetaForQuery(message.collection, query);

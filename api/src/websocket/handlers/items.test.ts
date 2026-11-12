@@ -434,6 +434,129 @@ describe('WebSocket heartbeat handler', () => {
 		expect(createMany).not.toHaveBeenCalled();
 	});
 
+	test('passes nestedUpdates to the create', async () => {
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
+
+		const createMany = vi.fn().mockResolvedValue([1]),
+			readMany = vi.fn();
+
+		(ItemsService as Mock).mockImplementation(function () {
+			return { createMany, readMany };
+		});
+
+		emitter.emitAction(
+			'websocket.message',
+			{
+				client: mockClient(),
+				message: {
+					type: 'items',
+					collection: 'test',
+					action: 'create',
+					data: [{}],
+					nestedUpdates: 'refuse',
+				},
+			},
+			{} as EventContext,
+		);
+
+		await vi.runAllTimersAsync();
+
+		expect(createMany).toHaveBeenCalledWith([{}], {
+			allowFilterCancel: true,
+			nestedUpdates: 'refuse',
+		});
+	});
+
+	test('passes nestedUpdates to the batch update', async () => {
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
+
+		const updateBatch = vi.fn().mockResolvedValue(['123']),
+			readMany = vi.fn();
+
+		(ItemsService as Mock).mockImplementation(function () {
+			return { updateBatch, readMany };
+		});
+
+		(MetaService as Mock).mockImplementation(function () {
+			return { getMetaForQuery: vi.fn() };
+		});
+
+		emitter.emitAction(
+			'websocket.message',
+			{
+				client: mockClient(),
+				message: {
+					type: 'items',
+					collection: 'test',
+					action: 'update',
+					data: [{ id: '123' }],
+					nestedUpdates: 'skip',
+				},
+			},
+			{} as EventContext,
+		);
+
+		await vi.runAllTimersAsync();
+
+		expect(updateBatch).toHaveBeenCalledWith(
+			[{ id: '123' }],
+			{ nestedUpdates: 'skip' },
+		);
+	});
+
+	test('refuses an unknown nestedUpdates before creating', async () => {
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
+
+		const createMany = vi.fn();
+
+		(ItemsService as Mock).mockImplementation(function () {
+			return { createMany };
+		});
+
+		const fakeClient = mockClient();
+
+		emitter.emitAction(
+			'websocket.message',
+			{
+				client: fakeClient,
+				message: {
+					type: 'items',
+					collection: 'test',
+					action: 'create',
+					data: [{}],
+					nestedUpdates: 'ignore',
+				},
+			},
+			{} as EventContext,
+		);
+
+		await vi.runAllTimersAsync();
+
+		expect(fakeClient.send).toHaveBeenCalledWith(JSON.stringify({
+			type: 'items',
+			status: 'error',
+			error: {
+				code: 'INVALID_PAYLOAD',
+				message: 'Validation error: Invalid option: expected one of '
+					+ '"apply"|"refuse"|"skip" '
+					+ 'at "nestedUpdates" or Invalid input: expected "read" at '
+					+ '"action" or Invalid input: expected "update" at "action"; '
+					+ 'Invalid option: expected one of '
+					+ '"apply"|"refuse"|"skip" '
+					+ 'at "nestedUpdates" or Invalid input: expected "delete" at '
+					+ '"action"',
+			},
+		}));
+
+		expect(createMany).not.toHaveBeenCalled();
+	});
+
 	test('delete one item', async () => {
 		// do mocking
 		(getSchema as Mock).mockImplementation(function () {
