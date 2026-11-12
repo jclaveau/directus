@@ -28,7 +28,10 @@ import {
 	type ScopedCacheEpochs,
 } from '../scoped-cache/index.js';
 import { readWhileServingOff } from '../scoped-cache/fill-guard.js';
-import { scopedCachePurgedStore } from '../scoped-cache/purged-record.js';
+import {
+	readRequestScopedCachePurges,
+	scopedCachePurgedStore,
+} from '../scoped-cache/purged-record.js';
 import {
 	recordPendingScopedCachePurge,
 } from '../scoped-cache-pending-purges.js';
@@ -98,9 +101,11 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	}
 
 	if (env['CACHE_PURGED_TAGS_HEADER']) {
-		// Every purge the request awaited (see ScopedCachePurgedRecord for what is
-		// left out).
-		const purged = scopedCachePurgedStore.getStore()?.purged;
+		// Every purge the request ran, a raw transaction's commit drain included
+		// (see ScopedCachePurgedRecord for what is left out).
+		const purged = scopedCachePurgedStore.getStore()
+			? await readRequestScopedCachePurges()
+			: undefined;
 
 		if (Array.isArray(purged) && purged.length) {
 			setScopedCachePinsHeader(

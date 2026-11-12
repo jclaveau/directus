@@ -34,7 +34,7 @@ describe.each(vendors)('%s', (vendor) => {
 	env[vendor]['CACHE_NAMESPACE'] = `directus-reqpurge-${vendor}`;
 
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
-	let instance: ChildProcess;
+	let instance: ChildProcess | undefined;
 
 	beforeAll(async () => {
 		await CreateCollections(vendor, {
@@ -61,7 +61,7 @@ describe.each(vendors)('%s', (vendor) => {
 	}, 60_000);
 
 	afterAll(async () => {
-		instance.kill();
+		instance?.kill();
 
 		await DeleteCollection(vendor, { collection: LESSON });
 	});

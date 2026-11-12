@@ -1,5 +1,6 @@
 import { oneLine } from '@directus/utils';
 import type { Request, Response } from 'express';
+import type { Knex } from 'knex';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { CacheSettingField } from '../cache-settings.js';
 
@@ -183,7 +184,11 @@ import { setCacheValue } from '../cache.js';
 import emitter from '../emitter.js';
 import { isCacheAuditReplay } from '../utils/cache-audit-replay.js';
 import { readScopedCacheEpochs } from '../scoped-cache/fill-guard.js';
-import { scopedCachePurgedStore } from '../scoped-cache/purged-record.js';
+import {
+	recordQueuedScopedCachePurges,
+	recordScopedCachePurged,
+	scopedCachePurgedStore,
+} from '../scoped-cache/purged-record.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import { withMeta } from '../utils/read-meta.js';
 import { respond } from './respond.js';
@@ -1514,6 +1519,31 @@ describe('respond middleware', () => {
 			},
 			() => respond(makeReq({ method: 'PATCH' }), res, next),
 		);
+
+		expect(res.setHeader).toHaveBeenCalledWith(
+			'X-Scoped-Cache-Purged-Tags',
+			'articles:owner=U2',
+		);
+	});
+
+	test('names a purge a raw transaction commit is still draining', async () => {
+		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
+
+		const res = makeRes({ data: { id: 1 } });
+
+		await scopedCachePurgedStore.run({ purged: [], queuedPurges: [] }, () => {
+			recordQueuedScopedCachePurges(
+				{ isCompleted: () => true } as Knex.Transaction,
+				new Promise<void>((resolve) => setTimeout(resolve, 10))
+					.then(() => {
+						recordScopedCachePurged([
+							{ collection: 'articles', pinnedScope: { owner: ['U2'] } },
+						]);
+					}),
+			);
+
+			return respond(makeReq({ method: 'PATCH' }), res, next);
+		});
 
 		expect(res.setHeader).toHaveBeenCalledWith(
 			'X-Scoped-Cache-Purged-Tags',

@@ -3123,6 +3123,46 @@ describe('the request\'s purged list', () => {
 		});
 	});
 
+	it(oneLine`
+		names the bare fingerprint a row-driven purge dropped though a cache.purge
+		filter took it out
+	`, async () => {
+		vi.mocked(emitter.emitFilter).mockResolvedValue([]);
+
+		const purgedRecord = { purged: [], queuedPurges: [] };
+
+		await scopedCachePurgedStore.run(purgedRecord, () => {
+			return purgeScopedCache(cache as any, 'rounds', [], null, {
+				rowFingerprints: [
+					scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+				],
+			});
+		});
+
+		expect(purgedRecord).toEqual({
+			purged: [
+				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+				scopedCacheFingerprintOf('rounds', []),
+			],
+			queuedPurges: [],
+		});
+	});
+
+	it(oneLine`
+		becomes a whole-namespace flush when the response cache is flushed
+	`, async () => {
+		const purgedRecord = {
+			purged: [{ collection: 'rounds' }],
+			queuedPurges: [],
+		};
+
+		await scopedCachePurgedStore.run(purgedRecord, () => {
+			return flushResponseCache(cache as any);
+		});
+
+		expect(purgedRecord).toEqual({ purged: null, queuedPurges: [] });
+	});
+
 	it('becomes a whole-namespace flush when scoped mode is off', async () => {
 		env['CACHE_AUTO_PURGE_MODE'] = 'all';
 

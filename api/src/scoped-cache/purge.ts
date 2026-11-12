@@ -810,6 +810,8 @@ export async function clearResponseCache(cache: Keyv | null): Promise<boolean> {
 export async function flushResponseCache(cache: Keyv | null): Promise<void> {
 	const flushedDatabase = await clearResponseCache(cache);
 
+	recordScopedCachePurged(null);
+
 	// Gated here, not in the drop: the flush command drops the index whatever the
 	// mode, so a store switched out of scoped purging leaves no sets behind — while
 	// this runs on every permission, field or collection change, and a scan that
@@ -1561,7 +1563,8 @@ async function reportRecoveredScopedCacheEntries(
  * the collections those slices name.
  *
  * What it reached goes in the request's purged list, which the
- * CACHE_PURGED_TAGS_HEADER reads.
+ * CACHE_PURGED_TAGS_HEADER reads. A purge Redis refused, recorded for the retry,
+ * is named there too: the slices are owed, not yet gone.
  */
 export async function purgeScopedCache(
 	...purgeArguments: Parameters<typeof purgeScopedCacheUnrecorded>
@@ -1752,11 +1755,15 @@ async function purgeScopedCacheUnrecorded(
 	].map(renderScopedCacheFingerprint);
 
 	// What the request's purged list names: the rows a row-driven purge was handed
-	// are slices it reached too, and a slice its old and new rows share is one.
+	// are slices it reached too, so are the bare reads it drops whatever the
+	// cache.purge filter kept, and a slice its old and new rows share is one.
 	const reachedFingerprints = [
 		...new Map(
-			[...purgedScopedCacheFingerprints, ...(options.rowFingerprints ?? [])]
-				.map((reached) => [renderScopedCacheFingerprint(reached), reached]),
+			[
+				...purgedScopedCacheFingerprints,
+				...(options.rowFingerprints ?? []),
+				...recordedBareFingerprint,
+			].map((reached) => [renderScopedCacheFingerprint(reached), reached]),
 		).values(),
 	];
 

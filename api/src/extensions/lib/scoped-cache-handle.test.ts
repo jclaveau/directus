@@ -352,6 +352,23 @@ describe('createScopedCacheExtensionHandle', () => {
 		expect(purgeScopedCache).not.toHaveBeenCalled();
 	});
 
+	it('scoped off: the request reads its purges as a whole flush', async () => {
+		state.scopedEnabled = false;
+
+		const handle = createScopedCacheExtensionHandle(getSchema);
+
+		const requestPurges = await scopedCachePurgedStore.run(
+			{ purged: [{ collection: 'rounds' }], queuedPurges: [] },
+			async () => {
+				await handle.purgeForMutatedRows('articles', [{ owner: 7 }]);
+
+				return handle.readRequestPurges();
+			},
+		);
+
+		expect(requestPurges).toBeNull();
+	});
+
 	it('cache disabled (null): no-op', async () => {
 		state.cacheNull = true;
 
