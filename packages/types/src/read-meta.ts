@@ -312,6 +312,10 @@ export interface ScopedCacheExtensionHandle {
 	 * opened raw (`database.transaction()`) and that has settled; one still open
 	 * has purged nothing yet. A copy: later purges do not reach it.
 	 *
+	 * Read a fingerprint naming only its collection as collection-wide. It is
+	 * also what a purge that reached the bare reads alone answers (a raw write
+	 * naming no stored row), and nothing tells the two apart.
+	 *
 	 * Throws outside a request (a schedule, the CLI): there is no request list to
 	 * read there.
 	 */
