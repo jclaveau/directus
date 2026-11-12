@@ -206,6 +206,22 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 - **#603 deep-review findings (fixed in the loop)**: completion-reporter retry can double-post after a 10 s axios timeout on a POST the server saved (gate counts rows, `test_file_path` not unique) → look the row up before retrying; `FOR UPDATE` hold in retry-timer stalls other instances' retries (pending-purge list not namespaced) → hold 3 s→500 ms; `finally{commit()}` must not mask the assertion error; restore the `performance.now` spy.
 - Method that worked: read-only subagents mine logs, then I re-verify the claimed mechanism (sim / grep vitest dist) before building the red.
 
+## query-audit-header "two requests at once" — TEST race (2026-11-05)
+
+- `query-audit-header.test.ts` "each reports the same entries both times": `rows: 7` expected vs `rows: 8` on the `audit_articles` GET. The scenario fires its POST (inserts a row) and GET together; the GET sees the new row or not depending on commit order. Not caused by the PR (seen on #679, which only touches `directus_access` + list-m2m). Rerun `--failed` once, until PR #692 lands: its GET filters out the POST's title. Recurred 2026-11-06 on #679 `7dd1b748ad`, shard 1, same `rows: 7` vs `8`.
+
+## `common/assets/concurrency.test.ts` is hot (2026-11-07, #367 still open)
+Failed the `Blackbox Tests / common` job in 6 of 58 latest PR runs, and was the failing test in all 6, across 3 branches. On #680 `bc21b3cac0` it went green, then red, then red on `--failed`, so red-then-red does NOT clear it of being this flake: survey the job first. Whether it was `timeouts` or `non2xx` is unknown, the test still discards the result.
+
+## Statement-count tables on shard 1 (2026-11-06, unattributed)
+Run 42220902802 (throwaway off #680): `update-batch-guards` (4) and `singular-write-users-invite` (2) went red on "on postgres the requests ran these statements:", with extra `directus_access` / `directus_sessions` rows. Same code path green on run 42222151629 and its neighbours, so not the PR; cause not investigated.
+
+## `cache-index-set-expiry` TTL read -2 (2026-11-07, 1 occurrence)
+#680 `ed6bcad6d6` (comments + subscriptions fake only), run 42416453877, postgres shard 3: `cache-index-set-expiry.test.ts:123` `expected -2 to be greater than 100` on `redisClient.ttl(slotIndexKey)` right after a `MISS`. `-2` = key absent at read time (a shard-mate's purge or flush between the fill and the read is the likely shape, not checked). Green on the `--failed` rerun. Not filed.
+
+## `cache-graphql-request-state` MISS where HIT expected (2 occurrences, root cause unproven)
+Run 37846335608 (2026-10-08, shard 8, slot "one") and run 42213640914 (2026-11-06, #692 red-proof, shard 5, slot "two"): `expected 'MISS' to be 'HIT'` on the repeat read of "this read is cached:". Scan of 554 failed bb job logs since 2026-09-27 found no other. Same shape in another file: run 43215846015 (2026-11-12, #680 `1b917d5dbb`, shard 3), `cache-aggregate-field-case.test.ts` "a sum filtered on one link follows the other links its rule reads": `x-cache-status` MISS for HIT. Two cache files with one signature points to the shared cache fill path, not to either test. Not a stale read: a MISS is served from the DB; the paths that end in it skip the fill (`respond.ts` ~231-249), swallow a failed SET (warn at ~458), or evict after the fill on a moved purge counter (~313-330, `fill-guard.ts`). Which one fired is unknown: the spawned instance's stdout/stderr are discarded. Next step if it recurs: pipe the instance output + `LOG_LEVEL=debug` in that test file. A HIT where MISS is expected would be the stale direction: HIGH.
+
 ## fk-no-key + fingerprint calibration (2026-10-31, PR from `v11.10.1-fix/fk-no-key-and-fingerprint-flakes`)
 
 - **`cache-m2o-through-fk-no-key` 3/3 red (tags undefined ×2, `HIT`≠`MISS` :206) = PORT COLLISION, not stale cache.** Its boot and `cache-entry-envelope`'s share port 45195 in `boots.jsonl`; envelope's env has no tags header and no scoped purge → every symptom. Fix: [[reference_directus_blackbox_port_slices]]. A whole file red with an undefined dev header is the tell.
