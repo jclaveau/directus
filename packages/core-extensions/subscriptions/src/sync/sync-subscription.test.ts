@@ -453,6 +453,9 @@ describe('syncSubscription', () => {
 		await database('subscription_plan_references')
 			.insert({ plan: 1, provider: 'mollie', reference: 'monthly' });
 
+		await database('directus_access')
+			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
+
 		await database('subscriptions').insert({
 			subscriber: 1,
 			customer: 1,
@@ -462,17 +465,18 @@ describe('syncSubscription', () => {
 			status: 'canceled',
 			current_period_end: new Date('2026-12-01T00:00:00Z'),
 			cancel_at_period_end: true,
+			access: 'access-1',
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
+
+		const accessService = { createOne: vi.fn(), deleteOne: vi.fn() };
 
 		await syncSubscription({
 			trx: database,
 			subscriptionProvider: {} as SubscriptionProvider,
 			logger: { warn: vi.fn() },
-			accessService: {
-				createOne: vi.fn().mockResolvedValue('access-2'),
-			} as unknown as AbstractService,
+			accessService: accessService as unknown as AbstractService,
 			providerName: 'mollie',
 			providerSubscription: {
 				subscriptionId: 'sub_2',
@@ -486,11 +490,101 @@ describe('syncSubscription', () => {
 			syncedAt: new Date('2026-11-05T00:00:00Z'),
 		});
 
+		expect(accessService.createOne).not.toHaveBeenCalled();
+		expect(accessService.deleteOne).not.toHaveBeenCalled();
+
 		expect(await database('subscriptions')
-			.select('id', 'provider_subscription_id', 'resumes'))
+			.select('id', 'provider_subscription_id', 'resumes', 'access'))
 			.toEqual([
-				{ id: 1, provider_subscription_id: 'sub_1', resumes: null },
-				{ id: 2, provider_subscription_id: 'sub_2', resumes: 1 },
+				{
+					id: 1,
+					provider_subscription_id: 'sub_1',
+					resumes: null,
+					access: 'access-1',
+				},
+				{
+					id: 2,
+					provider_subscription_id: 'sub_2',
+					resumes: 1,
+					access: 'access-1',
+				},
+			]);
+	});
+
+	test('keeps an access a resume shares when the resumed row ends', async () => {
+		await database('subscribers').insert({ user: 'user-1' });
+
+		await database('subscriber_customers')
+			.insert({ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' });
+
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 990,
+			currency: 'EUR',
+			interval: 'month',
+		});
+
+		await database('subscription_plan_references')
+			.insert({ plan: 1, provider: 'mollie', reference: 'monthly' });
+
+		await database('subscriptions').insert([
+			{
+				subscriber: 1,
+				customer: 1,
+				plan_reference: 1,
+				provider: 'mollie',
+				provider_subscription_id: 'sub_1',
+				status: 'canceled',
+				current_period_end: new Date('2026-11-01T00:00:00Z'),
+				cancel_at_period_end: true,
+				access: 'access-1',
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+			{
+				subscriber: 1,
+				customer: 1,
+				plan_reference: 1,
+				provider: 'mollie',
+				provider_subscription_id: 'sub_2',
+				status: 'active',
+				current_period_end: new Date('2026-11-01T00:00:00Z'),
+				cancel_at_period_end: false,
+				access: 'access-1',
+				resumes: 1,
+				date_created: new Date('2026-10-15T00:00:00Z'),
+				date_updated: new Date('2026-10-15T00:00:00Z'),
+			},
+		]);
+
+		const accessService = { createOne: vi.fn(), deleteOne: vi.fn() };
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn() },
+			accessService: accessService as unknown as AbstractService,
+			providerName: 'mollie',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cst_1',
+				status: 'canceled',
+				currentPeriodEnd: new Date('2026-11-01T00:00:00Z'),
+				cancelAtPeriodEnd: true,
+				planReference: 'monthly',
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(accessService.deleteOne).not.toHaveBeenCalled();
+
+		expect(await database('subscriptions')
+			.select('provider_subscription_id', 'access'))
+			.toEqual([
+				{ provider_subscription_id: 'sub_1', access: null },
+				{ provider_subscription_id: 'sub_2', access: 'access-1' },
 			]);
 	});
 

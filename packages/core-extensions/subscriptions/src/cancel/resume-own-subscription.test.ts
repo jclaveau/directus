@@ -52,7 +52,8 @@ afterEach(async () => {
 
 describe('resumeOwnSubscription', () => {
 	test(oneLine`
-		queues the sync of the new Mollie subscription, leaving the canceled row
+		queues the sync of the new Mollie subscription, leaving the canceled row,
+		and records who asked
 	`, async () => {
 		await database('subscriptions').insert({
 			subscriber: 1,
@@ -98,7 +99,16 @@ describe('resumeOwnSubscription', () => {
 				date_updated: 1_790_812_800_000,
 			}]);
 
-		expect(await database('subscription_events')).toEqual([]);
+		expect(await database('subscription_events')).toEqual([{
+			id: 1,
+			subscription: 1,
+			status: 'canceled',
+			current_period_end: 1_796_083_200_000,
+			cancel_at_period_end: 1,
+			source: 'user',
+			user: 'user-1',
+			date_created: 1_793_836_800_000,
+		}]);
 	});
 
 	test(oneLine`
@@ -210,6 +220,33 @@ describe('resumeOwnSubscription', () => {
 			enabledProviders: new Map(),
 			userId: 'user-1',
 		})).rejects.toThrow(new NoSubscriptionToResumeError());
+	});
+
+	test('refuses a Stripe subscription Stripe already canceled', async () => {
+		await database('subscriptions').insert({
+			subscriber: 1,
+			customer: 1,
+			plan_reference: 1,
+			provider: 'stripe',
+			provider_subscription_id: 'sub_1',
+			status: 'canceled',
+			current_period_end: new Date('2026-12-01T00:00:00Z'),
+			cancel_at_period_end: true,
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		const resumeCancel = vi.fn();
+
+		await expect(resumeOwnSubscription({
+			database,
+			enabledProviders: new Map([
+				['stripe', { resumeCancel } as unknown as SubscriptionProvider],
+			]),
+			userId: 'user-1',
+		})).rejects.toThrow(new NoSubscriptionToResumeError());
+
+		expect(resumeCancel).not.toHaveBeenCalled();
 	});
 
 	test('refuses a canceled subscription a stored one already resumes', async () => {
