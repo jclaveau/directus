@@ -7,7 +7,7 @@ touches an area, read that file before concluding no rule exists. A new memory
 gets its line in the category's index file and bumps the count here, never a
 line appended below.
 
-## process (21) — how to work in this repo: tests, CI asks, review routing
+## process (22) — how to work in this repo: tests, CI asks, review routing
 `.agents/auto-memory/index/process.md`
 
 - [Run every test in CI, loop on the run](feedback_directus_ci_only_test_runs.md) — unit, typecheck, blackbox all in CI; no local vitest/tsc gate
@@ -15,7 +15,7 @@ line appended below.
 - [No consumer data in fork memories](feedback_directus_no_consumer_data_in_fork_memories.md) — public repo: consumer specifics go to its private repo; a consumer prod DB is SELECT-only
 - [Non-PG review points go to #610](feedback_directus_non_pg_review_points_to_610.md) — sqlite/cockroach/maria finding → point in #610 + `TODO(#610):`, never fixed in the PR
 - [Postgres only in the main workflow](feedback_directus_pg_only_dialect_focus.md) — no MariaDB/SQLite investment; never report their absence as a gap
-- [CI-triggering action needs its own approval](feedback_ci_trigger_needs_own_approval.md) — label/dispatch/rerun is its own ask
+- [CI-triggering action needs its own approval](feedback_ci_trigger_needs_own_approval.md) — label/dispatch is its own ask; a likely-flake rerun is NOT (free runners) unless contended
 - [The admin preview is not a CI check](feedback_directus_ci_watch_skip_preview.md) — never wait on it, never mention it in a CI report
 - [New bb files are Gherkin](feedback_directus_blackbox_gherkin_standard.md) — `.feature` + step `.test.ts`
 
@@ -34,42 +34,42 @@ line appended below.
 - [scopedCache hook API](reference_directus_scopedcache_api.md) — scopeTo/dependOn on reads, purgeBy on mutations
 - [Query-filter $NOW is NOT a cache poison](reference_directus_query_now_not_cache_poison.md) — mis-analysed ≥2×; keys differ per request
 
-## cache (29) — tiers, namespaces, keys, telemetry, audit, admin page, Redis
+## cache (32) — tiers, namespaces, keys, telemetry, audit, admin page, Redis
 `.agents/auto-memory/index/cache.md`
 
 - [Cache key identities](project_directus_cache_key_identities.md) — cacheKey digest vs redisKey; a wrong one fails SILENTLY as a cold cache
 - [Cache layers fail differently](project_directus_cache_failure_semantics.md) — ioredis raises, Keyv swallows, bus fire-and-forget
 - [Cache tier switches](project_directus_cache_tier_switches.md) — only response+schema switchable
 
-## blackbox (24) — seeds, sharding, flakes, spawned instances
+## blackbox (25) — seeds, sharding, flakes, spawned instances
 `.agents/auto-memory/index/blackbox.md`
 
 - [Directus blackbox run + logs](project_directus_blackbox_run_and_logs.md) — bb runs on every code PR; the label is NOT required and cancels the run
-- [Blackbox flakes](project_directus_blackbox_flakes.md) — known intermittents; `gh run rerun --failed` only after the run completes (needs its own ask)
+- [Blackbox flakes](project_directus_blackbox_flakes.md) — known intermittents; `gh run rerun --failed` once the run completes, no ask unless runners are contended
 - [Isolate new blackbox fixtures](project_directus_bb_fixture_isolation.md) — `fields=*` splices every alias; new scenarios get own collections
 - [bb pins its own toolchain](reference_directus_blackbox_pins_own_toolchain.md) — CI resolved vitest 4.1.11; check the run log before relying on `expect.poll`
 
-## ci (19) — workflows, codecov, lint gates, bench, preview
+## ci (21) — workflows, codecov, lint gates, bench, preview
 `.agents/auto-memory/index/ci.md`
 
 - [Two eslint configs](project_directus_two_eslint_configs.md) — Lint vs Style (changes); run both before push
 - [The blocking codecov check is the unflagged patch at 95%](project_directus_codecov_aggregate_patch_gate.md) — only unit tests clear the bar
 - [Bench measures the trunk, not your PR](project_directus_bench_measures_trunk.md) — a red `Bench / cache` on a PR is the trunk tip
 
-## unit-tests (8) — vitest mocks, typecheck, local test env
+## unit-tests (10) — vitest mocks, typecheck, local test env
 `.agents/auto-memory/index/unit-tests.md`
 
 - [knex-mock matches raw SQL](reference_directus_knex_mock_sql_matching.md) — register the narrower handler first
 - [useEnv mock needs vi.hoisted](reference_directus_useenv_mock_hoisted.md) — automock evals the real module first
 
-## api (34) — Directus core internals, env, errors, migrations, DB
+## api (39) — Directus core internals, env, errors, migrations, DB
 `.agents/auto-memory/index/api.md`
 
 - [A bad env var fails the boot](feedback_directus_bad_env_var_fails_boot.md) — exit before listen naming the var; never fall back
 - [Env TYPE_MAP coverage](project_directus_env_type_map.md) — register every env var you touch
 - [Directus ForbiddenError conventions](project_directus_forbidden_error_conventions.md) — 403 for missing items, pre-access validation 400
 
-## processes (28) — pm2, autoscaler, boot cost, worker RAM
+## processes (29) — pm2, autoscaler, boot cost, worker RAM
 `.agents/auto-memory/index/processes.md`
 
 - [processes/autoscale consolidation](project_directus_processes_autoscale_consolidation.md) — one bounded `processes/supervisor/` gateway; routes/env frozen

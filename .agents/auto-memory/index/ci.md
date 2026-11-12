@@ -2,6 +2,8 @@
 
 Full hooks for this area. The routing keys live in `../MEMORY.md`.
 
+- [core-extensions package traps](../project_directus_core_extensions_package_traps.md) — undeclared @directus/utils dep, unverified subagent tests, Stylelint Empty source (#681), mutant-branch proof of red
+
 - [Codecov per-package flags; blackbox not in api unit flag](../project_directus_codecov_flags.md) — codecov/patch/<pkg> target=auto≈project; blackbox-only api code fails patch/api → needs knex-mock-client unit tests; constants barrel line needs import-through-index
 - [check.yml trigger scoping + Check ambiguity](../reference_directus_check_workflow_scoping.md) — check.yml (Unit/Format/Lint/Style) fires only on prepare/feat** base PRs, NOT hhh-dev → verify hhh-dev-based PRs (#205) locally; two workflows named "Check" (blackbox-pr.yml + check.yml); cancel-in-progress makes a superseded run show "cancelled" rc=1 (false fail — watch current-head run). FIXED 2026-06-30: run on every commit (unfiltered push) → unblocks unit-coverage upload for codecov
 - [Scalabus diff-scoped eslint style gate](../project_directus_scalabus_style_gate.md) — eslint.style.config.js (jean's own config, prettier disabled, indent/semi/quotes/quality-rules off) + lint-style-changes.mjs (config-is-source, added-lines-only, untracked-file scan, tooling-exempt); two-pass --fix to satisfy both style + directus padding; custom arrow-multiline-block rule
@@ -21,3 +23,4 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [Preview killed by CodeRabbit body edit](../project_directus_preview_cancelled_by_bot_edit.md) — `edited` event cancels the live admin preview via workflow-level concurrency; fix snippet + dispatch allow rule
 - [ci-prebuilds rejected; slim postgres image (PR #586)](../project_directus_ci_prebuilds_slim_postgres.md) — prebuilt runner images save 0-5s/job (not worth it); real lever = 645→204 MiB composite timescaledb+postgis image, "Start database" 26-30s→12-17s
 - [no-restricted-imports misses require and dynamic import](../reference_eslint_restricted_imports_static_only.md) — a lazy-load pin needs a no-restricted-syntax pair; mutation-test the pin or the ignores are dead config
+- [Style (changes) red on a stale base](../reference_directus_style_changes_stale_base.md) — diffs vs base.sha, so an old base lints trunk lines; merge hhh-dev in, never hand-fix them
