@@ -69,6 +69,7 @@ import { scopedCacheHomePinFields, scopedCacheIndexPath } from './index-path.js'
 import { scopedCacheFillPaused } from './fill-pause.js';
 import { scopedCacheDeclaredIndexPins } from './declared-index-pins.js';
 import { requestScopedCacheIndexReap } from './reap-requests.js';
+import { recordScopedCachePurged } from './purged-record.js';
 import {
 	scopedCacheEpochBumpScript,
 	scopedCacheEpochKey,
@@ -1558,8 +1559,21 @@ async function reportRecoveredScopedCacheEntries(
  * a cancelled mutation nothing in `collection` changed, so only what the hook
  * declared should drop: its (usually foreign) slices, and the global reads of
  * the collections those slices name.
+ *
+ * What it reached goes in the request's purged list, which the
+ * CACHE_PURGED_TAGS_HEADER reads.
  */
 export async function purgeScopedCache(
+	...purgeArguments: Parameters<typeof purgeScopedCacheUnrecorded>
+): Promise<ScopedCacheFingerprint[] | null> {
+	const purged = await purgeScopedCacheUnrecorded(...purgeArguments);
+
+	recordScopedCachePurged(purged);
+
+	return purged;
+}
+
+async function purgeScopedCacheUnrecorded(
 	cache: Keyv,
 	collection: string,
 	scopedCacheFingerprints: ScopedCacheFingerprint[] | null = [],

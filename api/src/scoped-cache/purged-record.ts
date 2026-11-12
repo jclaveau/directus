@@ -3,11 +3,10 @@ import type { ScopedCacheFingerprint } from '@directus/types';
 
 /**
  * What the scoped-cache purges of one request reached, for the
- * CACHE_PURGED_TAGS_HEADER: the request's own service's, and those of the services
- * its nested writes and hooks built, which wait for its commit (#363). `null` once
- * one of them flushed the whole namespace. Only ItemScopedCacheService.purge
- * records: direct purgeScopedCache calls (purgeForMutatedRows, a version save) and
- * purges ending after `respond` (an unawaited action hook) are not named.
+ * CACHE_PURGED_TAGS_HEADER: every purgeScopedCache call it awaited, a nested
+ * write's queued until its commit (#363) included. `null` once one of them
+ * flushed the whole namespace. A purge ending after `respond` (an unawaited
+ * action hook) is not named.
  */
 export type ScopedCachePurgedRecord = {
 	purged: ScopedCacheFingerprint[] | null;

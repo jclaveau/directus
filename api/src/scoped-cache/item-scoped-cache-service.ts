@@ -36,7 +36,6 @@ import {
 	scopedCacheCollectionsAcrossQuantifiers,
 	type ScopedCacheM2oJoin,
 } from './paths.js';
-import { recordScopedCachePurged } from './purged-record.js';
 import { scopedCacheAstWithQuantifierCases } from './quantifier-cases.js';
 import { ScopedCacheReadPlan } from './read-plan.js';
 import {
@@ -732,22 +731,7 @@ export class ItemScopedCacheService {
 		};
 	}
 
-	/**
-	 * Purges, and records what it reached in the request's purged list, which the
-	 * CACHE_PURGED_TAGS_HEADER reads. A purge queued until a nested write's
-	 * transaction commits records nothing now: it records once it runs.
-	 */
 	async purge(
-		...purgeArguments: Parameters<ItemScopedCacheService['purgeOrQueue']>
-	): Promise<ScopedCacheFingerprint[] | null> {
-		const purged = await this.purgeOrQueue(...purgeArguments);
-
-		recordScopedCachePurged(purged);
-
-		return purged;
-	}
-
-	private async purgeOrQueue(
 		scopedCacheFingerprints: ScopedCacheFingerprint[] | null,
 		hookDeclarations?: Pick<ScopedCacheHookDeclarations, 'purgeFingerprints'>,
 		changedCollections: string[] = [],
@@ -770,9 +754,8 @@ export class ItemScopedCacheService {
 		} = {},
 	): Promise<ScopedCacheFingerprint[] | null> {
 		// A write nested in a transaction it did not open (a hook's own service, built
-		// on the parent's trx) purges once that transaction commits (#363), and records
-		// its purged list then. The purges queued on one trx for the same collection
-		// merge into one
+		// on the parent's trx) purges once that transaction commits (#363). The purges
+		// queued on one trx for the same collection merge into one
 		// (#594), unless their accountability differs: the `cache.purge` filter is
 		// handed one, and may resolve other slices for another.
 		const queuedAfterCommit = queueMergedAfterCommit(

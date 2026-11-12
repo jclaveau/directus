@@ -76,6 +76,7 @@ import {
 import emitter from '../emitter.js';
 import { getCache } from '../cache.js';
 import { requestScopedCacheIndexReap } from './reap-requests.js';
+import { scopedCachePurgedStore } from './purged-record.js';
 import { recordScopedCacheBuild } from '../cache-build-identity.js';
 import { useLogger } from '../logger/index.js';
 import { withMeta } from '../utils/read-meta.js';
@@ -3027,6 +3028,68 @@ describe('a purge that fails after its mutation committed', () => {
 
 		expect(recordPendingScopedCachePurge).not.toHaveBeenCalled();
 		expect(queueCachePurge).toHaveBeenCalledOnce();
+	});
+});
+
+describe('the request\'s purged list', () => {
+	const cache = { clear: vi.fn(), delete: vi.fn().mockResolvedValue(true) };
+
+	beforeEach(() => {
+		vi.mocked(useRedis).mockReturnValue({
+			smembers: vi.fn().mockResolvedValue([]),
+			scan: vi.fn().mockResolvedValue(['0', []]),
+			sscan: vi.fn().mockResolvedValue(['0', []]),
+			mget: vi.fn().mockResolvedValue(['1', '1']),
+			srem: vi.fn(),
+			eval: vi.fn().mockResolvedValue([]),
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: vi.fn(),
+		} as any);
+
+		vi.mocked(emitter.emitFilter).mockImplementation(async (_e, pins) => pins);
+		cache.clear.mockResolvedValue(undefined);
+	});
+
+	it(oneLine`
+		names the slices a purge reached, its collection's bare fingerprint
+		included
+	`, async () => {
+		const purgedRecord = { purged: [] };
+
+		await scopedCachePurgedStore.run(purgedRecord, () => {
+			return purgeScopedCache(cache as any, 'rounds', [
+				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+			]);
+		});
+
+		expect(purgedRecord).toEqual({
+			purged: [
+				scopedCacheFingerprintOf('rounds', []),
+				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+			],
+		});
+	});
+
+	it('names the collection a collection-wide purge reached', async () => {
+		const purgedRecord = { purged: [] };
+
+		await scopedCachePurgedStore.run(purgedRecord, () => {
+			return purgeScopedCache(cache as any, 'articles', null);
+		});
+
+		expect(purgedRecord).toEqual({ purged: [{ collection: 'articles' }] });
+	});
+
+	it('becomes a whole-namespace flush when scoped mode is off', async () => {
+		env['CACHE_AUTO_PURGE_MODE'] = 'all';
+
+		const purgedRecord = { purged: [{ collection: 'rounds' }] };
+
+		await scopedCachePurgedStore.run(purgedRecord, () => {
+			return purgeScopedCache(cache as any, 'articles', []);
+		});
+
+		expect(purgedRecord).toEqual({ purged: null });
 	});
 });
 
