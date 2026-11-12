@@ -3,11 +3,13 @@ import { ForbiddenError } from '@directus/errors';
 import express from 'express';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cancelOwnSubscription } from './cancel/cancel-own-subscription.js';
+import { resumeOwnSubscription } from './cancel/resume-own-subscription.js';
 import { subscriptionsEndpoint } from './endpoint.js';
 import { archivePlan } from './plans/archive-plan.js';
 import { receiveWebhook } from './webhook/receive-webhook.js';
 
 vi.mock('./cancel/cancel-own-subscription.js');
+vi.mock('./cancel/resume-own-subscription.js');
 vi.mock('./plans/archive-plan.js');
 vi.mock('./webhook/receive-webhook.js');
 
@@ -220,6 +222,86 @@ describe('subscriptionsEndpoint', () => {
 		expect(cancelResponse.status).toBe(403);
 
 		expect(cancelOwnSubscription).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			userId: null,
+		});
+	});
+
+	test('resumes the requesting user\'s canceled subscription', async () => {
+		vi.mocked(resumeOwnSubscription)
+			.mockResolvedValue(undefined);
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+
+		expressApp.use((request, _response, next) => {
+			Object.assign(request, { accountability: { user: 'user-1' } });
+			next();
+		});
+
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const resumeResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/resume`,
+			{ method: 'POST' },
+		);
+
+		httpServer.close();
+
+		expect(resumeResponse.status).toBe(204);
+
+		expect(resumeOwnSubscription).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			userId: 'user-1',
+		});
+	});
+
+	test('resumes as nobody without accountability', async () => {
+		vi.mocked(resumeOwnSubscription)
+			.mockRejectedValue(new ForbiddenError());
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		expressApp.use((
+			routeError: Error & { status: number },
+			_request: express.Request,
+			response: express.Response,
+			_next: express.NextFunction,
+		) => {
+			response.status(routeError.status)
+				.end();
+		});
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const resumeResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/resume`,
+			{ method: 'POST' },
+		);
+
+		httpServer.close();
+
+		expect(resumeResponse.status).toBe(403);
+
+		expect(resumeOwnSubscription).toHaveBeenCalledWith({
 			database: 'database',
 			enabledProviders: new Map(),
 			userId: null,

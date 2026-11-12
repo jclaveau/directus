@@ -3,6 +3,7 @@ import { MollieApiError, type MollieClient } from '@mollie/api-client';
 import { describe, expect, test, vi } from 'vitest';
 import {
 	MissingProviderSubscriptionError,
+	NoValidMandateError,
 	WebhookRefusedError,
 } from '../errors.js';
 import { createMollieProvider } from './mollie-provider.js';
@@ -475,6 +476,32 @@ describe('fetchSubscription', () => {
 		});
 	});
 
+	test('names the subscription it resumes', async () => {
+		const mollieClient = {
+			customerSubscriptions: {
+				get: vi.fn().mockResolvedValue({
+					id: 'sub_2',
+					customerId: 'cst_1',
+					status: 'active',
+					interval: '1 month',
+					nextPaymentDate: '2026-12-01',
+					metadata: { plan: 'monthly', resumes: 'sub_1' },
+				}),
+			},
+		};
+
+		await expect(createMollieProvider(mollieClient as unknown as MollieClient)
+			.fetchSubscription('cst_1/sub_2')).resolves.toEqual({
+			subscriptionId: 'sub_2',
+			customerId: 'cst_1',
+			status: 'active',
+			currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+			cancelAtPeriodEnd: false,
+			planReference: 'monthly',
+			resumedSubscriptionId: 'sub_1',
+		});
+	});
+
 	test.each([
 		['sub_1', 'Mollie resource id "sub_1" is not'],
 		['cst_1/', 'Mollie resource id "cst_1/" is not'],
@@ -499,6 +526,170 @@ describe('cancelAtPeriodEnd', () => {
 
 		expect(mollieClient.customerSubscriptions.cancel)
 			.toHaveBeenCalledWith('sub_1', { customerId: 'cst_1' });
+	});
+});
+
+describe('resumeCancel', () => {
+	test(oneLine`
+		starts a new subscription at the period end on the canceled one's mandate
+	`, async () => {
+		const mollieClient = {
+			customerSubscriptions: {
+				iterate: vi.fn().mockReturnValue([
+					{ id: 'sub_1', metadata: { plan: 'monthly' } },
+				]),
+				get: vi.fn().mockResolvedValue({
+					id: 'sub_1',
+					status: 'canceled',
+					amount: { currency: 'EUR', value: '9.90' },
+					interval: '1 month',
+					description: 'Monthly',
+					mandateId: 'mdt_2',
+					times: null,
+					timesRemaining: null,
+					webhookUrl: 'https://example.com/subscriptions/webhooks/mollie',
+					metadata: { plan: 'monthly' },
+				}),
+				create: vi.fn().mockResolvedValue({ id: 'sub_2' }),
+			},
+			customerMandates: {
+				iterate: vi.fn().mockReturnValue([
+					{ id: 'mdt_1', status: 'valid' },
+					{ id: 'mdt_2', status: 'valid' },
+				]),
+			},
+		};
+
+		await expect(createMollieProvider(mollieClient as unknown as MollieClient)
+			.resumeCancel({
+				customerId: 'cst_1',
+				subscriptionId: 'sub_1',
+				periodEnd: new Date('2026-12-01T00:00:00Z'),
+			})).resolves.toEqual({
+			resourceId: 'cst_1/sub_2',
+			isNewSubscription: true,
+		});
+
+		expect(mollieClient.customerSubscriptions.create).toHaveBeenCalledWith({
+			customerId: 'cst_1',
+			amount: { currency: 'EUR', value: '9.90' },
+			interval: '1 month',
+			description: 'Monthly',
+			mandateId: 'mdt_2',
+			startDate: '2026-12-01',
+			webhookUrl: 'https://example.com/subscriptions/webhooks/mollie',
+			metadata: { plan: 'monthly', resumes: 'sub_1' },
+			idempotencyKey: 'resume-sub_1',
+		});
+	});
+
+	test(oneLine`
+		resumes a fixed-term subscription with its remaining payments, on another
+		valid mandate
+	`, async () => {
+		const mollieClient = {
+			customerSubscriptions: {
+				iterate: vi.fn().mockReturnValue([]),
+				get: vi.fn().mockResolvedValue({
+					id: 'sub_1',
+					status: 'canceled',
+					amount: { currency: 'EUR', value: '9.90' },
+					interval: '1 month',
+					description: 'Monthly',
+					mandateId: 'mdt_revoked',
+					times: 12,
+					timesRemaining: 4,
+					webhookUrl: '',
+					metadata: { plan: 'monthly' },
+				}),
+				create: vi.fn().mockResolvedValue({ id: 'sub_2' }),
+			},
+			customerMandates: {
+				iterate: vi.fn().mockReturnValue([
+					{ id: 'mdt_revoked', status: 'invalid' },
+					{ id: 'mdt_pending', status: 'pending' },
+				]),
+			},
+		};
+
+		await createMollieProvider(mollieClient as unknown as MollieClient)
+			.resumeCancel({
+				customerId: 'cst_1',
+				subscriptionId: 'sub_1',
+				periodEnd: new Date('2026-12-01T00:00:00Z'),
+			});
+
+		expect(mollieClient.customerSubscriptions.create).toHaveBeenCalledWith({
+			customerId: 'cst_1',
+			amount: { currency: 'EUR', value: '9.90' },
+			interval: '1 month',
+			description: 'Monthly',
+			mandateId: 'mdt_pending',
+			startDate: '2026-12-01',
+			times: 4,
+			metadata: { plan: 'monthly', resumes: 'sub_1' },
+			idempotencyKey: 'resume-sub_1',
+		});
+	});
+
+	test('returns the subscription Mollie already holds resuming it', async () => {
+		const mollieClient = {
+			customerSubscriptions: {
+				iterate: vi.fn().mockReturnValue([
+					{ id: 'sub_1', metadata: { plan: 'monthly' } },
+					{ id: 'sub_2', metadata: { plan: 'monthly', resumes: 'sub_1' } },
+				]),
+				get: vi.fn(),
+				create: vi.fn(),
+			},
+		};
+
+		await expect(createMollieProvider(mollieClient as unknown as MollieClient)
+			.resumeCancel({
+				customerId: 'cst_1',
+				subscriptionId: 'sub_1',
+				periodEnd: new Date('2026-12-01T00:00:00Z'),
+			})).resolves.toEqual({
+			resourceId: 'cst_1/sub_2',
+			isNewSubscription: true,
+		});
+
+		expect(mollieClient.customerSubscriptions.iterate)
+			.toHaveBeenCalledWith({ customerId: 'cst_1' });
+
+		expect(mollieClient.customerSubscriptions.create).not.toHaveBeenCalled();
+	});
+
+	test('refuses a customer without a valid mandate', async () => {
+		const mollieClient = {
+			customerSubscriptions: {
+				iterate: vi.fn().mockReturnValue([]),
+				get: vi.fn().mockResolvedValue({
+					id: 'sub_1',
+					status: 'canceled',
+					mandateId: 'mdt_1',
+					metadata: { plan: 'monthly' },
+				}),
+				create: vi.fn(),
+			},
+			customerMandates: {
+				iterate: vi.fn().mockReturnValue([
+					{ id: 'mdt_1', status: 'invalid' },
+				]),
+			},
+		};
+
+		await expect(createMollieProvider(mollieClient as unknown as MollieClient)
+			.resumeCancel({
+				customerId: 'cst_1',
+				subscriptionId: 'sub_1',
+				periodEnd: new Date('2026-12-01T00:00:00Z'),
+			})).rejects.toThrow(new NoValidMandateError({ customerId: 'cst_1' }));
+
+		expect(mollieClient.customerMandates.iterate)
+			.toHaveBeenCalledWith({ customerId: 'cst_1' });
+
+		expect(mollieClient.customerSubscriptions.create).not.toHaveBeenCalled();
 	});
 });
 

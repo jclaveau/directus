@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import type { AbstractService } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -109,6 +110,7 @@ describe('syncSubscription', () => {
 			date_created: 1_793_836_800_000,
 			date_updated: 1_793_836_800_000,
 			user_updated: null,
+			resumes: null,
 		}]);
 	});
 
@@ -182,6 +184,7 @@ describe('syncSubscription', () => {
 			date_created: 1_790_812_800_000,
 			date_updated: 1_793_836_800_000,
 			user_updated: null,
+			resumes: null,
 		}]);
 	});
 
@@ -428,6 +431,108 @@ describe('syncSubscription', () => {
 		expect(await database('subscriptions')
 			.select('status', 'current_period_end', 'access'))
 			.toEqual([{ status: 'unpaid', current_period_end: null, access: null }]);
+	});
+
+	test(oneLine`
+		stores a Mollie resume linked to the canceled row it resumes
+	`, async () => {
+		await database('subscribers').insert({ user: 'user-1' });
+
+		await database('subscriber_customers')
+			.insert({ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' });
+
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 990,
+			currency: 'EUR',
+			interval: 'month',
+		});
+
+		await database('subscription_plan_references')
+			.insert({ plan: 1, provider: 'mollie', reference: 'monthly' });
+
+		await database('subscriptions').insert({
+			subscriber: 1,
+			customer: 1,
+			plan_reference: 1,
+			provider: 'mollie',
+			provider_subscription_id: 'sub_1',
+			status: 'canceled',
+			current_period_end: new Date('2026-12-01T00:00:00Z'),
+			cancel_at_period_end: true,
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn() },
+			accessService: {
+				createOne: vi.fn().mockResolvedValue('access-2'),
+			} as unknown as AbstractService,
+			providerName: 'mollie',
+			providerSubscription: {
+				subscriptionId: 'sub_2',
+				customerId: 'cst_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				planReference: 'monthly',
+				resumedSubscriptionId: 'sub_1',
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(await database('subscriptions')
+			.select('id', 'provider_subscription_id', 'resumes'))
+			.toEqual([
+				{ id: 1, provider_subscription_id: 'sub_1', resumes: null },
+				{ id: 2, provider_subscription_id: 'sub_2', resumes: 1 },
+			]);
+	});
+
+	test('refuses a resume of a row not stored', async () => {
+		await database('subscribers').insert({ user: 'user-1' });
+
+		await database('subscriber_customers')
+			.insert({ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' });
+
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 990,
+			currency: 'EUR',
+			interval: 'month',
+		});
+
+		await database('subscription_plan_references')
+			.insert({ plan: 1, provider: 'mollie', reference: 'monthly' });
+
+		await expect(syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn() },
+			accessService: {
+				createOne: vi.fn().mockResolvedValue('access-2'),
+			} as unknown as AbstractService,
+			providerName: 'mollie',
+			providerSubscription: {
+				subscriptionId: 'sub_2',
+				customerId: 'cst_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				planReference: 'monthly',
+				resumedSubscriptionId: 'sub_1',
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		})).rejects.toThrow(new Error(
+			'Subscription "sub_2" resumes "sub_1", which is not stored',
+		));
 	});
 
 	test('refuses a customer no subscriber holds', async () => {

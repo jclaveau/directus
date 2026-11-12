@@ -8,6 +8,15 @@ export type MollieHolding = {
 	plan_reference: string;
 	status: string;
 	paid_at?: string;
+	/** Set on a subscription the bundle created to resume `resumes`. */
+	resumes?: string;
+	start_date?: string;
+};
+
+export type MollieMandate = {
+	mandate: string;
+	customer: string;
+	status: string;
 };
 
 export type StripeHolding = {
@@ -21,7 +30,8 @@ export type StripeHolding = {
 export type ReceivedWrite = {
 	method: string;
 	path: string;
-	body: string | null;
+	/** Parsed when Mollie's client sent JSON. */
+	body: string | object | null;
 };
 
 type FakeAnswer = { code: number; body: object };
@@ -87,6 +97,7 @@ async function readRequestBody(
 export async function startFakeProviders() {
 	const mollieHoldings = new Map<string, MollieHolding>();
 	const stripeHoldings = new Map<string, StripeHolding>();
+	const mollieMandates = new Map<string, MollieMandate>();
 	const forgottenSubscriptions = new Set<string>();
 	const unansweredPaths: string[] = [];
 	const receivedWrites: ReceivedWrite[] = [];
@@ -156,20 +167,103 @@ export async function startFakeProviders() {
 			mollieHolding.status = 'canceled';
 		}
 
+		return { code: 200, body: composeMollieSubscription(mollieHolding) };
+	}
+
+	function composeMollieSubscription(mollieHolding: MollieHolding) {
+		return {
+			resource: 'subscription',
+			id: mollieHolding.subscription,
+			customerId: mollieHolding.customer,
+			status: mollieHolding.status,
+			amount: { currency: 'EUR', value: '10.00' },
+			times: null,
+			timesRemaining: null,
+			interval: '1 month',
+			description: `Plan ${mollieHolding.plan_reference}`,
+			nextPaymentDate: mollieHolding.status === 'canceled'
+				? undefined
+				: mollieHolding.start_date ?? '2099-01-01',
+			metadata: mollieHolding.resumes === undefined
+				? { plan: mollieHolding.plan_reference }
+				: {
+					plan: mollieHolding.plan_reference,
+					resumes: mollieHolding.resumes,
+				},
+		};
+	}
+
+	function answerMollieList(embeddedName: string, embeddedItems: object[]) {
 		return {
 			code: 200,
 			body: {
-				resource: 'subscription',
-				id: subscriptionId,
-				customerId,
-				status: mollieHolding.status,
-				interval: '1 month',
-				nextPaymentDate: mollieHolding.status === 'canceled'
-					? undefined
-					: '2099-01-01',
-				metadata: { plan: mollieHolding.plan_reference },
+				count: embeddedItems.length,
+				_embedded: { [embeddedName]: embeddedItems },
+				_links: { next: null },
 			},
 		};
+	}
+
+	// What the bundle sends to resume a cancel: a subscription named after the
+	// one it resumes, so a scenario knows its id up front.
+	function createMollieSubscription(
+		customerId: string,
+		requestBody: string | object | null,
+	): FakeAnswer {
+		const { metadata } = requestBody as {
+			metadata: { plan: string; resumes: string };
+			startDate: string;
+		};
+
+		const createdHolding: MollieHolding = {
+			payment: `tr_${metadata.resumes}_2`,
+			customer: customerId,
+			subscription: `${metadata.resumes}_2`,
+			plan_reference: metadata.plan,
+			status: 'active',
+			resumes: metadata.resumes,
+			start_date: (requestBody as { startDate: string }).startDate,
+		};
+
+		mollieHoldings.set(createdHolding.payment, createdHolding);
+
+		return { code: 201, body: composeMollieSubscription(createdHolding) };
+	}
+
+	function answerMollieCustomer(
+		requestMethod: string,
+		customerId: string,
+		customerResource: string,
+		requestBody: string | object | null,
+	): FakeAnswer {
+		if (customerResource === 'mandates') {
+			return answerMollieList(
+				'mandates',
+				[...mollieMandates.values()]
+					.filter((mollieMandate) => mollieMandate.customer === customerId)
+					.map((mollieMandate) => {
+						return {
+							resource: 'mandate',
+							id: mollieMandate.mandate,
+							status: mollieMandate.status,
+						};
+					}),
+			);
+		}
+
+		if (requestMethod === 'POST') {
+			return createMollieSubscription(customerId, requestBody);
+		}
+
+		return answerMollieList(
+			'subscriptions',
+			[...mollieHoldings.values()]
+				.filter((mollieHolding) => {
+					return mollieHolding.customer === customerId
+						&& mollieHolding.subscription !== null;
+				})
+				.map(composeMollieSubscription),
+		);
 	}
 
 	function answerStripeSubscription(
@@ -213,7 +307,7 @@ export async function startFakeProviders() {
 	function answerProvider(
 		requestMethod: string,
 		requestPath: string,
-		requestBody: string | null,
+		requestBody: string | object | null,
 	): FakeAnswer | undefined {
 		const paymentMatch = /^\/v2\/payments\/(\w+)$/.exec(requestPath);
 
@@ -233,17 +327,34 @@ export async function startFakeProviders() {
 			);
 		}
 
+		const customerMatch = /^\/v2\/customers\/(\w+)\/(subscriptions|mandates)$/
+			.exec(requestPath);
+
+		if (customerMatch !== null) {
+			return answerMollieCustomer(
+				requestMethod,
+				customerMatch[1]!,
+				customerMatch[2]!,
+				requestBody,
+			);
+		}
+
 		const stripeMatch = /^\/v1\/subscriptions\/(\w+)$/.exec(requestPath);
 
 		return stripeMatch === null
 			? undefined
-			: answerStripeSubscription(stripeMatch[1]!, requestBody);
+			: answerStripeSubscription(stripeMatch[1]!, requestBody as string | null);
 	}
 
 	const fakeServer = createServer(async (providerRequest, providerResponse) => {
 		const requestPath = new URL(providerRequest.url!, 'http://provider').pathname;
 		const requestMethod = providerRequest.method!;
-		const requestBody = await readRequestBody(providerRequest);
+		const requestText = await readRequestBody(providerRequest);
+
+		const requestBody = requestText !== null
+			&& providerRequest.headers['content-type'] === 'application/json'
+			? JSON.parse(requestText) as object
+			: requestText;
 
 		if (requestMethod !== 'GET') {
 			receivedWrites.push({
@@ -282,6 +393,9 @@ export async function startFakeProviders() {
 		receivedWrites,
 		holdAtMollie(mollieHolding: MollieHolding) {
 			mollieHoldings.set(mollieHolding.payment, mollieHolding);
+		},
+		holdMandateAtMollie(mollieMandate: MollieMandate) {
+			mollieMandates.set(mollieMandate.mandate, mollieMandate);
 		},
 		holdAtStripe(stripeHolding: StripeHolding) {
 			stripeHoldings.set(stripeHolding.subscription, stripeHolding);

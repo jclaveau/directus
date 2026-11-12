@@ -1,6 +1,7 @@
 import { MollieApiError, type MollieClient } from '@mollie/api-client';
 import {
 	MissingProviderSubscriptionError,
+	NoValidMandateError,
 	WebhookRefusedError,
 } from '../errors.js';
 import type { ProviderSubscriptionIds, SubscriptionProvider } from './types.js';
@@ -17,6 +18,9 @@ type MollieSubscription = {
 const MOLLIE_PAYMENT_ID = /^tr_\w+$/;
 
 const MOLLIE_INTERVAL = /^(\d+) (month|week|day)s?$/;
+
+/** Mollie's recurring guide: a `pending` mandate can already be charged. */
+const USABLE_MANDATE_STATUSES = ['valid', 'pending'];
 
 /** Mollie's `completed` is a fixed-term subscription past its last payment. */
 const NORMALIZED_STATUSES: Record<string, string> = {
@@ -68,7 +72,8 @@ export function createMollieProvider(
 					mollieSubscription,
 				),
 				cancelAtPeriodEnd: mollieSubscription.status === 'canceled',
-				planReference: readPlanReference(mollieSubscription),
+				planReference: readMetadataText(mollieSubscription, 'plan'),
+				...readResumedSubscription(mollieSubscription),
 			};
 		},
 
@@ -81,8 +86,113 @@ export function createMollieProvider(
 			);
 		},
 
+		/**
+		 * Mollie cannot undo a cancel (a PATCH answers 422 "The subscription has
+		 * been cancelled"): a new subscription starts at the paid period's end, on
+		 * the mandate the customer already gave. Runs under the caller's row lock.
+		 */
+		async resumeCancel({ customerId, subscriptionId, periodEnd }) {
+			// A resume whose commit failed after this create, or whose sync has not
+			// stored the new row yet, is found by its metadata, past the hour the
+			// idempotency key lasts.
+			for await (const customerSubscription of mollieClient
+				.customerSubscriptions.iterate({ customerId })) {
+				if (readMetadataText(customerSubscription, 'resumes')
+					=== subscriptionId) {
+					return {
+						resourceId: composeMollieResourceId({
+							customerId,
+							subscriptionId: customerSubscription.id,
+						}),
+						isNewSubscription: true,
+					};
+				}
+			}
+
+			const canceledSubscription = await mollieClient.customerSubscriptions
+				.get(subscriptionId, { customerId });
+
+			const resumeMandateId = await findResumeMandate(
+				mollieClient,
+				customerId,
+				canceledSubscription.mandateId,
+			);
+
+			const createdSubscription = await mollieClient.customerSubscriptions
+				.create({
+					customerId,
+					amount: canceledSubscription.amount,
+					interval: canceledSubscription.interval,
+					description: canceledSubscription.description,
+					mandateId: resumeMandateId,
+					startDate: periodEnd.toISOString()
+						.slice(0, 10),
+					...readRemainingTimes(canceledSubscription),
+					...readWebhookUrl(canceledSubscription),
+					metadata: {
+						...readMetadataObject(canceledSubscription),
+						resumes: subscriptionId,
+					},
+					idempotencyKey: `resume-${subscriptionId}`,
+				});
+
+			return {
+				resourceId: composeMollieResourceId({
+					customerId,
+					subscriptionId: createdSubscription.id,
+				}),
+				isNewSubscription: true,
+			};
+		},
+
 		composeResourceId: composeMollieResourceId,
 	};
+}
+
+/** The canceled subscription's mandate first, else any the customer holds. */
+async function findResumeMandate(
+	mollieClient: MollieClient,
+	customerId: string,
+	canceledMandateId: string | undefined,
+): Promise<string> {
+	let usableMandateId: string | undefined;
+
+	for await (const customerMandate of mollieClient.customerMandates
+		.iterate({ customerId })) {
+		if (!USABLE_MANDATE_STATUSES.includes(customerMandate.status)) {
+			continue;
+		}
+
+		if (customerMandate.id === canceledMandateId) {
+			return customerMandate.id;
+		}
+
+		usableMandateId ??= customerMandate.id;
+	}
+
+	if (usableMandateId === undefined) {
+		throw new NoValidMandateError({ customerId });
+	}
+
+	return usableMandateId;
+}
+
+// A fixed-term subscription resumes with the payments it had left; Mollie
+// answers `times: null` for an unlimited one.
+function readRemainingTimes(canceledSubscription: {
+	times: number | null;
+	timesRemaining: number;
+}) {
+	return typeof canceledSubscription.times === 'number'
+		? { times: canceledSubscription.timesRemaining }
+		: {};
+}
+
+function readWebhookUrl(canceledSubscription: { webhookUrl?: string | null }) {
+	return typeof canceledSubscription.webhookUrl === 'string'
+		&& canceledSubscription.webhookUrl !== ''
+		? { webhookUrl: canceledSubscription.webhookUrl }
+		: {};
 }
 
 function composeMollieResourceId({
@@ -224,17 +334,32 @@ function addMollieInterval(startDate: Date, mollieInterval: string): Date {
 	return endDate;
 }
 
-function readPlanReference(
-	mollieSubscription: MollieSubscription,
-): string | null {
+function readMetadataObject(
+	mollieSubscription: { metadata: unknown },
+): Record<string, unknown> {
 	const subscriptionMetadata = mollieSubscription.metadata;
 
-	const planReference = typeof subscriptionMetadata === 'object'
+	return typeof subscriptionMetadata === 'object'
 		&& subscriptionMetadata !== null
-		? (subscriptionMetadata as Record<string, unknown>)['plan']
-		: undefined;
+		? subscriptionMetadata as Record<string, unknown>
+		: {};
+}
 
-	return typeof planReference === 'string'
-		? planReference
+function readMetadataText(
+	mollieSubscription: { metadata: unknown },
+	metadataKey: string,
+): string | null {
+	const metadataValue = readMetadataObject(mollieSubscription)[metadataKey];
+
+	return typeof metadataValue === 'string'
+		? metadataValue
 		: null;
+}
+
+function readResumedSubscription(mollieSubscription: MollieSubscription) {
+	const resumedSubscriptionId = readMetadataText(mollieSubscription, 'resumes');
+
+	return resumedSubscriptionId === null
+		? {}
+		: { resumedSubscriptionId };
 }

@@ -150,12 +150,21 @@ export const createSubscriptionTables = defineMigration(
 					.inTable('directus_users')
 					.onDelete('SET NULL');
 
+				// Mollie cannot undo a cancel: a resume is a new subscription.
+				table.integer('resumes')
+					.unsigned()
+					.nullable()
+					.references('id')
+					.inTable('subscriptions')
+					.onDelete('RESTRICT');
+
 				table.unique(['provider', 'provider_subscription_id']);
 				table.index(['subscriber']);
 				table.index(['customer']);
 				table.index(['plan_reference']);
 				table.index(['access']);
 				table.index(['user_updated']);
+				table.index(['resumes']);
 			});
 
 			await knex.schema.createTable('subscription_events', (table) => {

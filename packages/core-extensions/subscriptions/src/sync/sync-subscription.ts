@@ -210,6 +210,7 @@ export async function syncSubscription({
 
 	await trx('subscriptions').insert({
 		...subscriptionState,
+		resumes: await readResumedRowId(trx, providerName, providerSubscription),
 		provider: providerName,
 		provider_subscription_id: providerSubscription.subscriptionId,
 		date_created: syncedAt,
@@ -231,6 +232,36 @@ export async function syncSubscription({
 		userId: null,
 		recordedAt: syncedAt,
 	});
+}
+
+/** A resume is created by `POST /subscriptions/resume`, after the row it resumes. */
+async function readResumedRowId(
+	trx: Knex,
+	providerName: string,
+	providerSubscription: ProviderSubscription,
+): Promise<number | null> {
+	const { resumedSubscriptionId } = providerSubscription;
+
+	if (resumedSubscriptionId === undefined) {
+		return null;
+	}
+
+	const resumedSubscription = await trx('subscriptions')
+		.select('id')
+		.where({
+			provider: providerName,
+			provider_subscription_id: resumedSubscriptionId,
+		})
+		.first();
+
+	if (resumedSubscription === undefined) {
+		throw new Error(
+			`Subscription ${JSON.stringify(providerSubscription.subscriptionId)}`
+			+ ` resumes ${JSON.stringify(resumedSubscriptionId)}, which is not stored`,
+		);
+	}
+
+	return resumedSubscription.id;
 }
 
 /**

@@ -23,6 +23,7 @@ import { afterAll, beforeAll, describe, expect } from 'vitest';
 import {
 	startFakeProviders,
 	type MollieHolding,
+	type MollieMandate,
 	type ReceivedWrite,
 	type StripeHolding,
 } from './subscription-fake-providers';
@@ -231,6 +232,14 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 	}
 
+	function holdMandate(rowsTable: Record<string, string>[]) {
+		expect(rowsTable).toHaveLength(1);
+
+		fakeProviders.holdMandateAtMollie(
+			parseGherkinTable<MollieMandate>(rowsTable)[0]!,
+		);
+	}
+
 	function holdStripeSubscription(rowsTable: Record<string, string>[]) {
 		expect(rowsTable).toHaveLength(1);
 
@@ -377,6 +386,26 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 	}
 
+	// `resumes` holds a row id, which a scenario cannot know up front.
+	function expectResumedSubscription(
+		subscriptionId: string,
+		resumedSubscriptionId: string,
+	) {
+		return expectEventualRows(
+			() => {
+				return database('subscriptions')
+					.join(
+						'subscriptions as resumed_subscriptions',
+						'resumed_subscriptions.id',
+						'subscriptions.resumes',
+					)
+					.select('resumed_subscriptions.provider_subscription_id')
+					.where('subscriptions.provider_subscription_id', subscriptionId);
+			},
+			[{ provider_subscription_id: resumedSubscriptionId }],
+		);
+	}
+
 	function expectSubscriptionEvents(
 		subscriptionId: string,
 		rowsTable: Record<string, string>[],
@@ -438,6 +467,22 @@ describe.each(vendors)('%s', (vendor) => {
 			.toEqual(parseGherkinTable<ReceivedWrite>(rowsTable));
 
 		fakeProviders.receivedWrites.length = 0;
+	}
+
+	// A subscription too wide for a row: one line per field of the JSON body.
+	async function expectCreatedSubscription(
+		customerId: string,
+		fieldsTable: { field: string; value: string }[],
+	) {
+		await expectReceivedWrites([{
+			method: 'POST',
+			path: `/v2/customers/${customerId}/subscriptions`,
+			body: JSON.stringify(Object.fromEntries(
+				parseGherkinTable(fieldsTable).map(({ field, value }) => {
+					return [field, value];
+				}),
+			)),
+		}]);
 	}
 
 	function sendRequestRows(rowsTable: Row[]) {
@@ -518,6 +563,7 @@ describe.each(vendors)('%s', (vendor) => {
 		[/^these subscribers, each with its own plan:$/, seedOwnPlanSubscribers],
 		[/^the rows of (\w+):$/, seedRows],
 		[/^Mollie holds this subscription:$/, holdSubscription],
+		[/^Mollie holds this mandate:$/, holdMandate],
 		[/^Stripe holds this subscription:$/, holdStripeSubscription],
 		[/^(?:Mollie|Stripe) no longer holds subscription (\w+)$/, forgetSubscription],
 		[/^these requests get these responses:$/, sendRequestRows],
@@ -526,9 +572,14 @@ describe.each(vendors)('%s', (vendor) => {
 		[/^this user eventually holds no access:$/, expectNoAccess],
 		[/^subscription (\w+) is eventually stored:$/, expectStoredSubscription],
 		[/^the events of subscription (\w+) are eventually:$/, expectSubscriptionEvents],
+		[/^subscription (\w+) eventually resumes (\w+)$/, expectResumedSubscription],
 		[/^these sync queue rows are eventually stored:$/, expectQueueRows],
 		[/^the sync queue eventually holds no row for (\S+)$/, expectNoQueueRow],
 		[/^the providers eventually received these writes:$/, expectReceivedWrites],
+		[
+			/^Mollie eventually received this subscription for (\w+):$/,
+			expectCreatedSubscription,
+		],
 	];
 
 	type DiffEntry = { collection: string; diff: { kind: string }[] };
