@@ -7032,18 +7032,6 @@ describe('Services / Items / a batched upsert', () => {
 	it(oneLine`
 		upserts the payloads nesting a record by its key alone in one run
 	`, async () => {
-		const taggedSchema = new SchemaBuilder()
-			.collection('test', (c) => {
-				c.field('id').id();
-				c.field('name').string();
-				c.field('tag').m2o('tags');
-			})
-			.collection('tags', (c) => {
-				c.field('id').id();
-				c.field('name').string();
-			})
-			.build();
-
 		await database.schema.alterTable('test', (table) => {
 			table.integer('tag');
 		});
@@ -7060,7 +7048,20 @@ describe('Services / Items / a batched upsert', () => {
 
 		sqlStatements = [];
 
-		await expect(new ItemsService('test', { knex: database, schema: taggedSchema })
+		await expect(new ItemsService('test', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('test', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('tag').m2o('tags');
+				})
+				.collection('tags', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build(),
+		})
 			.upsertMany([
 				{ name: 'a', tag: { id: 7 } },
 				{ name: 'b', tag: { id: 8 } },
@@ -7098,18 +7099,6 @@ describe('Services / Items / a batched upsert', () => {
 	it(oneLine`
 		upserts two payloads naming one missing record by key in one run
 	`, async () => {
-		const taggedSchema = new SchemaBuilder()
-			.collection('test', (c) => {
-				c.field('id').id();
-				c.field('name').string();
-				c.field('tag').m2o('tags');
-			})
-			.collection('tags', (c) => {
-				c.field('id').id();
-				c.field('name').string();
-			})
-			.build();
-
 		await database.schema.alterTable('test', (table) => {
 			table.integer('tag');
 		});
@@ -7121,7 +7110,20 @@ describe('Services / Items / a batched upsert', () => {
 
 		sqlStatements = [];
 
-		await expect(new ItemsService('test', { knex: database, schema: taggedSchema })
+		await expect(new ItemsService('test', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('test', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('tag').m2o('tags');
+				})
+				.collection('tags', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build(),
+		})
 			.upsertMany([
 				{ name: 'a', tag: { id: 9 } },
 				{ name: 'b', tag: { id: 9 } },
@@ -7154,18 +7156,6 @@ describe('Services / Items / a batched upsert', () => {
 		upserts a payload naming a missing record by key after one creating
 		a keyless record
 	`, async () => {
-		const taggedSchema = new SchemaBuilder()
-			.collection('test', (c) => {
-				c.field('id').id();
-				c.field('name').string();
-				c.field('tag').m2o('tags');
-			})
-			.collection('tags', (c) => {
-				c.field('id').id();
-				c.field('name').string();
-			})
-			.build();
-
 		await database.schema.alterTable('test', (table) => {
 			table.integer('tag');
 		});
@@ -7180,7 +7170,20 @@ describe('Services / Items / a batched upsert', () => {
 			{ id: 8, name: 'eight' },
 		]);
 
-		await expect(new ItemsService('test', { knex: database, schema: taggedSchema })
+		await expect(new ItemsService('test', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('test', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('tag').m2o('tags');
+				})
+				.collection('tags', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build(),
+		})
 			.upsertMany([
 				{ name: 'a', tag: { name: 'new' } },
 				{ name: 'b', tag: { id: 9 } },
@@ -7199,18 +7202,6 @@ describe('Services / Items / a batched upsert', () => {
 		upserts a payload naming a missing record by key before one updating
 		a row with a keyless record
 	`, async () => {
-		const taggedSchema = new SchemaBuilder()
-			.collection('test', (c) => {
-				c.field('id').id();
-				c.field('name').string();
-				c.field('tag').m2o('tags');
-			})
-			.collection('tags', (c) => {
-				c.field('id').id();
-				c.field('name').string();
-			})
-			.build();
-
 		await database.schema.alterTable('test', (table) => {
 			table.integer('tag');
 		});
@@ -7225,7 +7216,20 @@ describe('Services / Items / a batched upsert', () => {
 			{ id: 8, name: 'eight' },
 		]);
 
-		await expect(new ItemsService('test', { knex: database, schema: taggedSchema })
+		await expect(new ItemsService('test', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('test', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('tag').m2o('tags');
+				})
+				.collection('tags', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build(),
+		})
 			.upsertMany([
 				{ name: 'b', tag: { id: 9 } },
 				{ id: 1, tag: { name: 'z' } },
@@ -7252,19 +7256,6 @@ describe('Services / Items / a batched upsert', () => {
 		upserts a payload naming a missing record by key after one holding a
 		keyless and a key-only record of that collection
 	`, async () => {
-		const taggedSchema = new SchemaBuilder()
-			.collection('test', (c) => {
-				c.field('id').id();
-				c.field('name').string();
-				c.field('tag').m2o('tags');
-				c.field('alt_tag').m2o('tags');
-			})
-			.collection('tags', (c) => {
-				c.field('id').id();
-				c.field('name').string();
-			})
-			.build();
-
 		await database.schema.alterTable('test', (table) => {
 			table.integer('tag');
 			table.integer('alt_tag');
@@ -7280,7 +7271,21 @@ describe('Services / Items / a batched upsert', () => {
 			{ id: 8, name: 'eight' },
 		]);
 
-		await expect(new ItemsService('test', { knex: database, schema: taggedSchema })
+		await expect(new ItemsService('test', {
+			knex: database,
+			schema: new SchemaBuilder()
+				.collection('test', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('tag').m2o('tags');
+					c.field('alt_tag').m2o('tags');
+				})
+				.collection('tags', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build(),
+		})
 			.upsertMany([
 				{ name: 'a', tag: { name: 'new' }, alt_tag: { id: 7 } },
 				{ name: 'b', tag: { id: 9 } },
