@@ -233,7 +233,7 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | as: anonymous                        | code: 200 |+
       | method: POST                         |           |
       | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_split                 |           |
+      | payload: id=tr_sub_split_2           |           |
     Then this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_26> | <policy_27> | @scalabus/subscriptions |
@@ -242,10 +242,10 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | as: anonymous                        | code: 200 |+
       | method: POST                         |           |
       | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_sub_split_2           |           |
-    Then subscription sub_split_2 is eventually stored:
-      | status | access           |
-      | active | <granted_access> |
+      | payload: id=tr_split                 |           |
+    Then subscription sub_split is eventually stored:
+      | status   | access           |
+      | canceled | <granted_access> |
     And this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_26> | <policy_27> | @scalabus/subscriptions |
