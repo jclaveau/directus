@@ -284,9 +284,7 @@ export default async function createApp(): Promise<express.Application> {
 		app.use(auditRequestQueries);
 	}
 
-	if (env['CACHE_PURGED_TAGS_HEADER']) {
-		app.use(recordRequestScopedCachePurges);
-	}
+	app.use(recordRequestScopedCachePurges);
 
 	app.use((req, res, next) => {
 		(

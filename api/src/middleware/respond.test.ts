@@ -1510,6 +1510,7 @@ describe('respond middleware', () => {
 						pinnedScope: { owner: ['U2'] },
 					},
 				],
+				queuedPurges: [],
 			},
 			() => respond(makeReq({ method: 'PATCH' }), res, next),
 		);
@@ -1535,6 +1536,7 @@ describe('respond middleware', () => {
 						pinnedScope: { owner: ['\x00null'] },
 					},
 				],
+				queuedPurges: [],
 			},
 			() => respond(makeReq({ method: 'PATCH' }), res, next),
 		);
@@ -1567,7 +1569,7 @@ describe('respond middleware', () => {
 		);
 
 		await scopedCachePurgedStore.run(
-			{ purged: purgedFingerprints },
+			{ purged: purgedFingerprints, queuedPurges: [] },
 			() => respond(makeReq(), res, next),
 		);
 
@@ -1603,7 +1605,7 @@ describe('respond middleware', () => {
 		);
 
 		await scopedCachePurgedStore.run(
-			{ purged: [{ collection: 'articles' }] },
+			{ purged: [{ collection: 'articles' }], queuedPurges: [] },
 			() => respond(makeReq(), res, next),
 		);
 

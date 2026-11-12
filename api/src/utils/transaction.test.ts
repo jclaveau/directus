@@ -5,6 +5,11 @@ import { describe, expect, it, vi } from 'vitest';
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import {
+	readRequestScopedCachePurges,
+	recordScopedCachePurged,
+	scopedCachePurgedStore,
+} from '../scoped-cache/purged-record.js';
+import {
 	queueAfterCommit,
 	queueAfterCommitOrRollback,
 	queueMergedAfterCommit,
@@ -222,6 +227,33 @@ describe('queueAfterCommit', () => {
 		await trx.commit();
 
 		await vi.waitFor(() => expect(queuedTask).toHaveBeenCalledWith(db));
+	});
+
+	it(oneLine`
+		lets the request read the purges a raw trx ran on its commit
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		vi.mocked(getDatabase).mockReturnValue(db);
+
+		const requestPurges = await scopedCachePurgedStore.run(
+			{ purged: [], queuedPurges: [] },
+			async () => {
+				const trx = await db.transaction();
+
+				queueAfterCommit(trx, async () => {
+					await new Promise((resolve) => setTimeout(resolve, 10));
+					recordScopedCachePurged([{ collection: 'rounds' }]);
+				});
+
+				await trx.commit();
+
+				return readRequestScopedCachePurges();
+			},
+		);
+
+		expect(requestPurges).toEqual([{ collection: 'rounds' }]);
 	});
 
 	// A purge missed leaves the old row cached until TTL; one too many only

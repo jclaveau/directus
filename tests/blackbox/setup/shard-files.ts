@@ -276,6 +276,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// Estimated from its spawned instance's boot, not yet measured.
 	'/tests/db/routes/users/cache-role-move-flush.test.ts': 8_000,
 	'/tests/db/routes/users/cache-untracked-transaction-flush.test.ts': 8_000,
+	'/tests/db/routes/items/cache-request-purges.test.ts': 8_000,
 };
 
 export function fileWeight(file: string): number {

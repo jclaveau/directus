@@ -303,6 +303,19 @@ export interface ScopedCacheExtensionHandle {
 		collection: string,
 		mutatedRows: Record<string, unknown>[],
 	): Promise<void>;
+	/**
+	 * The fingerprints every scoped-cache purge of the current request reached so
+	 * far, in order: its nested writes', its hooks' and `purgeForMutatedRows`'
+	 * included. `null` once one of them flushed the whole namespace.
+	 *
+	 * Waits first for the purges queued on the commit of a transaction the request
+	 * opened raw (`database.transaction()`) and that has settled; one still open
+	 * has purged nothing yet. A copy: later purges do not reach it.
+	 *
+	 * Throws outside a request (a schedule, the CLI): there is no request list to
+	 * read there.
+	 */
+	readRequestPurges(): Promise<ScopedCacheFingerprint[] | null>;
 }
 
 /**

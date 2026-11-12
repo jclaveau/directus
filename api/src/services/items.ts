@@ -23,7 +23,6 @@ import type {
 	Query,
 	QueryOptions,
 	SchemaOverview,
-	ScopedCacheFingerprint,
 	Type,
 	UpdateEntries,
 	UpdateEntry,
@@ -364,13 +363,6 @@ implements AbstractService<Item> {
 	schema: SchemaOverview;
 	cache: Keyv<any> | null;
 	nested: string[];
-
-	// The fingerprints the latest mutation on this (per-request) service purged,
-	// surfaced by the controllers as the CACHE_PURGED_TAGS_HEADER response header
-	// (rendered to labels there). Mutation
-	// methods return bare primary keys — no object for a `withMeta` rider (as reads
-	// use) — so the purged set rides the instance. `null` until a mutation purges.
-	scopedCachePurged: ScopedCacheFingerprint[] | null = null;
 
 	scopedCache: ItemScopedCacheService;
 
@@ -1225,7 +1217,7 @@ implements AbstractService<Item> {
 			// On the caller's transaction, the rows created before the failure commit
 			// with it, and nothing tells which they are.
 			if (this.knex.isTransaction) {
-				this.scopedCachePurged = await this.scopedCache.purge(
+				await this.scopedCache.purge(
 					null,
 					scopedCacheHookDeclarations,
 					[],
@@ -3212,7 +3204,7 @@ implements AbstractService<Item> {
 		}
 
 		if (takeoverUndeclared) {
-			this.scopedCachePurged = await this.scopedCache.purge(
+			await this.scopedCache.purge(
 				null,
 				declarations,
 				[],
@@ -3226,7 +3218,7 @@ implements AbstractService<Item> {
 			.snapshot(writtenKeys)
 			.catch(() => null);
 
-		this.scopedCachePurged = await this.scopedCache.purge(
+		await this.scopedCache.purge(
 			scopedCacheMutatedFingerprints(
 				oldScopedCacheSnapshot,
 				newScopedCacheSnapshot,
@@ -3321,7 +3313,7 @@ implements AbstractService<Item> {
 			? null
 			: await this.scopedCache.snapshot(changedKeys).catch(() => null);
 
-		this.scopedCachePurged = await this.scopedCache.purge(
+		await this.scopedCache.purge(
 			scopedCacheMutatedFingerprints(scopedCacheSnapshot),
 			declarations,
 			[],
@@ -3350,7 +3342,7 @@ implements AbstractService<Item> {
 			return;
 		}
 
-		this.scopedCachePurged = await this.scopedCache.purge(
+		await this.scopedCache.purge(
 			[],
 			declarations,
 			[],
@@ -4179,7 +4171,7 @@ implements AbstractService<Item> {
 			// On the caller's transaction, the rows upserted before the failure commit
 			// with it, and nothing tells which they are.
 			if (this.knex.isTransaction) {
-				this.scopedCachePurged = await this.scopedCache.purge(
+				await this.scopedCache.purge(
 					null,
 					scopedCacheHookDeclarations,
 					[],
@@ -4262,7 +4254,7 @@ implements AbstractService<Item> {
 					newScopedCacheSnapshot,
 				);
 
-			this.scopedCachePurged = await this.scopedCache.purge(
+			await this.scopedCache.purge(
 				scopedCacheFingerprints,
 				scopedCacheHookDeclarations,
 				[],
@@ -4985,7 +4977,7 @@ implements AbstractService<Item> {
 				scopedCacheHookDeclarations.purgeFingerprints.length > 0
 				&& shouldClearCache(this.cache, opts, this.collection)
 			) {
-				this.scopedCachePurged = await this.scopedCache.purge(
+				await this.scopedCache.purge(
 					[],
 					scopedCacheHookDeclarations,
 					[],
@@ -5013,7 +5005,7 @@ implements AbstractService<Item> {
 				scopedCacheHookDeclarations.purgeFingerprints.length > 0 &&
 				shouldClearCache(this.cache, opts, this.collection)
 			) {
-				this.scopedCachePurged = await this.scopedCache.purge(
+				await this.scopedCache.purge(
 					[],
 					scopedCacheHookDeclarations,
 					[],
@@ -5035,7 +5027,7 @@ implements AbstractService<Item> {
 				.snapshot(selfRelationSurvivorKeys)
 				.catch(() => null);
 
-			this.scopedCachePurged = await this.scopedCache.purge(
+			await this.scopedCache.purge(
 				scopedCacheMutatedFingerprints(
 					oldScopedCacheSnapshot,
 					survivorScopedCacheSnapshot,

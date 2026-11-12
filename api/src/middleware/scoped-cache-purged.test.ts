@@ -14,5 +14,8 @@ test('opens an empty purged list the rest of the request records into', () => {
 		purgedRecord = scopedCachePurgedStore.getStore();
 	});
 
-	expect(purgedRecord).toEqual({ purged: [{ collection: 'rounds' }] });
+	expect(purgedRecord).toEqual({
+		purged: [{ collection: 'rounds' }],
+		queuedPurges: [],
+	});
 });

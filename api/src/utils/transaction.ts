@@ -2,6 +2,7 @@ import { isObject } from '@directus/utils';
 import { type Knex } from 'knex';
 import getDatabase, { getDatabaseClient } from '../database/index.js';
 import { useLogger } from '../logger/index.js';
+import { recordQueuedScopedCachePurges } from '../scoped-cache/purged-record.js';
 import type { DatabaseClient } from '@directus/types';
 
 /**
@@ -50,7 +51,7 @@ function findQueuedTasks(knex: Knex): AfterCommitTask[] | undefined {
  * Its tasks run once it settled without a rollback, on the database
  * `getDatabase()` returns, the trx carrying no link to the knex it was opened on.
  * The opener's await does not wait for them: the first one starts before it
- * resumes, and they end after.
+ * resumes, and they end after. The request's `readRequestPurges` waits for them.
  */
 function queueOnRawTransaction(knex: Knex): AfterCommitTask[] | undefined {
 	let outermostTrx = knex as Knex.Transaction;
@@ -86,7 +87,7 @@ function queueOnRawTransaction(knex: Knex): AfterCommitTask[] | undefined {
 
 	afterCommitTasks.set(outermostTrx, queuedTasks);
 
-	outermostTrx.executionPromise.then(
+	recordQueuedScopedCachePurges(outermostTrx, outermostTrx.executionPromise.then(
 		async () => {
 			afterCommitTasks.delete(outermostTrx);
 
@@ -97,7 +98,7 @@ function queueOnRawTransaction(knex: Knex): AfterCommitTask[] | undefined {
 		() => {
 			afterCommitTasks.delete(outermostTrx);
 		},
-	);
+	));
 
 	return queuedTasks;
 }

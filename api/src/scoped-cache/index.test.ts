@@ -3054,7 +3054,7 @@ describe('the request\'s purged list', () => {
 		names the slices a purge reached, its collection's bare fingerprint
 		included
 	`, async () => {
-		const purgedRecord = { purged: [] };
+		const purgedRecord = { purged: [], queuedPurges: [] };
 
 		await scopedCachePurgedStore.run(purgedRecord, () => {
 			return purgeScopedCache(cache as any, 'rounds', [
@@ -3067,29 +3067,36 @@ describe('the request\'s purged list', () => {
 				scopedCacheFingerprintOf('rounds', []),
 				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
 			],
+			queuedPurges: [],
 		});
 	});
 
 	it('names the collection a collection-wide purge reached', async () => {
-		const purgedRecord = { purged: [] };
+		const purgedRecord = { purged: [], queuedPurges: [] };
 
 		await scopedCachePurgedStore.run(purgedRecord, () => {
 			return purgeScopedCache(cache as any, 'articles', null);
 		});
 
-		expect(purgedRecord).toEqual({ purged: [{ collection: 'articles' }] });
+		expect(purgedRecord).toEqual({
+			purged: [{ collection: 'articles' }],
+			queuedPurges: [],
+		});
 	});
 
 	it('becomes a whole-namespace flush when scoped mode is off', async () => {
 		env['CACHE_AUTO_PURGE_MODE'] = 'all';
 
-		const purgedRecord = { purged: [{ collection: 'rounds' }] };
+		const purgedRecord = {
+			purged: [{ collection: 'rounds' }],
+			queuedPurges: [],
+		};
 
 		await scopedCachePurgedStore.run(purgedRecord, () => {
 			return purgeScopedCache(cache as any, 'articles', []);
 		});
 
-		expect(purgedRecord).toEqual({ purged: null });
+		expect(purgedRecord).toEqual({ purged: null, queuedPurges: [] });
 	});
 });
 
