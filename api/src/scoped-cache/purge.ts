@@ -1751,6 +1751,15 @@ async function purgeScopedCacheUnrecorded(
 		...purgedByPin,
 	].map(renderScopedCacheFingerprint);
 
+	// What the request's purged list names: the rows a row-driven purge was handed
+	// are slices it reached too, and a slice its old and new rows share is one.
+	const reachedFingerprints = [
+		...new Map(
+			[...purgedScopedCacheFingerprints, ...(options.rowFingerprints ?? [])]
+				.map((reached) => [renderScopedCacheFingerprint(reached), reached]),
+		).values(),
+	];
+
 	const scanTally = emptyScopedCacheScanTally();
 
 	const purged = await purgeOrRecord(
@@ -1788,7 +1797,7 @@ async function purgeScopedCacheUnrecorded(
 	);
 
 	if (!purged) {
-		return purgedScopedCacheFingerprints;
+		return reachedFingerprints;
 	}
 
 	// The legacy pins a mutation actually resolved, in the same form the entry
@@ -1809,5 +1818,5 @@ async function purgeScopedCacheUnrecorded(
 		scopedCacheScan: cachePurgeScanOf(scanTally),
 	});
 
-	return purgedScopedCacheFingerprints;
+	return reachedFingerprints;
 }

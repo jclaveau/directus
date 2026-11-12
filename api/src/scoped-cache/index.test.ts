@@ -3071,6 +3071,45 @@ describe('the request\'s purged list', () => {
 		});
 	});
 
+	it('names a slice its old and new rows share once', async () => {
+		const purgedRecord = { purged: [], queuedPurges: [] };
+
+		await scopedCachePurgedStore.run(purgedRecord, () => {
+			return purgeScopedCache(cache as any, 'rounds', [
+				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+			]);
+		});
+
+		expect(purgedRecord).toEqual({
+			purged: [
+				scopedCacheFingerprintOf('rounds', []),
+				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+			],
+			queuedPurges: [],
+		});
+	});
+
+	it('names the slices of the rows a row-driven purge was handed', async () => {
+		const purgedRecord = { purged: [], queuedPurges: [] };
+
+		await scopedCachePurgedStore.run(purgedRecord, () => {
+			return purgeScopedCache(cache as any, 'rounds', [], null, {
+				rowFingerprints: [
+					scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+				],
+			});
+		});
+
+		expect(purgedRecord).toEqual({
+			purged: [
+				scopedCacheFingerprintOf('rounds', []),
+				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+			],
+			queuedPurges: [],
+		});
+	});
+
 	it('names the collection a collection-wide purge reached', async () => {
 		const purgedRecord = { purged: [], queuedPurges: [] };
 
