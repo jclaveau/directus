@@ -108,6 +108,13 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | status | cancel_at_period_end | current_period_end       |
       | active | false                | 2099-02-01T00:00:00.000Z |
     And subscription sub_resume_2 eventually resumes sub_resume
+    And the events of subscription sub_resume are eventually:
+      | source | status   | cancel_at_period_end | user      |
+      | sync   | canceled | true                 |           |
+      | user   | canceled | true                 | <user_24> |
+    And this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_24> | <policy_24> | @scalabus/subscriptions |
     And these requests get these responses:
       | request                     | response                                |
       | as: lifecycle-24-token      | code: 404                               |+
