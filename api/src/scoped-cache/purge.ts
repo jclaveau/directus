@@ -69,6 +69,7 @@ import { scopedCacheHomePinFields, scopedCacheIndexPath } from './index-path.js'
 import { scopedCacheFillPaused } from './fill-pause.js';
 import { scopedCacheDeclaredIndexPins } from './declared-index-pins.js';
 import { requestScopedCacheIndexReap } from './reap-requests.js';
+import { recordScopedCachePurged } from './purged-record.js';
 import {
 	scopedCacheEpochBumpScript,
 	scopedCacheEpochKey,
@@ -808,6 +809,8 @@ export async function clearResponseCache(cache: Keyv | null): Promise<boolean> {
  */
 export async function flushResponseCache(cache: Keyv | null): Promise<void> {
 	const flushedDatabase = await clearResponseCache(cache);
+
+	recordScopedCachePurged(null);
 
 	// Gated here, not in the drop: the flush command drops the index whatever the
 	// mode, so a store switched out of scoped purging leaves no sets behind — while
@@ -1558,8 +1561,22 @@ async function reportRecoveredScopedCacheEntries(
  * a cancelled mutation nothing in `collection` changed, so only what the hook
  * declared should drop: its (usually foreign) slices, and the global reads of
  * the collections those slices name.
+ *
+ * What it reached goes in the request's purged list, which the
+ * CACHE_PURGED_TAGS_HEADER reads. A purge Redis refused, recorded for the retry,
+ * is named there too: the slices are owed, not yet gone.
  */
 export async function purgeScopedCache(
+	...purgeArguments: Parameters<typeof purgeScopedCacheUnrecorded>
+): Promise<ScopedCacheFingerprint[] | null> {
+	const purged = await purgeScopedCacheUnrecorded(...purgeArguments);
+
+	recordScopedCachePurged(purged);
+
+	return purged;
+}
+
+async function purgeScopedCacheUnrecorded(
 	cache: Keyv,
 	collection: string,
 	scopedCacheFingerprints: ScopedCacheFingerprint[] | null = [],
@@ -1737,6 +1754,19 @@ export async function purgeScopedCache(
 		...purgedByPin,
 	].map(renderScopedCacheFingerprint);
 
+	// What the request's purged list names: the rows a row-driven purge was handed
+	// are slices it reached too, so are the bare reads it drops whatever the
+	// cache.purge filter kept, and a slice its old and new rows share is one.
+	const reachedFingerprints = [
+		...new Map(
+			[
+				...purgedScopedCacheFingerprints,
+				...(options.rowFingerprints ?? []),
+				...recordedBareFingerprint,
+			].map((reached) => [renderScopedCacheFingerprint(reached), reached]),
+		).values(),
+	];
+
 	const scanTally = emptyScopedCacheScanTally();
 
 	const purged = await purgeOrRecord(
@@ -1774,7 +1804,7 @@ export async function purgeScopedCache(
 	);
 
 	if (!purged) {
-		return purgedScopedCacheFingerprints;
+		return reachedFingerprints;
 	}
 
 	// The legacy pins a mutation actually resolved, in the same form the entry
@@ -1795,5 +1825,5 @@ export async function purgeScopedCache(
 		scopedCacheScan: cachePurgeScanOf(scanTally),
 	});
 
-	return purgedScopedCacheFingerprints;
+	return reachedFingerprints;
 }

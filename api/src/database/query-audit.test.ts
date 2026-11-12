@@ -10,8 +10,8 @@ import {
 	emptyQueryAudit,
 	formatQueryAudit,
 	queryAuditEnabled,
-	queryAuditStore,
 } from './query-audit.js';
+import { requestStore } from '../utils/request-store.js';
 
 vi.mock('@directus/env');
 
@@ -781,7 +781,7 @@ test('audits every statement sent through the driver', async () => {
 
 	const audit = emptyQueryAudit();
 
-	const result = await queryAuditStore.run(audit, () => {
+	const result = await requestStore.run({ queryAudit: audit }, () => {
 		return driverClient._query({ __knexUid: 'a' }, {
 			sql: 'select * from "authors"',
 		});
@@ -833,7 +833,7 @@ test('audits a statement streamed through the driver', async () => {
 
 	const audit = emptyQueryAudit();
 
-	const result = await queryAuditStore.run(audit, () => {
+	const result = await requestStore.run({ queryAudit: audit }, () => {
 		return driverClient._stream(
 			{ __knexUid: 'a' },
 			{ sql: 'select * from "authors"' },
@@ -865,7 +865,7 @@ test('wraps a dialect prototype once, however many pools share it', () => {
 	auditQueriesOf({ client: new DriverClient() } as unknown as Knex);
 	auditQueriesOf({ client: namedPool } as unknown as Knex);
 
-	queryAuditStore.run(audit, () => {
+	requestStore.run({ queryAudit: audit }, () => {
 		namedPool._query({ __knexUid: 'a' }, { sql: 'select * from "authors"' });
 	});
 
@@ -898,7 +898,7 @@ test('reports how long a statement waited for its pool connection', async () => 
 
 	const audit = emptyQueryAudit();
 
-	await queryAuditStore.run(audit, async () => {
+	await requestStore.run({ queryAudit: audit }, async () => {
 		const pendingConnection = driverClient.acquireConnection();
 
 		now = 40;
@@ -938,7 +938,7 @@ test('counts the wait for a connection the pool never handed out', async () => {
 
 	const audit = emptyQueryAudit();
 
-	const acquireResult = queryAuditStore.run(audit, () => {
+	const acquireResult = requestStore.run({ queryAudit: audit }, () => {
 		const pendingConnection = driverClient.acquireConnection();
 
 		now = 30;
@@ -1004,7 +1004,7 @@ test('sums the rows of grouped runs, each run its own at full', async () => {
 
 	const audit = emptyQueryAudit('full');
 
-	await queryAuditStore.run(audit, async () => {
+	await requestStore.run({ queryAudit: audit }, async () => {
 		await driverClient._query({ __knexUid: 'a' }, { sql: 'BEGIN;', bindings: [] });
 
 		await driverClient._query({ __knexUid: 'a' }, {
@@ -1079,7 +1079,7 @@ test('leaves out the rows of a statement pg counts none for', async () => {
 
 	const audit = emptyQueryAudit('counts');
 
-	await queryAuditStore.run(audit, async () => {
+	await requestStore.run({ queryAudit: audit }, async () => {
 		await driverClient._query({ __knexUid: 'a' }, { sql: 'SET search_path' });
 	});
 
@@ -1103,7 +1103,7 @@ test('reads the rows sqlite3 returned or changed', async () => {
 
 	const audit = emptyQueryAudit();
 
-	await queryAuditStore.run(audit, async () => {
+	await requestStore.run({ queryAudit: audit }, async () => {
 		await driverClient._query({ __knexUid: 'a' }, {
 			sql: 'select * from "a"',
 			response: [{ id: 1 }, { id: 2 }],
@@ -1144,7 +1144,7 @@ test('reads the rows mysql returned or changed', async () => {
 
 	const audit = emptyQueryAudit();
 
-	await queryAuditStore.run(audit, async () => {
+	await requestStore.run({ queryAudit: audit }, async () => {
 		await driverClient._query({ __knexUid: 'a' }, {
 			sql: 'select * from `a`',
 			response: [[{ id: 1 }], []],
@@ -1185,7 +1185,7 @@ test('reports a failed statement\'s code and the rollback after it', async () =>
 	const audit = emptyQueryAudit();
 	const insertStatement = { sql: 'insert into "a" ("b") values (?)' };
 
-	await queryAuditStore.run(audit, async () => {
+	await requestStore.run({ queryAudit: audit }, async () => {
 		await driverClient._query({ __knexUid: 'a' }, { sql: 'BEGIN;' });
 		driverError = { code: '23505' };
 
@@ -1250,7 +1250,7 @@ test('reports a rollback when the COMMIT fails or pg rolls it back', async () =>
 
 	const audit = emptyQueryAudit();
 
-	await queryAuditStore.run(audit, async () => {
+	await requestStore.run({ queryAudit: audit }, async () => {
 		await driverClient._query({ __knexUid: 'a' }, { sql: 'BEGIN;' });
 		await driverClient._query({ __knexUid: 'a' }, { sql: 'select * from "a"' });
 		commitError = { code: '40001' };
@@ -1295,7 +1295,7 @@ test('reports a failed BEGIN and releases its connection', async () => {
 
 	const audit = emptyQueryAudit();
 
-	await queryAuditStore.run(audit, async () => {
+	await requestStore.run({ queryAudit: audit }, async () => {
 		await expect(driverClient._query({ __knexUid: 'a' }, { sql: 'BEGIN;' }))
 			.rejects.toEqual({ code: '57P01' });
 
@@ -1331,7 +1331,7 @@ test('reports a statement the driver throws on before answering', async () => {
 
 	const audit = emptyQueryAudit();
 
-	await queryAuditStore.run(audit, async () => {
+	await requestStore.run({ queryAudit: audit }, async () => {
 		expect(() => driverClient._query({ __knexUid: 'a' }, { sql: '' }))
 			.toThrow(driverError);
 
@@ -1361,7 +1361,7 @@ test('reads no rows off a raw statement sqlite3 ran for its rows', async () => {
 
 	const audit = emptyQueryAudit();
 
-	await queryAuditStore.run(audit, async () => {
+	await requestStore.run({ queryAudit: audit }, async () => {
 		await driverClient._query({ __knexUid: 'a' }, {
 			sql: 'delete from "a" where "id" = ?',
 			method: 'raw',

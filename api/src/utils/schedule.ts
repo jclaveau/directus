@@ -2,6 +2,7 @@ import schedule from 'node-schedule';
 import { useLogger } from '../logger/index.js';
 import { migrationsAreOutstanding } from '../outstanding-migrations.js';
 import { SynchronizedClock } from '../synchronization.js';
+import { emptyRequestState, requestStore } from './request-store.js';
 
 export interface ScheduledJob {
 	stop(): Promise<void>;
@@ -21,7 +22,7 @@ export function scheduleSynchronizedJob(
 	// job's wait as already said.
 	let heldForMigrations = false;
 
-	const job = schedule.scheduleJob(rule, async (fireDate) => {
+	const runTick = async (fireDate: Date) => {
 		// A build the database has not caught up with must not write through a
 		// schema it does not match — `/server/health` is already red on the same
 		// reading. Returning before the claim below leaves the tick to a node
@@ -57,14 +58,21 @@ export function scheduleSynchronizedJob(
 		try {
 			const wasSet = await clock.set(nextTimestamp);
 
+			// Each tick names its purges in a list of its own, not in the one of the
+			// request that happened to register the job (a flow saved over HTTP).
 			if (wasSet) {
-				await cb(fireDate);
+				await requestStore.run(emptyRequestState(), () => cb(fireDate));
 			}
 		}
 		catch (error: any) {
 			useLogger().warn(error, `[schedule] job "${id}" failed: ${error}`);
 		}
-	});
+	};
+
+	// Armed outside any store: node-schedule re-arms each next timer from the one
+	// firing, so a job registered by a request (a flow saved over HTTP) would
+	// otherwise hold that request's store for as long as the job lives.
+	const job = requestStore.exit(() => schedule.scheduleJob(rule, runTick));
 
 	const stop = async () => {
 		job.cancel();

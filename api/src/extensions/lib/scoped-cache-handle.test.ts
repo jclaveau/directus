@@ -56,6 +56,8 @@ vi.mock('../../scoped-cache/index.js', async (importOriginal) => {
 const { createScopedCacheExtensionHandle } =
 	await import('./scoped-cache-handle.js');
 
+const { requestStore } = await import('../../utils/request-store.js');
+
 function schemaScopedBy(fields: string[]) {
 	const schema = new SchemaBuilder()
 		.collection('articles', (c) => {
@@ -349,6 +351,28 @@ describe('createScopedCacheExtensionHandle', () => {
 		expect(purgeScopedCache).not.toHaveBeenCalled();
 	});
 
+	it('scoped off: the request reads its purges as a whole flush', async () => {
+		state.scopedEnabled = false;
+
+		const handle = createScopedCacheExtensionHandle(getSchema);
+
+		const requestPurges = await requestStore.run(
+			{
+				scopedCachePurged: {
+					purged: [{ collection: 'rounds' }],
+					queuedPurges: [],
+				},
+			},
+			async () => {
+				await handle.purgeForMutatedRows('articles', [{ owner: 7 }]);
+
+				return handle.readRequestPurges();
+			},
+		);
+
+		expect(requestPurges).toBeNull();
+	});
+
 	it('cache disabled (null): no-op', async () => {
 		state.cacheNull = true;
 
@@ -358,5 +382,21 @@ describe('createScopedCacheExtensionHandle', () => {
 
 		expect(purgeScopedCache).not.toHaveBeenCalled();
 		expect(state.cache.clear).not.toHaveBeenCalled();
+	});
+
+	it('reads the purges the current request reached', async () => {
+		const handle = createScopedCacheExtensionHandle(getSchema);
+
+		const requestPurges = await requestStore.run(
+			{
+				scopedCachePurged: {
+					purged: [{ collection: 'articles' }],
+					queuedPurges: [],
+				},
+			},
+			() => handle.readRequestPurges(),
+		);
+
+		expect(requestPurges).toEqual([{ collection: 'articles' }]);
 	});
 });

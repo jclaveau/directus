@@ -5,8 +5,12 @@ import { afterEach, expect, test, vi } from 'vitest';
 import {
 	auditStatementStart,
 	formatQueryAudit,
-	queryAuditStore,
 } from '../database/query-audit.js';
+import {
+	emptyRequestState,
+	requestStore,
+	type RequestState,
+} from '../utils/request-store.js';
 import {
 	auditMessageQueries,
 	reportQueryAuditInReplies,
@@ -39,7 +43,7 @@ test('adds the statements a message ran to its reply', async () => {
 
 	await auditMessageQueries(client, { type: 'items', uid: 1 }, async () => {
 		auditStatementStart(
-			queryAuditStore.getStore()!,
+			requestStore.getStore()!.queryAudit!,
 			'select * from "articles"',
 			'a',
 		)();
@@ -54,6 +58,36 @@ test('adds the statements a message ran to its reply', async () => {
 			+ '{"stmt":"select * from \\"articles\\"","ms":0,"wait":0}]}}',
 		],
 	]);
+});
+
+test('keeps the purged list of the message it audits', async () => {
+	vi.mocked(useEnv).mockReturnValue({
+		QUERY_AUDIT_HEADER: 'X-Query-Audit',
+		QUERY_AUDIT_LEVEL: 'statements',
+		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
+	});
+
+	const client = Object.assign(new EventEmitter(), {
+		send: vi.fn(),
+		accountability: null,
+	}) as unknown as WebSocketClient;
+
+	const messageState = emptyRequestState();
+	let auditedState: RequestState | undefined;
+
+	await requestStore.run(messageState, () => {
+		return auditMessageQueries(client, { type: 'items', uid: 1 }, async () => {
+			auditedState = requestStore.getStore();
+		});
+	});
+
+	expect(auditedState).toEqual({
+		queryAudit: expect.any(Object),
+		scopedCachePurged: { purged: [], queuedPurges: [] },
+	});
+
+	expect(auditedState!.scopedCachePurged)
+		.toBe(messageState.scopedCachePurged);
 });
 
 test('sends the reply as is while QUERY_AUDIT_HEADER is unset', async () => {
@@ -72,7 +106,7 @@ test('sends the reply as is while QUERY_AUDIT_HEADER is unset', async () => {
 	reportQueryAuditInReplies(client);
 
 	await auditMessageQueries(client, { type: 'items', uid: 1 }, async () => {
-		expect(queryAuditStore.getStore()).toBeUndefined();
+		expect(requestStore.getStore()?.queryAudit).toBeUndefined();
 
 		client.send('{"type":"items","data":[],"uid":1}');
 	});
@@ -108,7 +142,7 @@ test('reports statements to a non-admin asking bindings', async () => {
 
 	await auditMessageQueries(client, message, async () => {
 		auditStatementStart(
-			queryAuditStore.getStore()!,
+			requestStore.getStore()!.queryAudit!,
 			'select * from "articles" where "id" = ?',
 			'a',
 			[7],
@@ -143,7 +177,7 @@ test('records no bound value of a non-admin asking bindings', async () => {
 	const formattedAudits: string[] = [];
 
 	await auditMessageQueries(client, message, async () => {
-		const audit = queryAuditStore.getStore()!;
+		const audit = requestStore.getStore()!.queryAudit!;
 
 		auditStatementStart(audit, 'select ?', 'a', [7])();
 
@@ -184,7 +218,7 @@ test('reports the bound values to an admin asking bindings', async () => {
 
 	await auditMessageQueries(client, message, async () => {
 		auditStatementStart(
-			queryAuditStore.getStore()!,
+			requestStore.getStore()!.queryAudit!,
 			'select * from "articles" where "id" = ?',
 			'a',
 			[7],
@@ -280,7 +314,7 @@ test('does not audit a message without a uid', async () => {
 	}) as unknown as WebSocketClient;
 
 	await auditMessageQueries(client, { type: 'ping' }, async () => {
-		expect(queryAuditStore.getStore()).toBeUndefined();
+		expect(requestStore.getStore()?.queryAudit).toBeUndefined();
 	});
 });
 
@@ -397,7 +431,7 @@ test('closes an unreplied message audit on disconnect', async () => {
 	const audits: unknown[] = [];
 
 	void auditMessageQueries(client, { type: 'items', uid: 'a' }, () => {
-		const audit = queryAuditStore.getStore()!;
+		const audit = requestStore.getStore()!.queryAudit!;
 
 		auditStatementStart(audit, 'select 1', 'a')();
 		audits.push(audit);
@@ -427,7 +461,7 @@ test('closes a message audit once its handler settles without a reply', async ()
 	const audits: unknown[] = [];
 
 	await auditMessageQueries(client, { type: 'items', uid: 'a' }, async () => {
-		const audit = queryAuditStore.getStore()!;
+		const audit = requestStore.getStore()!.queryAudit!;
 
 		auditStatementStart(audit, 'select 1', 'a')();
 		audits.push(audit);
@@ -457,7 +491,7 @@ test('closes a message audit once its handler throws', async () => {
 		client,
 		{ type: 'items', uid: 'a' },
 		async () => {
-			const audit = queryAuditStore.getStore()!;
+			const audit = requestStore.getStore()!.queryAudit!;
 
 			auditStatementStart(audit, 'select 1', 'a')();
 			audits.push(audit);

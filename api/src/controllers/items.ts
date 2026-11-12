@@ -68,8 +68,6 @@ router.post(
 			}
 		}
 
-		res.locals['scopedCachePurged'] = service.scopedCachePurged;
-
 		try {
 			if (Array.isArray(req.body)) {
 				const result = await service.readMany(savedKeys, req.sanitizedQuery);
@@ -211,7 +209,6 @@ router.patch(
 			const item = await service.readSingleton(req.sanitizedQuery);
 
 			res.locals['payload'] = { data: item || null };
-			res.locals['scopedCachePurged'] = service.scopedCachePurged;
 			return next();
 		}
 
@@ -255,8 +252,6 @@ router.patch(
 				updateOptions,
 			);
 		}
-
-		res.locals['scopedCachePurged'] = service.scopedCachePurged;
 
 		try {
 			// Cancelled updates come back as null; drop them before reading the affected items.
@@ -305,8 +300,6 @@ router.patch(
 			nestedUpdates: nestedUpdatesFromQuery(req.query),
 		});
 
-		res.locals['scopedCachePurged'] = service.scopedCachePurged;
-
 		try {
 			const result = await service.readOne(updatedPrimaryKey, req.sanitizedQuery);
 			res.locals['payload'] = { data: result || null };
@@ -328,7 +321,7 @@ router.delete(
 	'/:collection',
 	collectionExists,
 	validateBatch('delete'),
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, _res, next) => {
 		if (isSystemCollection(req.params['collection']!)) {
 			throw new ForbiddenError({
 				reason: 'Forbidden access to directus_* collections',
@@ -351,7 +344,6 @@ router.delete(
 			await service.deleteByQuery(sanitizedQuery, { allowFilterCancel: true });
 		}
 
-		res.locals['scopedCachePurged'] = service.scopedCachePurged;
 		return next();
 	}),
 	respond,
@@ -360,7 +352,7 @@ router.delete(
 router.delete(
 	'/:collection/:pk',
 	collectionExists,
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, _res, next) => {
 		if (isSystemCollection(req.params['collection']!)) {
 			throw new ForbiddenError({
 				reason: 'Forbidden access to directus_* collections',
@@ -373,7 +365,6 @@ router.delete(
 		});
 
 		await service.deleteOne(req.params['pk']!, { allowFilterCancel: true });
-		res.locals['scopedCachePurged'] = service.scopedCachePurged;
 		return next();
 	}),
 	respond,

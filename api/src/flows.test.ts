@@ -4,8 +4,13 @@ import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import emitter from './emitter.js';
 import { getFlowManager } from './flows.js';
+import {
+	readRequestScopedCachePurges,
+	recordScopedCachePurged,
+} from './scoped-cache/purged-record.js';
 import { ActivityService } from './services/activity.js';
 import { FlowsService } from './services/flows.js';
+import { requestStore } from './utils/request-store.js';
 
 vi.mock('./bus/index.js', () => {
 	return { useBus: () => ({ subscribe: vi.fn(), publish: vi.fn() }) };
@@ -634,6 +639,74 @@ describe('event flows inside the mutation transaction', () => {
 
 		expect(receivedTransactions).toEqual([updateTransaction]);
 		expect(receivedTransactions[0]).toBe(updateTransaction);
+	});
+});
+
+describe('the purged list of a flow run', () => {
+	test(oneLine`
+		a flow run outside a request reads a list of its own, one inside a request
+		names its purges in the request's
+	`, async () => {
+		const readings: unknown[] = [];
+
+		getFlowManager().addOperation('read-purges', async () => {
+			recordScopedCachePurged([{ collection: 'articles' }]);
+			readings.push(await readRequestScopedCachePurges());
+
+			return null;
+		});
+
+		vi.mocked(FlowsService).mockImplementation(function () {
+			return {
+				readByQuery: async (): Promise<FlowRaw[]> => {
+					return [{
+						id: 'flow-1',
+						trigger: 'event',
+						accountability: null,
+						options: {
+							type: 'filter',
+							scope: ['items.update'],
+							collections: ['articles'],
+						},
+						operation: 'op-1',
+						operations: [{
+							id: 'op-1',
+							key: 'read_purges',
+							type: 'read-purges',
+							options: {},
+							resolve: null,
+							reject: null,
+							flow: 'flow-1',
+						}],
+					} as unknown as FlowRaw];
+				},
+			} as unknown as FlowsService;
+		});
+
+		await (getFlowManager() as any).load();
+
+		const updateGroups = [{ data: { status: 'a' }, keys: [1] }];
+
+		await emitter.emitFilter(
+			'articles.items.update',
+			updateGroups,
+			{ collection: 'articles' },
+		);
+
+		const lessonsPurged = { purged: [{ collection: 'lessons' }], queuedPurges: [] };
+
+		await requestStore.run({ scopedCachePurged: lessonsPurged }, () => {
+			return emitter.emitFilter(
+				'articles.items.update',
+				updateGroups,
+				{ collection: 'articles' },
+			);
+		});
+
+		expect(readings).toEqual([
+			[{ collection: 'articles' }],
+			[{ collection: 'lessons' }, { collection: 'articles' }],
+		]);
 	});
 });
 
