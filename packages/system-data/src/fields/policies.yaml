@@ -81,6 +81,7 @@ fields:
       junctionFilter:
         user:
           _nnull: true
+      managedByField: managed_by
     special:
       - m2m
 
@@ -91,5 +92,6 @@ fields:
       junctionFilter:
         role:
           _nnull: true
+      managedByField: managed_by
     special:
       - m2m

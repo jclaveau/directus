@@ -8,10 +8,14 @@ import { getInternalModules, registerModules } from './modules';
 import { getInternalOperations, registerOperations } from './operations';
 import { getInternalPanels, registerPanels } from './panels';
 import { registerThemes } from './themes/register';
-import { getRootPath } from './utils/get-root-path';
+import {
+	readAppChunkUrl,
+	watchAppChunk,
+	type AppChunkStamp,
+} from './utils/sync-app-chunk';
 import { translate } from './utils/translate-object-values';
 
-let customExtensions: AppExtensionConfigs | null = null;
+let customExtensions: (AppExtensionConfigs & AppChunkStamp) | null = null;
 
 const extensions: RefRecord<AppExtensionConfigs> = {
 	interfaces: shallowRef([]),
@@ -30,7 +34,7 @@ export async function loadExtensions(): Promise<void> {
 	try {
 		customExtensions = import.meta.env.DEV
 			? await import(/* @vite-ignore */ '@directus-extensions')
-			: await import(/* @vite-ignore */ `${getRootPath()}extensions/sources/index.js`);
+			: await import(/* @vite-ignore */ await readAppChunkUrl());
 	} catch (err: any) {
 		// eslint-disable-next-line no-console
 		console.warn(`Couldn't load extensions`);
@@ -89,6 +93,18 @@ export function registerExtensions(app: App): void {
 
 	onHydrateCallbacks.push(onHydrateModules);
 	onDehydrateCallbacks.push(onDehydrateModules);
+
+	const appChunk: AppChunkStamp = customExtensions ?? {};
+
+	let stopWatchingAppChunk = () => {};
+
+	onHydrateCallbacks.push(async () => {
+		stopWatchingAppChunk = watchAppChunk(appChunk);
+	});
+
+	onDehydrateCallbacks.push(async () => {
+		stopWatchingAppChunk();
+	});
 }
 
 export async function onHydrateExtensions() {
@@ -97,6 +113,11 @@ export async function onHydrateExtensions() {
 
 export async function onDehydrateExtensions() {
 	await Promise.all(onDehydrateCallbacks.map((onDehydrate) => onDehydrate()));
+}
+
+/** The app entries of the enabled bundles declaring their entries in code. */
+export function getCodeBundleEntries(): NonNullable<AppChunkStamp['bundleEntries']> {
+	return customExtensions?.bundleEntries ?? [];
 }
 
 export function useExtensions(): RefRecord<AppExtensionConfigs> {

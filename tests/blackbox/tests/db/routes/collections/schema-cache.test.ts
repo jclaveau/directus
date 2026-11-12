@@ -4,7 +4,7 @@ import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import type { Knex } from 'knex';
 import knex from 'knex';
 import { cloneDeep } from 'lodash-es';
@@ -39,8 +39,8 @@ describe('Schema Caching Tests', () => {
 					const env2 = cloneDeep(env1);
 					env2[vendor]['CACHE_NAMESPACE'] = env1[vendor]['CACHE_NAMESPACE'] + '2';
 
-					const newServerPort1 = await getPort();
-					const newServerPort2 = await getPort();
+					const newServerPort1 = await freePortOfWorker();
+					const newServerPort2 = await freePortOfWorker();
 
 					env1[vendor].PORT = String(newServerPort1);
 					env2[vendor].PORT = String(newServerPort2);
@@ -139,8 +139,8 @@ describe('Schema Caching Tests', () => {
 					const env4 = cloneDeep(env3);
 					env4[vendor]['CACHE_NAMESPACE'] = cacheNamespacePrefix + '4';
 
-					const newServerPort3 = await getPort();
-					const newServerPort4 = await getPort();
+					const newServerPort3 = await freePortOfWorker();
+					const newServerPort4 = await freePortOfWorker();
 
 					env3[vendor].PORT = String(newServerPort3);
 					env4[vendor].PORT = String(newServerPort4);

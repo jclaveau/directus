@@ -61,9 +61,15 @@ vi.mock('../scoped-cache/config.js', async (importOriginal) => {
 });
 
 const { ItemsService } = await import('./items.js');
+
+const { CapabilitiesHelper } =
+	await import('../database/helpers/capabilities/types.js');
+
 const { readMeta } = await import('../utils/read-meta.js');
 const { default: emitter } = await import('../emitter.js');
-const { getDatabaseClient } = await import('../database/index.js');
+
+const { default: getDatabase, getDatabaseClient } =
+	await import('../database/index.js');
 
 const { createScopedCacheHookDeclarations, scopedCachePinKeys } =
 	await import('../scoped-cache/index.js');
@@ -171,11 +177,20 @@ describe(oneLine`
 
 	beforeEach(() => {
 		tracker.on.any('test').response({});
+
+		// this MockClient compiles no FOR UPDATE: the existence read takes no lock
+		vi.spyOn(CapabilitiesHelper.prototype, 'supportsRowLocks')
+			.mockReturnValue(false);
 	});
 
 	afterEach(() => {
 		tracker.reset();
+		vi.mocked(CapabilitiesHelper.prototype.supportsRowLocks).mockRestore();
 		purgeScopedCache.mockClear();
+		vi.mocked(getDatabase).mockReset();
+		// A test writing its groups one by one runs off postgres, since this
+		// MockClient has no dialect to compile their batch with.
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 	});
 
 	const service = (withSchema = schema) => {
@@ -467,6 +482,47 @@ describe(oneLine`
 		);
 	});
 
+	// https://github.com/jclaveau/directus/issues/645
+	it(oneLine`
+		a delete whose survivor re-read fails after the commit still answers, purges
+		the collection and emits the action
+	`, async () => {
+		tracker.on.select('test').responseOnce([{ id: 2 }]);
+
+		tracker.on.select('test').responseOnce([
+			{ id: 1, student: 'A' },
+			{ id: 2, student: 'B' },
+		]);
+
+		tracker.on.delete('test').response(1);
+		tracker.on.select('test').simulateErrorOnce('read failed');
+		const bypassEmitAction = vi.fn();
+
+		await expect(service(selfRefSchema).deleteMany([1], { bypassEmitAction }))
+			.resolves
+			.toEqual([1]);
+
+		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			null,
+			expect.anything(),
+			expect.anything(),
+		);
+
+		expect(bypassEmitAction).toHaveBeenCalledWith({
+			event: ['items.delete', 'test.items.delete'],
+			meta: { payload: [1], keys: [1], collection: 'test' },
+			context: {
+				database: undefined,
+				schema: selfRefSchema,
+				accountability: null,
+			},
+		});
+	});
+
 	it(oneLine`
 		a delete on a collection with no self-relation looks for no survivor
 	`, async () => {
@@ -545,6 +601,50 @@ describe(oneLine`
 		);
 	});
 
+	it('createMany purges before awaiting its action hooks', async () => {
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		tracker.on.insert('test').response([1]);
+
+		const purgesSeenByHook: number[] = [];
+
+		const countPurges = () => {
+			purgesSeenByHook.push(purgeScopedCache.mock.calls.length);
+		};
+
+		emitter.onAction('test.items.create', countPurges);
+
+		try {
+			await service().createMany([{ name: 'a', student: 'A' }]);
+		}
+		finally {
+			emitter.offAction('test.items.create', countPurges);
+		}
+
+		expect(purgesSeenByHook).toEqual([1]);
+	});
+
+	it('upsertMany purges before awaiting its action hooks', async () => {
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		tracker.on.insert('test').response([1]);
+
+		const purgesSeenByHook: number[] = [];
+
+		const countPurges = () => {
+			purgesSeenByHook.push(purgeScopedCache.mock.calls.length);
+		};
+
+		emitter.onAction('test.items.create', countPurges);
+
+		try {
+			await service().upsertMany([{ name: 'a', student: 'A' }]);
+		}
+		finally {
+			emitter.offAction('test.items.create', countPurges);
+		}
+
+		expect(purgesSeenByHook).toEqual([1]);
+	});
+
 	it(oneLine`
 		updateBatch purges old ∪ new — re-snapshots the committed rows for the new values
 	`, async () => {
@@ -576,6 +676,7 @@ describe(oneLine`
 		updateBatch keeps its own autoPurgeCache:false when the caller passes true, so
 		the batch purges once after the commit, not once per forked child
 	`, async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
 
@@ -685,6 +786,12 @@ describe(oneLine`
 		a failed updateBatch on the caller's transaction purges old ∪ new of every
 		row, since the groups written before the failure commit with it
 	`, async () => {
+		// The groups are written one by one only off postgres.
+		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+		// The purge runs once the trx committed, on the database `getDatabase()`
+		// returns.
+		vi.mocked(getDatabase).mockReturnValue(db);
+
 		tracker.on.select('test').response([
 			{ id: 1, student: 'A' },
 			{ id: 2, student: 'B' },
@@ -693,39 +800,47 @@ describe(oneLine`
 		tracker.on.update((query) => query.bindings.includes('second'))
 			.simulateError('boom');
 
-		await db.transaction(async (trx) => {
-			const callerService = new ItemsService('test', { knex: trx, schema });
+		try {
+			await db.transaction(async (trx) => {
+				const callerService = new ItemsService('test', { knex: trx, schema });
 
-			await expect(callerService.updateBatch([
-				{ id: 1, name: 'first' },
-				{ id: 2, name: 'second' },
-			])).rejects.toThrow('boom');
+				await expect(callerService.updateBatch([
+					{ id: 1, name: 'first' },
+					{ id: 2, name: 'second' },
+				])).rejects.toThrow('boom');
+			});
+		}
+		finally {
+			vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+		}
+
+		// The opener's await does not wait for the tasks queued on its trx.
+		await vi.waitFor(() => {
+			expect(purgeScopedCache).toHaveBeenCalledWith(
+				expect.anything(),
+				'test',
+				[
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					},
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['2'], 'student': ['b'] },
+					},
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					},
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['2'], 'student': ['b'] },
+					},
+				],
+				expect.anything(),
+				expect.anything(),
+			);
 		});
-
-		expect(purgeScopedCache).toHaveBeenCalledWith(
-			expect.anything(),
-			'test',
-			[
-				{
-					collection: 'test',
-					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-				},
-				{
-					collection: 'test',
-					pinnedScope: { 'id': ['2'], 'student': ['b'] },
-				},
-				{
-					collection: 'test',
-					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-				},
-				{
-					collection: 'test',
-					pinnedScope: { 'id': ['2'], 'student': ['b'] },
-				},
-			],
-			expect.anything(),
-			expect.anything(),
-		);
 	});
 
 	// Purge pins come from the value actually stored, not the raw input: a
@@ -3144,6 +3259,156 @@ describe(oneLine`
 			}
 			finally {
 				emitter.offFilter('test.items.create', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an upsert whose create a hook takes over and declares inert reads no row
+			back and purges nothing
+		`, async () => {
+			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
+
+			const takeOverInert = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async () => {
+					ctx.scopedCache.skipPurgeFor(99);
+					return 99;
+				});
+			};
+
+			emitter.onFilter('test.items.create', takeOverInert);
+
+			try {
+				await expect(service().upsertMany([{ name: 'x', student: 'A' }]))
+					.resolves
+					.toEqual([99]);
+
+				expect(tracker.history.all).toEqual([]);
+				expect(purgeScopedCache).not.toHaveBeenCalled();
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOverInert);
+			}
+		});
+
+		it(oneLine`
+			an upsert still reads back a row it updates that another of its creates
+			takes over and declares inert
+		`, async () => {
+			tracker.on.select('test').responseOnce([{ id: 99, student: 'A' }]);
+			tracker.on.select('test').response([{ id: 99, student: 'B' }]);
+			tracker.on.update('test').response(1);
+
+			const takeOverInert = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async () => {
+					ctx.scopedCache.skipPurgeFor(99);
+					return 99;
+				});
+			};
+
+			emitter.onFilter('test.items.create', takeOverInert);
+
+			try {
+				await service().upsertMany([
+					{ id: 99, student: 'B' },
+					{ name: 'x', student: 'B' },
+				]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{ collection: 'test', pinnedScope: { id: ['99'], student: ['a'] } },
+						{ collection: 'test', pinnedScope: { id: ['99'], student: ['b'] } },
+					],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOverInert);
+			}
+		});
+
+		it(oneLine`
+			an upsert still reads back a row one run inserts that a later run's create
+			takes over and declares inert
+		`, async () => {
+			tracker.on.insert('test').response([100]);
+			tracker.on.select('test').response([{ id: 100, student: 'A' }]);
+
+			let createCount = 0;
+
+			const takeOverSecondInert = (entries: any, _meta: any, ctx: any) => {
+				createCount += 1;
+
+				if (createCount === 1) {
+					return entries;
+				}
+
+				return mapCreateRows(entries, async () => {
+					ctx.scopedCache.skipPurgeFor(100);
+					return 100;
+				});
+			};
+
+			emitter.onFilter('test.items.create', takeOverSecondInert);
+
+			try {
+				await expect(service().upsertMany(
+					[{ name: 'x', student: 'A' }, { name: 'x', student: 'A' }],
+					{ mutationBatching: 'disableBatching' },
+				))
+					.resolves
+					.toEqual([100, 100]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[{ collection: 'test', pinnedScope: { id: ['100'], student: ['a'] } }],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOverSecondInert);
+			}
+		});
+
+		it(oneLine`
+			an upsert whose create a hook takes over and declares by key reads the
+			taken-over row back
+		`, async () => {
+			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
+
+			const takeOverDeclared = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async () => {
+					ctx.scopedCache.purgeBy({
+						collection: 'test',
+						pinnedScope: { student: ['A'] },
+					}, { forKey: 99 });
+
+					return 99;
+				});
+			};
+
+			emitter.onFilter('test.items.create', takeOverDeclared);
+
+			try {
+				await service().upsertMany([{ name: 'x', student: 'A' }]);
+
+				expect(tracker.history.select).toHaveLength(1);
+				expect(tracker.history.select[0]!.bindings).toEqual([99, '99']);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[{ collection: 'test', pinnedScope: { id: ['99'], student: ['z'] } }],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOverDeclared);
 			}
 		});
 

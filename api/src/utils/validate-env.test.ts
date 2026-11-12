@@ -1,14 +1,24 @@
 import { useEnv } from '@directus/env';
 import type { Logger } from 'pino';
-import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
+import {
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	test,
+	vi,
+} from 'vitest';
 import { useLogger } from '../logger/index.js';
 import {
+	validateAutoMigrateEnv,
 	validateBooleanEnv,
 	validateBytesEnv,
 	validateChoiceEnv,
 	validateDurationEnv,
 	validateEnv,
 	validateHeaderNameEnv,
+	validateUnreadEnv,
 } from './validate-env.js';
 
 vi.mock('@directus/env');
@@ -262,4 +272,96 @@ test('takes a header name Node can write', () => {
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
+});
+
+test('refuses EXTENSIONS_PATH, which this build does not read', () => {
+	vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_PATH: './extensions' });
+
+	validateUnreadEnv();
+
+	expect(mockLogger.error).toHaveBeenCalledWith(
+		'"EXTENSIONS_PATH" Environment Variable is "./extensions", which this'
+			+ ' build does not read: extensions load only as the dependencies of'
+			+ ' the package.json in PACKAGE_FILE_LOCATION. Unset it.',
+	);
+
+	expect(process.exit).toHaveBeenCalledWith(1);
+});
+
+test('passes an environment without EXTENSIONS_PATH', () => {
+	vi.mocked(useEnv).mockReturnValueOnce({ PACKAGE_FILE_LOCATION: '.' });
+
+	validateUnreadEnv();
+
+	expect(mockLogger.error).not.toHaveBeenCalled();
+	expect(process.exit).not.toHaveBeenCalled();
+});
+
+describe('validateAutoMigrateEnv', () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	test('refuses it in production', () => {
+		vi.stubEnv('NODE_ENV', 'production');
+
+		vi.mocked(useEnv).mockReturnValueOnce({
+			EXTENSIONS_AUTO_MIGRATE: true,
+			EXTENSIONS_AUTO_RELOAD: true,
+		});
+
+		validateAutoMigrateEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"EXTENSIONS_AUTO_MIGRATE" Environment Variable is true while'
+				+ ' NODE_ENV is "production": production runs the migrations of'
+				+ ' its bundles with "directus database migrate:latest".',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('refuses it without EXTENSIONS_AUTO_RELOAD', () => {
+		vi.stubEnv('NODE_ENV', 'development');
+
+		vi.mocked(useEnv).mockReturnValueOnce({
+			EXTENSIONS_AUTO_MIGRATE: true,
+			EXTENSIONS_AUTO_RELOAD: false,
+		});
+
+		validateAutoMigrateEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"EXTENSIONS_AUTO_MIGRATE" Environment Variable is true while'
+				+ ' "EXTENSIONS_AUTO_RELOAD" is not: it migrates on the reload a'
+				+ ' change in a bundle triggers.',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('takes it in development with EXTENSIONS_AUTO_RELOAD', () => {
+		vi.stubEnv('NODE_ENV', 'development');
+
+		vi.mocked(useEnv).mockReturnValueOnce({
+			EXTENSIONS_AUTO_MIGRATE: true,
+			EXTENSIONS_AUTO_RELOAD: true,
+		});
+
+		validateAutoMigrateEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test('takes it off in production', () => {
+		vi.stubEnv('NODE_ENV', 'production');
+
+		vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_AUTO_MIGRATE: false });
+
+		validateAutoMigrateEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
 });

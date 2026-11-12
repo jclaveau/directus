@@ -1,5 +1,6 @@
 import { useEnv } from '@directus/env';
 import { InvalidPayloadError, ServiceUnavailableError } from '@directus/errors';
+import { MutationBatchingModes } from '@directus/types';
 import cookieParser from 'cookie-parser';
 import type { Request, RequestHandler, Response, Router } from 'express';
 import express from 'express';
@@ -67,6 +68,8 @@ import {
 	validateChoiceEnv,
 	validateDurationEnv,
 	validateHeaderNameEnv,
+	validateUnreadEnv,
+	validateAutoMigrateEnv,
 } from './utils/validate-env.js';
 import { initSharedSettings } from './processes/lib/shared-settings.js';
 import { initPoolHealthMirror } from './processes/lib/pool-health.js';
@@ -87,6 +90,9 @@ import { errorHandler } from './middleware/error-handler.js';
 import extractToken from './middleware/extract-token.js';
 import auditRequestQueries from './middleware/query-audit.js';
 import rateLimiterGlobal from './middleware/rate-limiter-global.js';
+import {
+	refuseExtensionChangeInProduction,
+} from './middleware/refuse-extension-change-in-production.js';
 import rateLimiter, {
 	resolvedRateLimiterCharge,
 	type RateLimiterCharge,
@@ -109,7 +115,9 @@ import tusSchedule from './schedules/tus.js';
 import {
 	assertScopedCacheStoreSupported,
 	startScopedCachePurgeRecovery,
+	warnFullPurgeDeprecated,
 } from './scoped-cache/index.js';
+import { initNotificationEmails } from './services/notifications.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { merge } from './utils/lodash-es-used.js';
 import { Url } from './utils/url.js';
@@ -130,7 +138,10 @@ export default async function createApp(): Promise<express.Application> {
 	// Ending the process after the listen would pass the deployment's healthcheck
 	// and crash-loop behind it.
 	validateDurationEnv(['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX']);
+	validateChoiceEnv('DEFAULT_MUTATION_BATCHING', MutationBatchingModes);
 	validateCacheSettingsEnv();
+	validateUnreadEnv();
+	validateAutoMigrateEnv();
 
 	await validateDatabaseConnection();
 
@@ -161,6 +172,7 @@ export default async function createApp(): Promise<express.Application> {
 	await validateStorage();
 
 	assertScopedCacheStoreSupported();
+	warnFullPurgeDeprecated();
 
 	await registerAuthProviders();
 
@@ -361,6 +373,10 @@ export default async function createApp(): Promise<express.Application> {
 
 	app.get('/server/ping', (_req, res) => res.send('pong'));
 
+	// Above the response cache, which would otherwise serve a registry answer
+	// cached by a replica outside production until its TTL.
+	app.use('/extensions/registry', refuseExtensionChangeInProduction);
+
 	app.use(authenticate);
 
 	app.use(schema);
@@ -455,6 +471,7 @@ export default async function createApp(): Promise<express.Application> {
 	initPoolHealthMirror();
 	await initSharedSettingsGuard();
 	await initProcessReports();
+	initNotificationEmails();
 	initAutoscaleDrill();
 	assertPgBouncerConnections();
 

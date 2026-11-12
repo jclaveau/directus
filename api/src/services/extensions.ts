@@ -1,14 +1,30 @@
 import { useEnv } from '@directus/env';
-import { ForbiddenError, InvalidPayloadError, LimitExceededError, UnprocessableContentError } from '@directus/errors';
-import type { ApiOutput, BundleExtension, ExtensionSettings, ExtensionManager } from '@directus/types';
+import {
+	ForbiddenError,
+	InvalidPayloadError,
+	LimitExceededError,
+	ServiceUnavailableError,
+	UnprocessableContentError,
+} from '@directus/errors';
+import type {
+	AbstractServiceOptions,
+	Accountability,
+	ActionEventParams,
+	ApiOutput,
+	BundleExtension,
+	DeepPartial,
+	ExtensionManager,
+	ExtensionSettings,
+	SchemaOverview,
+} from '@directus/types';
 import { describe, type DescribeOptions } from '@directus/extensions-registry';
-import type { AbstractServiceOptions, Accountability, DeepPartial, SchemaOverview } from '@directus/types';
-import { isObject } from '@directus/utils';
+import { isObject, oneLine } from '@directus/utils';
 import type { Knex } from 'knex';
 import getDatabase from '../database/index.js';
 import { getExtensionManager } from '../extensions/index.js';
-import { transaction } from '../utils/transaction.js';
-import { ItemsService } from './items.js';
+import { useLogger } from '../logger/index.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
+import { emitActionEvents, ItemsService } from './items.js';
 
 export class ExtensionReadError extends Error {
 	originalError: unknown;
@@ -164,11 +180,16 @@ export class ExtensionsService {
 
 			if (!parentBundle) continue;
 
-			const schema = (parentBundle.schema as BundleExtension | null)?.entries.find(
-				(entry) => entry.name === meta.folder,
-			);
+			const parentSchema = parentBundle.schema as BundleExtension | null;
 
-			if (!schema) continue;
+			const schema = parentSchema?.entries.find(
+				(entry) => entry.name === meta.folder,
+			) ?? null;
+
+			// The app reads the app entries of a code bundle from its chunk.
+			if (!schema && parentSchema?.entriesFrom !== 'code') {
+				continue;
+			}
 
 			output.push({
 				id: meta.id,
@@ -194,39 +215,122 @@ export class ExtensionsService {
 	}
 
 	async updateOne(id: string, data: DeepPartial<ApiOutput>) {
-		const result = await transaction(this.knex, async (trx) => {
-			if (!isObject(data.meta)) {
-				throw new InvalidPayloadError({ reason: `"meta" is required` });
-			}
+		if (!isObject(data.meta)) {
+			throw new InvalidPayloadError({ reason: `"meta" is required` });
+		}
 
-			const service = new ExtensionsService({
-				knex: trx,
-				accountability: this.accountability,
-				schema: this.schema,
+		const updatedMeta = data.meta;
+		const heldActionEvents: ActionEventParams[] = [];
+
+		const result = await transactionHoldingActions(
+			this.knex,
+			heldActionEvents,
+			async (trx) => {
+				const service = new ExtensionsService({
+					knex: trx,
+					accountability: this.accountability,
+					schema: this.schema,
+				});
+
+				await service.extensionsItemService.updateOne(id, updatedMeta, {
+					bypassEmitAction: (actionEvent) => {
+						heldActionEvents.push(actionEvent);
+					},
+				});
+
+				let extension;
+
+				try {
+					extension = await service.readOne(id);
+				}
+				catch (error) {
+					throw new ExtensionReadError(error);
+				}
+
+				if ('enabled' in updatedMeta) {
+					await service.checkBundleAndSyncStatus(trx, id, extension);
+				}
+
+				return extension;
+			},
+		);
+
+		await emitActionEvents(heldActionEvents, {});
+
+		const reloadOutcome = await this.extensionsManager.reload().then(
+			() => ({ hasFailed: false, failure: undefined }),
+			(failure: unknown) => ({ hasFailed: true, failure }),
+		);
+
+		if (reloadOutcome.hasFailed) {
+			useLogger().error(
+				reloadOutcome.failure,
+				'Failed to reload the extensions after an extension update',
+			);
+		}
+
+		// The settings are saved either way: a bus that fails is logged, not
+		// answered in place of the reload's outcome.
+		try {
+			await this.extensionsManager.broadcastReloadNotification();
+		}
+		catch (broadcastFailure) {
+			useLogger().error(
+				broadcastFailure,
+				'Failed to tell the other processes to reload the extensions',
+			);
+		}
+
+		if (reloadOutcome.hasFailed) {
+
+			throw new ServiceUnavailableError({
+				service: 'extensions',
+				reason: oneLine`
+					The extension settings were saved,
+					but reloading the extensions failed
+				`,
 			});
-
-			await service.extensionsItemService.updateOne(id, data.meta);
-
-			let extension;
-
-			try {
-				extension = await service.readOne(id);
-			} catch (error) {
-				throw new ExtensionReadError(error);
-			}
-
-			if ('enabled' in data.meta) {
-				await service.checkBundleAndSyncStatus(trx, id, extension);
-			}
-
-			return extension;
-		});
-
-		this.extensionsManager.reload().then(() => {
-			this.extensionsManager.broadcastReloadNotification();
-		});
+		}
 
 		return result;
+	}
+
+	/**
+	 * Updates the row of an entry of a bundle declaring its entries in code,
+	 * creating it first: an app entry has no row until an admin toggles it.
+	 */
+	async updateEntry(
+		bundleId: string,
+		entryName: string,
+		data: DeepPartial<ApiOutput>,
+	) {
+		const bundle = await this.readOne(bundleId);
+
+		if ((bundle.schema as BundleExtension | null)?.entriesFrom !== 'code') {
+			throw new InvalidPayloadError({
+				reason: `Extension ${JSON.stringify(bundleId)}`
+					+ ' is not a bundle declaring its entries in code',
+			});
+		}
+
+		if (!isObject(data.meta)) {
+			throw new InvalidPayloadError({ reason: `"meta" is required` });
+		}
+
+		const [entryRow] = await this.extensionsItemService.readByQuery({
+			filter: { bundle: { _eq: bundleId }, folder: { _eq: entryName } },
+			limit: 1,
+		});
+
+		const entryId = entryRow?.id
+			?? (await this.extensionsItemService.createOne({
+				enabled: bundle.meta.enabled,
+				source: bundle.meta.source,
+				bundle: bundleId,
+				folder: entryName,
+			})) as string;
+
+		return this.updateOne(entryId, data);
 	}
 
 	async deleteOne(id: string) {
@@ -268,6 +372,11 @@ export class ExtensionsService {
 			throw new UnprocessableContentError({
 				reason: 'Unable to toggle status of an entry for a bundle marked as non partial',
 			});
+		}
+
+		// The server cannot count the app entries of a code bundle without a row.
+		if (parent.schema.entriesFrom === 'code') {
+			return;
 		}
 
 		const hasEnabledChildren = !!(await trx('directus_extensions')

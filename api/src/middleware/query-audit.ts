@@ -3,13 +3,13 @@ import { InvalidQueryError } from '@directus/errors';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler, Response } from 'express';
 import {
+	auditAskOf,
+	auditAskRefusalOf,
 	closeQueryAudit,
 	discardAuditedStatements,
 	emptyQueryAudit,
 	formatQueryAudit,
-	isQueryAuditLevel,
 	levelCarriesBindings,
-	QUERY_AUDIT_LEVELS,
 	queryAuditStore,
 } from '../database/query-audit.js';
 
@@ -38,10 +38,7 @@ const auditRequestQueries: RequestHandler = (req, res, next) => {
 
 	if (auditAsk === undefined) {
 		return next(new InvalidQueryError({
-			reason: `"${headerName}" must be a level, a timings word, or both as `
-				+ '"<level>; <timings word>". '
-				+ `Levels: ${QUERY_AUDIT_LEVELS.join(', ')}. `
-				+ `Timings words: ${TIMINGS_WORDS.join(', ')}`,
+			reason: auditAskRefusalOf(headerName),
 		}));
 	}
 
@@ -78,32 +75,5 @@ const auditRequestQueries: RequestHandler = (req, res, next) => {
 
 	queryAuditStore.run(audit, next);
 };
-
-const TIMINGS_WORDS: readonly string[] = ['timings', 'no-timings'];
-
-// `<level>`, `<timings word>` or `<level>; <timings word>`: a request that
-// leaves out the level gets QUERY_AUDIT_LEVEL's, one that leaves out the
-// timings word gets the durations.
-function auditAskOf(askedValue: string | undefined, instanceLevel: unknown) {
-	const askedWords = askedValue === undefined
-		? []
-		: askedValue.split(';').map((askedWord) => askedWord.trim());
-
-	const lastWord = askedWords.at(-1) ?? '';
-
-	const levelWords = TIMINGS_WORDS.includes(lastWord)
-		? askedWords.slice(0, -1)
-		: askedWords;
-
-	const askedLevel = levelWords.length === 0
-		? instanceLevel
-		: levelWords[0];
-
-	if (levelWords.length > 1 || !isQueryAuditLevel(askedLevel)) {
-		return undefined;
-	}
-
-	return { level: askedLevel, timings: lastWord !== 'no-timings' };
-}
 
 export default auditRequestQueries;

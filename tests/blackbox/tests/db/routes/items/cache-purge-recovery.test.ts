@@ -5,7 +5,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import knex from 'knex';
 import { cloneDeep } from 'lodash-es';
 import net from 'node:net';
@@ -145,7 +145,7 @@ describe(oneLine`
 
 			[readNote, siblingNote] = notes.map((note: { id: number }) => note.id);
 
-			const proxyPort = await getPort();
+			const proxyPort = await freePortOfWorker();
 			proxy = createRedisProxy(REDIS_PORT, proxyPort);
 			await proxy.open();
 
@@ -170,7 +170,7 @@ describe(oneLine`
 			env[vendor]['REDIS_RETRY_BASE_DELAY'] = '10';
 			env[vendor]['REDIS_RETRY_MAX_DELAY'] = '50';
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
@@ -699,7 +699,7 @@ describe(oneLine`
 			// path would never be the thing under test.
 			const bootEnv = cloneDeep(env[vendor]);
 			bootEnv['REDIS_PORT'] = String(REDIS_PORT);
-			const bootPort = await getPort();
+			const bootPort = await freePortOfWorker();
 			bootEnv.PORT = String(bootPort);
 
 			const bootLog: string[] = [];

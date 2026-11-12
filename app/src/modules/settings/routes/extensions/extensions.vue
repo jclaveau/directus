@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { getCodeBundleEntries } from '@/extensions';
 import { useExtensionsStore } from '@/stores/extensions';
 import { ApiOutput } from '@directus/types';
 import { groupBy } from 'lodash';
@@ -9,6 +10,7 @@ import SettingsNavigation from '../../components/navigation.vue';
 import ExtensionGroupDivider from './components/extension-group-divider.vue';
 import ExtensionItem from './components/extension-item.vue';
 import ExtensionsInfoSidebarDetail from './components/extensions-info-sidebar-detail.vue';
+import { listBundleChildren } from './list-bundle-children';
 import { ExtensionType } from './types';
 
 type ExtensionsMap = Record<ExtensionType, ApiOutput[]>;
@@ -17,8 +19,6 @@ const { t } = useI18n();
 
 const extensionsStore = useExtensionsStore();
 const { extensions, loading } = storeToRefs(extensionsStore);
-
-const bundled = computed(() => extensionsStore.extensions.filter(({ bundle }) => bundle !== null));
 
 const regular = computed(() => extensionsStore.extensions.filter(({ bundle }) => bundle === null));
 
@@ -62,7 +62,13 @@ const extensionsByType = computed(() => {
 							<extension-item
 								:extension
 								:children="
-									extension.schema?.type === 'bundle' ? bundled.filter(({ bundle }) => bundle === extension.id) : []
+									extension.schema?.type === 'bundle'
+										? listBundleChildren(
+											extension,
+											extensionsStore.extensions,
+											getCodeBundleEntries(),
+										)
+										: []
 								"
 							/>
 						</template>

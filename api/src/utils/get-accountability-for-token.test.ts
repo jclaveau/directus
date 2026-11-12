@@ -7,7 +7,7 @@ import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 
 vi.mock('@directus/env', () => {
 	return {
-		useEnv: vi.fn().mockReturnValue({ SECRET: 'super-secure-secret', EXTENSIONS_PATH: './extensions' }),
+		useEnv: vi.fn().mockReturnValue({ SECRET: 'super-secure-secret' }),
 	};
 });
 

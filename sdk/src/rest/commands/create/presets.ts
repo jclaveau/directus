@@ -1,5 +1,9 @@
 import type { DirectusPreset } from '../../../schema/preset.js';
-import type { ApplyQueryFields, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import type { RestCommand } from '../../types.js';
 
 export type CreatePresetOutput<
@@ -17,7 +21,7 @@ export type CreatePresetOutput<
  * @returns Returns the preset object for the created preset.
  */
 export const createPresets =
-	<Schema, const TQuery extends Query<Schema, DirectusPreset<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPreset<Schema>>>(
 		items: Partial<DirectusPreset<Schema>>[],
 		query?: TQuery,
 	): RestCommand<CreatePresetOutput<Schema, TQuery>[], Schema> =>
@@ -37,7 +41,7 @@ export const createPresets =
  * @returns Returns the preset object for the created preset.
  */
 export const createPreset =
-	<Schema, const TQuery extends Query<Schema, DirectusPreset<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPreset<Schema>>>(
 		item: Partial<DirectusPreset<Schema>>,
 		query?: TQuery,
 	): RestCommand<CreatePresetOutput<Schema, TQuery>, Schema> =>

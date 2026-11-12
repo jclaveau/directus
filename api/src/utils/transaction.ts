@@ -1,6 +1,6 @@
 import { isObject } from '@directus/utils';
 import { type Knex } from 'knex';
-import { getDatabaseClient } from '../database/index.js';
+import getDatabase, { getDatabaseClient } from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import type { DatabaseClient } from '@directus/types';
 
@@ -11,28 +11,135 @@ import type { DatabaseClient } from '@directus/types';
 type AfterCommitTask = (database: Knex) => Promise<void>;
 
 /**
- * The work each open transaction holds back, keyed by the trx `transaction()`
- * opened. A trx it did not open has no entry, so work queued on it runs at once,
- * as before.
+ * The work each open transaction holds back, keyed by the outermost trx: the one
+ * `transaction()` opened, or a raw one, given its list when work is first queued
+ * on it. A savepoint queues on the list of the trx it was opened in.
  */
 const afterCommitTasks = new WeakMap<Knex, AfterCommitTask[]>();
 
+/** The work each open transaction runs if it rolls back, keyed the same way. */
+const afterRollbackTasks = new WeakMap<Knex, AfterCommitTask[]>();
+
 /**
- * Hold `task` until the transaction `knex` belongs to commits, when `transaction()`
- * opened it. Returns false when nothing will run it later: `knex` is no
- * transaction, or one opened elsewhere, and the caller runs the task itself.
+ * The tasks held back for the transaction `knex` belongs to: its own, or, for a
+ * savepoint `trx.transaction()` opened, the ones of the transaction it was opened
+ * in, which its writes commit with.
+ */
+function findQueuedTasks(knex: Knex): AfterCommitTask[] | undefined {
+	let openTrx: Knex.Transaction | undefined = knex as Knex.Transaction;
+
+	while (openTrx !== undefined) {
+		const queuedTasks = afterCommitTasks.get(openTrx);
+
+		if (queuedTasks !== undefined) {
+			return queuedTasks;
+		}
+
+		openTrx = openTrx.parentTransaction;
+	}
+
+	return undefined;
+}
+
+/**
+ * The list for a trx `transaction()` did not open: a raw `database.transaction()`
+ * an extension or a service opened itself, handing its trx to a service whose
+ * purge would otherwise run before that trx commits (#641). Undefined when
+ * `knex` is no open trx.
+ *
+ * Its tasks run once it settled without a rollback, on the database
+ * `getDatabase()` returns, the trx carrying no link to the knex it was opened on.
+ * The opener's await does not wait for them: the first one starts before it
+ * resumes, and they end after.
+ */
+function queueOnRawTransaction(knex: Knex): AfterCommitTask[] | undefined {
+	let outermostTrx = knex as Knex.Transaction;
+
+	if (!outermostTrx.isTransaction) {
+		return undefined;
+	}
+
+	while (outermostTrx.parentTransaction !== undefined) {
+		outermostTrx = outermostTrx.parentTransaction;
+	}
+
+	// Checked on the outermost trx: a savepoint released inside it still commits
+	// with it.
+	if (outermostTrx.isCompleted()) {
+		return undefined;
+	}
+
+	const queuedTasks: AfterCommitTask[] = [];
+	const { rollback } = outermostTrx;
+	let rollbackRequested = false;
+
+	// A trx opened without a handler and rolled back resolves as a committed one
+	// does: only a call to its rollback tells them apart. Watched rather than its
+	// commit: an opener that took the method before this ran goes unseen, and a
+	// rollback unseen costs a purge of rows left unchanged, a commit unseen a
+	// stale row.
+	outermostTrx.rollback = (error) => {
+		rollbackRequested = true;
+
+		return rollback.call(outermostTrx, error);
+	};
+
+	afterCommitTasks.set(outermostTrx, queuedTasks);
+
+	outermostTrx.executionPromise.then(
+		async () => {
+			afterCommitTasks.delete(outermostTrx);
+
+			if (!rollbackRequested) {
+				await drainAfterSettle(getDatabase(), queuedTasks, 'commit');
+			}
+		},
+		() => {
+			afterCommitTasks.delete(outermostTrx);
+		},
+	);
+
+	return queuedTasks;
+}
+
+/**
+ * Hold `task` until the transaction `knex` belongs to commits. Returns false when
+ * nothing will run it later: `knex` is no transaction, or one already settled,
+ * and the caller runs the task itself.
  *
  * A rolled-back transaction drops its tasks: nothing it wrote landed, so nothing
  * needs them. A retried one drops the aborted attempt's tasks with that attempt.
+ * A rolled-back savepoint keeps them: they run once the outer one commits, a purge
+ * of rows left unchanged. `queueAfterCommitOrRollback` holds a task both ends need.
  */
 export function queueAfterCommit(knex: Knex, task: AfterCommitTask): boolean {
-	const queuedTasks = afterCommitTasks.get(knex);
+	const queuedTasks = findQueuedTasks(knex) ?? queueOnRawTransaction(knex);
 
 	if (queuedTasks === undefined) {
 		return false;
 	}
 
 	queuedTasks.push(task);
+
+	return true;
+}
+
+/**
+ * `queueAfterCommit` for a task the transaction needs whichever way it settles:
+ * run once it commits, or once it rolls back, aborted attempts of a retry
+ * included. Returns false when nothing will run it, as `queueAfterCommit` does.
+ */
+export function queueAfterCommitOrRollback(
+	knex: Knex,
+	task: AfterCommitTask,
+): boolean {
+	const rollbackTasks = afterRollbackTasks.get(knex);
+
+	if (rollbackTasks === undefined || !queueAfterCommit(knex, task)) {
+		return false;
+	}
+
+	rollbackTasks.push(task);
 
 	return true;
 }
@@ -72,7 +179,7 @@ export function queueMergedAfterCommit<Request>(
 		runRequest: (database: Knex, request: Request) => Promise<void>;
 	},
 ): boolean {
-	const queuedTasks = afterCommitTasks.get(knex);
+	const queuedTasks = findQueuedTasks(knex) ?? queueOnRawTransaction(knex);
 
 	if (queuedTasks === undefined) {
 		return false;
@@ -123,12 +230,130 @@ export const transaction = async <T = unknown>(
 
 	const { result, queuedTasks } = await commitWithRetries(knex, handler, onRetry);
 
-	await drainAfterCommit(knex, queuedTasks);
+	await drainAfterSettle(knex, queuedTasks, 'commit');
 
 	return result;
 };
 
 type CommittedAttempt<T> = { result: T; queuedTasks: AfterCommitTask[] };
+
+type OpenTransaction = (
+	container?: unknown,
+	config?: Knex.TransactionConfig,
+) => Promise<any>;
+
+/**
+ * Where knex keeps the methods a knex instance forwards to, `transaction` among
+ * them. `transactionProvider()` calls it there, not on the instance.
+ */
+type KnexContext = { transaction: OpenTransaction };
+
+/**
+ * The `transaction` each tracked database had before `trackTransactionsOf`, which
+ * `transaction()` opens its own trxs with so they are not held twice.
+ */
+const untrackedTransactions = new WeakMap<Knex, OpenTransaction>();
+
+/**
+ * Make every transaction opened on `database` hold its work for after the commit
+ * as one `transaction()` opened does, so an extension's own `database.transaction()`
+ * clears the caches before it resolves rather than after (#633).
+ *
+ * It does not retry: a handler re-run without the caller asking could repeat what
+ * it did outside the trx. A savepoint is the trx's own method, untouched, and
+ * already waits for the trx it nests in. A trx opened without a handler runs its
+ * tasks once its `commit()` or `rollback()` resolves, and none if neither is
+ * called.
+ */
+export function trackTransactionsOf(database: Knex): void {
+	const knexContext = (database as Knex & { context: KnexContext }).context;
+	const openUntracked = knexContext.transaction.bind(knexContext);
+
+	untrackedTransactions.set(database, openUntracked);
+
+	knexContext.transaction = (container, config) => {
+		if (typeof container === 'function') {
+			return commitHeldTasks(database, container as never, config);
+		}
+
+		return holdTasksUntilSettled(database, openUntracked(container, config));
+	};
+}
+
+async function commitHeldTasks<T>(
+	database: Knex,
+	handler: (trx: Knex) => Promise<T>,
+	config?: Knex.TransactionConfig,
+): Promise<T> {
+	const { result, queuedTasks } = await commitAttempt(database, handler, config);
+
+	await drainAfterSettle(database, queuedTasks, 'commit');
+
+	return result;
+}
+
+async function holdTasksUntilSettled(
+	database: Knex,
+	openingTrx: Promise<Knex.Transaction>,
+): Promise<Knex.Transaction> {
+	const trx = await openingTrx;
+	const queuedTasks: AfterCommitTask[] = [];
+	const rollbackTasks: AfterCommitTask[] = [];
+	let drainingTasks: Promise<void> | null = null;
+
+	afterCommitTasks.set(trx, queuedTasks);
+	afterRollbackTasks.set(trx, rollbackTasks);
+
+	const drainOnce = (settlement: 'commit' | 'rollback') => {
+		if (drainingTasks === null) {
+			afterCommitTasks.delete(trx);
+			afterRollbackTasks.delete(trx);
+
+			const settledTasks = settlement === 'commit'
+				? queuedTasks
+				: rollbackTasks;
+
+			drainingTasks = drainAfterSettle(database, settledTasks, settlement);
+		}
+
+		return drainingTasks;
+	};
+
+	const { commit: commitUntracked, rollback: rollbackUntracked } = trx;
+
+	return Object.assign(trx, {
+		commit: async (value?: unknown) => {
+			let committedValue: unknown;
+
+			try {
+				committedValue = await commitUntracked(value);
+			}
+			catch (error) {
+				await drainOnce('rollback');
+
+				throw error;
+			}
+
+			// knex resolves commit() over a failed COMMIT, rejecting only this.
+			const settlement = await trx.executionPromise.then(
+				() => 'commit' as const,
+				() => 'rollback' as const,
+			);
+
+			await drainOnce(settlement);
+
+			return committedValue;
+		},
+		rollback: async (error?: unknown) => {
+			try {
+				return await rollbackUntracked(error);
+			}
+			finally {
+				await drainOnce('rollback');
+			}
+		},
+	});
+}
 
 /**
  * One attempt: the handler in a new trx, with the list it queues work on, which
@@ -137,25 +362,37 @@ type CommittedAttempt<T> = { result: T; queuedTasks: AfterCommitTask[] };
 async function commitAttempt<T>(
 	knex: Knex,
 	handler: (knex: Knex) => Promise<T>,
+	config?: Knex.TransactionConfig,
 ): Promise<CommittedAttempt<T>> {
 	const queuedTasks: AfterCommitTask[] = [];
+	const rollbackTasks: AfterCommitTask[] = [];
 	const openedTrxs: Knex[] = [];
 
+	const openTransaction = untrackedTransactions.get(knex)
+		?? (knex.transaction.bind(knex) as OpenTransaction);
+
 	try {
-		const result = await knex.transaction((trx) => {
+		const result = await openTransaction((trx: Knex.Transaction) => {
 			openedTrxs.push(trx);
 			afterCommitTasks.set(trx, queuedTasks);
+			afterRollbackTasks.set(trx, rollbackTasks);
 
 			return handler(trx);
-		});
+		}, config);
 
 		return { result, queuedTasks };
+	}
+	catch (error) {
+		await drainAfterSettle(knex, rollbackTasks, 'rollback');
+
+		throw error;
 	}
 	finally {
 		// Once settled, a straggler queueing on the trx gets false and runs its task
 		// itself: pushed onto a list already drained, it would never run.
 		for (const openedTrx of openedTrxs) {
 			afterCommitTasks.delete(openedTrx);
+			afterRollbackTasks.delete(openedTrx);
 		}
 	}
 }
@@ -219,7 +456,8 @@ async function commitWithRetries<T>(
 }
 
 /**
- * Run what the committed transaction queued. Outside the retry loop: a task
+ * Run what the settled transaction queued. A committed one drains outside the
+ * retry loop: a task
  * failing with a retryable code must not re-run a write that already landed.
  * Awaited, not left floating: a task lost on process death leaves what it was for
  * undone with nothing coming to redo it.
@@ -232,11 +470,13 @@ async function commitWithRetries<T>(
  *
  * A failure is logged, not thrown: the write is durable by now, and a 500 for it
  * invites a client retry that duplicates a non-idempotent write. Same rule as the
- * purge's own `purgeOrRecord`.
+ * purge's own `purgeOrRecord`. After a rollback, it would stand in for the error
+ * that rolled the write back.
  */
-async function drainAfterCommit(
+async function drainAfterSettle(
 	knex: Knex,
 	queuedTasks: AfterCommitTask[],
+	settlement: 'commit' | 'rollback',
 ): Promise<void> {
 	// One after another, as they ran inside the trx: purges of different collections
 	// can share index sets, and each shrinks what the next one scans. A hook's
@@ -249,7 +489,7 @@ async function drainAfterCommit(
 		catch (error) {
 			useLogger().error(
 				error,
-				`[transaction] a task queued after commit failed: ${error}`,
+				`[transaction] a task queued after ${settlement} failed: ${error}`,
 			);
 		}
 	}

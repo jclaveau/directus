@@ -1,19 +1,18 @@
-import { useEnv } from '@directus/env';
-import formatTitle from '@directus/format-title';
-import fse from 'fs-extra';
 import type { Knex } from 'knex';
-import path, { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { flushCaches } from '../../cache.js';
 import { useLogger } from '../../logger/index.js';
 import type { DatabaseClient } from '@directus/types';
+import type { MigrationPhase } from '@directus/extensions/scalabus';
 import type { Migration, MigrationTransactionScope } from '../../types/index.js';
 import { getDatabaseClient } from '../index.js';
 import { getHelpers } from '../helpers/index.js';
-import getModuleDefault from '../../utils/get-module-default.js';
 import { orderBy } from '../../utils/lodash-es-used.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
+import {
+	listMigrations,
+	type ExtensionMigration,
+	type ListedMigration,
+	type MigrationModule,
+} from './list.js';
 
 /**
  * Only Postgres both rolls DDL back and tolerates the runner holding a transaction
@@ -28,89 +27,62 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  */
 const TRANSACTIONAL_CLIENTS: DatabaseClient[] = ['postgres', 'cockroachdb'];
 
-type MigrationModule = {
-	up: (knex: Knex) => Promise<void>;
-	down: (knex: Knex) => Promise<void>;
-	transactionScope?: MigrationTransactionScope;
-};
+export interface RunOptions {
+	/**
+	 * The installed bundles' `defineMigration`s, run in date order with
+	 * the core's.
+	 */
+	extensionMigrations?: ExtensionMigration[];
+	/** Restricts `up` and `latest` to one phase; both phases run when unset. */
+	phase?: MigrationPhase;
+}
 
-export default async function run(database: Knex, direction: 'up' | 'down' | 'latest', log = true): Promise<void> {
-	const env = useEnv();
+export default async function run(
+	database: Knex,
+	direction: 'up' | 'down' | 'latest',
+	log = true,
+	options: RunOptions = {},
+): Promise<void> {
 	const logger = useLogger();
 
-	let migrationFiles = await fse.readdir(__dirname);
+	const listedMigrations = await listMigrations(options.extensionMigrations);
 
-	const customMigrationsPath = path.resolve(env['MIGRATIONS_PATH'] as string);
+	const completedMigrations = await database
+		.select<Migration[]>('*')
+		.from('directus_migrations')
+		.orderBy('version');
 
-	let customMigrationFiles =
-		((await fse.pathExists(customMigrationsPath)) && (await fse.readdir(customMigrationsPath))) || [];
+	const completedVersions = new Set(
+		completedMigrations.map((migration) => migration.version),
+	);
 
-	migrationFiles = migrationFiles.filter((file: string) => /^[0-9]+[A-Z]-[^.]+\.(?:js|ts)$/.test(file));
+	const phaseMigrations = listedMigrations.filter(
+		(migration) => options.phase === undefined || migration.phase === options.phase,
+	);
 
-	customMigrationFiles = customMigrationFiles.filter((file: string) => file.includes('-') && /\.(c|m)?js$/.test(file));
-
-	const completedMigrations = await database.select<Migration[]>('*').from('directus_migrations').orderBy('version');
-
-	const migrations = [
-		...migrationFiles.map((path) => parseFilePath(path)),
-		...customMigrationFiles.map((path) => parseFilePath(path, true)),
-	].sort((a, b) => (a.version! > b.version! ? 1 : -1));
-
-	const migrationKeys = new Set(migrations.map((m) => m.version));
-
-	if (migrations.length > migrationKeys.size) {
-		const filesByVersion = new Map<string, string[]>();
-
-		for (const migration of migrations) {
-			const files = filesByVersion.get(migration.version!) ?? [];
-			files.push(migration.file);
-			filesByVersion.set(migration.version!, files);
-		}
-
-		const collisions = [...filesByVersion]
-			.filter(([, files]) => files.length > 1)
-			.map(([version, files]) => `\t- "${version}": ${files.join(', ')}`)
-			.join('\n');
-
-		throw new Error(`Migration keys collide! Please ensure that every migration uses a unique key:\n${collisions}`);
-	}
-
-	function parseFilePath(filePath: string, custom = false) {
-		const version = filePath.split('-')[0];
-		const name = formatTitle(filePath.split('-').slice(1).join('_').split('.')[0]!);
-		const completed = !!completedMigrations.find((migration) => migration.version === version);
-
-		return {
-			file: custom ? path.join(customMigrationsPath, filePath) : path.join(__dirname, filePath),
-			version,
-			name,
-			completed,
-		};
-	}
+	const pendingMigrations = phaseMigrations.filter(
+		(migration) => !completedVersions.has(migration.version),
+	);
 
 	if (direction === 'up') await up();
 	if (direction === 'down') await down();
 	if (direction === 'latest') await latest();
 
 	async function up() {
-		const currentVersion = completedMigrations[completedMigrations.length - 1];
-
-		let nextVersion: any;
-
-		if (!currentVersion) {
-			nextVersion = migrations[0];
-		}
-		else {
-			nextVersion = migrations.find((migration) => {
-				return migration.version! > currentVersion.version && migration.completed === false;
-			});
-		}
+		const nextVersion = pendingMigrations[0];
 
 		if (!nextVersion) {
 			throw Error('Nothing to upgrade');
 		}
 
-		const migrationModule = await loadMigration(nextVersion.file);
+		if (options.phase === undefined && nextVersion.phase === 'after-schema') {
+			throw new Error(
+				`Migration ${JSON.stringify(nextVersion.version)} runs after the schema:`
+					+ ' run "migrate:latest --snapshot <path>" instead',
+			);
+		}
+
+		const migrationModule = await nextVersion.loadModule();
 
 		if (log) {
 			logger.info(`Applying ${nextVersion.name}...`);
@@ -129,19 +101,37 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 	}
 
 	async function down() {
-		const lastAppliedMigration = orderBy(completedMigrations, ['timestamp', 'version'], ['desc', 'desc'])[0];
+		// A batch stamps its rows with one time: the run order breaks the tie, and
+		// a row no installed migration lists sorts last, to be refused by name.
+		const runOrder = (completed: Migration) => {
+			const index = listedMigrations.findIndex(
+				(listedMigration) => listedMigration.version === completed.version,
+			);
+
+			return index === -1
+				? listedMigrations.length
+				: index;
+		};
+
+		const lastAppliedMigration = orderBy(
+			completedMigrations,
+			['timestamp', runOrder],
+			['desc', 'desc'],
+		)[0];
 
 		if (!lastAppliedMigration) {
 			throw Error('Nothing to downgrade');
 		}
 
-		const migration = migrations.find((migration) => migration.version === lastAppliedMigration.version);
+		const migration = listedMigrations.find(
+			(listedMigration) => listedMigration.version === lastAppliedMigration.version,
+		);
 
 		if (!migration) {
-			throw new Error("Couldn't find migration");
+			throw new Error(describeMissingMigration(lastAppliedMigration.version));
 		}
 
-		const migrationModule = await loadMigration(migration.file);
+		const migrationModule = await migration.loadModule();
 
 		if (!migrationModule.down) {
 			logger.warn(`Couldn't find the "down" function from migration ${migration.file}`);
@@ -170,7 +160,7 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 	}
 
 	async function latest() {
-		const pending = migrations.filter((migration) => migration.completed === false);
+		const pending = pendingMigrations;
 
 		if (pending.length === 0) {
 			return;
@@ -183,7 +173,7 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 
 		try {
 			for (const migration of pending) {
-				const migrationModule = await loadMigration(migration.file);
+				const migrationModule = await migration.loadModule();
 
 				const declared = declaredScope(migrationModule, migration.file);
 
@@ -329,13 +319,9 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 		}
 	}
 
-	async function loadMigration(file: string): Promise<MigrationModule> {
-		return getModuleDefault<MigrationModule>(await import(`file://${file}`));
-	}
-
 	async function applyUp(
 		migrationModule: MigrationModule,
-		migration: ReturnType<typeof parseFilePath>,
+		migration: ListedMigration,
 		connection: Knex,
 	) {
 		if (!migrationModule.up) {
@@ -350,4 +336,21 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 			.insert({ version: migration.version, name: migration.name })
 			.into('directus_migrations');
 	}
+}
+
+/**
+ * A bundle's migration is versioned `<bundle>:<date>`, so a row the list does
+ * not hold names the bundle that applied it.
+ */
+function describeMissingMigration(version: string): string {
+	const separatorIndex = String(version).lastIndexOf(':');
+
+	if (separatorIndex === -1) {
+		return "Couldn't find migration";
+	}
+
+	const bundleName = version.slice(0, separatorIndex);
+
+	return `Migration ${JSON.stringify(version)} was applied by`
+		+ ` ${JSON.stringify(bundleName)}, which is not installed`;
 }

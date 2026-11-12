@@ -11,7 +11,7 @@ import { awaitRequestedReap } from '@utils/await-requested-reap';
 import { redisCommand } from '@utils/redis-command';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -39,10 +39,13 @@ const HELD_SLOT = 'window';
 const REDIS_PORT = 6108;
 const cacheStatusHeader = 'x-cache-status';
 
-// Enough members that the purge's pass over the set is seconds. Planted straight
-// into it, in the set's own grammar: a member naming a slice no write touches is
-// read and compared like any other, and reading it is the cost this needs.
-const decoyMemberCount = 120_000;
+// Enough members that the purge's pass over the set outlasts the held reads:
+// the pass costs 6-26 µs a member across CI runners, so 120k ran 742 ms on
+// the fastest, under the 900 ms the reads need; 360k clears it by more than
+// twice. Planted straight into it, in the set's own grammar: a member naming
+// a slice no write touches is read and compared like any other, and reading
+// it is the cost this needs.
+const decoyMemberCount = 360_000;
 const decoyChunkSize = 4_000;
 
 // How long the hook holds a read after its query. Its fill lands this far after the
@@ -87,6 +90,12 @@ describe(oneLine`
 		// this one. Nothing in here ever records a pending purge, so it loses nothing.
 		env[vendor]['CACHE_SCOPED_PURGE_RETRY_INTERVAL'] = '0';
 
+		// Once a year: the default reap ticks on the hour, and a tick inside
+		// the purge walks the decoys, each naming no entry, and bumps the counter
+		// the held reads check, so every fill declines to cache. The reaps the
+		// clears ask for are the only ones, and the test waits them out.
+		env[vendor]['CACHE_SCOPED_INDEX_REAP_SCHEDULE'] = '0 0 1 1 *';
+
 		// The instance that purges, and the one that reads while it does. Same Redis,
 		// same database, separate event loops — which is the whole point.
 		let sweeperInstance: ChildProcess;
@@ -129,7 +138,7 @@ describe(oneLine`
 				item: [{ slot: HELD_SLOT, label: 'v1' }],
 			});
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			sweeperInstance = spawn('node', [paths.cli, 'start'], {
@@ -146,7 +155,7 @@ describe(oneLine`
 
 			rowId = seeded.body.data[0].id;
 
-			const readerPort = await getPort();
+			const readerPort = await freePortOfWorker();
 			readerEnv[vendor].PORT = String(readerPort);
 
 			readerInstance = spawn('node', [paths.cli, 'start'], {
@@ -372,7 +381,7 @@ describe(oneLine`
 		}, 120_000);
 
 		it(oneLine`
-			a collection-wide purge of a set holding 120k reads never holds Redis for
+			a collection-wide purge of a set holding 360k reads never holds Redis for
 			10 ms, and leaves no index set behind
 		`, async () => {
 			await plantDecoys(heldIndexKey);
@@ -381,7 +390,7 @@ describe(oneLine`
 			// cannot pass for a stall. The slowlog keeps every command slower than
 			// 10 ms — set here, not trusted to the image's default, since a higher
 			// threshold would pass this with nothing measured. Only the ones naming an
-			// index set count, since the purge also drops the 120k cache keys the
+			// index set count, since the purge also drops the 360k cache keys the
 			// decoys name.
 			expect(await redisCommand(REDIS_PORT, [
 				'CONFIG',

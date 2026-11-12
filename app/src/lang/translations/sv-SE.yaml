@@ -1091,7 +1091,6 @@ install_extension: Installera tillägg
 uninstall: Avinstallera
 installed: Installerad
 reinstall: Installera om
-source_local: Lokal
 source_module: Nodmodul
 collection: Kollektion
 collections: Kollektioner

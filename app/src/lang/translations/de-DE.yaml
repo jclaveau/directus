@@ -1223,7 +1223,6 @@ installed: Installiert
 reinstall: Neu installieren
 open_in_marketplace: Im Marketplace öffnen
 source_registry: Marketplace
-source_local: Lokal
 source_module: Node Module
 collection: Sammlung
 collections: Sammlungen

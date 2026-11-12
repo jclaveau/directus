@@ -6,7 +6,7 @@ import { TEST_USERS, USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { sleep } from '@utils/sleep';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import knex, { Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
@@ -44,7 +44,7 @@ function describeAuthScenarios(
 			for (const vendor of vendors) {
 				databases.set(vendor, knex(config.knexConfig[vendor]));
 
-				const newServerPort = await getPort();
+				const newServerPort = await freePortOfWorker();
 
 				env[vendor]['WEBSOCKETS_REST_AUTH'] = authMethod;
 				env[vendor]['WEBSOCKETS_REST_AUTH_TIMEOUT'] = String(authenticationTimeoutSeconds);

@@ -2,7 +2,7 @@ import config from '@common/config';
 import {
 	CreateCollections,
 	CreateFieldM2O,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import knex from 'knex';
@@ -19,11 +19,23 @@ export const seedDBStructure = () => {
 		'%s',
 		async (vendor) => {
 			try {
-				await DeleteCollection(vendor, { collection: collectionGrouped });
-				await DeleteCollection(vendor, { collection: collectionGroupedLog });
-				await DeleteCollection(vendor, { collection: collectionGroupedOwner });
-				await DeleteCollection(vendor, { collection: collectionGroupedSlot });
-				await DeleteCollection(vendor, { collection: collectionGroupedBadge });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionGrouped });
+
+				await DeleteCollectionIfPresent(vendor, {
+					collection: collectionGroupedLog,
+				});
+
+				await DeleteCollectionIfPresent(vendor, {
+					collection: collectionGroupedSlot,
+				});
+
+				await DeleteCollectionIfPresent(vendor, {
+					collection: collectionGroupedOwner,
+				});
+
+				await DeleteCollectionIfPresent(vendor, {
+					collection: collectionGroupedBadge,
+				});
 
 				await CreateCollections(vendor, {
 					collections: [
@@ -61,6 +73,12 @@ export const seedDBStructure = () => {
 								{ field: 'name', type: 'string', meta: {} },
 								{ field: 'holder', type: 'string', meta: {} },
 								{ field: 'slot', type: 'string', meta: {} },
+								{
+									field: 'label',
+									type: 'string',
+									meta: {},
+									schema: { default_value: 'unlabelled' },
+								},
 							],
 						},
 						{
@@ -89,6 +107,12 @@ export const seedDBStructure = () => {
 
 				await CreateFieldM2O(vendor, {
 					collection: collectionGrouped,
+					field: 'owner',
+					otherCollection: collectionGroupedOwner,
+				});
+
+				await CreateFieldM2O(vendor, {
+					collection: collectionGroupedSlot,
 					field: 'owner',
 					otherCollection: collectionGroupedOwner,
 				});

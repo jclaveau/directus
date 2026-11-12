@@ -4,7 +4,10 @@ import type {
 	FilterHandler,
 	InitHandler,
 	MutationEventContext,
+	WrittenEventContext,
 } from '@directus/types';
+import { InvalidPayloadError } from '@directus/errors';
+import { oneLine } from '@directus/utils';
 import EventEmitter2 from 'eventemitter2';
 import getDatabase from './database/index.js';
 import { useLogger } from './logger/index.js';
@@ -45,23 +48,7 @@ export class Emitter {
 		meta: Record<string, any>,
 		context: EventContext | MutationEventContext | null = null,
 	): Promise<TIn | TOut> {
-		const events = Array.isArray(event) ? event : [event];
-
-		const listenersOf = (filterEmitter: EventEmitter2) => {
-			return events.map((event) => {
-				return {
-					event,
-					listeners: filterEmitter.listeners(event) as FilterHandler<TIn, TOut>[],
-				};
-			});
-		};
-
-		// A last filter runs after every other filter of every event emitted, so it
-		// sees the payload all of them left.
-		const eventListeners = [
-			...listenersOf(this.filterEmitter),
-			...listenersOf(this.lastFilterEmitter),
-		];
+		const eventListeners = this.filterListenersOf<TIn, TOut>(event);
 
 		let updatedPayload: TIn | TOut = payload;
 
@@ -80,6 +67,64 @@ export class Emitter {
 		}
 
 		return updatedPayload;
+	}
+
+	/**
+	 * Hand every filter of these events the rows a mutation already wrote. No
+	 * answer has a reader, so a filter answering anything is refused, naming the
+	 * event it listens on.
+	 */
+	public async emitWrittenFilter(
+		event: string | string[],
+		payload: unknown,
+		meta: Record<string, any>,
+		context: WrittenEventContext,
+	): Promise<void> {
+		const eventListeners = this.filterListenersOf(event);
+
+		for (const { event: listenedEvent, listeners } of eventListeners) {
+			for (const listener of listeners) {
+				const answer = await listener(
+					payload,
+					{ event: listenedEvent, ...meta, originalPayload: payload },
+					context,
+				);
+
+				if (answer !== undefined) {
+					throw new InvalidPayloadError({
+						reason: oneLine`
+							A "${listenedEvent}" filter hook must return nothing: the rows are
+							already written
+						`,
+					});
+				}
+			}
+		}
+	}
+
+	/**
+	 * The filters of each event, then the last filters of each: a last filter
+	 * runs after every other filter of every event emitted, so it sees the
+	 * payload all of them left.
+	 */
+	private filterListenersOf<TIn = unknown, TOut = TIn>(event: string | string[]) {
+		const events = Array.isArray(event)
+			? event
+			: [event];
+
+		const listenersOf = (filterEmitter: EventEmitter2) => {
+			return events.map((event) => {
+				return {
+					event,
+					listeners: filterEmitter.listeners(event) as FilterHandler<TIn, TOut>[],
+				};
+			});
+		};
+
+		return [
+			...listenersOf(this.filterEmitter),
+			...listenersOf(this.lastFilterEmitter),
+		];
 	}
 
 	public hasFilterListeners(event: string | string[]): boolean {

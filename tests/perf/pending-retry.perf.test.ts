@@ -4,6 +4,10 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Redis from 'ioredis';
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import {
+	createExtensionPackage,
+	PURGE_EXTENSION_FOLDERS,
+} from './extension-package.js';
 
 /**
  * What retrying a recorded purge costs as the record grows
@@ -26,6 +30,8 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
  */
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+let extensionPackage: string;
 
 const cli = process.env['PERF_CLI'] ?? join(root, 'dist', 'cli');
 const adminToken = process.env['PERF_ADMIN_TOKEN'] ?? 'bench-admin-token';
@@ -106,7 +112,7 @@ async function startInstance(): Promise<ChildProcess> {
 			SERVE_APP: 'false',
 			LOG_LEVEL: 'warn',
 			TELEMETRY: 'false',
-			EXTENSIONS_PATH: join(root, 'tests', 'perf', 'purge-extensions'),
+			PACKAGE_FILE_LOCATION: extensionPackage,
 			PORT: String(instancePort),
 			PUBLIC_URL: base,
 			CACHE_ENABLED: 'true',
@@ -324,6 +330,8 @@ async function measureDrain(
 const measures: RetryMeasure[] = [];
 
 beforeAll(async () => {
+	extensionPackage = await createExtensionPackage(PURGE_EXTENSION_FOLDERS);
+
 	redis = new Redis(redisUrl);
 	instance = await startInstance();
 	await seedCollection();

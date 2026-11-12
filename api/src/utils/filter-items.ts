@@ -27,7 +27,9 @@ export function filterItems<T extends Item[]>(items: T, filter: Query['filter'])
 				return passesFilter(item, subFilter);
 			});
 		} else {
-			const schema = generateJoi(filter as FieldFilter);
+			// A Joi schema lets an absent key pass, but an item lacking the field the
+			// filter names doesn't match it, so every key along the path is required.
+			const schema = generateJoi(filter as FieldFilter, { requireAll: true });
 
 			const { error } = schema.validate(item);
 			return error === undefined;

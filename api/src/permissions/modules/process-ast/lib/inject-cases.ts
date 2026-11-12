@@ -1,7 +1,15 @@
-import type { Permission } from '@directus/types';
-import type { AST, FieldNode, FunctionFieldNode, NestedCollectionNode } from '../../../../types/ast.js';
-import { uniq } from '../../../../utils/lodash-es-used.js';
+import type { Filter, Permission, Query } from '@directus/types';
+import type {
+	AST,
+	FieldNode,
+	FunctionFieldNode,
+	M2ONode,
+	NestedCollectionNode,
+	O2MNode,
+} from '../../../../types/ast.js';
+import { isEqual, uniq, uniqWith } from '../../../../utils/lodash-es-used.js';
 import { getUnaliasedFieldKey } from '../../../utils/get-unaliased-field-key.js';
+import { getAggregateFieldCases } from './aggregate-field-cases.js';
 import { getCases } from './get-cases.js';
 
 /**
@@ -12,6 +20,41 @@ import { getCases } from './get-cases.js';
  */
 export function injectCases(ast: AST, permissions: Permission[]) {
 	ast.cases = processChildren(ast.name, ast.children, permissions);
+	injectAggregateCases(ast, ast.name, permissions);
+}
+
+function injectAggregateCases(
+	node: AST | M2ONode | O2MNode,
+	collection: string,
+	permissions: Permission[],
+) {
+	const aggregateCases = aggregateCasesOf(
+		collection,
+		node.query,
+		permissions,
+		node.cases,
+	);
+
+	if (aggregateCases.length > 0) {
+		node.aggregateCases = aggregateCases;
+	}
+}
+
+function aggregateCasesOf(
+	collection: string,
+	query: Query | undefined,
+	permissions: Permission[],
+	cases: Filter[],
+): Filter[] {
+	const aggregatedFields = uniq(Object.values(query?.aggregate ?? {}).flat())
+		.filter((field) => field !== '*');
+
+	return uniqWith(
+		aggregatedFields.flatMap((field) => {
+			return getAggregateFieldCases(collection, field, { cases, permissions });
+		}),
+		isEqual,
+	);
 }
 
 function processChildren(
@@ -51,15 +94,31 @@ function processChildren(
 
 		if (child.type === 'm2o') {
 			child.cases = processChildren(child.relation.related_collection!, child.children, permissions);
+			injectAggregateCases(child, child.relation.related_collection!, permissions);
 		}
 
 		if (child.type === 'o2m') {
 			child.cases = processChildren(child.relation.collection, child.children, permissions);
+			injectAggregateCases(child, child.relation.collection, permissions);
 		}
 
 		if (child.type === 'a2o') {
 			for (const collection of child.names) {
 				child.cases[collection] = processChildren(collection, child.children[collection] ?? [], permissions);
+
+				const aggregateCases = aggregateCasesOf(
+					collection,
+					child.query[collection],
+					permissions,
+					child.cases[collection]!,
+				);
+
+				if (aggregateCases.length > 0) {
+					child.aggregateCases = {
+						...child.aggregateCases,
+						[collection]: aggregateCases,
+					};
+				}
 			}
 		}
 

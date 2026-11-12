@@ -17,6 +17,11 @@ const schema = new SchemaBuilder()
 	.collection('pk_uuid', (c) => {
 		c.field('id').uuid().primary();
 	})
+	.collection('pk_string', (c) => {
+		c.field('id')
+			.string()
+			.primary();
+	})
 	.build();
 
 describe('validate keys', () => {
@@ -198,6 +203,38 @@ describe('validate keys', () => {
 			expect(() =>
 				validateKeys(schema, 'pk_uuid', 'id', [randomUUID(), randomUUID(), randomUUID()]),
 			).not.toThrowError();
+		});
+	});
+
+	describe('of string type', () => {
+		it.each([
+			[
+				undefined,
+				'Primary key of "pk_string" must be a "string" instead of undefined',
+			],
+			[
+				null,
+				'Primary key of "pk_string" must be a "string" instead of null',
+			],
+		])('refuses a missing key: %s', (key, reason) => {
+			expect(() => validateKeys(schema, 'pk_string', 'id', key as never))
+				.toThrow(new InvalidPayloadError({ reason }));
+		});
+
+		it('refuses a missing key in an array', () => {
+			const keysMissingOne = ['k1', undefined] as never;
+
+			expect(() => validateKeys(schema, 'pk_string', 'id', keysMissingOne))
+				.toThrow(new InvalidPayloadError({
+					reason: oneLine`
+						Primary key of "pk_string" must be a "string" instead of
+						undefined
+					`,
+				}));
+		});
+
+		it.each(['k5', ''])('accepts a key the database can store: %j', (key) => {
+			expect(() => validateKeys(schema, 'pk_string', 'id', key)).not.toThrow();
 		});
 	});
 });

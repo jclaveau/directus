@@ -10,11 +10,18 @@ import type {
 } from '../../shared/types/index.js';
 
 export function generateExtensionsEntrypoint(
-	extensionMaps: { local: Map<string, Extension>; registry: Map<string, Extension>; module: Map<string, Extension> },
+	extensionMaps: Record<string, Map<string, Extension>>,
 	settings: ExtensionSettings[],
 ): string {
 	const appOrHybridExtensions: (AppExtension | HybridExtension)[] = [];
 	const bundleExtensions: BundleExtension[] = [];
+
+	const codeBundles: {
+		source: string;
+		folder: string;
+		extension: BundleExtension;
+		disabledNames: string[];
+	}[] = [];
 
 	for (const [source, extensions] of Object.entries(extensionMaps)) {
 		for (const [folder, extension] of extensions.entries()) {
@@ -26,7 +33,22 @@ export function generateExtensionsEntrypoint(
 				appOrHybridExtensions.push(extension as AppExtension | HybridExtension);
 			}
 
-			if (extension.type === 'bundle') {
+			if (extension.type === 'bundle' && extension.entriesFrom === 'code') {
+				// An entry without a row follows its bundle.
+				if (!settingsForExtension.enabled) {
+					continue;
+				}
+
+				const disabledNames = settings
+					.filter((setting) => {
+						return setting.bundle === settingsForExtension.id
+							&& setting.enabled === false;
+					})
+					.map((setting) => setting.folder);
+
+				codeBundles.push({ source, folder, extension, disabledNames });
+			}
+			else if (extension.type === 'bundle') {
 				const appBundle: BundleExtension = {
 					...extension,
 					entries: extension.entries.filter((entry) => {
@@ -75,6 +97,27 @@ export function generateExtensionsEntrypoint(
 			: '',
 	);
 
+	const codeBundleImports = codeBundles.map(({ extension, disabledNames }, i) => {
+		const apiEntries = extension.entries
+			.map(({ type, name }) => ({ type, name }));
+
+		const sharedNameError = `Bundle ${JSON.stringify(extension.name)} names `;
+
+		return `import bundleCode${i} from './${pathToRelativeUrl(
+			path.resolve(extension.path, extension.entrypoint.app),
+		)}';`
+			+ `const sharedName${i} = bundleCode${i}.entries.find((entry) => `
+			+ `${JSON.stringify(apiEntries)}`
+			+ `.some((apiEntry) => apiEntry.name === entry.name && `
+			// An operation is one entry with an app half and an api half.
+			+ `(apiEntry.type !== "operation" || entry.type !== "operation")));`
+			+ `if (sharedName${i}) console.error(${JSON.stringify(sharedNameError)} `
+			+ `+ JSON.stringify(sharedName${i}.name) + " on both sides");`
+			+ `const codeEntries${i} = sharedName${i} ? [] : `
+			+ `bundleCode${i}.entries.filter((entry) => `
+			+ `!${JSON.stringify(disabledNames)}.includes(entry.name));`;
+	});
+
 	const extensionExports = [...APP_EXTENSION_TYPES, ...HYBRID_EXTENSION_TYPES].map(
 		(type) =>
 			`export const ${pluralize(type)} = [${appOrHybridExtensions
@@ -87,8 +130,29 @@ export function generateExtensionsEntrypoint(
 						)
 						.filter((e): e is string => e !== null),
 				)
+				.concat(
+					codeBundles.map((_, i) => {
+						return `...codeEntries${i}.filter((entry) => `
+							+ `entry.type === ${JSON.stringify(type)})`
+							+ `.map((entry) => entry.config)`;
+					}),
+				)
 				.join(',')}];`,
 	);
 
-	return `${appOrHybridExtensionImports.join('')}${bundleExtensionImports.join('')}${extensionExports.join('')}`;
+	const bundleEntriesExport = codeBundles.length > 0
+		? `export const bundleEntries = [${codeBundles
+				.map(({ source, folder }, i) => {
+					return `{source:${JSON.stringify(source)},`
+						+ `folder:${JSON.stringify(folder)},`
+						+ `entries:bundleCode${i}.entries.map((entry) => `
+						+ `({type:entry.type,name:entry.name}))}`;
+				})
+				.join(',')}];`
+		: '';
+
+	return `${appOrHybridExtensionImports.join('')}`
+		+ `${bundleExtensionImports.join('')}`
+		+ `${codeBundleImports.join('')}`
+		+ `${extensionExports.join('')}${bundleEntriesExport}`;
 }

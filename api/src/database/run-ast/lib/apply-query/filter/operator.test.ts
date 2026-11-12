@@ -2,18 +2,13 @@ import { SchemaBuilder } from '@directus/schema-builder';
 import knex from 'knex';
 import { expect, test, vi } from 'vitest';
 import { Client_SQLite3 } from '../mock.js';
+import { applyOperator } from './operator.js';
 
 let aliasCount = 0;
 
 const aliasFn = vi.fn(() => {
 	return 'alias' + aliasCount++;
 });
-
-vi.doMock('nanoid/non-secure', () => ({
-	customAlphabet: () => aliasFn,
-}));
-
-const { applyOperator } = await import('./operator.js');
 
 for (const { field, operator, value, sql, bindings } of [
 	{
@@ -101,7 +96,15 @@ for (const { field, operator, value, sql, bindings } of [
 		const queryBuilder = db.queryBuilder();
 		aliasCount = 0;
 
-		applyOperator(db, queryBuilder, schema, field, operator, value);
+		applyOperator(
+			db,
+			queryBuilder,
+			schema,
+			field,
+			operator,
+			value,
+			aliasFn,
+		);
 
 		const rawQuery = queryBuilder.toSQL();
 

@@ -29,5 +29,13 @@ the code.
 - This is a standing ruling: no need to ask jean "fix or #610?" for a non-PG point.
 - The #330 (sqlite) / #331 (maria) trackers keep the per-dialect blackbox failures;
   #610 is for design/review points.
+- **A closed or superseded PR that leaves a SQLite or MariaDB/MySQL gap → link it
+  in that dialect's tracker (#330 / #331) AND as a numbered point in #610, without
+  asking** (#632 → #610 point 7): failure scenario, the
+  dialect's limit, what superseded it on PG, "reopen/cherry-pick when <dialect> is
+  supported again". The closing comment names the tracker link back. jean,
+  2026-10-26, on #632 (chunking made redundant on PG by knex#4; SQLite still caps
+  at 32766 binds): _"memorize to do it in the future for oos mysql / sqlite without
+  asking"_. Example comments: #330 issuecomment-6415191191, #331 -6415191586.
 
 Related: [[project_directus_deferred_dialects]], [[project_directus_trunk_full_vendor_matrix]].

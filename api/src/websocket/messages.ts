@@ -1,5 +1,10 @@
-import type { Item, Query } from '@directus/types';
-import { WebSocketMessage } from '@directus/types';
+import {
+	MutationBatchingModes,
+	NestedUpdateAnswers,
+	WebSocketMessage,
+	type Item,
+	type Query,
+} from '@directus/types';
 import { z } from 'zod';
 
 const zodStringOrNumber = z.union([z.string(), z.number()]);
@@ -73,6 +78,8 @@ export const WebSocketItemsMessage = z.union([
 		action: z.literal('create'),
 		data: z.union([z.array(ZodItem), ZodItem]),
 		query: z.custom<Query>().optional(),
+		mutationBatching: z.enum(MutationBatchingModes).optional(),
+		nestedUpdates: z.enum(NestedUpdateAnswers).optional(),
 	}),
 	PartialItemsMessage.extend({
 		action: z.literal('read'),
@@ -86,6 +93,8 @@ export const WebSocketItemsMessage = z.union([
 		ids: z.array(zodStringOrNumber).optional(),
 		id: zodStringOrNumber.optional(),
 		query: z.custom<Query>().optional(),
+		mutationBatching: z.enum(MutationBatchingModes).optional(),
+		nestedUpdates: z.enum(NestedUpdateAnswers).optional(),
 	}),
 	PartialItemsMessage.extend({
 		action: z.literal('delete'),

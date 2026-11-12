@@ -6,22 +6,21 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { collectionReadHookNull } from './read-hook-null.seed';
 
-// emitFilter propagates an `items.read` listener's return value verbatim, and
-// `readByQuery` casts it with an unchecked `as Item[]` — so a hook returning null
-// looks like it should make reads resolve to null. It does not: the last thing
-// `readByQuery` does is `withMeta(...)`, whose `Object.defineProperty` refuses a
-// non-object, so the read throws instead of answering.
+// emitFilter propagates an `items.read` listener's return value verbatim, so a
+// hook can hand `readByQuery` null or a lone object where the rows were. It
+// refuses either with a 500 rather than casting it to a list: an object filed as
+// the snapshot of every row an update touched is a revision `revert` would write
+// back onto the wrong item.
 //
-// That matters most where a read runs inside somebody else's transaction. The
-// snapshot `updateMany` takes for its revisions is one, and this pins what happens
-// there: the request fails and the write rolls back, rather than the update landing
-// with a corrupted revision beside it.
+// The snapshot `updateMany` takes for its revisions reads with `emitEvents: false`,
+// so no hook reaches it: the revision holds the row as stored. The read the hook
+// does reach is the route's own read-back, after the commit, so the request fails
+// with the write already in place.
 //
 // The read-null-hook extension supplies the hook, scoped to this collection and to
-// rows carrying the marker name so every other read here answers normally.
+// rows carrying a marker name so every other read here answers normally.
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
-const MARKER = 'read-returns-null';
 
 async function createRow(vendor: Vendor, name: string) {
 	const [row] = await CreateItem(vendor, {
@@ -64,44 +63,32 @@ async function revisionsFor(vendor: Vendor, id: number) {
 	return response.body.data as { id: number; data: unknown }[];
 }
 
-describe('an items.read hook returning null', () => {
+describe('an items.read hook answering with no list', () => {
 	describe.each(vendors)('%s', (vendor) => {
-		it('fails the update that snapshots its rows, and rolls it back', async () => {
-			const row = await createRow(vendor, 'starts-readable');
+		it.each([
+			{ answer: 'null', marker: 'read-returns-null' },
+			{ answer: 'an object', marker: 'read-returns-object' },
+		])(
+			'answering $answer fails the read-back of an update that committed',
+			async ({ marker }) => {
+				const row = await createRow(vendor, 'starts-readable');
 
-			// Creating the row already filed a revision of its own, so the check
-			// below is that the failed update added none — not that there are none.
-			const revisionsBefore = await revisionsFor(vendor, row.id);
+				// Creating the row already filed a revision of its own.
+				const revisionsBefore = await revisionsFor(vendor, row.id);
 
-			// Renaming it to the marker is what arms the hook: the snapshot read
-			// runs after the update, inside the transaction, so it sees the new
-			// name and the hook answers null for it.
-			const response = await renameViaBatch(vendor, row.id, MARKER);
+				// Renaming it to the marker is what arms the hook for the read-back.
+				const response = await renameViaBatch(vendor, row.id, marker);
 
-			// `withMeta` refuses the null before the caller ever sees it, and the
-			// throw is not caught anywhere between there and the request.
-			expect(response.statusCode).toEqual(500);
+				expect(response.statusCode).toEqual(500);
 
-			// The rename was inside the transaction the snapshot ran in, so it went
-			// back with it. Reading the row is safe: it never took the marker name,
-			// so the hook does not fire for it.
-			// The row and its revisions are two independent reads of the same
-			// rolled-back write.
-			const [after, revisionsAfter] = await Promise.all([
-				request(getUrl(vendor))
-					.get(`/items/${collectionReadHookNull}/${row.id}`)
-					.query({ fields: 'id,name' })
-					.set('Authorization', AUTH),
-				revisionsFor(vendor, row.id),
-			]);
+				// The row now answers the hook on every read, so its revision is what
+				// shows the write landed, holding the row and not the hook's answer.
+				const revisionsAfter = await revisionsFor(vendor, row.id);
 
-			expect(after.statusCode).toEqual(200);
-			expect(after.body.data).toEqual({ id: row.id, name: 'starts-readable' });
-
-			// And no revision was added — the block that writes them is the one
-			// that threw, and it went back with the rest of the transaction.
-			expect(revisionsAfter).toEqual(revisionsBefore);
-		});
+				expect(revisionsAfter).toHaveLength(revisionsBefore.length + 1);
+				expect(revisionsAfter.at(-1)!.data).toEqual({ id: row.id, name: marker });
+			},
+		);
 
 		it('leaves a row without the marker writing and reading normally', async () => {
 			const row = await createRow(vendor, 'stays-readable');

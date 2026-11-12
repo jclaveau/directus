@@ -29,11 +29,37 @@ export interface QueryItem<Schema, Item> extends Query<Schema, Item> {
 }
 
 /**
+ * How a create or an update batches its statements: `preserveMutationOrder`, the
+ * default unless the server's DEFAULT_MUTATION_BATCHING says otherwise, writes
+ * them in the order sent; `minimizeMutations` writes a run's updates before its
+ * creates; `disableBatching` writes one row at a time, each with its own hooks.
+ */
+export type MutationBatching =
+	| 'minimizeMutations'
+	| 'preserveMutationOrder'
+	| 'disableBatching';
+
+/**
+ * All query options with additional mutationBatching and nestedUpdates options
+ * for the create and update commands.
+ */
+export interface QueryMutation<Schema, Item> extends Query<Schema, Item> {
+	readonly mutationBatching?: MutationBatching | undefined;
+
+	/**
+	 * What a nested record carrying an existing row's key and more fields does:
+	 * `apply`, the default, updates that row; `refuse` refuses the mutation with
+	 * a 400; `skip` only names the row, leaving its fields as they are.
+	 */
+	readonly nestedUpdates?: 'apply' | 'refuse' | 'skip' | undefined;
+}
+
+/**
  * All query options with an additional onRepeatedPk option for updateItems and
  * updateItemsBatch: `refuse`, the default, refuses an update sending a row more
  * than once, `lastWins` writes every change in the order sent.
  */
-export interface QueryUpdate<Schema, Item> extends Query<Schema, Item> {
+export interface QueryUpdate<Schema, Item> extends QueryMutation<Schema, Item> {
 	readonly onRepeatedPk?: 'refuse' | 'lastWins' | undefined;
 }
 

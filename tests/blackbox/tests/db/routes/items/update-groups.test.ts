@@ -8,9 +8,14 @@ import {
 } from '@common/cucumber';
 import { CreateItem, CreatePermission } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
+import {
+	defineStatementCountsStep,
+	instanceUrlForFeature,
+} from '@common/query-audit-steps';
 import { USER } from '@common/variables';
 import { oneLine } from '@directus/utils';
 import { randomUUID } from 'crypto';
+import { pickBy } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeEach, describe, expect } from 'vitest';
 import {
@@ -33,7 +38,7 @@ type Update = {
 	rows: GroupedRow[];
 	malformedKey: string;
 	authorization: string;
-	response?: request.Response;
+	responses: request.Response[];
 };
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -110,6 +115,7 @@ describe.each(vendors)('%s', (vendor) => {
 	function defineSteps(
 		{ given, when, then, and }: StepFunctions,
 		update: Update,
+		instanceUrl: () => string,
 	) {
 		given.optional('the rows:', async (table: Record<string, string>[]) => {
 			update.rows = await CreateItem(vendor, {
@@ -216,21 +222,21 @@ describe.each(vendors)('%s', (vendor) => {
 		}
 
 		when.optional('the batch sends:', async (table: Record<string, string>[]) => {
-			update.response = await request(getUrl(vendor))
+			update.responses.push(await request(instanceUrl())
 				.patch(`/items/${update.collection}`)
 				.query({ fields: 'name,status', sort: 'id' })
 				.send(batchOf(table))
-				.set('Authorization', update.authorization);
+				.set('Authorization', update.authorization));
 		});
 
 		when.optional(
 			/^the batch sends, with onRepeatedPk "(.*)":$/,
 			async (onRepeatedPk: string, table: Record<string, string>[]) => {
-				update.response = await request(getUrl(vendor))
+				update.responses.push(await request(instanceUrl())
 					.patch(`/items/${update.collection}`)
 					.query({ fields: 'name,status', sort: 'id', onRepeatedPk })
 					.send(batchOf(table))
-					.set('Authorization', update.authorization);
+					.set('Authorization', update.authorization));
 			},
 		);
 
@@ -240,13 +246,13 @@ describe.each(vendors)('%s', (vendor) => {
 				const sentChanges = batchOf(table);
 				const lastChange = sentChanges.at(-1)!;
 
-				update.response = await request(getUrl(vendor))
+				update.responses.push(await request(instanceUrl())
 					.patch(`/items/${update.collection}`)
 					.send([
 						...sentChanges.slice(0, -1),
 						{ ...lastChange, id: String(lastChange.id).toUpperCase() },
 					])
-					.set('Authorization', update.authorization);
+					.set('Authorization', update.authorization));
 			},
 		);
 
@@ -256,13 +262,13 @@ describe.each(vendors)('%s', (vendor) => {
 				const sentChanges = batchOf(table);
 				const lastChange = sentChanges.at(-1)!;
 
-				update.response = await request(getUrl(vendor))
+				update.responses.push(await request(instanceUrl())
 					.patch(`/items/${update.collection}`)
 					.send([
 						...sentChanges.slice(0, -1),
 						{ ...lastChange, id: `0${lastChange.id}` },
 					])
-					.set('Authorization', update.authorization);
+					.set('Authorization', update.authorization));
 			},
 		);
 
@@ -272,7 +278,7 @@ describe.each(vendors)('%s', (vendor) => {
 				onRepeatedPk: string | undefined,
 				table: Record<string, string>[],
 			) => {
-				update.response = await request(getUrl(vendor))
+				update.responses.push(await request(instanceUrl())
 					.post('/graphql')
 					.send({
 						query: `
@@ -287,7 +293,7 @@ describe.each(vendors)('%s', (vendor) => {
 						`,
 						variables: { rows: batchOf(table) },
 					})
-					.set('Authorization', update.authorization);
+					.set('Authorization', update.authorization));
 			},
 		);
 
@@ -297,7 +303,7 @@ describe.each(vendors)('%s', (vendor) => {
 				onRepeatedPk: string | undefined,
 				table: Record<string, string>[],
 			) => {
-				update.response = await request(getUrl(vendor))
+				update.responses.push(await request(instanceUrl())
 					.post('/graphql/system')
 					.send({
 						query: `
@@ -312,20 +318,20 @@ describe.each(vendors)('%s', (vendor) => {
 						`,
 						variables: { rows: batchOf(table) },
 					})
-					.set('Authorization', AUTH);
+					.set('Authorization', AUTH));
 			},
 		);
 
 		when.optional('the OAS is read', async () => {
-			update.response = await request(getUrl(vendor))
+			update.responses.push(await request(instanceUrl())
 				.get('/server/specs/oas')
-				.set('Authorization', AUTH);
+				.set('Authorization', AUTH));
 		});
 
 		when.optional(
 			'the batch sends the slots:',
 			async (table: Record<string, string>[]) => {
-				update.response = await request(getUrl(vendor))
+				update.responses.push(await request(instanceUrl())
 					.patch(`/items/${update.collection}`)
 					.send(parseGherkinTable<{ name: string; slot: string }>(table)
 						.map((change) => {
@@ -334,89 +340,125 @@ describe.each(vendors)('%s', (vendor) => {
 								slot: change.slot,
 							};
 						}))
-					.set('Authorization', update.authorization);
+					.set('Authorization', update.authorization));
+			},
+		);
+
+		when.optional(
+			'the batch sends the owners, a blank one as null:',
+			async (table: Record<string, string>[]) => {
+				update.responses.push(await request(instanceUrl())
+					.patch(`/items/${update.collection}`)
+					.send(parseGherkinTable<{ name: string; owner: number | null }>(table)
+						.map((change) => {
+							return {
+								id: update.rows.find((row) => row.name === change.name)!.id,
+								owner: change.owner,
+							};
+						}))
+					.set('Authorization', update.authorization));
+			},
+		);
+
+		// A blank cell leaves that field out of the row's change.
+		when.optional(
+			'the batch sends the slots and labels:',
+			async (table: Record<string, string>[]) => {
+				update.responses.push(await request(instanceUrl())
+					.patch(`/items/${update.collection}`)
+					.send(parseGherkinTable<{
+						name: string;
+						slot: string | null;
+						label: string | null;
+					}>(table).map(({ name, ...fields }) => {
+						return {
+							id: update.rows.find((row) => row.name === name)!.id,
+							...pickBy(fields, (value) => value !== null),
+						};
+					}))
+					.set('Authorization', update.authorization));
 			},
 		);
 
 		when.optional(
 			/^the rows are updated to the status "(.*)"$/,
 			async (status: string) => {
-				update.response = await request(getUrl(vendor))
+				update.responses.push(await request(instanceUrl())
 					.patch(`/items/${collectionGrouped}`)
 					.send({ keys: update.rows.map((row) => row.id), data: { status } })
-					.set('Authorization', update.authorization);
+					.set('Authorization', update.authorization));
 			},
 		);
 
 		when.optional(
 			/^the rows are sent twice, updated to the status "(.*)"$/,
 			async (status: string) => {
-				update.response = await request(getUrl(vendor))
+				update.responses.push(await request(instanceUrl())
 					.patch(`/items/${collectionGrouped}`)
 					.send({
 						keys: update.rows.flatMap((row) => [row.id, row.id]),
 						data: { status },
 					})
-					.set('Authorization', update.authorization);
+					.set('Authorization', update.authorization));
 			},
 		);
 
 		when.optional(
 			/^a malformed key is updated to the status "(.*)"$/,
 			async (status: string) => {
-				update.response = await request(getUrl(vendor))
+				update.responses.push(await request(instanceUrl())
 					.patch(`/items/${collectionGrouped}`)
 					.send({ keys: [update.malformedKey], data: { status } })
-					.set('Authorization', AUTH);
+					.set('Authorization', AUTH));
 			},
 		);
 
 		when.optional(
 			/^no row is updated to the status "(.*)"$/,
 			async (status: string) => {
-				update.response = await request(getUrl(vendor))
+				update.responses.push(await request(instanceUrl())
 					.patch(`/items/${collectionGrouped}`)
 					.send({ keys: [], data: { status } })
-					.set('Authorization', AUTH);
+					.set('Authorization', AUTH));
 			},
 		);
 
 		when.optional(
 			/^the rows are updated to point at a new owner named "(.*)"$/,
 			async (ownerName: string) => {
-				update.response = await request(getUrl(vendor))
+				update.responses.push(await request(instanceUrl())
 					.patch(`/items/${collectionGrouped}`)
 					.send({
 						keys: update.rows.map((row) => row.id),
 						data: { owner: { name: ownerName } },
 					})
-					.set('Authorization', update.authorization);
+					.set('Authorization', update.authorization));
 			},
 		);
 
 		when.optional(
 			'the users batch sends:',
 			async (table: Record<string, string>[]) => {
-				update.response = await request(getUrl(vendor))
+				update.responses.push(await request(instanceUrl())
 					.patch('/users')
 					.send(batchOf(table))
-					.set('Authorization', AUTH);
+					.set('Authorization', AUTH));
 			},
 		);
 
 		then.optional('the update succeeds', () => {
-			expect(update.response!.statusCode).toEqual(200);
+			expect(update.responses[0]!.statusCode).toEqual(200);
 		});
 
 		then.optional('the update answers:', (table: Record<string, string>[]) => {
-			expect(update.response!.statusCode).toEqual(200);
-			expect(update.response!.body.data).toEqual(parseGherkinTable(table));
+			expect(update.responses[0]!.statusCode).toEqual(200);
+			expect(update.responses[0]!.body.data).toEqual(parseGherkinTable(table));
 		});
 
 		then.optional(
 			/^the grouped (filter|action) carries:$/,
 			async (phase: string, table: Record<string, string>[]) => {
-				expect(update.response!.statusCode).toEqual(200);
+				expect(update.responses[0]!.statusCode).toEqual(200);
 
 				// Every grouped event of the scenario, so a second one fails the
 				// comparison.
@@ -438,9 +480,9 @@ describe.each(vendors)('%s', (vendor) => {
 		then.optional(
 			'the update is refused with the message:',
 			(docString: string) => {
-				expect(update.response!.statusCode).toEqual(400);
+				expect(update.responses[0]!.statusCode).toEqual(400);
 
-				expect(update.response!.body.errors[0].message)
+				expect(update.responses[0]!.body.errors[0].message)
 					.toEqual(messageOfDocString(docString, (rowName) => {
 						return update.rows.find((row) => row.name === rowName)!.id;
 					}));
@@ -448,16 +490,16 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		then.optional('the GraphQL update succeeds', () => {
-			expect(update.response!.statusCode).toEqual(200);
-			expect(update.response!.body.errors).toBeUndefined();
+			expect(update.responses[0]!.statusCode).toEqual(200);
+			expect(update.responses[0]!.body.errors).toBeUndefined();
 		});
 
 		then.optional(
 			'the GraphQL update is refused with the message:',
 			(docString: string) => {
-				expect(update.response!.statusCode).toEqual(200);
+				expect(update.responses[0]!.statusCode).toEqual(200);
 
-				expect(update.response!.body.errors[0].message)
+				expect(update.responses[0]!.body.errors[0].message)
 					.toEqual(messageOfDocString(docString, (rowName) => {
 						return update.rows.find((row) => row.name === rowName)!.id;
 					}));
@@ -468,13 +510,13 @@ describe.each(vendors)('%s', (vendor) => {
 		then.optional(
 			'the GraphQL query is rejected with the message:',
 			(docString: string) => {
-				expect(update.response!.statusCode).toEqual(400);
+				expect(update.responses[0]!.statusCode).toEqual(400);
 
-				expect(update.response!.body.errors[0].extensions.code)
+				expect(update.responses[0]!.body.errors[0].extensions.code)
 					.toEqual('GRAPHQL_VALIDATION');
 
 				expect(
-					update.response!.body.errors[0].extensions.errors[0].message,
+					update.responses[0]!.body.errors[0].extensions.errors[0].message,
 				).toEqual(messageOfDocString(docString, (rowName) => {
 						return update.rows.find((row) => row.name === rowName)!.id;
 					}));
@@ -484,7 +526,7 @@ describe.each(vendors)('%s', (vendor) => {
 		then.optional(
 			"the collection's update references the OnRepeatedPk parameter",
 			() => {
-				const specDocument = update.response!.body;
+				const specDocument = update.responses[0]!.body;
 
 				expect(specDocument.paths[`/items/${update.collection}`].patch.parameters)
 					.toEqual([
@@ -496,12 +538,13 @@ describe.each(vendors)('%s', (vendor) => {
 						{ $ref: '#/components/parameters/Filter' },
 						{ $ref: '#/components/parameters/Search' },
 						{ $ref: '#/components/parameters/OnRepeatedPk' },
+						{ $ref: '#/components/parameters/MutationBatching' },
 					]);
 			},
 		);
 
 		and.optional('the OAS describes the OnRepeatedPk parameter', () => {
-			expect(update.response!.body.components.parameters.OnRepeatedPk)
+			expect(update.responses[0]!.body.components.parameters.OnRepeatedPk)
 				.toEqual({
 					name: 'onRepeatedPk',
 					// The spec's folded scalar keeps its last line break.
@@ -523,7 +566,7 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 
 		and.optional(/^the refusal's code is "(.*)"$/, (code: string) => {
-			expect(update.response!.body.errors[0].extensions.code).toEqual(code);
+			expect(update.responses[0]!.body.errors[0].extensions.code).toEqual(code);
 		});
 
 		and.optional('the rows hold:', async (table: Record<string, string>[]) => {
@@ -546,6 +589,20 @@ describe.each(vendors)('%s', (vendor) => {
 				.query({
 					'filter[id][_in]': update.rows.map((row) => row.id).join(','),
 					fields: 'name,holder,slot',
+					sort: 'id',
+				})
+				.set('Authorization', AUTH);
+
+			expect(response.statusCode).toEqual(200);
+			expect(response.body.data).toEqual(parseGherkinTable(table));
+		});
+
+		and.optional('the labels hold:', async (table: Record<string, string>[]) => {
+			const response = await request(getUrl(vendor))
+				.get(`/items/${update.collection}`)
+				.query({
+					'filter[id][_in]': update.rows.map((row) => row.id).join(','),
+					fields: 'name,label',
 					sort: 'id',
 				})
 				.set('Authorization', AUTH);
@@ -648,7 +705,11 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 			},
 		);
+
+		defineStatementCountsStep(and, vendor, update.responses);
 	}
+
+	const instanceUrl = instanceUrlForFeature(feature, vendor);
 
 	defineFeature(feature, (scenario) => {
 		for (const title of [
@@ -664,6 +725,15 @@ describe.each(vendors)('%s', (vendor) => {
 				a batch hands a slot over when a row frees it before the next takes
 				it
 			`,
+			oneLine`
+				a batch hands a slot over to a row stored before the one freeing it
+			`,
+			oneLine`
+				a batch taking a slot its holder still holds is refused, writing
+				nothing
+			`,
+			'a batch naming an owner that does not exist is refused',
+			'rows side by side changing different fields are each written',
 			oneLine`
 				a row a batch changes back and forth keeps the last change it was
 				sent
@@ -739,7 +809,8 @@ describe.each(vendors)('%s', (vendor) => {
 					rows: [],
 					malformedKey: 'not-a-key',
 					authorization: AUTH,
-				});
+					responses: [],
+				}, instanceUrl);
 			}, 60_000);
 		}
 	});

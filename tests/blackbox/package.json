@@ -9,8 +9,14 @@
 		"merge-coverage": "node merge-coverage.mjs",
 		"timings": "node setup/timings-summary.mjs"
 	},
+	"dependencies": {
+		"blackbox-extensions": "link:./extensions",
+		"code-entries-probe": "link:./extensions/code-entries-probe",
+		"extension-settings-probe": "link:./extensions/extension-settings-probe"
+	},
 	"devDependencies": {
 		"@directus/env": "workspace:*",
+		"@directus/errors": "workspace:*",
 		"@directus/schema": "workspace:*",
 		"@directus/tsconfig": "catalog:",
 		"@directus/types": "workspace:*",
@@ -23,6 +29,7 @@
 		"argon2": "0.45.1",
 		"autocannon": "8.0.0",
 		"axios": "1.18.1",
+		"express": "catalog:",
 		"get-port": "7.2.0",
 		"globby": "16.2.2",
 		"graphql-ws": "6.2.0",

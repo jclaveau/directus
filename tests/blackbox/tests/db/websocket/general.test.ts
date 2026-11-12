@@ -6,7 +6,7 @@ import { PRIMARY_KEY_TYPES, USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { sleep } from '@utils/sleep';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import knex, { Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
 import { randomUUID } from 'node:crypto';
@@ -30,8 +30,8 @@ describe('WebSocket General Tests', () => {
 
 			const env2 = cloneDeep(env1);
 
-			const newServerPort1 = await getPort();
-			const newServerPort2 = await getPort();
+			const newServerPort1 = await freePortOfWorker();
+			const newServerPort2 = await freePortOfWorker();
 
 			env1[vendor].PORT = String(newServerPort1);
 			env2[vendor].PORT = String(newServerPort2);

@@ -1226,7 +1226,6 @@ installed: 已安装
 reinstall: 重新安装
 open_in_marketplace: 在市场中打开
 source_registry: 扩展集市
-source_local: 本地
 source_module: Node模块
 collection: 数据模型
 collections: 数据模型

@@ -9,7 +9,8 @@ Feature: An update reaches its hooks as one grouped event
   key alone. The log is emptied before each scenario.
   `test_update_groups_owner` holds rows too, and no update hook listens to it.
   `test_update_groups_slot` lets a holder hold each slot once (a unique
-  `(holder, slot)`), and no update hook listens to it either.
+  `(holder, slot)`), and no update hook listens to it either. Its `label`
+  starts "unlabelled", and its `owner` points at `test_update_groups_owner`.
   `test_update_groups_badge` is keyed by uuid, and no update hook listens to
   it.
 
@@ -50,6 +51,13 @@ Feature: An update reaches its hooks as one grouped event
       | event        | phase  | count |
       | items.update | filter | 1     |
       | items.update | action | 1     |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 5      | 0      | 1      | 0      |
+      | 1       | test_update_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: a batch where every row writes nothing answers with every row
     Given the rows:
@@ -68,6 +76,11 @@ Feature: An update reaches its hooks as one grouped event
       | name   | status |
       | noop-a |        |
       | noop-b |        |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 3      | 0      | 0      | 0      |
+      | 1       | test_update_groups_log | 0      | 1      | 0      | 0      |
 
   Scenario: a batch answers with every row it was sent, no-op rows included
     Given the rows:
@@ -82,6 +95,13 @@ Feature: An update reaches its hooks as one grouped event
       | name     | status   |
       | noop-one |          |
       | noop-two | archived |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 4      | 0      | 1      | 0      |
+      | 1       | test_update_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: rows side by side carrying the same change are written together
     Given the rows:
@@ -98,6 +118,13 @@ Feature: An update reaches its hooks as one grouped event
       | status   | names               |
       | archived | ["next-a","next-b"] |
       | kept     | ["next-c"]          |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 5      | 0      | 1      | 0      |
+      | 1       | test_update_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: rows apart carrying the same change are written in the order sent
     Given the rows:
@@ -119,6 +146,13 @@ Feature: An update reaches its hooks as one grouped event
       | event        | phase  | count |
       | items.update | filter | 1     |
       | items.update | action | 1     |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 5      | 0      | 1      | 0      |
+      | 1       | test_update_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: a batch writes its revisions in the order it sends its rows
     Given the rows, in the collection no update hook listens to:
@@ -137,6 +171,12 @@ Feature: An update reaches its hooks as one grouped event
       | ordered-a |
       | ordered-b |
       | ordered-c |
+    And on postgres the requests ran these statements:
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups_owner | 2      | 0      | 1      | 0      |
 
   Scenario: a batch hands a slot over when a row frees it before the next takes it
     Given the rows, in the collection holding each slot once per holder:
@@ -155,6 +195,104 @@ Feature: An update reaches its hooks as one grouped event
       | hand-a | first  | open   |
       | hand-b | second | closed |
       | hand-c | second | open   |
+    And on postgres the requests ran these statements:
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_activity       | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions      | 0      | 1      | 0      | 0      |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups_slot | 2      | 0      | 1      | 0      |
+
+  Scenario: a batch hands a slot over to a row stored before the one freeing it
+    Given the rows, in the collection holding each slot once per holder:
+      | name   | holder   | slot |
+      | take-d | holder-d |      |
+      | free-d | holder-d | open |
+    When the batch sends the slots:
+      | name   | slot   |
+      | free-d | closed |
+      | take-d | open   |
+    Then the update succeeds
+    And the slots hold:
+      | name   | holder   | slot   |
+      | take-d | holder-d | open   |
+      | free-d | holder-d | closed |
+    And on postgres the requests ran these statements:
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_activity       | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions      | 0      | 1      | 0      | 0      |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups_slot | 2      | 0      | 1      | 0      |
+
+  Scenario: a batch taking a slot its holder still holds is refused, writing nothing
+    Given the rows, in the collection holding each slot once per holder:
+      | name    | holder         | slot |
+      | keep-e  | holder-e       | open |
+      | move-e  | holder-e       |      |
+      | other-e | holder-e-other |      |
+    When the batch sends the slots:
+      | name    | slot   |
+      | other-e | closed |
+      | move-e  | open   |
+    Then the update is refused with the message:
+      """
+      Value for field "holder, slot" in collection "test_update_groups_slot" has
+      to be unique.
+      """
+    And the slots hold:
+      | name    | holder         | slot |
+      | keep-e  | holder-e       | open |
+      | move-e  | holder-e       |      |
+      | other-e | holder-e-other |      |
+    And on postgres the requests ran these statements:
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_activity       | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions      | 0      | 1      | 0      | 0      |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups_slot | 1      | 0      | 3      | 0      |
+
+  Scenario: a batch naming an owner that does not exist is refused
+    Given the rows, in the collection holding each slot once per holder:
+      | name    | holder   | slot |
+      | owner-f | holder-f |      |
+      | ghost-f | holder-f | open |
+    When the batch sends the owners, a blank one as null:
+      | name    | owner  |
+      | owner-f |        |
+      | ghost-f | 999999 |
+    Then the update is refused with the message:
+      """
+      Invalid foreign key "999999" for field "owner" in collection
+      "test_update_groups_slot" (references "test_update_groups_owner").
+      """
+    And on postgres the requests ran these statements:
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups_slot | 0      | 0      | 1      | 0      |
+
+  Scenario: rows side by side changing different fields are each written
+    Given the rows, in the collection holding each slot once per holder:
+      | name  | holder   | slot |
+      | mix-g | holder-g |      |
+      | mix-h | holder-h |      |
+    When the batch sends the slots and labels:
+      | name  | slot | label  |
+      | mix-g | open |        |
+      | mix-h |      | tagged |
+    Then the update succeeds
+    And the slots hold:
+      | name  | holder   | slot |
+      | mix-g | holder-g | open |
+      | mix-h | holder-h |      |
+    And the labels hold:
+      | name  | label      |
+      | mix-g | unlabelled |
+      | mix-h | tagged     |
+    And on postgres the requests ran these statements:
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_activity       | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions      | 0      | 2      | 0      | 0      |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups_slot | 3      | 0      | 2      | 0      |
 
   Scenario: a row a batch changes back and forth keeps the last change it was sent
     Given the rows:
@@ -169,6 +307,13 @@ Feature: An update reaches its hooks as one grouped event
     And the rows hold:
       | name       | status   |
       | back-forth | archived |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 3      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 3      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 7      | 0      | 3      | 0      |
+      | 1       | test_update_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: a row a non-admin sends twice with one change is checked and written once
     Given the rows:
@@ -185,6 +330,17 @@ Feature: An update reaches its hooks as one grouped event
     And the rows hold:
       | name  | status   |
       | twice | archived |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_access        | 3      | 0      | 0      | 0      |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_permissions   | 4      | 0      | 0      | 0      |
+      | 1       | directus_policies      | 1      | 0      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_roles         | 1      | 0      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 5      | 0      | 1      | 0      |
+      | 1       | test_update_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: a batch sending a row twice is refused before any update hook runs
     Given the rows:
@@ -207,6 +363,9 @@ Feature: An update reaches its hooks as one grouped event
       | repeat-a |        |
       | repeat-b |        |
     And no update event was logged
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a batch passing an unknown onRepeatedPk is refused before any hook
     Given the rows:
@@ -224,6 +383,9 @@ Feature: An update reaches its hooks as one grouped event
       | name      | status |
       | unknown-a |        |
     And no update event was logged
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a batch sending a uuid twice, once in capitals, is refused
     Given the rows, in the collection keyed by uuid:
@@ -242,6 +404,9 @@ Feature: An update reaches its hooks as one grouped event
     And the rows hold:
       | name    | status |
       | badge-a |        |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a batch sending a row twice, once with a leading zero, is refused
     Given the rows:
@@ -260,6 +425,9 @@ Feature: An update reaches its hooks as one grouped event
     And the rows hold:
       | name   | status |
       | zero-a |        |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a GraphQL batch sending a row twice is refused before any hook
     Given the rows:
@@ -279,6 +447,9 @@ Feature: An update reaches its hooks as one grouped event
       | name      | status |
       | gql-twice |        |
     And no update event was logged
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a GraphQL batch passing onRepeatedPk lastWins keeps the last change
     Given the rows:
@@ -292,6 +463,13 @@ Feature: An update reaches its hooks as one grouped event
     And the rows hold:
       | name     | status |
       | gql-last | kept   |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 2      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 5      | 0      | 2      | 0      |
+      | 1       | test_update_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: a GraphQL batch passing an unknown onRepeatedPk is refused
     Given the rows:
@@ -308,6 +486,9 @@ Feature: An update reaches its hooks as one grouped event
       | name        | status |
       | gql-unknown |        |
     And no update event was logged
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: the OAS describes onRepeatedPk on a collection's batch update
     When the OAS is read
@@ -325,6 +506,13 @@ Feature: An update reaches its hooks as one grouped event
     And the rows hold:
       | name     | status   |
       | same-key | archived |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 3      | 0      | 1      | 0      |
+      | 1       | test_update_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: a grouped hook answering with a row twice is refused, writing nothing
     Given the rows:
@@ -345,6 +533,11 @@ Feature: An update reaches its hooks as one grouped event
       | name     | status |
       | answer-a |        |
       | answer-b |        |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 3      | 0      | 0      | 0      |
+      | 1       | test_update_groups_log | 0      | 1      | 0      | 0      |
 
   Scenario: a grouped hook answering with one payload is refused, naming the helper
     Given the rows:
@@ -366,6 +559,10 @@ Feature: An update reaches its hooks as one grouped event
       | name     | status |
       | single-a |        |
       | single-b |        |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups_log | 0      | 1      | 0      | 0      |
 
   Scenario: a grouped hook dropping a key cancels that row, its sibling written
     Given the rows:
@@ -380,6 +577,13 @@ Feature: An update reaches its hooks as one grouped event
       | name   | status   |
       | drop-a |          |
       | drop-b | drop-key |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 3      | 0      | 1      | 0      |
+      | 1       | test_update_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: a grouped hook deleting a field off the list is refused, writing nothing
     Given the rows:
@@ -398,9 +602,13 @@ Feature: An update reaches its hooks as one grouped event
       """
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
-      | name    | status     |
-      | strip-a |            |
-      | strip-b |            |
+      | name    | status |
+      | strip-a |        |
+      | strip-b |        |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups_log | 0      | 1      | 0      | 0      |
 
   Scenario: a grouped hook reading a field off the list is refused, writing nothing
     Given the rows:
@@ -419,9 +627,13 @@ Feature: An update reaches its hooks as one grouped event
       """
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
-      | name    | status       |
-      | check-a |              |
-      | check-b |              |
+      | name    | status |
+      | check-a |        |
+      | check-b |        |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups_log | 0      | 1      | 0      | 0      |
 
   Scenario: a malformed key is refused before any update hook runs
     When a malformed key is updated to the status "archived"
@@ -432,11 +644,18 @@ Feature: An update reaches its hooks as one grouped event
       """
     And the refusal's code is "INVALID_PAYLOAD"
     And no update event was logged
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: an update naming no row runs no update hook
     When no row is updated to the status "archived"
     Then the update succeeds
     And no update event was logged
+    And on postgres the requests ran these statements:
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups | 1      | 0      | 0      | 0      |
 
   Scenario: a batch no update hook listens to is written as it was sent
     Given the rows, in the collection no update hook listens to:
@@ -460,6 +679,12 @@ Feature: An update reaches its hooks as one grouped event
       | bare-b | kept     |
       | bare-c | archived |
     And no update event was logged
+    And on postgres the requests ran these statements:
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups_owner | 2      | 0      | 1      | 0      |
 
   Scenario: a hook mapping its rows cancels one, its siblings written together
     Given the rows:
@@ -476,6 +701,13 @@ Feature: An update reaches its hooks as one grouped event
       | cancel-me |          |
       | c-two     | archived |
       | c-three   | archived |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 5      | 0      | 1      | 0      |
+      | 1       | test_update_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: a hook mapping its rows splits off the one it rewrote
     Given the rows:
@@ -493,6 +725,13 @@ Feature: An update reaches its hooks as one grouped event
       | d-one     | archived |
       | rewritten | archived |
       | d-three   | archived |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 2      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 6      | 0      | 2      | 0      |
+      | 1       | test_update_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: a hook mapping its rows takes one over, Directus writing the others
     Given the rows:
@@ -509,6 +748,13 @@ Feature: An update reaches its hooks as one grouped event
       | take-over-me | taken-over |
       | t-two        | archived   |
       | t-three      | archived   |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 5      | 0      | 2      | 0      |
+      | 1       | test_update_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: a nested owner sent to several rows a hook maps is created once
     Given the rows:
@@ -518,6 +764,14 @@ Feature: An update reaches its hooks as one grouped event
     When the rows are updated to point at a new owner named "shared-owner"
     Then the update succeeds
     And the rows point at the one owner named "shared-owner"
+    And on postgres the requests ran these statements:
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 2      | 1      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups       | 4      | 0      | 1      | 0      |
+      | 1       | test_update_groups_log   | 0      | 2      | 0      | 0      |
+      | 1       | test_update_groups_owner | 0      | 1      | 0      | 0      |
 
   Scenario: a row a hook adds to an update is written, left out of the answer
     Given the rows:
@@ -534,6 +788,13 @@ Feature: An update reaches its hooks as one grouped event
       | name          | status  |
       | added-by-hook | add-row |
       | add-one       | add-row |
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_update_groups     | 5      | 0      | 1      | 0      |
+      | 1       | test_update_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: a users batch sending a user twice is refused, no onRepeatedPk to pass
     Given the users:
@@ -551,6 +812,9 @@ Feature: An update reaches its hooks as one grouped event
     And the users hold:
       | first_name  | status |
       | repeat-user | active |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a GraphQL users batch sending a user twice is refused, naming no option
     Given the users:
@@ -568,6 +832,9 @@ Feature: An update reaches its hooks as one grouped event
     And the users hold:
       | first_name | status |
       | gql-user   | active |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a GraphQL users batch passing onRepeatedPk is rejected
     Given the users:
@@ -583,3 +850,6 @@ Feature: An update reaches its hooks as one grouped event
     And the users hold:
       | first_name  | status |
       | gql-lastwin | active |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |

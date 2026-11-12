@@ -183,3 +183,67 @@ export function validateHeaderNameEnv(key: string): void {
 		process.exit(1);
 	}
 }
+
+const UNREAD_VARIABLE_ADVICE: Record<string, string> = {
+	EXTENSIONS_PATH: 'extensions load only as the dependencies of the'
+		+ ' package.json in PACKAGE_FILE_LOCATION. Unset it.',
+};
+
+/**
+ * Refuse a variable this build does not read, set by a deployment configured
+ * for one that did.
+ */
+export function validateUnreadEnv(): void {
+	const env = useEnv();
+
+	for (const [key, advice] of Object.entries(UNREAD_VARIABLE_ADVICE)) {
+		if (env[key] === undefined) {
+			continue;
+		}
+
+		useLogger().error(
+			`${JSON.stringify(key)} Environment Variable is `
+				+ `${JSON.stringify(env[key])}, which this build does not read: `
+				+ `${advice}`,
+		);
+
+		process.exit(1);
+	}
+}
+
+/**
+ * Refuse `EXTENSIONS_AUTO_MIGRATE` where it cannot do what it says: it migrates
+ * on a watcher-triggered reload, so it needs `EXTENSIONS_AUTO_RELOAD`, and it
+ * applies a bundle's schema changes unreviewed, which production must not.
+ */
+export function validateAutoMigrateEnv(): void {
+	const env = useEnv();
+
+	validateBooleanEnv(['EXTENSIONS_AUTO_MIGRATE']);
+
+	if (env['EXTENSIONS_AUTO_MIGRATE'] !== true) {
+		return;
+	}
+
+	const nodeEnv = process.env['NODE_ENV'] || 'production';
+
+	if (nodeEnv === 'production') {
+		useLogger().error(
+			'"EXTENSIONS_AUTO_MIGRATE" Environment Variable is true while'
+				+ ` NODE_ENV is ${JSON.stringify(nodeEnv)}: production runs the`
+				+ ' migrations of its bundles with "directus database migrate:latest".',
+		);
+
+		process.exit(1);
+	}
+
+	if (env['EXTENSIONS_AUTO_RELOAD'] !== true) {
+		useLogger().error(
+			'"EXTENSIONS_AUTO_MIGRATE" Environment Variable is true while'
+				+ ' "EXTENSIONS_AUTO_RELOAD" is not: it migrates on the reload a'
+				+ ' change in a bundle triggers.',
+		);
+
+		process.exit(1);
+	}
+}

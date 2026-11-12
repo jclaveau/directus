@@ -37,11 +37,15 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import getDefaultValue from '../utils/get-default-value.js';
 import { getSystemFieldRowsWithAuthProviders } from '../utils/get-field-system-rows.js';
 import getLocalType from '../utils/get-local-type.js';
-import { getSchema } from '../utils/get-schema.js';
 import { isEqual, isNil, merge } from '../utils/lodash-es-used.js';
 import { withMeta } from '../utils/read-meta.js';
 import { sanitizeColumn } from '../utils/sanitize-schema.js';
+import {
+	clearCachesThenFireActions,
+	fireNestedActionEvents,
+} from '../utils/clear-caches-then-fire-actions.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { transaction } from '../utils/transaction.js';
 import { buildCollectionAndFieldRelations } from './fields/build-collection-and-field-relations.js';
 import { getCollectionMetaUpdates } from './fields/get-collection-meta-updates.js';
@@ -52,6 +56,19 @@ import { RelationsService } from './relations.js';
 
 const systemFieldRows = getSystemFieldRowsWithAuthProviders();
 const env = useEnv();
+
+// `emitEvents: false` still writes an activity row, whose action has to wait for
+// the field's commit, or for the caller's own hold.
+function holdActionEventIn(
+	nestedActionEvents: ActionEventParams[],
+	opts: MutationOptions | undefined,
+) {
+	return (actionEvent: ActionEventParams) => {
+		return opts?.bypassEmitAction
+			? opts.bypassEmitAction(actionEvent)
+			: nestedActionEvents.push(actionEvent);
+	};
+}
 
 export class FieldsService {
 	knex: Knex;
@@ -376,6 +393,8 @@ export class FieldsService {
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
 		const nestedActionEvents: ActionEventParams[] = [];
 
+		let mutationFailed = false;
+
 		try {
 			const exists =
 				field.field in this.schema.collections[collection]!.fields ||
@@ -397,7 +416,7 @@ export class FieldsService {
 				addFieldFlag(field, flagToAdd);
 			}
 
-			await transaction(this.knex, async (trx) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
 				const itemsService = new ItemsService('directus_fields', {
 					knex: trx,
 					accountability: this.accountability,
@@ -445,7 +464,10 @@ export class FieldsService {
 							collection: collection,
 							field: hookAdjustedField.field,
 						},
-						{ emitEvents: false },
+						{
+							emitEvents: false,
+							bypassEmitAction: holdActionEventIn(nestedActionEvents, opts),
+						},
 					);
 				}
 
@@ -469,27 +491,19 @@ export class FieldsService {
 					nestedActionEvents.push(actionEvent);
 				}
 			});
-		} finally {
-			if (runPostColumnChange) {
-				await this.helpers.schema.postColumnChange();
-			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
-
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+				runPostColumnChange,
+			);
 		}
 	}
 
@@ -503,11 +517,15 @@ export class FieldsService {
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
 		const nestedActionEvents: ActionEventParams[] = [];
 
+		const holdActionEvent = holdActionEventIn(nestedActionEvents, opts);
+
 		// 'type' is required for further checks on schema update
 		if (field.schema && !field.type) {
 			const existingType = this.schema.collections[collection]?.fields[field.field]?.type;
 			if (existingType) field.type = existingType;
 		}
+
+		let mutationFailed = false;
 
 		try {
 			const hookAdjustedField =
@@ -556,7 +574,10 @@ export class FieldsService {
 				if (!isEqual(columnToCompare, hookAdjustedField.schema)) {
 					try {
 						await transaction(this.knex, async (trx) => {
-							await trx.schema.alterTable(collection, async (table) => {
+							// Synchronous: knex never awaits the callback, so an async one
+							// turns a refused column into an unhandled rejection and a
+							// reported success.
+							await trx.schema.alterTable(collection, (table) => {
 								if (!hookAdjustedField.schema) return;
 								this.addColumnToTable(table, collection, field, existingColumn);
 							});
@@ -587,7 +608,7 @@ export class FieldsService {
 							collection: collection,
 							field: hookAdjustedField.field,
 						},
-						{ emitEvents: false },
+						{ emitEvents: false, bypassEmitAction: holdActionEvent },
 					);
 				} else {
 					await this.itemsService.createOne(
@@ -596,7 +617,7 @@ export class FieldsService {
 							collection: collection,
 							field: hookAdjustedField.field,
 						},
-						{ emitEvents: false },
+						{ emitEvents: false, bypassEmitAction: holdActionEvent },
 					);
 				}
 			}
@@ -622,32 +643,26 @@ export class FieldsService {
 			}
 
 			return field.field;
-		} finally {
-			if (runPostColumnChange) {
-				await this.helpers.schema.postColumnChange();
-			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
-
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+				runPostColumnChange,
+			);
 		}
 	}
 
 	async updateFields(collection: string, fields: RawField[], opts?: MutationOptions): Promise<string[]> {
 		const nestedActionEvents: ActionEventParams[] = [];
+
+		let mutationFailed = false;
 
 		try {
 			const fieldNames = [];
@@ -663,23 +678,18 @@ export class FieldsService {
 			}
 
 			return fieldNames;
-		} finally {
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+			);
 		}
 	}
 
@@ -692,6 +702,8 @@ export class FieldsService {
 
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
 		const nestedActionEvents: ActionEventParams[] = [];
+
+		let mutationFailed = false;
 
 		try {
 			if (opts?.emitEvents !== false) {
@@ -709,7 +721,7 @@ export class FieldsService {
 				);
 			}
 
-			await transaction(this.knex, async (trx) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
 				const relations = getRelations(this.schema.relations, collection, field);
 
 				const relationsService = new RelationsService({
@@ -828,7 +840,10 @@ export class FieldsService {
 							field: { _eq: field },
 						},
 					},
-					{ emitEvents: false },
+					{
+						emitEvents: false,
+						bypassEmitAction: holdActionEventIn(nestedActionEvents, opts),
+					},
 				);
 			});
 
@@ -850,27 +865,19 @@ export class FieldsService {
 			} else {
 				nestedActionEvents.push(actionEvent);
 			}
-		} finally {
-			if (runPostColumnChange) {
-				await this.helpers.schema.postColumnChange();
-			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
-
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-			}
-
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+				runPostColumnChange,
+			);
 		}
 	}
 
@@ -978,5 +985,30 @@ export class FieldsService {
 		if (existing) {
 			column.alter();
 		}
+	}
+
+	private async clearCachesThenFireNestedActions(
+		nestedActionEvents: ActionEventParams[],
+		mutationFailed: boolean,
+		opts?: MutationOptions,
+		runPostColumnChange = false,
+	): Promise<void> {
+		await clearCachesThenFireActions(
+			async () => {
+				if (runPostColumnChange) {
+					await this.helpers.schema.postColumnChange();
+				}
+
+				if (shouldClearCache(this.cache, opts)) {
+					await flushResponseCache(this.cache);
+				}
+
+				if (opts?.autoPurgeSystemCache !== false) {
+					await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
+				}
+			},
+			() => fireNestedActionEvents(nestedActionEvents, opts),
+			mutationFailed,
+		);
 	}
 }

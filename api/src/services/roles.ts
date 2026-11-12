@@ -1,16 +1,19 @@
 import { InvalidPayloadError } from '@directus/errors';
 import type {
 	AbstractServiceOptions,
+	ActionEventParams,
 	Item,
 	MutationOptions,
 	PrimaryKey,
 	UpdateGroup,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
-import { clearSystemCache } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache/index.js';
-import { transaction } from '../utils/transaction.js';
-import { ItemsService } from './items.js';
+import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
+import {
+	clearCachesThenFireActions,
+} from '../utils/clear-caches-then-fire-actions.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
+import { emitActionEvents, ItemsService } from './items.js';
 import { AccessService } from './access.js';
 import { PresetsService } from './presets.js';
 import { UsersService } from './users.js';
@@ -65,7 +68,16 @@ export class RolesService extends ItemsService {
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
-		await transaction(this.knex, async (trx) => {
+		const heldActionEvents: ActionEventParams[] = [];
+
+		const holdingOpts: MutationOptions = {
+			...opts,
+			bypassEmitAction: opts.bypassEmitAction ?? ((actionEvent) => {
+				heldActionEvents.push(actionEvent);
+			}),
+		};
+
+		await transactionHoldingActions(this.knex, heldActionEvents, async (trx) => {
 			const options: AbstractServiceOptions = {
 				knex: trx,
 				accountability: this.accountability,
@@ -80,18 +92,16 @@ export class RolesService extends ItemsService {
 
 			// Delete permissions/presets for this role, suspend all remaining users in role
 
-			await accessService.deleteByQuery(
-				{
-					filter: { role: { _in: keys } },
-				},
-				{ ...opts, bypassLimits: true },
+			await accessService.deleteRoleAccess(
+				keys,
+				{ ...holdingOpts, bypassLimits: true },
 			);
 
 			await presetsService.deleteByQuery(
 				{
 					filter: { role: { _in: keys } },
 				},
-				{ ...opts, bypassLimits: true },
+				{ ...holdingOpts, bypassLimits: true },
 			);
 
 			await usersService.updateByQuery(
@@ -102,7 +112,7 @@ export class RolesService extends ItemsService {
 					status: 'suspended',
 					role: null,
 				},
-				{ ...opts, bypassLimits: true },
+				{ ...holdingOpts, bypassLimits: true },
 			);
 
 			// If the about to be deleted roles are the parent of other roles set those parents to null
@@ -112,13 +122,18 @@ export class RolesService extends ItemsService {
 					filter: { parent: { _in: keys } },
 				},
 				{ parent: null },
+				{ bypassEmitAction: holdingOpts.bypassEmitAction },
 			);
 
-			await rolesItemsService.deleteMany(keys, opts);
+			await rolesItemsService.deleteMany(keys, holdingOpts);
 		});
 
 		// Since nested roles could be updated, clear caches
-		await this.clearCaches();
+		await clearCachesThenFireActions(
+			() => this.clearCaches(),
+			() => emitActionEvents(heldActionEvents, opts),
+			false,
+		);
 
 		return keys;
 	}
@@ -191,10 +206,6 @@ export class RolesService extends ItemsService {
 	}
 
 	private async clearCaches(opts?: MutationOptions) {
-		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-
-		if (this.cache && opts?.autoPurgeCache !== false) {
-			await flushResponseCache(this.cache);
-		}
+		await clearCachesAfterCommit(this.knex, this.cache, opts);
 	}
 }

@@ -9,9 +9,11 @@ import type {
 	Item,
 	MutationOptions,
 	PayloadAction,
-	PayloadServiceProcessRelationResult,
+	PayloadServiceProcessO2MResult,
+	PayloadServiceProcessRowsResult,
 	PrimaryKey,
 	Query,
+	Relation,
 	SchemaOverview,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
@@ -26,7 +28,9 @@ import { getHelpers } from '../database/helpers/index.js';
 import getDatabase from '../database/index.js';
 import { format, isValid, parseISO } from '../utils/date-fns-used.js';
 import { generateHash } from '../utils/generate-hash.js';
+import { isMissingPrimaryKey, isPrimaryKey } from '../utils/is-primary-key.js';
 import {
+	chunk,
 	clone,
 	cloneDeep,
 	isNil,
@@ -34,6 +38,25 @@ import {
 	isPlainObject,
 	pick,
 } from '../utils/lodash-es-used.js';
+import { primaryKeyNameOf } from '../utils/primary-key-name.js';
+import { resolveMutationBatching } from '../utils/resolve-mutation-batching.js';
+import { validateKeys } from '../utils/validate-keys.js';
+import type { ItemsService } from './items.js';
+
+// One read names at most this many keys, under every dialect's bind limit
+const RELATED_READ_CHUNK_SIZE = 10_000;
+
+// a record a row nests in one of its fields
+type NestedReference = { rowIndex: number; field: string };
+
+// a nested record carrying an existing row's key and more fields, under refuse
+function nestedUpdateRefusal(key: PrimaryKey, collection: string) {
+	return new InvalidPayloadError({
+		reason: `Record ${JSON.stringify(key)} of ${JSON.stringify(collection)}`
+			+ ' is nested with fields besides its key, refused by'
+			+ ' nestedUpdates=refuse',
+	});
+}
 
 type Transformers = {
 	[type: string]: (context: {
@@ -461,222 +484,556 @@ export class PayloadService {
 	}
 
 	/**
-	 * Recursively save/update all nested related Any-to-One items
+	 * Save/update the nested M2O and A2O items of several rows.
+	 *
+	 * Per related collection, the records the rows nest in any of its fields,
+	 * M2O or A2O, go through one upsertMany in payload order, and each payload
+	 * comes back with its record replaced by the record's key. A collection
+	 * another one references is written first. The collections of a foreign
+	 * key cycle are written one record at a time in payload order, as before
+	 * batching: no single collection order fits every batch inside a cycle.
 	 */
-	async processA2O(
-		data: Partial<Item>,
+	async processM2OAndA2O(
+		rows: Partial<Item>[],
 		opts?: MutationOptions,
-	): Promise<
-		PayloadServiceProcessRelationResult & {
-			payload: Partial<Item>;
-		}
-	> {
-		const relations = this.schema.relations.filter((relation) => {
-			return relation.collection === this.collection;
-		});
-
-		const revisions: PrimaryKey[] = [];
-		let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
-
-		const nestedActionEvents: ActionEventParams[] = [];
-
-		const payload = cloneDeep(data);
-
-		// Only process related records that are actually in the payload
-		const relationsToProcess = relations.filter((relation) => {
-			return relation.field in payload && isPlainObject(payload[relation.field]);
-		});
-
-		for (const relation of relationsToProcess) {
-			// If the required a2o configuration fields are missing, this is a m2o instead of an a2o
-			if (!relation.meta?.one_collection_field || !relation.meta?.one_allowed_collections) continue;
-
-			const relatedCollection = payload[relation.meta.one_collection_field];
-
-			if (!relatedCollection) {
-				throw new InvalidPayloadError({
-					reason: `Can't update nested record "${relation.collection}.${relation.field}" without field "${relation.collection}.${relation.meta.one_collection_field}" being set`,
-				});
-			}
-
-			const allowedCollections = relation.meta.one_allowed_collections;
-
-			if (allowedCollections.includes(relatedCollection) === false) {
-				throw new InvalidPayloadError({
-					reason: `"${relation.collection}.${relation.field}" can't be linked to collection "${relatedCollection}"`,
-				});
-			}
-
-			const { getService } = await import('../utils/get-service.js');
-
-			const service = getService(relatedCollection, {
-				accountability: this.accountability,
-				knex: this.knex,
-				schema: this.schema,
-				nested: [...this.nested, relation.field],
-			});
-
-			const relatedPrimaryKeyField = this.schema.collections[relatedCollection]!.primary;
-			const relatedRecord: Partial<Item> = payload[relation.field];
-
-			if (['string', 'number'].includes(typeof relatedRecord)) continue;
-
-			const hasPrimaryKey = relatedPrimaryKeyField in relatedRecord;
-
-			let relatedPrimaryKey: PrimaryKey = relatedRecord[relatedPrimaryKeyField];
-
-			const exists =
-				hasPrimaryKey &&
-				!!(await this.knex
-					.select(relatedPrimaryKeyField)
-					.from(relatedCollection)
-					.where({ [relatedPrimaryKeyField]: relatedPrimaryKey })
-					.first());
-
-			if (exists) {
-				const { [relatedPrimaryKeyField]: _, ...record } = relatedRecord;
-
-				if (Object.keys(record).length > 0) {
-					await service.updateOne(relatedPrimaryKey, record, {
-						onRevisionCreate: (pk) => revisions.push(pk),
-						onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
-						bypassEmitAction: (params) =>
-							opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
-						emitEvents: opts?.emitEvents,
-						mutationTracker: opts?.mutationTracker,
-					});
-				}
-			} else {
-				relatedPrimaryKey = await service.createOne(relatedRecord, {
-					onRevisionCreate: (pk) => revisions.push(pk),
-					onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
-					bypassEmitAction: (params) =>
-						opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
-					emitEvents: opts?.emitEvents,
-					mutationTracker: opts?.mutationTracker,
-				});
-			}
-
-			// Overwrite the nested object with just the primary key, so the parent level can be saved correctly
-			payload[relation.field] = relatedPrimaryKey;
+	): Promise<PayloadServiceProcessRowsResult> {
+		// a single row would otherwise fail on a TypeError
+		if (!Array.isArray(rows)) {
+			throw new Error(
+				'processM2OAndA2O takes the rows as an array,'
+				+ ` got ${JSON.stringify(rows)}`,
+			);
 		}
 
-		return { payload, revisions, nestedActionEvents, userIntegrityCheckFlags };
-	}
-
-	/**
-	 * Save/update all nested related m2o items inside the payload
-	 */
-	async processM2O(
-		data: Partial<Item>,
-		opts?: MutationOptions,
-	): Promise<
-		PayloadServiceProcessRelationResult & {
-			payload: Partial<Item>;
-		}
-	> {
-		const payload = cloneDeep(data);
-
-		// All the revisions saved on this level
-		const revisions: PrimaryKey[] = [];
-		let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
-
-		const nestedActionEvents: ActionEventParams[] = [];
+		const rowsResult: PayloadServiceProcessRowsResult = {
+			payloads: rows.map((row) => cloneDeep(row)),
+			revisionsByParent: rows.map(() => []),
+			nestedActionEvents: [],
+			userIntegrityCheckFlags: UserIntegrityCheckFlag.None,
+		};
 
 		// Many to one relations that exist on the current collection
 		const relations = this.schema.relations.filter((relation) => {
 			return relation.collection === this.collection;
 		});
 
-		// Only process related records that are actually in the payload
-		const relationsToProcess = relations.filter((relation) => {
-			return relation.field in payload && isObject(payload[relation.field]);
-		});
+		const fieldsOfCollections = new Map<string, string[]>();
 
-		for (const relation of relationsToProcess) {
+		for (const relation of relations) {
 			// If no "one collection" exists, this is a A2O, not a M2O
-			if (!relation.related_collection) continue;
-			const relatedPrimaryKeyField = this.schema.collections[relation.related_collection]!.primary;
-
-			const { getService } = await import('../utils/get-service.js');
-
-			const service = getService(relation.related_collection, {
-				accountability: this.accountability,
-				knex: this.knex,
-				schema: this.schema,
-				nested: [...this.nested, relation.field],
-			});
-
-			const relatedRecord: Partial<Item> = payload[relation.field];
-
-			if (['string', 'number'].includes(typeof relatedRecord)) continue;
-
-			const hasPrimaryKey = relatedPrimaryKeyField in relatedRecord;
-
-			let relatedPrimaryKey: PrimaryKey = relatedRecord[relatedPrimaryKeyField];
-
-			const exists =
-				hasPrimaryKey &&
-				!!(await this.knex
-					.select(relatedPrimaryKeyField)
-					.from(relation.related_collection)
-					.where({ [relatedPrimaryKeyField]: relatedPrimaryKey })
-					.first());
-
-			if (exists) {
-				const { [relatedPrimaryKeyField]: _, ...record } = relatedRecord;
-
-				if (Object.keys(record).length > 0) {
-					await service.updateOne(relatedPrimaryKey, record, {
-						onRevisionCreate: (pk) => revisions.push(pk),
-						onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
-						bypassEmitAction: (params) =>
-							opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
-						emitEvents: opts?.emitEvents,
-						mutationTracker: opts?.mutationTracker,
-					});
-				}
-			} else {
-				relatedPrimaryKey = await service.createOne(relatedRecord, {
-					onRevisionCreate: (pk) => revisions.push(pk),
-					onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
-					bypassEmitAction: (params) =>
-						opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
-					emitEvents: opts?.emitEvents,
-					mutationTracker: opts?.mutationTracker,
-				});
+			if (!relation.related_collection) {
+				continue;
 			}
 
-			// Overwrite the nested object with just the primary key, so the parent level can be saved correctly
-			payload[relation.field] = relatedPrimaryKey;
+			const collectionFields =
+				fieldsOfCollections.get(relation.related_collection) ?? [];
+
+			// a schema can list one relation twice
+			if (!collectionFields.includes(relation.field)) {
+				collectionFields.push(relation.field);
+			}
+
+			fieldsOfCollections.set(relation.related_collection, collectionFields);
 		}
 
-		return { payload, revisions, nestedActionEvents, userIntegrityCheckFlags };
+		const referencesOfCollections = new Map<string, NestedReference[]>();
+
+		for (const [collectionName, collectionFields] of fieldsOfCollections) {
+			// Only process related records that are actually in the payload
+			const references = [...rowsResult.payloads.entries()]
+				.flatMap(([rowIndex, payload]) => {
+					return collectionFields
+						.filter((field) => field in payload && isObject(payload[field]))
+						.map((field) => ({ rowIndex, field }));
+				});
+
+			if (references.length > 0) {
+				referencesOfCollections.set(collectionName, references);
+			}
+		}
+
+		const a2oFields = new Set<string>();
+
+		for (const relation of relations) {
+			// If the required a2o configuration fields are missing, this is a m2o
+			// instead of an a2o
+			if (
+				!relation.meta?.one_collection_field
+				|| !relation.meta?.one_allowed_collections
+				|| a2oFields.has(relation.field)
+			) {
+				continue;
+			}
+
+			a2oFields.add(relation.field);
+
+			const collectionField = relation.meta.one_collection_field;
+			const allowedCollections = relation.meta.one_allowed_collections;
+
+			for (const [rowIndex, payload] of rowsResult.payloads.entries()) {
+				// Only process related records that are actually in the payload
+				if (
+					!(relation.field in payload)
+					|| !isPlainObject(payload[relation.field])
+				) {
+					continue;
+				}
+
+				const relatedCollection = payload[collectionField];
+
+				if (!relatedCollection) {
+					throw new InvalidPayloadError({
+						reason: `Can't update nested record`
+							+ ` ${JSON.stringify(`${relation.collection}.${relation.field}`)}`
+							+ ' without field'
+							+ ` ${JSON.stringify(`${relation.collection}.${collectionField}`)}`
+							+ ' being set',
+					});
+				}
+
+				if (allowedCollections.includes(relatedCollection) === false) {
+					throw new InvalidPayloadError({
+						reason: `${JSON.stringify(`${relation.collection}.${relation.field}`)}`
+							+ ' can\'t be linked to collection'
+							+ ` ${JSON.stringify(relatedCollection)}`,
+					});
+				}
+
+				const collectionReferences =
+					referencesOfCollections.get(relatedCollection) ?? [];
+
+				collectionReferences.push({ rowIndex, field: relation.field });
+				referencesOfCollections.set(relatedCollection, collectionReferences);
+			}
+		}
+
+		const orderedCollections: string[] = [];
+		const visitedCollections = new Set<string>();
+
+		const visitCollection = (collectionName: string) => {
+			if (visitedCollections.has(collectionName)) {
+				return;
+			}
+
+			visitedCollections.add(collectionName);
+
+			for (const relation of this.schema.relations) {
+				if (
+					relation.collection === collectionName
+					&& relation.related_collection
+				) {
+					visitCollection(relation.related_collection);
+				}
+			}
+
+			if (referencesOfCollections.has(collectionName)) {
+				orderedCollections.push(collectionName);
+			}
+		};
+
+		for (const collectionName of referencesOfCollections.keys()) {
+			visitCollection(collectionName);
+		}
+
+		const reachableCollectionsOf = (collectionName: string) => {
+			const reachedCollections = new Set<string>();
+			const pendingCollections = [collectionName];
+
+			while (pendingCollections.length > 0) {
+				const currentCollection = pendingCollections.pop()!;
+
+				for (const relation of this.schema.relations) {
+					if (
+						relation.collection === currentCollection
+						&& relation.related_collection
+						&& !reachedCollections.has(relation.related_collection)
+					) {
+						reachedCollections.add(relation.related_collection);
+						pendingCollections.push(relation.related_collection);
+					}
+				}
+			}
+
+			return reachedCollections;
+		};
+
+		const reachableCollections = new Map(orderedCollections.map((name) => {
+			return [name, reachableCollectionsOf(name)];
+		}));
+
+		// as before batching: a row's M2O records in relation order, then its A2O
+		const relationRankOf = (field: string) => {
+			const relationIndex = relations
+				.findIndex((relation) => relation.field === field);
+
+			return a2oFields.has(field)
+				? relations.length + relationIndex
+				: relationIndex;
+		};
+
+		// a depth-first walk stops at a collection it is already in, so a cycle
+		// it entered through a collection the rows do not nest can finish before
+		// a collection the cycle references: the count of collections a
+		// collection references outside its cycle orders the writes instead
+		const referencedCountOf = (collectionName: string) => {
+			return orderedCollections.filter((otherName) => {
+				return reachableCollections.get(collectionName)!.has(otherName)
+					&& !reachableCollections.get(otherName)!.has(collectionName);
+			}).length;
+		};
+
+		const writtenCollections = [...orderedCollections].sort((left, right) => {
+			return referencedCountOf(left) - referencedCountOf(right);
+		});
+
+		// a key alone names a record an earlier reference of the cycle writes
+		const upsertedKeyNamesOfCollections = new Map<string, Set<string>>();
+
+		for (const collectionName of writtenCollections) {
+			const cycleCollections = writtenCollections.filter((otherName) => {
+				return otherName === collectionName
+					|| (reachableCollections.get(collectionName)!.has(otherName)
+						&& reachableCollections.get(otherName)!.has(collectionName));
+			});
+
+			if (cycleCollections.length === 1) {
+				await this.saveNestedReferences(
+					collectionName,
+					// payload order: a row's M2O records come before its A2O ones
+					referencesOfCollections.get(collectionName)!
+						.sort((left, right) => left.rowIndex - right.rowIndex),
+					rowsResult,
+					opts,
+				);
+
+				continue;
+			}
+
+			// the last collection of a cycle comes after every collection the
+			// cycle references
+			if (cycleCollections.at(-1) !== collectionName) {
+				continue;
+			}
+
+			const cycleReferences = cycleCollections
+				.flatMap((cycleCollection) => {
+					return referencesOfCollections.get(cycleCollection)!
+						.map((reference) => ({ cycleCollection, reference }));
+				})
+				.sort((left, right) => {
+					return left.reference.rowIndex - right.reference.rowIndex
+						|| relationRankOf(left.reference.field)
+						- relationRankOf(right.reference.field);
+				});
+
+			for (const { cycleCollection, reference } of cycleReferences) {
+				const upsertedKeyNames =
+					upsertedKeyNamesOfCollections.get(cycleCollection) ?? new Set();
+
+				upsertedKeyNamesOfCollections.set(cycleCollection, upsertedKeyNames);
+
+				await this.saveNestedReferences(
+					cycleCollection,
+					[reference],
+					rowsResult,
+					opts,
+					upsertedKeyNames,
+				);
+			}
+		}
+
+		return rowsResult;
 	}
 
 	/**
-	 * Recursively save/update all nested related o2m items
+	 * Under preserveMutationOrder, cut the records into one upsert each time a
+	 * record holding only its key follows one holding fields, or the reverse:
+	 * a key alone is then read after the records sent before it are written.
+	 */
+	private async saveNestedReferences(
+		relatedCollection: string,
+		references: NestedReference[],
+		rowsResult: PayloadServiceProcessRowsResult,
+		opts?: MutationOptions,
+		// a key alone names a row a record of an earlier segment writes, too
+		upsertedKeyNames = new Set<string>(),
+	): Promise<void> {
+		if (resolveMutationBatching(opts ?? {}) !== 'preserveMutationOrder') {
+			return this.saveNestedRecords(
+				relatedCollection,
+				references,
+				rowsResult,
+				opts,
+				upsertedKeyNames,
+			);
+		}
+
+		const relatedPrimaryKeyField =
+			this.schema.collections[relatedCollection]!.primary;
+
+		const holdsKeyOnly = ({ rowIndex, field }: NestedReference) => {
+			const record: Partial<Item> = rowsResult.payloads[rowIndex]![field];
+			const recordFields = Object.keys(record);
+
+			return recordFields.length === 1
+				&& recordFields[0] === relatedPrimaryKeyField
+				&& !isMissingPrimaryKey(record[relatedPrimaryKeyField]);
+		};
+
+		let segmentReferences: NestedReference[] = [];
+
+		for (const reference of references) {
+			if (
+				segmentReferences.length > 0
+				&& holdsKeyOnly(segmentReferences[0]!) !== holdsKeyOnly(reference)
+			) {
+				await this.saveNestedRecords(
+					relatedCollection,
+					segmentReferences,
+					rowsResult,
+					opts,
+					upsertedKeyNames,
+				);
+
+				segmentReferences = [];
+			}
+
+			segmentReferences.push(reference);
+		}
+
+		await this.saveNestedRecords(
+			relatedCollection,
+			segmentReferences,
+			rowsResult,
+			opts,
+			upsertedKeyNames,
+		);
+	}
+
+	/**
+	 * Upsert the records several rows nest, all of one collection, and replace
+	 * each by its key in its row's payload. A record naming only the key of a
+	 * row that exists writes nothing. That key is compared by its spelling, as
+	 * in `upsertRun`: under a column storing another one (char(n) padding,
+	 * citext) it reads as no row, and creating it is refused as not unique.
+	 *
+	 * TODO(#610): the same under a MariaDB `_ci` collation.
+	 */
+	private async saveNestedRecords(
+		relatedCollection: string,
+		references: NestedReference[],
+		rowsResult: PayloadServiceProcessRowsResult,
+		opts?: MutationOptions,
+		upsertedKeyNames = new Set<string>(),
+	): Promise<void> {
+		const { getService } = await import('../utils/get-service.js');
+
+		const service = getService(relatedCollection, {
+			accountability: this.accountability,
+			knex: this.knex,
+			schema: this.schema,
+			nested: [...this.nested, references[0]!.field],
+		});
+
+		const relatedPrimaryKeyField =
+			this.schema.collections[relatedCollection]!.primary;
+
+		const keyOnlyOf = ({
+			rowIndex,
+			field,
+		}: NestedReference): PrimaryKey | null => {
+			const record: Partial<Item> = rowsResult.payloads[rowIndex]![field];
+			const recordFields = Object.keys(record);
+			const relatedPrimaryKey = record[relatedPrimaryKeyField];
+
+			return recordFields.length === 1
+				&& recordFields[0] === relatedPrimaryKeyField
+				&& !isMissingPrimaryKey(relatedPrimaryKey)
+				? relatedPrimaryKey
+				: null;
+		};
+
+		const nestedUpdates = opts?.nestedUpdates ?? 'apply';
+
+		// apply reads only the keys of key-only records: the others upsert anyway
+		const checkedKeys = references.flatMap((reference) => {
+			const relatedPrimaryKey = rowsResult
+				.payloads[reference.rowIndex]![reference.field][relatedPrimaryKeyField];
+
+			if (nestedUpdates === 'apply') {
+				return keyOnlyOf(reference) === null
+					? []
+					: [relatedPrimaryKey];
+			}
+
+			return isMissingPrimaryKey(relatedPrimaryKey)
+				? []
+				: [relatedPrimaryKey];
+		});
+
+		validateKeys(
+			this.schema,
+			relatedCollection,
+			relatedPrimaryKeyField,
+			checkedKeys,
+		);
+
+		const existingKeyNames = new Set<string>();
+
+		for (const keyChunk of chunk(checkedKeys, RELATED_READ_CHUNK_SIZE)) {
+			const existingRows = await this.knex
+				.select(relatedPrimaryKeyField)
+				.from(relatedCollection)
+				.whereIn(relatedPrimaryKeyField, keyChunk);
+
+			for (const existingRow of existingRows) {
+				existingKeyNames.add(primaryKeyNameOf(
+					existingRow[relatedPrimaryKeyField],
+					relatedCollection,
+					this.schema,
+				));
+			}
+		}
+
+		const upsertReferences = references.filter(({ rowIndex, field }) => {
+			const relatedPrimaryKey =
+				rowsResult.payloads[rowIndex]![field][relatedPrimaryKeyField];
+
+			if (isMissingPrimaryKey(relatedPrimaryKey)) {
+				return true;
+			}
+
+			const keyName = primaryKeyNameOf(
+				relatedPrimaryKey,
+				relatedCollection,
+				this.schema,
+			);
+
+			const namesExistingRow =
+				existingKeyNames.has(keyName) || upsertedKeyNames.has(keyName);
+
+			if (namesExistingRow && keyOnlyOf({ rowIndex, field }) !== null) {
+				return false;
+			}
+
+			if (namesExistingRow && nestedUpdates === 'refuse') {
+				throw nestedUpdateRefusal(relatedPrimaryKey, relatedCollection);
+			}
+
+			if (namesExistingRow && nestedUpdates === 'skip') {
+				return false;
+			}
+
+			upsertedKeyNames.add(keyName);
+
+			return true;
+		});
+
+		const upsertReferenceSet = new Set(upsertReferences);
+
+		// a record left out names its row by its key alone
+		for (const reference of references) {
+			const payload = rowsResult.payloads[reference.rowIndex]!;
+
+			if (!upsertReferenceSet.has(reference)) {
+				payload[reference.field] =
+					payload[reference.field][relatedPrimaryKeyField];
+			}
+		}
+
+		if (upsertReferences.length === 0) {
+			return;
+		}
+
+		const upsertedKeys = await service.upsertMany(
+			upsertReferences.map(({ rowIndex, field }) => {
+				return rowsResult.payloads[rowIndex]![field];
+			}),
+			{
+				// a row an update hook adds is refused, like the updateOne this was
+				refuseHookAddedRows: true,
+				nestedOfPayloads: upsertReferences.map(({ field }) => {
+					return [...this.nested, field];
+				}),
+				onRevisionCreate: (revision, item, recordIndex) => {
+					// refuseHookAddedRows leaves every revision a record of its own
+					if (recordIndex === undefined) {
+						throw new Error(
+							`Revision ${JSON.stringify(revision)} of`
+							+ ` ${JSON.stringify(item)} in ${JSON.stringify(relatedCollection)}`
+							+ ' came from no nested record',
+						);
+					}
+
+					const { rowIndex } = upsertReferences[recordIndex]!;
+
+					rowsResult.revisionsByParent[rowIndex]!.push(revision);
+				},
+				onRequireUserIntegrityCheck: (flags) => {
+					rowsResult.userIntegrityCheckFlags |= flags;
+				},
+				bypassEmitAction: (params) => {
+					return opts?.bypassEmitAction
+						? opts.bypassEmitAction(params)
+						: rowsResult.nestedActionEvents.push(params);
+				},
+				emitEvents: opts?.emitEvents,
+				mutationTracker: opts?.mutationTracker,
+				mutationBatching: opts?.mutationBatching,
+				nestedUpdates: opts?.nestedUpdates,
+			},
+		);
+
+		for (const [recordIndex, upsertedKey] of upsertedKeys.entries()) {
+			const { rowIndex, field } = upsertReferences[recordIndex]!;
+
+			rowsResult.payloads[rowIndex]![field] = upsertedKey;
+		}
+	}
+
+	/**
+	 * Recursively save/update all nested related o2m items of several parent rows.
+	 *
+	 * Per relation, the lists of parents next to each other go through one
+	 * read of the existing children they name and one upsertMany; a deselect
+	 * runs only for the parents still holding a child their list leaves out,
+	 * once those lists are saved. A child two lists name ends on the last parent
+	 * naming it, and a child moving from one parent of the call to another is
+	 * not nullified on the way. An alterations object ({ create, update,
+	 * delete }) is applied for its parent in its place between the lists.
 	 */
 	async processO2M(
-		data: Partial<Item>,
-		parent: PrimaryKey,
+		parentRows: { data: Partial<Item>; key: PrimaryKey }[],
 		opts?: MutationOptions,
-	): Promise<PayloadServiceProcessRelationResult> {
-		const revisions: PrimaryKey[] = [];
+	): Promise<PayloadServiceProcessO2MResult> {
+		// a caller of the former processO2M(data, key) would get a TypeError
+		if (!Array.isArray(parentRows)) {
+			throw new Error(
+				'processO2M takes the parent rows as [{ data, key }], got'
+				+ ` ${JSON.stringify(parentRows)}`,
+			);
+		}
+
+		const revisionsByParent: PrimaryKey[][] = parentRows.map(() => []);
 		let userIntegrityCheckFlags = UserIntegrityCheckFlag.None;
 
 		const nestedActionEvents: ActionEventParams[] = [];
 
+		const nestedMutationOptions: MutationOptions = {
+			onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
+			bypassEmitAction: (params) => {
+				return opts?.bypassEmitAction
+					? opts.bypassEmitAction(params)
+					: nestedActionEvents.push(params);
+			},
+			emitEvents: opts?.emitEvents,
+			mutationTracker: opts?.mutationTracker,
+			mutationBatching: opts?.mutationBatching,
+			nestedUpdates: opts?.nestedUpdates,
+		};
+
 		const relations = this.schema.relations.filter((relation) => {
 			return relation.related_collection === this.collection;
-		});
-
-		const payload = cloneDeep(data);
-
-		// Only process related records that are actually in the payload
-		const relationsToProcess = relations.filter((relation) => {
-			if (!relation.meta?.one_field) return false;
-			return relation.meta.one_field in payload;
 		});
 
 		const nestedUpdateSchema = Joi.object({
@@ -685,10 +1042,39 @@ export class PayloadService {
 			delete: Joi.array().items(Joi.string(), Joi.number()),
 		});
 
-		for (const relation of relationsToProcess) {
-			if (!relation.meta) continue;
+		for (const relation of relations) {
+			if (!relation.meta?.one_field) {
+				continue;
+			}
 
-			const currentPrimaryKeyField = this.schema.collections[relation.related_collection!]!.primary;
+			const oneField = relation.meta.one_field;
+
+			// Only process related records that are actually in the payload. Lists
+			// next to each other save at once; an alteration keeps its place between
+			// them, so a child two parents name ends where the later one puts it
+			const parentRuns: { listsChildren: boolean; parentIndexes: number[] }[] = [];
+
+			for (const [parentIndex, parentRow] of parentRows.entries()) {
+				if (!(oneField in parentRow.data)) {
+					continue;
+				}
+
+				const field = parentRow.data[oneField];
+				const listsChildren = !field || Array.isArray(field);
+				const lastRun = parentRuns.at(-1);
+
+				if (listsChildren && lastRun?.listsChildren) {
+					lastRun.parentIndexes.push(parentIndex);
+				}
+				else {
+					parentRuns.push({ listsChildren, parentIndexes: [parentIndex] });
+				}
+			}
+
+			if (parentRuns.length === 0) {
+				continue;
+			}
+
 			const relatedPrimaryKeyField = this.schema.collections[relation.collection]!.primary;
 
 			const { getService } = await import('../utils/get-service.js');
@@ -697,127 +1083,29 @@ export class PayloadService {
 				accountability: this.accountability,
 				knex: this.knex,
 				schema: this.schema,
-				nested: [...this.nested, relation.meta!.one_field!],
+				nested: [...this.nested, oneField],
 			});
 
-			const recordsToUpsert: Partial<Item>[] = [];
-			const savedPrimaryKeys: PrimaryKey[] = [];
-
-			// Nested array of individual items
-			const field = payload[relation.meta!.one_field!];
-
-			if (!field || Array.isArray(field)) {
-				const updates = field || []; // treat falsey values as removing all children
-
-				for (let i = 0; i < updates.length; i++) {
-					const currentId = parent || payload[currentPrimaryKeyField];
-					const relatedRecord = updates[i];
-
-					const relatedId =
-						typeof relatedRecord === 'string' || typeof relatedRecord === 'number'
-							? relatedRecord
-							: relatedRecord[relatedPrimaryKeyField];
-
-					let record = cloneDeep(relatedRecord);
-
-					let existingRecord;
-
-					// No relatedId means it's a new record
-					if (relatedId) {
-						existingRecord = await this.knex
-							.select(relatedPrimaryKeyField, relation.field)
-							.from(relation.collection)
-							.where({ [relatedPrimaryKeyField]: relatedId })
-							.first();
-					}
-
-					if (typeof relatedRecord === 'string' || typeof relatedRecord === 'number') {
-						if (!existingRecord) {
-							// 404 / InvalidPayload?
-							throw new ForbiddenError({
-								reason: `Could not find a '${relation.collection}' record having the primary key ${record} while processing O2M relation`,
-							});
-						}
-
-						// If the related item is already associated to the current item, and there's no
-						// other updates (which is indicated by the fact that this is just the PK, we can
-						// ignore updating this item. This makes sure we don't trigger any update logic
-						// for items that aren't actually being updated. NOTE: We use == here, as the
-						// primary key might be reported as a string instead of number, coming from the
-						// http route, and or a bigInteger in the DB
-						if (isNil(existingRecord[relation.field]) === false && existingRecord[relation.field] == currentId) {
-							savedPrimaryKeys.push(existingRecord[relatedPrimaryKeyField]);
-							continue;
-						}
-
-						record = {
-							[relatedPrimaryKeyField]: relatedRecord,
-						};
-					}
-
-					if (!existingRecord || existingRecord[relation.field] != parent) {
-						record[relation.field] = currentId;
-					}
-
-					recordsToUpsert.push(record);
-				}
-
-				savedPrimaryKeys.push(
-					...(await service.upsertMany(recordsToUpsert, {
-						onRevisionCreate: (pk) => revisions.push(pk),
-						onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
-						bypassEmitAction: (params) =>
-							opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
-						emitEvents: opts?.emitEvents,
-						mutationTracker: opts?.mutationTracker,
-					})),
-				);
-
-				const query: Query = {
-					filter: {
-						_and: [
-							{
-								[relation.field]: {
-									_eq: parent,
-								},
-							},
-							{
-								[relatedPrimaryKeyField]: {
-									_nin: savedPrimaryKeys,
-								},
-							},
-						],
-					},
-					limit: -1,
-				};
-
-				// Nullify all related items that aren't included in the current payload
-				if (relation.meta.one_deselect_action === 'delete') {
-					// There's no revision for a deletion
-					await service.deleteByQuery(query, {
-						onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
-						bypassEmitAction: (params) =>
-							opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
-						emitEvents: opts?.emitEvents,
-						mutationTracker: opts?.mutationTracker,
-					});
-				} else {
-					await service.updateByQuery(
-						query,
-						{ [relation.field]: null },
-						{
-							onRevisionCreate: (pk) => revisions.push(pk),
-							onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
-							bypassEmitAction: (params) =>
-								opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
-							emitEvents: opts?.emitEvents,
-							mutationTracker: opts?.mutationTracker,
-						},
+			for (const parentRun of parentRuns) {
+				if (parentRun.listsChildren) {
+					await this.saveO2MLists(
+						relation,
+						service,
+						parentRun.parentIndexes.map((parentIndex) => parentRows[parentIndex]!),
+						parentRun.parentIndexes.map((parentIndex) => {
+							return revisionsByParent[parentIndex]!;
+						}),
+						nestedMutationOptions,
 					);
+
+					continue;
 				}
-			}
-			// "Updates" object w/ create/update/delete
-			else {
+
+				const parentIndex = parentRun.parentIndexes[0]!;
+				const parent = parentRows[parentIndex]!.key;
+				const field = parentRows[parentIndex]!.data[oneField];
+				const revisions = revisionsByParent[parentIndex]!;
+
 				const alterations = field as Alterations;
 				const { error } = nestedUpdateSchema.validate(alterations);
 				if (error) throw new InvalidPayloadError({ reason: `Invalid one-to-many update structure: ${error.message}` });
@@ -839,19 +1127,19 @@ export class PayloadService {
 							const record = cloneDeep(item);
 
 							// add sort field value if it is not supplied in the item
-							if (parent !== null && record[sortField] === undefined) {
+							if (record[sortField] === undefined) {
 								record[sortField] = highestOrderNumber?.max ? highestOrderNumber.max + index + 1 : index + 1;
 							}
 
 							return {
 								...record,
-								[relation.field]: parent || payload[currentPrimaryKeyField],
+								[relation.field]: parent,
 							};
 						});
 					} else {
 						createPayload = alterations.create.map((item) => ({
 							...item,
-							[relation.field]: parent || payload[currentPrimaryKeyField],
+							[relation.field]: parent,
 						}));
 					}
 
@@ -862,12 +1150,28 @@ export class PayloadService {
 							opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
 						emitEvents: opts?.emitEvents,
 						mutationTracker: opts?.mutationTracker,
+						mutationBatching: opts?.mutationBatching,
+						nestedUpdates: opts?.nestedUpdates,
 					});
 				}
 
 				if (alterations.update) {
+					const parentKeyName = primaryKeyNameOf(
+						parent,
+						this.collection,
+						this.schema,
+					);
+
+					// a uuid sent in capitals names the parent Postgres returns in lowercase
+					const namesParent = (value: PrimaryKey | null) => {
+						return value !== null
+							&& value !== undefined
+							&& primaryKeyNameOf(value, this.collection, this.schema)
+								=== parentKeyName;
+					};
+
 					for (const item of alterations.update) {
-						const { [relatedPrimaryKeyField]: key, ...record } = item;
+						const { [relatedPrimaryKeyField]: key, ...fields } = item;
 
 						const existingRecord = await this.knex
 							.select(relatedPrimaryKeyField, relation.field)
@@ -875,8 +1179,33 @@ export class PayloadService {
 							.where({ [relatedPrimaryKeyField]: key })
 							.first();
 
-						if (!existingRecord || existingRecord[relation.field] != parent) {
-							record[relation.field] = parent || payload[currentPrimaryKeyField];
+						// the child's key to this parent says what the alteration says
+						const updatesChild = Object.entries(fields).some(([field, value]) => {
+							return field !== relation.field || !namesParent(value);
+						});
+
+						if (
+							existingRecord
+							&& updatesChild
+							&& opts?.nestedUpdates === 'refuse'
+						) {
+							throw nestedUpdateRefusal(key, relation.collection);
+						}
+
+						// skip only links the child to its parent, as does a child
+						// naming only that parent
+						const record: Partial<Item> = opts?.nestedUpdates === 'skip'
+							|| !updatesChild
+							? {}
+							: fields;
+
+						if (!existingRecord || !namesParent(existingRecord[relation.field])) {
+							record[relation.field] = parent;
+						}
+
+						// a child already linked, with nothing to update, is left as it is
+						if (Object.keys(record).length === 0) {
+							continue;
 						}
 
 						await service.updateOne(key, record, {
@@ -886,6 +1215,8 @@ export class PayloadService {
 								opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
 							emitEvents: opts?.emitEvents,
 							mutationTracker: opts?.mutationTracker,
+							mutationBatching: opts?.mutationBatching,
+							nestedUpdates: opts?.nestedUpdates,
 						});
 					}
 				}
@@ -916,6 +1247,7 @@ export class PayloadService {
 								opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
 							emitEvents: opts?.emitEvents,
 							mutationTracker: opts?.mutationTracker,
+							mutationBatching: opts?.mutationBatching,
 						});
 					} else {
 						await service.updateByQuery(
@@ -928,6 +1260,7 @@ export class PayloadService {
 									opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
 								emitEvents: opts?.emitEvents,
 								mutationTracker: opts?.mutationTracker,
+								mutationBatching: opts?.mutationBatching,
 							},
 						);
 					}
@@ -935,7 +1268,307 @@ export class PayloadService {
 			}
 		}
 
-		return { revisions, nestedActionEvents, userIntegrityCheckFlags };
+		return { revisionsByParent, nestedActionEvents, userIntegrityCheckFlags };
+	}
+
+	/**
+	 * Saves the O2M lists of several parents for one relation: what processO2M
+	 * does to a list, with one read and one upsertMany for every parent.
+	 *
+	 * The children a list names by their key are read once, then the parent
+	 * each holds is followed in JS through the lists in order, so a bare key
+	 * already on its parent is still skipped as the per-parent read skipped it.
+	 * Each revision goes to the parent whose list wrote its child; a child
+	 * two lists name gets its revisions in their order, and a revision of a row
+	 * no list names (a hook's) goes to the first parent.
+	 */
+	private async saveO2MLists(
+		relation: Relation,
+		service: ItemsService,
+		listedParents: { data: Partial<Item>; key: PrimaryKey }[],
+		revisionsOfParents: PrimaryKey[][],
+		nestedMutationOptions: MutationOptions,
+	): Promise<void> {
+		const oneField = relation.meta!.one_field!;
+
+		const relatedPrimaryKeyField = this.schema
+			.collections[relation.collection]!.primary;
+
+		const childKeyNameOf = (childKey: PrimaryKey) => {
+			return primaryKeyNameOf(childKey, relation.collection, this.schema);
+		};
+
+		const parentKeyNameOf = (parentKey: PrimaryKey) => {
+			return primaryKeyNameOf(parentKey, this.collection, this.schema);
+		};
+
+		// a uuid the route names in capitals is the parent its children hold in
+		// lowercase
+		const namesParent = (value: unknown, parent: PrimaryKey) => {
+			return !isNil(value)
+				&& parentKeyNameOf(value as PrimaryKey) === parentKeyNameOf(parent);
+		};
+
+		// treat falsey values as removing all children
+		const listsOfParents: (PrimaryKey | Partial<Item>)[][] = listedParents
+			.map((parentRow) => parentRow.data[oneField] || []);
+
+		const namedChildKeys = listsOfParents.flat().flatMap((relatedRecord) => {
+			const relatedId = isPrimaryKey(relatedRecord)
+				? relatedRecord
+				: relatedRecord[relatedPrimaryKeyField];
+
+			return isMissingPrimaryKey(relatedId)
+				? []
+				: [relatedId];
+		});
+
+		// A key the column cannot hold, such as '{uuid}' or ' 7', is a 400, not a
+		// missing row
+		validateKeys(
+			this.schema,
+			relation.collection,
+			relatedPrimaryKeyField,
+			namedChildKeys,
+		);
+
+		// The children the lists name, by key name: the key a row answers to and the
+		// parent it holds as the lists before the current one leave it
+		const existingChildren = new Map<
+			string,
+			{ childKey: PrimaryKey; heldParent: unknown }
+		>();
+
+		for (const keyChunk of chunk(namedChildKeys, RELATED_READ_CHUNK_SIZE)) {
+			const existingRecords = await this.knex
+				.select(relatedPrimaryKeyField, relation.field)
+				.from(relation.collection)
+				.whereIn(relatedPrimaryKeyField, keyChunk);
+
+			for (const existingRecord of existingRecords) {
+				const childKey = existingRecord[relatedPrimaryKeyField];
+
+				existingChildren.set(childKeyNameOf(childKey), {
+					childKey,
+					heldParent: existingRecord[relation.field],
+				});
+			}
+		}
+
+		const recordsToUpsert: Partial<Item>[] = [];
+		const parentOfRecord: number[] = [];
+		const savedKeysOfParents: PrimaryKey[][] = listedParents.map(() => []);
+
+		for (const [parentIndex, updates] of listsOfParents.entries()) {
+			const parent = listedParents[parentIndex]!.key;
+
+			for (const relatedRecord of updates) {
+				const relatedId = isPrimaryKey(relatedRecord)
+					? relatedRecord
+					: relatedRecord[relatedPrimaryKeyField];
+
+				let record = cloneDeep(relatedRecord) as Partial<Item>;
+
+				// No relatedId means it's a new record
+				const relatedKeyName = isMissingPrimaryKey(relatedId)
+					? null
+					: childKeyNameOf(relatedId);
+
+				const existingRecord = relatedKeyName === null
+					? undefined
+					: existingChildren.get(relatedKeyName);
+
+				// the child's key to this parent says what the list says
+				const updatesChild = existingRecord !== undefined
+					&& !isPrimaryKey(relatedRecord)
+					&& Object.entries(relatedRecord).some(([recordField, value]) => {
+						return recordField !== relatedPrimaryKeyField
+							&& (
+								recordField !== relation.field
+								|| !namesParent(value, parent)
+							);
+					});
+
+				if (updatesChild && nestedMutationOptions.nestedUpdates === 'refuse') {
+					throw nestedUpdateRefusal(relatedId, relation.collection);
+				}
+
+				// skip names the child by its key alone, as a bare key does, and
+				// so does a child naming only this parent
+				if (
+					isPrimaryKey(relatedRecord)
+					|| (
+						existingRecord !== undefined
+						&& (!updatesChild || nestedMutationOptions.nestedUpdates === 'skip')
+					)
+				) {
+					if (!existingRecord) {
+						// 404 / InvalidPayload?
+						throw new ForbiddenError({
+							reason: `Could not find a '${relation.collection}' record`
+								+ ` having the primary key ${relatedRecord}`
+								+ ' while processing O2M relation',
+						});
+					}
+
+					// If the related item is already associated to the current item, and
+					// there's no other updates (which is indicated by the fact that this
+					// is just the PK, we can ignore updating this item. This makes sure we
+					// don't trigger any update logic for items that aren't actually being
+					// updated.
+					if (namesParent(existingRecord.heldParent, parent)) {
+						savedKeysOfParents[parentIndex]!.push(existingRecord.childKey);
+						continue;
+					}
+
+					record = {
+						[relatedPrimaryKeyField]: relatedId,
+					};
+				}
+
+				if (
+					!existingRecord
+					|| !namesParent(existingRecord.heldParent, parent)
+				) {
+					record[relation.field] = parent;
+				}
+
+				// A later list naming this child finds it where this one leaves it
+				if (relatedKeyName !== null) {
+					existingChildren.set(relatedKeyName, {
+						childKey: existingRecord?.childKey ?? relatedId,
+						heldParent: relation.field in record
+							? record[relation.field]
+							: existingRecord?.heldParent,
+					});
+				}
+
+				recordsToUpsert.push(record);
+				parentOfRecord.push(parentIndex);
+			}
+		}
+
+		const writtenRevisions: {
+			revision: PrimaryKey;
+			recordIndex: number | undefined;
+		}[] = [];
+
+		const upsertedKeys = await service.upsertMany(recordsToUpsert, {
+			...nestedMutationOptions,
+			onRevisionCreate: (revision, item, recordIndex) => {
+				// a missing key would hand the revision to the first parent
+				if (isMissingPrimaryKey(item)) {
+					throw new Error(
+						`Revision ${JSON.stringify(revision)} of`
+						+ ` ${JSON.stringify(relation.collection)} came without the`
+						+ ` key of its item: ${JSON.stringify(item)}`,
+					);
+				}
+
+				writtenRevisions.push({ revision, recordIndex });
+			},
+		});
+
+		for (const [recordIndex, upsertedKey] of upsertedKeys.entries()) {
+			savedKeysOfParents[parentOfRecord[recordIndex]!]!.push(upsertedKey);
+		}
+
+		// a row a hook added comes from no record
+		for (const { revision, recordIndex } of writtenRevisions) {
+			const parentIndex = recordIndex === undefined
+				? 0
+				: parentOfRecord[recordIndex]!;
+
+			revisionsOfParents[parentIndex]!.push(revision);
+		}
+
+		// Nullify all related items that aren't included in the current payload, only
+		// for the parents still holding one: most parents hold none after a create.
+		// A single parent skips the probe: its deselect query reads as much
+		const probesHeldChildren = listedParents.length > 1;
+		const savedKeyNamesOfParents = new Map<string, Set<string>>();
+
+		for (const [parentIndex, parentRow] of listedParents.entries()) {
+			savedKeyNamesOfParents.set(
+				parentKeyNameOf(parentRow.key),
+				new Set(savedKeysOfParents[parentIndex]!.flatMap((savedKey) => {
+					return isPrimaryKey(savedKey)
+						? [childKeyNameOf(savedKey)]
+						: [];
+				})),
+			);
+		}
+
+		const parentKeyNamesLeavingChildren = new Set<string>();
+
+		const listedParentKeys = listedParents.map((parentRow) => parentRow.key);
+
+		const probedKeyChunks = probesHeldChildren
+			? chunk(listedParentKeys, RELATED_READ_CHUNK_SIZE)
+			: [];
+
+		for (const keyChunk of probedKeyChunks) {
+			const heldRecords = await this.knex
+				.select(relatedPrimaryKeyField, relation.field)
+				.from(relation.collection)
+				.whereIn(relation.field, keyChunk);
+
+			for (const heldRecord of heldRecords) {
+				const parentKeyName = parentKeyNameOf(heldRecord[relation.field]);
+
+				const heldKeyName = childKeyNameOf(
+					heldRecord[relatedPrimaryKeyField],
+				);
+
+				if (!savedKeyNamesOfParents.get(parentKeyName)?.has(heldKeyName)) {
+					parentKeyNamesLeavingChildren.add(parentKeyName);
+				}
+			}
+		}
+
+		for (const [parentIndex, parentRow] of listedParents.entries()) {
+			const parentKeyName = parentKeyNameOf(parentRow.key);
+
+			if (
+				probesHeldChildren
+				&& !parentKeyNamesLeavingChildren.has(parentKeyName)
+			) {
+				continue;
+			}
+
+			const query: Query = {
+				filter: {
+					_and: [
+						{
+							[relation.field]: {
+								_eq: parentRow.key,
+							},
+						},
+						{
+							[relatedPrimaryKeyField]: {
+								_nin: savedKeysOfParents[parentIndex]!,
+							},
+						},
+					],
+				},
+				limit: -1,
+			};
+
+			if (relation.meta!.one_deselect_action === 'delete') {
+				// There's no revision for a deletion
+				await service.deleteByQuery(query, nestedMutationOptions);
+			}
+			else {
+				await service.updateByQuery(
+					query,
+					{ [relation.field]: null },
+					{
+						...nestedMutationOptions,
+						onRevisionCreate: (pk) => revisionsOfParents[parentIndex]!.push(pk),
+					},
+				);
+			}
+		}
 	}
 
 	/**
@@ -955,6 +1588,12 @@ export class PayloadService {
 
 		if (Object.keys(payload).length === 0) return null;
 
-		return JSON.stringify(payload);
+		// A filter hook may answer a BigInt, which JSON cannot hold as a number
+		// without losing digits.
+		return JSON.stringify(payload, (_key, fieldValue) => {
+			return typeof fieldValue === 'bigint'
+				? fieldValue.toString()
+				: fieldValue;
+		});
 	}
 }

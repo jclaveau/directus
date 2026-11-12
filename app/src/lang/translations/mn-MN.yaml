@@ -1210,7 +1210,6 @@ installed: Суулгасан
 reinstall: Дахин суулгах
 open_in_marketplace: Нэмэлт хэрэгслийн цэсэнд нээх
 source_registry: Нэмэлт хэрэгсэл
-source_local: Локал
 source_module: Node модуль
 collection: Бүрдэл
 collections: Бүрдлүүд

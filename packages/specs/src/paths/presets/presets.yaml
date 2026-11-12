@@ -42,6 +42,7 @@ post:
   parameters:
     - $ref: '../../openapi.yaml#/components/parameters/Fields'
     - $ref: '../../openapi.yaml#/components/parameters/Meta'
+    - $ref: '../../openapi.yaml#/components/parameters/MutationBatching'
   requestBody:
     content:
       application/json:
@@ -123,6 +124,7 @@ patch:
     - $ref: '../../openapi.yaml#/components/parameters/Sort'
     - $ref: '../../openapi.yaml#/components/parameters/Filter'
     - $ref: '../../openapi.yaml#/components/parameters/Search'
+    - $ref: '../../openapi.yaml#/components/parameters/MutationBatching'
   requestBody:
     content:
       application/json:

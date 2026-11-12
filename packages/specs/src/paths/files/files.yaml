@@ -35,6 +35,8 @@ post:
   tags:
     - Files
   operationId: createFile
+  parameters:
+    - $ref: '../../openapi.yaml#/components/parameters/MutationBatching'
   requestBody:
     content:
       application/json:
@@ -71,6 +73,7 @@ patch:
     - $ref: '../../openapi.yaml#/components/parameters/Sort'
     - $ref: '../../openapi.yaml#/components/parameters/Filter'
     - $ref: '../../openapi.yaml#/components/parameters/Search'
+    - $ref: '../../openapi.yaml#/components/parameters/MutationBatching'
   requestBody:
     content:
       application/json:

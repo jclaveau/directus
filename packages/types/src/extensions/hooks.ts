@@ -7,12 +7,14 @@ import type {
 	MutationEventContext,
 	ReadEventContext,
 	ScheduleHandler,
+	WrittenFilterHandler,
 } from '../events.js';
 import type {
 	CreateEntries,
 	DeleteKeys,
 	Item as AnyItem,
 	UpdateEntries,
+	UpdateGroup,
 } from '../items.js';
 import type { PermissionsAction } from '../permissions.js';
 import type { ApiExtensionContext } from './api-extension-context.js';
@@ -36,16 +38,25 @@ export type SystemScope = SystemCollection extends `directus_${infer Scope}`
  * collection, `<name>.<op>`. A create and an update are emitted grouped, once per
  * mutation.
  */
-type ItemsServiceEvent<Action extends PermissionsAction> =
+type ItemsServiceEvent<Action extends PermissionsAction | WrittenAction> =
 	| `items.${Action}`
 	| `${string}.items.${Action}`
 	| `${SystemScope}.${Action}`;
+
+/**
+ * The events an `ItemsService` emits once its rows are written, inside the
+ * transaction and before it commits.
+ */
+type WrittenAction = 'created' | 'updated';
 
 export type ItemsReadEvent = ItemsServiceEvent<'read'>;
 export type ItemsCreateEvent = ItemsServiceEvent<'create'>;
 export type ItemsUpdateEvent = ItemsServiceEvent<'update'>;
 export type ItemsDeleteEvent = ItemsServiceEvent<'delete'>;
 export type ItemsMutationEvent = ItemsServiceEvent<MutationAction>;
+export type ItemsCreatedEvent = ItemsServiceEvent<'created'>;
+export type ItemsUpdatedEvent = ItemsServiceEvent<'updated'>;
+export type ItemsWrittenEvent = ItemsServiceEvent<WrittenAction>;
 
 /**
  * A system scope whose events a service other than `ItemsService` emits by hand: its
@@ -61,11 +72,13 @@ export type BareFilterEvent =
  * `fields.create` does not read as a mutation; then the item shapes, a grouped
  * create or update taking the item type and wrapping it in the list it carries,
  * a delete taking the item type too, so `filter<Row>` does not type its keys as
- * a row, and handing them as `DeleteKeys`; then any other string, which is also
- * where a non-literal event name lands.
+ * a row, and handing them as `DeleteKeys`; then a created or updated one, typed
+ * by the rows or groups it wrote; then any other string, which is also where a
+ * non-literal event name lands.
  *
  * An item handler may return nothing: `emitFilter` keeps the payload when a
- * handler answers `undefined`.
+ * handler answers `undefined`. A created or updated one must: its rows are
+ * already written.
  *
  * The last overload refuses an item event whose name it can infer, so a handler
  * that does not fit its item overload is an error rather than a silent fall
@@ -107,8 +120,16 @@ export type RegisterFilter = {
 			MutationEventContext
 		>,
 	): void;
+	<CreatedItem = AnyItem>(
+		event: ItemsCreatedEvent,
+		handler: WrittenFilterHandler<CreatedItem[]>,
+	): void;
+	<UpdatedItem = AnyItem>(
+		event: ItemsUpdatedEvent,
+		handler: WrittenFilterHandler<UpdateGroup<UpdatedItem>[]>,
+	): void;
 	<TIn = unknown, TOut = TIn, EventName extends string = string>(
-		event: EventName extends ItemsReadEvent | ItemsMutationEvent
+		event: EventName extends ItemsReadEvent | ItemsMutationEvent | ItemsWrittenEvent
 			? never
 			: EventName,
 		handler: FilterHandler<TIn, TOut>,

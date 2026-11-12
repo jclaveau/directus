@@ -4,7 +4,7 @@ import vendors from '@common/get-dbs-to-test';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import { cloneDeep } from 'lodash-es';
 import { gunzipSync } from 'node:zlib';
@@ -42,7 +42,7 @@ describe.each(vendors)('%s', (vendor) => {
 					env[vendor]['CACHE_NAMESPACE'] = namespace;
 					env[vendor]['CACHE_BUILD_ID'] = buildId;
 					env[vendor]['RAILWAY_REPLICA_ID'] = `${vendor}-${replica}`;
-					env[vendor].PORT = String(await getPort());
+					env[vendor].PORT = String(await freePortOfWorker());
 
 					instances.push(spawn('node', [paths.cli, 'start'], {
 						cwd: paths.cwd,

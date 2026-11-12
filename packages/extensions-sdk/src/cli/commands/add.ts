@@ -62,7 +62,20 @@ export default async function add(options: AddOptions): Promise<void> {
 
 	const sourceExists = await fse.pathExists(path.resolve('src'));
 
+	if (extensionOptions.type === 'bundle' && extensionOptions.entries === undefined) {
+		log(
+			`Bundle ${chalk.bold(extensionManifest.name)} declares its entries in code:`
+				+ ` add the new entry to ${chalk.bold('defineBundleApi')} or`
+				+ ` ${chalk.bold('defineBundleApp')}.`,
+			'error',
+		);
+
+		process.exit(1);
+	}
+
 	if (extensionOptions.type === 'bundle') {
+		const bundleEntries = extensionOptions.entries ?? [];
+
 		const { type, name, language, alternativeSource } = await inquirer.prompt<{
 			type: NestedExtensionType;
 			name: string;
@@ -91,11 +104,11 @@ export default async function add(options: AddOptions): Promise<void> {
 				type: 'input',
 				name: 'alternativeSource',
 				message: 'Specify the path to the extension source',
-				when: !sourceExists && extensionOptions.entries.length > 0,
+				when: !sourceExists && bundleEntries.length > 0,
 			},
 		]);
 
-		const bundleEntryNames = new Set(extensionOptions.entries.map((entry) => entry.name));
+		const bundleEntryNames = new Set(bundleEntries.map((entry) => entry.name));
 
 		if (bundleEntryNames.has(name)) {
 			log(`Extension ${chalk.bold(name)} already exists for this bundle.`, 'error');
@@ -112,7 +125,7 @@ export default async function add(options: AddOptions): Promise<void> {
 		await copyTemplate(type, extensionPath, sourcePath, language);
 
 		const newEntries: ExtensionOptionsBundleEntry[] = [
-			...extensionOptions.entries,
+			...bundleEntries,
 			isIn(type, HYBRID_EXTENSION_TYPES)
 				? {
 						type,

@@ -147,8 +147,18 @@ function sanitizeAggregate(rawAggregate: any): Aggregate {
 	}
 
 	for (const [operation, fields] of Object.entries(aggregate)) {
-		if (typeof fields === 'string') aggregate[operation as keyof Aggregate] = (fields as string).split(',');
-		else if (Array.isArray(fields)) aggregate[operation as keyof Aggregate] = fields as string[];
+		const fieldList = typeof fields === 'string'
+			? (fields as string).split(',')
+			: fields;
+
+		// The validation refuses what is no string: a bad value stays a 400, no crash
+		if (Array.isArray(fieldList)) {
+			aggregate[operation as keyof Aggregate] = fieldList.map((field) => {
+				return typeof field === 'string'
+					? field.trim()
+					: field;
+			});
+		}
 	}
 
 	return aggregate as Aggregate;

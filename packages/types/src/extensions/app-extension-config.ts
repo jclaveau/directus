@@ -61,7 +61,7 @@ export type ExtensionSandboxOptions = z.infer<typeof ExtensionSandboxOptions>;
 
 export interface ExtensionSettings {
 	id: string;
-	source: 'module' | 'registry' | 'local';
+	source: 'module' | 'registry';
 	enabled: boolean;
 	bundle: string | null;
 	folder: string;
@@ -127,6 +127,11 @@ export type BundleExtension = ExtensionBase & {
 	partial: boolean | undefined;
 	entrypoint: SplitEntrypoint;
 	entries: BundleExtensionEntry[];
+	/**
+	 * Set when the package.json leaves `entries` out: the server reads them from
+	 * the built `api.js`, and the app reads the `app.js` ones from its chunk.
+	 */
+	entriesFrom?: 'code';
 };
 
 export type Extension = AppExtension | ApiExtension | HybridExtension | BundleExtension;

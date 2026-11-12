@@ -14,6 +14,7 @@ import type {
 	UpdateEntries,
 	UpdateEntry,
 	UpdateGroup,
+	WrittenEventContext,
 } from '@directus/types';
 import type { Knex } from 'knex';
 import { expectTypeOf, test } from 'vitest';
@@ -312,13 +313,79 @@ test('register.filter leaves the handle optional on a bare or runtime event', ()
 
 	register.filter('auth.create', (_payload, _meta, context) => {
 		expectTypeOf(context.scopedCache).toEqualTypeOf<
-			ScopedCacheScopeHandle | ScopedCachePurgeHandle | undefined
+			| ScopedCacheScopeHandle
+			| ScopedCachePurgeHandle
+			| Pick<ScopedCachePurgeHandle, 'purgeBy'>
+			| undefined
 		>();
 	});
 
 	register.filter(event, (_payload, _meta, context) => {
 		expectTypeOf(context.scopedCache).toEqualTypeOf<
-			ScopedCacheScopeHandle | ScopedCachePurgeHandle | undefined
+			| ScopedCacheScopeHandle
+			| ScopedCachePurgeHandle
+			| Pick<ScopedCachePurgeHandle, 'purgeBy'>
+			| undefined
 		>();
+	});
+});
+
+test('register.filter types a created event by the rows it wrote', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter<Item>('article.items.created', (rows, _meta, context) => {
+		expectTypeOf(rows).toEqualTypeOf<Item[]>();
+		expectTypeOf(context).toEqualTypeOf<WrittenEventContext>();
+	});
+
+	register.filter('users.created', (rows, _meta, context) => {
+		expectTypeOf(rows).toEqualTypeOf<Record<string, any>[]>();
+		expectTypeOf(context.transaction).toEqualTypeOf<Knex>();
+	});
+});
+
+test('register.filter types an updated event by the groups it applied', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter<Item>('items.updated', (groups, _meta, context) => {
+		expectTypeOf(groups).toEqualTypeOf<UpdateGroup<Item>[]>();
+		expectTypeOf(context).toEqualTypeOf<WrittenEventContext>();
+	});
+
+	register.filter('users.updated', (groups) => {
+		expectTypeOf(groups).toEqualTypeOf<UpdateGroup<Record<string, any>>[]>();
+	});
+});
+
+test('register.filter refuses a written handler answering anything', () => {
+	const register = {} as RegisterFunctions;
+
+	// @ts-expect-error -- the rows are written: a created hook answers nothing
+	register.filter('article.items.created', () => ({ a: 1 }));
+
+	// @ts-expect-error -- the rows are written: an updated hook answers nothing
+	register.filter('users.updated', () => ({ a: 1 }));
+
+	// @ts-expect-error -- the rows are written: a created hook answers nothing
+	register.filter('article.items.created', (rows) => rows);
+
+	// @ts-expect-error -- the rows are written: an updated hook answers nothing
+	register.filter('items.updated', async (groups) => groups);
+});
+
+test('register.filter takes a written handler answering nothing', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter('article.items.created', () => {});
+
+	register.filter('items.updated', async () => {});
+});
+
+test('register.filter hands a written handler no skipPurgeFor', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter('items.updated', (_groups, _meta, context) => {
+		// @ts-expect-error -- the rows are written: no take-over to declare inert
+		context.scopedCache.skipPurgeFor(1);
 	});
 });

@@ -7,7 +7,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
   - A response states the keys it checks; `x-query-audit` reads parsed.
   - Every header is a map of the request's own fields and its `statements`,
     the first being the read that authenticates it, outside any transaction.
-  - At `counts`, `stmt` is `<kind> <table>...`; at the other levels, the SQL.
+  - At `counts`, `stmt` is `<keyword> <table>...`, `<keyword> <function>()...` for a
+    statement naming no table, or `<keyword>...`; at the other levels, the SQL.
 
   Scenario: a create reports its transaction and the reads around it
     Then on postgres these requests get these responses:
@@ -309,19 +310,21 @@ Feature: A request reports the SQL it ran, one entry per transaction
     When an instance starts with QUERY_AUDIT_HEADER "x query audit"
     Then it exits naming QUERY_AUDIT_HEADER
 
+  # The GET leaves out the POST's titles: its row count must not depend on which
+  # of the two commits first.
   Scenario: two requests at once each report what they report alone
     When these requests run one after the other, then all at once:
-      | request                     |
-      | method: POST                |+
-      | path: /items/audit_articles |
-      | headers:                    |
-      |   x-query-audit: no-timings |
-      | payload:                    |
-      |   - title: a                |
-      | method: GET                 |+
-      | path: /items/audit_articles |
-      | headers:                    |
-      |   x-query-audit: no-timings |
+      | request                                           |
+      | method: POST                                      |+
+      | path: /items/audit_articles                       |
+      | headers:                                          |
+      |   x-query-audit: no-timings                       |
+      | payload:                                          |
+      |   - title: a                                      |
+      | method: GET                                       |+
+      | path: /items/audit_articles?filter[title][_neq]=a |
+      | headers:                                          |
+      |   x-query-audit: no-timings                       |
     Then each reports the same entries both times
 
   Scenario: an error response reports the statements it ran

@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Redis from 'ioredis';
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { createExtensionPackage } from './extension-package.js';
 import { summarise, summaryRow, type Summary } from './measure.js';
 
 /**
@@ -59,6 +60,8 @@ import { summarise, summaryRow, type Summary } from './measure.js';
  */
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+let extensionPackage: string;
 
 // The bundle `pnpm --filter directus deploy` produces, as the startup bench uses:
 // measuring a shape nobody deploys measures nothing.
@@ -380,7 +383,7 @@ async function startInstance(
 			SERVE_APP: 'false',
 			LOG_LEVEL: 'warn',
 			TELEMETRY: 'false',
-			EXTENSIONS_PATH: join(root, 'tests', 'perf', 'cache-extensions'),
+			PACKAGE_FILE_LOCATION: extensionPackage,
 			PORT: String(port),
 			PUBLIC_URL: `http://127.0.0.1:${port}`,
 			...env,
@@ -988,7 +991,7 @@ async function sampleCpu(
 }
 
 beforeAll(async () => {
-	await mkdir(join(root, 'tests', 'perf', 'cache-extensions'), { recursive: true });
+	extensionPackage = await createExtensionPackage();
 
 	// Seeded from an instance of its own, killed before any arm starts: the arms
 	// cache the schema, and a collection created after they booted would reach some

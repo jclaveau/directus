@@ -1,11 +1,17 @@
 import { getUrl } from '@common/config';
 import {
+	cellOfKnownKeys,
 	defineFeature,
 	loadFeature,
 	parseGherkinTable,
+	responseCellOf,
 	type StepFunctions,
 } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
+import {
+	defineStatementCountsStep,
+	instanceUrlForFeature,
+} from '@common/query-audit-steps';
 import { USER } from '@common/variables';
 import { randomUUID } from 'crypto';
 import { load as loadYaml } from 'js-yaml';
@@ -20,10 +26,21 @@ type RequestCell = {
 	payload?: unknown;
 };
 
+const REQUEST_CELL_KEYS = [
+	'as',
+	'method',
+	'path',
+	'query',
+	'payload',
+] as const satisfies readonly (keyof RequestCell)[];
+
+const RESPONSE_CELL_KEYS = ['code', 'body'] as const;
+
 type Batch = {
 	run: string;
 	keysByName: Record<string, string>;
 	tokensByName: Record<string, string>;
+	responses: Response[];
 };
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -33,8 +50,9 @@ const feature = loadFeature(
 );
 
 describe.each(vendors)('%s', (vendor) => {
-	// `<run>` and every `<name>` a Given created, `<name:upper>` upper-cased;
-	// anything else stays as written.
+	const instanceUrl = instanceUrlForFeature(feature, vendor);
+
+	// `<run>` and every `<name>` a Given created, `<name:upper>` upper-cased.
 	function withKeys(cell: string, batch: Batch) {
 		return cell.replaceAll(
 			/<([\w-]+)(:upper)?>/g,
@@ -46,7 +64,7 @@ describe.each(vendors)('%s', (vendor) => {
 				const key = batch.keysByName[name];
 
 				if (key === undefined) {
-					return placeholder;
+					throw new Error(`No row or user is named ${placeholder}`);
 				}
 
 				if (upper === undefined) {
@@ -59,20 +77,39 @@ describe.each(vendors)('%s', (vendor) => {
 	}
 
 	// A cell is YAML: the fork's multiline notation dedents it as a block.
+	function tokenOf(name: string, batch: Batch) {
+		const token = batch.tokensByName[name];
+
+		if (token === undefined) {
+			throw new Error(`No user is named "${name}"`);
+		}
+
+		return token;
+	}
+
 	function sendRequest(requestCell: string, batch: Batch) {
-		const { as: name, method, path, query = {}, payload } = loadYaml(
-			requestCell,
-		) as RequestCell;
+		const {
+			as: name,
+			method,
+			path,
+			query = {},
+			payload,
+		} = cellOfKnownKeys<RequestCell>(
+			'request',
+			loadYaml(requestCell),
+			REQUEST_CELL_KEYS,
+			'update-batch-guards.test.ts',
+		);
 
 		const pendingRequest = method === 'PATCH'
-			? request(getUrl(vendor)).patch(path)
-			: request(getUrl(vendor)).get(path);
+			? request(instanceUrl()).patch(path)
+			: request(instanceUrl()).get(path);
 
 		pendingRequest.query(query).set(
 			'Authorization',
 			name === undefined
 				? AUTH
-				: `Bearer ${batch.tokensByName[name]}`,
+				: `Bearer ${tokenOf(name, batch)}`,
 		);
 
 		return payload === undefined
@@ -85,6 +122,10 @@ describe.each(vendors)('%s', (vendor) => {
 		async function createRows(path: string, table: Record<string, string>[]) {
 			for (const row of table) {
 				const { as: name, ...cells } = row;
+
+				if (name === undefined) {
+					throw new Error(`A row of ${path} has no "as" cell`);
+				}
 
 				const [rowToCreate] = parseGherkinTable(
 					[Object.fromEntries(Object.entries(cells).map(([column, cell]) => {
@@ -100,7 +141,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				expect(response.statusCode).toEqual(200);
 
-				batch.keysByName[name!] = String(response.body.data.id);
+				batch.keysByName[name] = String(response.body.data.id);
 			}
 		}
 
@@ -155,7 +196,7 @@ describe.each(vendors)('%s', (vendor) => {
 		then(
 			'these requests get these responses:',
 			async (table: { request: string; response: string }[]) => {
-				const responses: Response[] = [];
+				const { responses } = batch;
 
 				for (const { request: requestCell } of table) {
 					responses.push(
@@ -166,10 +207,16 @@ describe.each(vendors)('%s', (vendor) => {
 				expect(responses.map((response) => {
 					return { code: response.statusCode, body: response.body };
 				})).toMatchObject(table.map(({ response }) => {
-					return loadYaml(withKeys(response, batch)) ?? {};
+					return responseCellOf<object>(
+						loadYaml(withKeys(response, batch)),
+						RESPONSE_CELL_KEYS,
+						'update-batch-guards.test.ts',
+					);
 				}));
 			},
 		);
+
+		defineStatementCountsStep(and, vendor, batch.responses);
 	}
 
 	defineFeature(feature, (scenario) => {
@@ -198,6 +245,7 @@ describe.each(vendors)('%s', (vendor) => {
 					run: randomUUID(),
 					keysByName: {},
 					tokensByName: {},
+					responses: [],
 				});
 			}, 60_000);
 		}

@@ -17,6 +17,9 @@ import FlowsOverview from './routes/flows/overview.vue';
 import MarketplaceAccount from './routes/marketplace/routes/account/account.vue';
 import MarketplaceExtension from './routes/marketplace/routes/extension/extension.vue';
 import MarketplaceRegistry from './routes/marketplace/routes/registry/registry.vue';
+import {
+	redirectClosedMarketplace,
+} from './routes/marketplace/redirect-closed-marketplace';
 import NotFound from './routes/not-found.vue';
 import PgBouncer from './routes/pgbouncer/pgbouncer.vue';
 import PoliciesCollection from './routes/policies/collection.vue';
@@ -267,6 +270,7 @@ export default defineModule({
 			name: 'marketplace',
 			path: 'marketplace',
 			component: RouterPass,
+			beforeEnter: redirectClosedMarketplace,
 			children: [
 				{
 					name: 'marketplace-registry',
