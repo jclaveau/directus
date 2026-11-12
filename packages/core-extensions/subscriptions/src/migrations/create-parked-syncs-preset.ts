@@ -6,7 +6,9 @@ const PARKED_SYNCS_BOOKMARK = 'Parked syncs';
 /**
  * Lists the syncs stuck at the attempt ceiling in the admin. A bookmark only shows
  * under a collection Directus tracks, hence the `directus_collections` row: a
- * `schema apply` of a snapshot made before this runs would drop that table.
+ * `schema apply` of a snapshot made before this runs drops that table and its
+ * pending syncs (blackbox `subscription-schema-apply.feature`), so a snapshot to
+ * apply is taken after the bundle is installed.
  */
 export const createParkedSyncsPreset = defineMigration(
 	'20261107A-create-parked-syncs-preset',
