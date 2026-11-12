@@ -7096,6 +7096,159 @@ describe('Services / Items / a batched upsert', () => {
 	});
 
 	it(oneLine`
+		upserts two payloads naming one missing record by key in one run
+	`, async () => {
+		const taggedSchema = new SchemaBuilder()
+			.collection('test', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('tag').m2o('tags');
+			})
+			.collection('tags', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.build();
+
+		await database.schema.alterTable('test', (table) => {
+			table.integer('tag');
+		});
+
+		await database.schema.createTable('tags', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		sqlStatements = [];
+
+		await expect(new ItemsService('test', { knex: database, schema: taggedSchema })
+			.upsertMany([
+				{ name: 'a', tag: { id: 9 } },
+				{ name: 'b', tag: { id: 9 } },
+			])).resolves.toStrictEqual([3, 4]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `tags` where `id` in (?, ?)',
+			'select `id` from `tags` where `id` in (?)',
+			'insert into `tags` (`id`) values (?) returning `id`',
+			'select sqlite_version() as version limit ?',
+			'insert into `test` (`name`, `tag`) select ? as `name`, ? as `tag` '
+				+ 'union all select ? as `name`, ? as `tag` returning `id`',
+			'COMMIT;',
+		]);
+
+		await expect(database('test')
+			.select('id', 'tag')
+			.where('id', '>', 2))
+			.resolves.toStrictEqual([
+				{ id: 3, tag: 9 },
+				{ id: 4, tag: 9 },
+			]);
+
+		await expect(database('tags').select('id', 'name'))
+			.resolves.toStrictEqual([{ id: 9, name: null }]);
+	});
+
+	it(oneLine`
+		upserts a payload naming a missing record by key after one creating
+		a keyless record
+	`, async () => {
+		const taggedSchema = new SchemaBuilder()
+			.collection('test', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('tag').m2o('tags');
+			})
+			.collection('tags', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.build();
+
+		await database.schema.alterTable('test', (table) => {
+			table.integer('tag');
+		});
+
+		await database.schema.createTable('tags', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		await database('tags').insert([
+			{ id: 7, name: 'seven' },
+			{ id: 8, name: 'eight' },
+		]);
+
+		await expect(new ItemsService('test', { knex: database, schema: taggedSchema })
+			.upsertMany([
+				{ name: 'a', tag: { name: 'new' } },
+				{ name: 'b', tag: { id: 9 } },
+			], { mutationBatching: 'minimizeMutations' }))
+			.resolves.toStrictEqual([3, 4]);
+
+		await expect(database('test').select('id', 'name', 'tag')
+			.where('id', '>', 2)
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 3, name: 'a', tag: 9 },
+			{ id: 4, name: 'b', tag: 9 },
+		]);
+	});
+
+	it(oneLine`
+		upserts a payload naming a missing record by key before one updating
+		a row with a keyless record
+	`, async () => {
+		const taggedSchema = new SchemaBuilder()
+			.collection('test', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('tag').m2o('tags');
+			})
+			.collection('tags', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.build();
+
+		await database.schema.alterTable('test', (table) => {
+			table.integer('tag');
+		});
+
+		await database.schema.createTable('tags', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		await database('tags').insert([
+			{ id: 7, name: 'seven' },
+			{ id: 8, name: 'eight' },
+		]);
+
+		await expect(new ItemsService('test', { knex: database, schema: taggedSchema })
+			.upsertMany([
+				{ name: 'b', tag: { id: 9 } },
+				{ id: 1, tag: { name: 'z' } },
+			], { mutationBatching: 'minimizeMutations' }))
+			.resolves.toStrictEqual([3, 1]);
+
+		await expect(database('test').select('id', 'name', 'tag')
+			.whereIn('id', [1, 3])
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one', tag: 10 },
+			{ id: 3, name: 'b', tag: 9 },
+		]);
+
+		await expect(database('tags').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 7, name: 'seven' },
+			{ id: 8, name: 'eight' },
+			{ id: 9, name: null },
+			{ id: 10, name: 'z' },
+		]);
+	});
+
+	it(oneLine`
 		upserts a payload nesting a record of its any-to-one field alone
 	`, async () => {
 		const itemSchema = new SchemaBuilder()

@@ -4305,8 +4305,11 @@ implements AbstractService<Item> {
 	 *
 	 * So does an m2o record holding its key alone, `{ tag: { id: 7 } }`: it
 	 * names its row as the bare key `7` does, and carries no field another
-	 * payload could overwrite. Its collection's `upsertMany` splits on a
-	 * repeated key itself, so two payloads naming a missing row create it once.
+	 * payload could overwrite. The run's nested records are upserted once per
+	 * key, so two payloads naming a missing row create it once. A run never
+	 * holds a key-only and a keyless record of one collection: the keyless one
+	 * may be given the key the other names, under `minimizeMutations` in the
+	 * same insert or ahead of it.
 	 */
 	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -4404,9 +4407,28 @@ implements AbstractService<Item> {
 				});
 		};
 
+		// related collection → whether the run's records there are key-only
+		const recordKindsOf = (payload: Partial<Item>) => {
+			const recordKinds = new Map<string, boolean>();
+
+			for (const [field, recordCollection] of recordCollections) {
+				const value = payload[field];
+
+				if (isPlainObject(value)) {
+					recordKinds.set(
+						recordCollection,
+						isKeyOnlyRecord(field, value as Partial<Item>),
+					);
+				}
+			}
+
+			return recordKinds;
+		};
+
 		const upsertRuns: Partial<Item>[][] = [];
 		let currentRun: Partial<Item>[] = [];
 		let runKeyNames = new Set<string>();
+		let runRecordKinds = new Map<string, boolean>();
 
 		for (const payload of payloads) {
 			if (runsAlone(payload)) {
@@ -4417,6 +4439,7 @@ implements AbstractService<Item> {
 				upsertRuns.push([payload]);
 				currentRun = [];
 				runKeyNames = new Set();
+				runRecordKinds = new Map();
 				continue;
 			}
 
@@ -4426,16 +4449,32 @@ implements AbstractService<Item> {
 				? null
 				: this.primaryKeyNameOf(primaryKey);
 
-			if (keyName !== null && runKeyNames.has(keyName)) {
+			const recordKinds = recordKindsOf(payload);
+
+			// a keyless record may be given the key a key-only one names
+			const mixesRecordKinds = [...recordKinds].some(([collection, keyOnly]) => {
+				return runRecordKinds.has(collection)
+					&& runRecordKinds.get(collection) !== keyOnly;
+			});
+
+			if (
+				(keyName !== null && runKeyNames.has(keyName))
+				|| mixesRecordKinds
+			) {
 				upsertRuns.push(currentRun);
 				currentRun = [];
 				runKeyNames = new Set();
+				runRecordKinds = new Map();
 			}
 
 			currentRun.push(payload);
 
 			if (keyName !== null) {
 				runKeyNames.add(keyName);
+			}
+
+			for (const [collection, keyOnly] of recordKinds) {
+				runRecordKinds.set(collection, keyOnly);
 			}
 		}
 
