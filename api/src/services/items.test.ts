@@ -7030,6 +7030,72 @@ describe('Services / Items / a batched upsert', () => {
 	});
 
 	it(oneLine`
+		upserts the payloads nesting a record by its key alone in one run
+	`, async () => {
+		const taggedSchema = new SchemaBuilder()
+			.collection('test', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('tag').m2o('tags');
+			})
+			.collection('tags', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.build();
+
+		await database.schema.alterTable('test', (table) => {
+			table.integer('tag');
+		});
+
+		await database.schema.createTable('tags', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		await database('tags').insert([
+			{ id: 7, name: 'seven' },
+			{ id: 8, name: 'eight' },
+		]);
+
+		sqlStatements = [];
+
+		await expect(new ItemsService('test', { knex: database, schema: taggedSchema })
+			.upsertMany([
+				{ name: 'a', tag: { id: 7 } },
+				{ name: 'b', tag: { id: 8 } },
+				{ name: 'c', tag: { id: 9 } },
+			])).resolves.toStrictEqual([3, 4, 5]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `tags` where `id` in (?, ?, ?)',
+			'select `id` from `tags` where `id` in (?)',
+			'insert into `tags` (`id`) values (?) returning `id`',
+			'select sqlite_version() as version limit ?',
+			'insert into `test` (`name`, `tag`) select ? as `name`, ? as `tag`'
+				+ ' union all select ? as `name`, ? as `tag`'
+				+ ' union all select ? as `name`, ? as `tag` returning `id`',
+			'COMMIT;',
+		]);
+
+		await expect(database('test').select('id', 'name', 'tag')
+			.where('id', '>', 2)
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 3, name: 'a', tag: 7 },
+			{ id: 4, name: 'b', tag: 8 },
+			{ id: 5, name: 'c', tag: 9 },
+		]);
+
+		await expect(database('tags').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 7, name: 'seven' },
+			{ id: 8, name: 'eight' },
+			{ id: 9, name: null },
+		]);
+	});
+
+	it(oneLine`
 		upserts a payload nesting a record of its any-to-one field alone
 	`, async () => {
 		const itemSchema = new SchemaBuilder()

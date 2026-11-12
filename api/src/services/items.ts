@@ -4302,6 +4302,11 @@ implements AbstractService<Item> {
 	 * fields the payload carries are checked, so a preset or hook setting a
 	 * field that names a row of the run may see that row written after the
 	 * record.
+	 *
+	 * So does an m2o record holding its key alone, `{ tag: { id: 7 } }`: it
+	 * names its row as the bare key `7` does, and carries no field another
+	 * payload could overwrite. Its collection's `upsertMany` splits on a
+	 * repeated key itself, so two payloads naming a missing row create it once.
 	 */
 	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -4364,6 +4369,22 @@ implements AbstractService<Item> {
 				});
 		};
 
+		const isKeyOnlyRecord = (field: string, record: Partial<Item>) => {
+			const recordCollection = recordCollections.get(field);
+
+			if (recordCollection === undefined) {
+				return false;
+			}
+
+			const { primary } = this.schema.collections[recordCollection]!;
+			const recordFields = Object.keys(record);
+
+			return recordFields.length === 1
+				&& recordFields[0] === primary
+				&& !isMissingPrimaryKey(record[primary])
+				&& !isPlainObject(record[primary]);
+		};
+
 		const runsAlone = (payload: Partial<Item>) => {
 			return [...nestingFields].some((field) => {
 				const value = payload[field];
@@ -4371,6 +4392,7 @@ implements AbstractService<Item> {
 				return (
 					isPlainObject(value)
 					&& !isKeylessFlatRecord(field, value as Partial<Item>)
+					&& !isKeyOnlyRecord(field, value as Partial<Item>)
 				)
 					|| (Array.isArray(value) && value.some(isPlainObject));
 			})
