@@ -4302,6 +4302,14 @@ implements AbstractService<Item> {
 	 * fields the payload carries are checked, so a preset or hook setting a
 	 * field that names a row of the run may see that row written after the
 	 * record.
+	 *
+	 * So does an m2o record holding its key alone, `{ tag: { id: 7 } }`: it
+	 * names its row as the bare key `7` does, and carries no field another
+	 * payload could overwrite. The run's nested records are upserted once per
+	 * key, so two payloads naming a missing row create it once. A run never
+	 * holds a key-only and a keyless record of one collection: the keyless one
+	 * may be given the key the other names, under `minimizeMutations` in the
+	 * same insert or ahead of it. A payload holding both runs alone.
 	 */
 	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -4364,6 +4372,22 @@ implements AbstractService<Item> {
 				});
 		};
 
+		const isKeyOnlyRecord = (field: string, record: Partial<Item>) => {
+			const recordCollection = recordCollections.get(field);
+
+			if (recordCollection === undefined) {
+				return false;
+			}
+
+			const { primary } = this.schema.collections[recordCollection]!;
+			const recordFields = Object.keys(record);
+
+			return recordFields.length === 1
+				&& recordFields[0] === primary
+				&& !isMissingPrimaryKey(record[primary])
+				&& !isPlainObject(record[primary]);
+		};
+
 		const runsAlone = (payload: Partial<Item>) => {
 			return [...nestingFields].some((field) => {
 				const value = payload[field];
@@ -4371,6 +4395,7 @@ implements AbstractService<Item> {
 				return (
 					isPlainObject(value)
 					&& !isKeylessFlatRecord(field, value as Partial<Item>)
+					&& !isKeyOnlyRecord(field, value as Partial<Item>)
 				)
 					|| (Array.isArray(value) && value.some(isPlainObject));
 			})
@@ -4382,12 +4407,37 @@ implements AbstractService<Item> {
 				});
 		};
 
+		// related collection → whether the run's records there are key-only; null
+		// for a payload holding both kinds of one collection, which runs alone
+		const recordKindsOf = (payload: Partial<Item>) => {
+			const recordKinds = new Map<string, boolean>();
+
+			for (const [field, recordCollection] of recordCollections) {
+				const value = payload[field];
+
+				if (isPlainObject(value)) {
+					const keyOnly = isKeyOnlyRecord(field, value as Partial<Item>);
+
+					if (recordKinds.get(recordCollection) === !keyOnly) {
+						return null;
+					}
+
+					recordKinds.set(recordCollection, keyOnly);
+				}
+			}
+
+			return recordKinds;
+		};
+
 		const upsertRuns: Partial<Item>[][] = [];
 		let currentRun: Partial<Item>[] = [];
 		let runKeyNames = new Set<string>();
+		let runRecordKinds = new Map<string, boolean>();
 
 		for (const payload of payloads) {
-			if (runsAlone(payload)) {
+			const recordKinds = recordKindsOf(payload);
+
+			if (recordKinds === null || runsAlone(payload)) {
 				if (currentRun.length > 0) {
 					upsertRuns.push(currentRun);
 				}
@@ -4395,6 +4445,7 @@ implements AbstractService<Item> {
 				upsertRuns.push([payload]);
 				currentRun = [];
 				runKeyNames = new Set();
+				runRecordKinds = new Map();
 				continue;
 			}
 
@@ -4404,16 +4455,30 @@ implements AbstractService<Item> {
 				? null
 				: this.primaryKeyNameOf(primaryKey);
 
-			if (keyName !== null && runKeyNames.has(keyName)) {
+			// a keyless record may be given the key a key-only one names
+			const mixesRecordKinds = [...recordKinds].some(([collection, keyOnly]) => {
+				return runRecordKinds.has(collection)
+					&& runRecordKinds.get(collection) !== keyOnly;
+			});
+
+			if (
+				(keyName !== null && runKeyNames.has(keyName))
+				|| mixesRecordKinds
+			) {
 				upsertRuns.push(currentRun);
 				currentRun = [];
 				runKeyNames = new Set();
+				runRecordKinds = new Map();
 			}
 
 			currentRun.push(payload);
 
 			if (keyName !== null) {
 				runKeyNames.add(keyName);
+			}
+
+			for (const [collection, keyOnly] of recordKinds) {
+				runRecordKinds.set(collection, keyOnly);
 			}
 		}
 
