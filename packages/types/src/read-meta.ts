@@ -316,8 +316,10 @@ export interface ScopedCacheExtensionHandle {
 	 * also what a purge that reached the bare reads alone answers (a raw write
 	 * naming no stored row), and nothing tells the two apart.
 	 *
-	 * Throws outside a request (a schedule, the CLI): there is no request list to
-	 * read there.
+	 * A request is an HTTP request, a websocket message, a GraphQL websocket
+	 * operation, a schedule tick or a flow run with none of those around it.
+	 * Throws where none runs (boot, a CLI command, middleware mounted on
+	 * `app.before`): there is no list to read there.
 	 */
 	readRequestPurges(): Promise<ScopedCacheFingerprint[] | null>;
 }

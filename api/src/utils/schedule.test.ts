@@ -3,7 +3,12 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { oneLine } from '@directus/utils';
 import { useLogger } from '../logger/index.js';
 import { migrationsAreOutstanding } from '../outstanding-migrations.js';
+import {
+	readRequestScopedCachePurges,
+	recordScopedCachePurged,
+} from '../scoped-cache/purged-record.js';
 import { SynchronizedClock } from '../synchronization.js';
+import { requestStore } from './request-store.js';
 import { scheduleSynchronizedJob, validateCron } from './schedule.js';
 
 vi.mock('node-schedule');
@@ -104,6 +109,37 @@ describe('scheduleSynchronizedJob', () => {
 		await tick();
 
 		expect(body).not.toHaveBeenCalled();
+		expect(warn).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		Each tick names its purges in a list of its own, not in the one of the
+		request that registered the job
+	`, async () => {
+		const { tick } = scheduledTick({ set: vi.fn().mockResolvedValue(true) });
+		const readings: unknown[] = [];
+
+		scheduleSynchronizedJob('flow-cron', '* * * * *', async () => {
+			recordScopedCachePurged([{ collection: 'articles' }]);
+			readings.push(await readRequestScopedCachePurges());
+		});
+
+		const requestState = { scopedCachePurged: { purged: [], queuedPurges: [] } };
+
+		await requestStore.run(requestState, async () => {
+			await tick();
+			await tick();
+		});
+
+		expect(readings).toEqual([
+			[{ collection: 'articles' }],
+			[{ collection: 'articles' }],
+		]);
+
+		expect(requestState).toEqual({
+			scopedCachePurged: { purged: [], queuedPurges: [] },
+		});
+
 		expect(warn).not.toHaveBeenCalled();
 	});
 });

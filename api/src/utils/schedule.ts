@@ -2,6 +2,7 @@ import schedule from 'node-schedule';
 import { useLogger } from '../logger/index.js';
 import { migrationsAreOutstanding } from '../outstanding-migrations.js';
 import { SynchronizedClock } from '../synchronization.js';
+import { emptyRequestState, requestStore } from './request-store.js';
 
 export interface ScheduledJob {
 	stop(): Promise<void>;
@@ -57,8 +58,10 @@ export function scheduleSynchronizedJob(
 		try {
 			const wasSet = await clock.set(nextTimestamp);
 
+			// Each tick names its purges in a list of its own, not in the one of the
+			// request that happened to register the job (a flow saved over HTTP).
 			if (wasSet) {
-				await cb(fireDate);
+				await requestStore.run(emptyRequestState(), () => cb(fireDate));
 			}
 		}
 		catch (error: any) {

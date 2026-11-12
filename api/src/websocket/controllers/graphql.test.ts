@@ -40,6 +40,7 @@ vi.mock('graphql-ws', async (importOriginal) => {
 	return { ...actual, makeServer: vi.fn(actual.makeServer) };
 });
 
+import { readRequestScopedCachePurges } from '../../scoped-cache/purged-record.js';
 import { executingService } from '../../services/graphql/schema-cache.js';
 import { GraphQLService } from '../../services/index.js';
 import type { UpgradeContext } from '../types.js';
@@ -97,6 +98,24 @@ describe('GraphQLSubscriptionController', () => {
 
 		expect(options.execute!(args)).toBe(service);
 		expect(options.subscribe!(args)).toBe(service);
+	});
+
+	test(oneLine`
+		a query and a subscription each read a purged list of their own
+	`, async () => {
+		new GraphQLSubscriptionController(new EventEmitter() as unknown as HttpServer);
+
+		const options = vi.mocked(makeServer).mock.lastCall![0] as ServerOptions;
+		const args = { contextValue: { service: {} } } as unknown as ExecutionArgs;
+
+		vi.mocked(execute)
+			.mockImplementation(() => readRequestScopedCachePurges() as any);
+
+		vi.mocked(subscribe)
+			.mockImplementation(() => readRequestScopedCachePurges() as any);
+
+		await expect(options.execute!(args)).resolves.toEqual([]);
+		await expect(options.subscribe!(args)).resolves.toEqual([]);
 	});
 
 	test(oneLine`
