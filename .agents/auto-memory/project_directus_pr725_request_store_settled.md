@@ -21,6 +21,12 @@ leak risk with B?" then "what is the cleaner / more reliable solution?" → **A*
 `{...getStore()}` copy (a copy escapes the clear). After close: recorders no-op, the reader
 throws "outside a request" — header already sent, nothing lost.
 
+Fields are `delete`d, not set to undefined (6193d86338: exactOptionalPropertyTypes TS2412).
+Choice 2 of that run → **A** (033bb96ff5): empty only when `res.writableFinished` — a client
+hanging up fires 'close' while the request still runs, so its store is kept until its work
+lets go. jean said "push now": fix pushed without waiting for the test commit's CI red
+(56abf93a0f, red seen locally) — a one-off, the red-proof-in-CI rule still stands.
+
 **Why:** retention bounded only by pool max / idle timeout / third-party sockets is not
 reliable; an empty object held is.
 **How to apply:** any new `requestStore.run(...)` inside an HTTP request must mutate the
