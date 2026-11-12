@@ -22,7 +22,7 @@ export function scheduleSynchronizedJob(
 	// job's wait as already said.
 	let heldForMigrations = false;
 
-	const job = schedule.scheduleJob(rule, async (fireDate) => {
+	const runTick = async (fireDate: Date) => {
 		// A build the database has not caught up with must not write through a
 		// schema it does not match — `/server/health` is already red on the same
 		// reading. Returning before the claim below leaves the tick to a node
@@ -67,7 +67,12 @@ export function scheduleSynchronizedJob(
 		catch (error: any) {
 			useLogger().warn(error, `[schedule] job "${id}" failed: ${error}`);
 		}
-	});
+	};
+
+	// Armed outside any store: node-schedule re-arms each next timer from the one
+	// firing, so a job registered by a request (a flow saved over HTTP) would
+	// otherwise hold that request's store for as long as the job lives.
+	const job = requestStore.exit(() => schedule.scheduleJob(rule, runTick));
 
 	const stop = async () => {
 		job.cancel();

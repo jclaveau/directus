@@ -279,6 +279,7 @@ export default async function createApp(): Promise<express.Application> {
 		app.use(cors);
 	}
 
+	// Before `auditRequestQueries`, which adds its audit to this store.
 	app.use(openRequestStore);
 
 	// After `cors`, so a browser can read the 400 of a level outside the list.

@@ -318,8 +318,9 @@ export interface ScopedCacheExtensionHandle {
 	 *
 	 * A request is an HTTP request, a websocket message, a GraphQL websocket
 	 * operation, a schedule tick or a flow run with none of those around it.
-	 * Throws where none runs (boot, a CLI command, middleware mounted on
-	 * `app.before`): there is no list to read there.
+	 * Rejects where none runs (boot, a CLI command, middleware mounted on
+	 * `app.before` or `middlewares.before`, the `websocket.connect`, `.close`
+	 * and `.error` actions): there is no list to read there.
 	 */
 	readRequestPurges(): Promise<ScopedCacheFingerprint[] | null>;
 }

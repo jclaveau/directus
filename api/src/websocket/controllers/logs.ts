@@ -4,6 +4,7 @@ import type { Server as httpServer } from 'node:http';
 import type WebSocket from 'ws';
 import emitter from '../../emitter.js';
 import { useLogger } from '../../logger/index.js';
+import { emptyRequestState, requestStore } from '../../utils/request-store.js';
 import { handleWebSocketError, WebSocketError } from '../errors.js';
 import { AuthMode } from '../messages.js';
 import type { AuthenticationState, WebSocketClient } from '../types.js';
@@ -44,13 +45,17 @@ export class LogsController extends SocketController {
 	}
 
 	private bindEvents(client: WebSocketClient) {
-		client.on('parsed-message', async (message: WebSocketMessage) => {
-			try {
-				emitter.emitAction('websocket.logs', { message, client });
-			} catch (error) {
-				handleWebSocketError(client, error, 'server');
-				return;
-			}
+		// Each message is a request of its own, as on the REST websocket.
+		client.on('parsed-message', (message: WebSocketMessage) => {
+			return requestStore.run(emptyRequestState(), async () => {
+				try {
+					emitter.emitAction('websocket.logs', { message, client });
+				}
+				catch (error) {
+					handleWebSocketError(client, error, 'server');
+					return;
+				}
+			});
 		});
 
 		client.on('error', (event: WebSocket.Event) => {
