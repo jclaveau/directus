@@ -95,7 +95,12 @@ export async function syncSubscription({
 				...providerState,
 				cancel_at_period_end: isCancelRequested
 					|| providerState.cancel_at_period_end,
-				access: await revokeAccess(accessService, storedAccess),
+				access: await revokeAccess({
+					trx,
+					accessService,
+					storedAccess,
+					subscriptionId: storedSubscription.id,
+				}),
 			},
 			eventSource: isCancelRequested
 				? 'user_deleted'
@@ -173,15 +178,27 @@ export async function syncSubscription({
 		await requestProviderCancel(subscriptionProvider, providerSubscription);
 	}
 
+	const resumedRow = await readResumedRow(
+		trx,
+		providerName,
+		providerSubscription,
+	);
+
+	// A resume shares the access of the row it resumes: one row per user and plan.
 	const grantedAccess = isKept && !isUserDeleted
 		? await keepAccess({
 			trx,
 			accessService,
-			storedAccess,
+			storedAccess: storedAccess ?? resumedRow?.access ?? null,
 			grantedUser: subscriber.user,
 			planPolicy: subscribedPlan.policy,
 		})
-		: await revokeAccess(accessService, storedAccess);
+		: await revokeAccess({
+			trx,
+			accessService,
+			storedAccess,
+			subscriptionId: storedSubscription?.id ?? null,
+		});
 
 	const subscriptionState: SubscriptionState = {
 		...providerState,
@@ -210,7 +227,7 @@ export async function syncSubscription({
 
 	await trx('subscriptions').insert({
 		...subscriptionState,
-		resumes: await readResumedRowId(trx, providerName, providerSubscription),
+		resumes: resumedRow?.id ?? null,
 		provider: providerName,
 		provider_subscription_id: providerSubscription.subscriptionId,
 		date_created: syncedAt,
@@ -235,11 +252,11 @@ export async function syncSubscription({
 }
 
 /** A resume is created by `POST /subscriptions/resume`, after the row it resumes. */
-async function readResumedRowId(
+async function readResumedRow(
 	trx: Knex,
 	providerName: string,
 	providerSubscription: ProviderSubscription,
-): Promise<number | null> {
+): Promise<{ id: number; access: string | null } | null> {
 	const { resumedSubscriptionId } = providerSubscription;
 
 	if (resumedSubscriptionId === undefined) {
@@ -247,7 +264,7 @@ async function readResumedRowId(
 	}
 
 	const resumedSubscription = await trx('subscriptions')
-		.select('id')
+		.select('id', 'access')
 		.where({
 			provider: providerName,
 			provider_subscription_id: resumedSubscriptionId,
@@ -261,7 +278,7 @@ async function readResumedRowId(
 		);
 	}
 
-	return resumedSubscription.id;
+	return resumedSubscription;
 }
 
 /**
@@ -315,7 +332,12 @@ export async function closeMissingSubscription({
 			status: 'canceled',
 			current_period_end: storedSubscription.current_period_end,
 			cancel_at_period_end: Boolean(storedSubscription.cancel_at_period_end),
-			access: await revokeAccess(accessService, storedSubscription.access),
+			access: await revokeAccess({
+				trx,
+				accessService,
+				storedAccess: storedSubscription.access,
+				subscriptionId: storedSubscription.id,
+			}),
 		},
 		eventSource: 'provider_missing',
 		writtenAt: closedAt,
@@ -465,11 +487,34 @@ async function keepAccess({
 	return String(createdAccess);
 }
 
-async function revokeAccess(
-	accessService: AbstractService,
-	storedAccess: string | null,
-): Promise<null> {
-	if (storedAccess !== null) {
+type AccessRevoke = {
+	trx: Knex;
+	accessService: AbstractService;
+	storedAccess: string | null;
+	/** Null for a row not stored yet. */
+	subscriptionId: number | null;
+};
+
+/** An access a resume still shares stays: the other row keeps granting it. */
+async function revokeAccess({
+	trx,
+	accessService,
+	storedAccess,
+	subscriptionId,
+}: AccessRevoke): Promise<null> {
+	if (storedAccess === null) {
+		return null;
+	}
+
+	const sharingQuery = trx('subscriptions')
+		.first('id')
+		.where('access', storedAccess);
+
+	if (subscriptionId !== null) {
+		sharingQuery.whereNot('id', subscriptionId);
+	}
+
+	if (await sharingQuery === undefined) {
 		await accessService.deleteOne(storedAccess);
 	}
 
