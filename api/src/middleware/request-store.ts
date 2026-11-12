@@ -15,8 +15,8 @@ const openRequestStore: RequestHandler = (_req, res, next) => {
 	const requestState = emptyRequestState();
 
 	res.once('close', () => {
-		requestState.scopedCachePurged = undefined;
-		requestState.queryAudit = undefined;
+		delete requestState.scopedCachePurged;
+		delete requestState.queryAudit;
 	});
 
 	requestStore.run(requestState, next);

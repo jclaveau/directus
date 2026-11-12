@@ -50,8 +50,5 @@ test('empties the store of an audited request once its response closed', () => {
 
 	res.emit('close');
 
-	expect(requestState).toStrictEqual({
-		scopedCachePurged: undefined,
-		queryAudit: undefined,
-	});
+	expect(requestState).toStrictEqual({});
 });
