@@ -7249,6 +7249,53 @@ describe('Services / Items / a batched upsert', () => {
 	});
 
 	it(oneLine`
+		upserts a payload naming a missing record by key after one holding a
+		keyless and a key-only record of that collection
+	`, async () => {
+		const taggedSchema = new SchemaBuilder()
+			.collection('test', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('tag').m2o('tags');
+				c.field('alt_tag').m2o('tags');
+			})
+			.collection('tags', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.build();
+
+		await database.schema.alterTable('test', (table) => {
+			table.integer('tag');
+			table.integer('alt_tag');
+		});
+
+		await database.schema.createTable('tags', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		await database('tags').insert([
+			{ id: 7, name: 'seven' },
+			{ id: 8, name: 'eight' },
+		]);
+
+		await expect(new ItemsService('test', { knex: database, schema: taggedSchema })
+			.upsertMany([
+				{ name: 'a', tag: { name: 'new' }, alt_tag: { id: 7 } },
+				{ name: 'b', tag: { id: 9 } },
+			], { mutationBatching: 'minimizeMutations' }))
+			.resolves.toStrictEqual([3, 4]);
+
+		await expect(database('test').select('id', 'name', 'tag', 'alt_tag')
+			.where('id', '>', 2)
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 3, name: 'a', tag: 9, alt_tag: 7 },
+			{ id: 4, name: 'b', tag: 9, alt_tag: null },
+		]);
+	});
+
+	it(oneLine`
 		upserts a payload nesting a record of its any-to-one field alone
 	`, async () => {
 		const itemSchema = new SchemaBuilder()

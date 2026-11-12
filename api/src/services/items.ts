@@ -4309,7 +4309,7 @@ implements AbstractService<Item> {
 	 * key, so two payloads naming a missing row create it once. A run never
 	 * holds a key-only and a keyless record of one collection: the keyless one
 	 * may be given the key the other names, under `minimizeMutations` in the
-	 * same insert or ahead of it.
+	 * same insert or ahead of it. A payload holding both runs alone.
 	 */
 	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -4407,7 +4407,8 @@ implements AbstractService<Item> {
 				});
 		};
 
-		// related collection → whether the run's records there are key-only
+		// related collection → whether the run's records there are key-only; null
+		// for a payload holding both kinds of one collection, which runs alone
 		const recordKindsOf = (payload: Partial<Item>) => {
 			const recordKinds = new Map<string, boolean>();
 
@@ -4415,10 +4416,13 @@ implements AbstractService<Item> {
 				const value = payload[field];
 
 				if (isPlainObject(value)) {
-					recordKinds.set(
-						recordCollection,
-						isKeyOnlyRecord(field, value as Partial<Item>),
-					);
+					const keyOnly = isKeyOnlyRecord(field, value as Partial<Item>);
+
+					if (recordKinds.get(recordCollection) === !keyOnly) {
+						return null;
+					}
+
+					recordKinds.set(recordCollection, keyOnly);
 				}
 			}
 
@@ -4431,7 +4435,9 @@ implements AbstractService<Item> {
 		let runRecordKinds = new Map<string, boolean>();
 
 		for (const payload of payloads) {
-			if (runsAlone(payload)) {
+			const recordKinds = recordKindsOf(payload);
+
+			if (recordKinds === null || runsAlone(payload)) {
 				if (currentRun.length > 0) {
 					upsertRuns.push(currentRun);
 				}
@@ -4448,8 +4454,6 @@ implements AbstractService<Item> {
 			const keyName = isMissingPrimaryKey(primaryKey)
 				? null
 				: this.primaryKeyNameOf(primaryKey);
-
-			const recordKinds = recordKindsOf(payload);
 
 			// a keyless record may be given the key a key-only one names
 			const mixesRecordKinds = [...recordKinds].some(([collection, keyOnly]) => {
