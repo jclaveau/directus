@@ -256,6 +256,67 @@ describe('queueAfterCommit', () => {
 		expect(requestPurges).toEqual([{ collection: 'rounds' }]);
 	});
 
+	it(oneLine`
+		answers a read made by a purge a raw trx ran on its commit
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		vi.mocked(getDatabase).mockReturnValue(db);
+
+		let purgesReadWhileDraining:
+			| Awaited<ReturnType<typeof readRequestScopedCachePurges>>
+			| undefined;
+
+		await scopedCachePurgedStore.run(
+			{ purged: [], queuedPurges: [] },
+			async () => {
+				const trx = await db.transaction();
+
+				queueAfterCommit(trx, async () => {
+					await new Promise((resolve) => setTimeout(resolve, 10));
+					recordScopedCachePurged([{ collection: 'rounds' }]);
+					purgesReadWhileDraining = await readRequestScopedCachePurges();
+				});
+
+				await trx.commit();
+			},
+		);
+
+		await vi.waitFor(() => {
+			expect(purgesReadWhileDraining).toEqual([{ collection: 'rounds' }]);
+		});
+	});
+
+	it(oneLine`
+		lets the request read nothing from a raw trx rolled back by hand
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		vi.mocked(getDatabase).mockReturnValue(db);
+
+		const queuedTask = vi.fn(async () => {
+			recordScopedCachePurged([{ collection: 'rounds' }]);
+		});
+
+		const requestPurges = await scopedCachePurgedStore.run(
+			{ purged: [], queuedPurges: [] },
+			async () => {
+				const trx = await db.transaction();
+
+				queueAfterCommit(trx, queuedTask);
+
+				await trx.rollback();
+
+				return readRequestScopedCachePurges();
+			},
+		);
+
+		expect(requestPurges).toEqual([]);
+		expect(queuedTask).not.toHaveBeenCalled();
+	});
+
 	// A purge missed leaves the old row cached until TTL; one too many only
 	// re-reads it.
 	it(oneLine`

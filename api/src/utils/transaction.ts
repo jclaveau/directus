@@ -2,7 +2,10 @@ import { isObject } from '@directus/utils';
 import { type Knex } from 'knex';
 import getDatabase, { getDatabaseClient } from '../database/index.js';
 import { useLogger } from '../logger/index.js';
-import { recordQueuedScopedCachePurges } from '../scoped-cache/purged-record.js';
+import {
+	drainQueuedScopedCachePurges,
+	recordQueuedScopedCachePurges,
+} from '../scoped-cache/purged-record.js';
 import type { DatabaseClient } from '@directus/types';
 
 /**
@@ -92,7 +95,9 @@ function queueOnRawTransaction(knex: Knex): AfterCommitTask[] | undefined {
 			afterCommitTasks.delete(outermostTrx);
 
 			if (!rollbackRequested) {
-				await drainAfterSettle(getDatabase(), queuedTasks, 'commit');
+				await drainQueuedScopedCachePurges(outermostTrx, () => {
+					return drainAfterSettle(getDatabase(), queuedTasks, 'commit');
+				});
 			}
 		},
 		() => {

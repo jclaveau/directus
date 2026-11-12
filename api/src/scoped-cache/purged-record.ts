@@ -6,8 +6,9 @@ import type { Knex } from 'knex';
  * What the scoped-cache purges of one request reached, read by the
  * CACHE_PURGED_TAGS_HEADER and by an extension's `scopedCache.readRequestPurges`:
  * every purgeScopedCache call it awaited, a nested write's queued until its
- * commit (#363) included. `null` once one of them flushed the whole namespace. A
- * purge ending after `respond` (an unawaited action hook) is not named.
+ * commit (#363) included, in call order: two calls reaching one slice name it
+ * twice. `null` once one of them flushed the whole namespace. A purge ending
+ * after `respond` (an unawaited action hook) is not named.
  */
 export type ScopedCachePurgedRecord = {
 	purged: ScopedCacheFingerprint[] | null;
@@ -44,11 +45,45 @@ export function recordScopedCachePurged(
 	}
 }
 
+/**
+ * The transactions whose queued work is running around the caller: a read made
+ * from inside that work (a `cache.purge` filter calling `readRequestPurges`)
+ * must not wait for the work it is part of.
+ */
+const drainingTransactionStore = new AsyncLocalStorage<Knex.Transaction[]>();
+
+export function drainQueuedScopedCachePurges(
+	transaction: Knex.Transaction,
+	drainQueuedTasks: () => Promise<void>,
+): Promise<void> {
+	return drainingTransactionStore.run(
+		[...(drainingTransactionStore.getStore() ?? []), transaction],
+		drainQueuedTasks,
+	);
+}
+
 export function recordQueuedScopedCachePurges(
 	transaction: Knex.Transaction,
 	settled: Promise<void>,
 ): void {
-	scopedCachePurgedStore.getStore()?.queuedPurges.push({ transaction, settled });
+	const purgedRecord = scopedCachePurgedStore.getStore();
+
+	if (purgedRecord === undefined) {
+		return;
+	}
+
+	// Let go once settled: nothing reads the list in most requests, and an entry
+	// holds the rows of every purge its transaction queued.
+	const queuedPurge = {
+		transaction,
+		settled: settled.finally(() => {
+			purgedRecord.queuedPurges = purgedRecord.queuedPurges.filter((queued) => {
+				return queued !== queuedPurge;
+			});
+		}),
+	};
+
+	purgedRecord.queuedPurges.push(queuedPurge);
 }
 
 /**
@@ -69,22 +104,25 @@ export async function readRequestScopedCachePurges(): Promise<
 
 	// Only a settled transaction's: awaiting one still open, from inside its own
 	// callback, would wait for the very transaction that is waiting on this read.
-	// Its writes have not landed, so nothing of theirs is purged yet. Taken in
-	// rounds: a queued purge can run a hook that opens a transaction of its own.
-	let settledQueues = purgedRecord.queuedPurges.filter((queuedPurge) => {
-		return queuedPurge.transaction.isCompleted();
-	});
+	// Its writes have not landed, so nothing of theirs is purged yet. Nor the one
+	// whose queued work made this read: it would wait for itself. Taken in rounds:
+	// a queued purge can run a hook that opens a transaction of its own. Left in
+	// the list until settled, so a second read waits for them too.
+	const drainingTransactions = drainingTransactionStore.getStore() ?? [];
 
-	while (settledQueues.length > 0) {
-		purgedRecord.queuedPurges = purgedRecord.queuedPurges.filter((queuedPurge) => {
-			return !settledQueues.includes(queuedPurge);
+	const findAwaitableQueues = () => {
+		return purgedRecord.queuedPurges.filter((queuedPurge) => {
+			return queuedPurge.transaction.isCompleted()
+				&& !drainingTransactions.includes(queuedPurge.transaction);
 		});
+	};
 
-		await Promise.all(settledQueues.map((queuedPurge) => queuedPurge.settled));
+	let awaitableQueues = findAwaitableQueues();
 
-		settledQueues = purgedRecord.queuedPurges.filter((queuedPurge) => {
-			return queuedPurge.transaction.isCompleted();
-		});
+	while (awaitableQueues.length > 0) {
+		await Promise.all(awaitableQueues.map((queuedPurge) => queuedPurge.settled));
+
+		awaitableQueues = findAwaitableQueues();
 	}
 
 	return purgedRecord.purged === null
