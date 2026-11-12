@@ -5,6 +5,10 @@ import type { Server as HttpServer } from 'node:http';
 import { performance } from 'node:perf_hooks';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import emitter from '../../emitter.js';
+import {
+	readRequestScopedCachePurges,
+	recordScopedCachePurged,
+} from '../../scoped-cache/purged-record.js';
 import { WebSocketController } from './rest.js';
 
 vi.mock('../../bus/index.js', () => ({ useBus: () => ({ subscribe: vi.fn() }) }));
@@ -113,5 +117,37 @@ describe('a parsed message', () => {
 				+ '"statements":[]}}',
 			],
 		]);
+	});
+
+	test('names what its handlers purged, as a request does', async () => {
+		const send = vi.fn();
+		const ws = Object.assign(new EventEmitter(), { send });
+
+		new WebSocketController(
+			new EventEmitter() as unknown as HttpServer,
+		).server.emit('connection', ws, {
+			accountability: null,
+			expires_at: null,
+		});
+
+		const readings: unknown[] = [];
+
+		vi.spyOn(emitter, 'emitFilter').mockImplementation(async (_event, message) => {
+			recordScopedCachePurged([{ collection: 'articles' }]);
+			readings.push(await readRequestScopedCachePurges());
+			return message;
+		});
+
+		vi.spyOn(emitter, 'emitAction').mockResolvedValue();
+
+		await ws.listeners('parsed-message')[0]!({ type: 'items', uid: 1 });
+		await ws.listeners('parsed-message')[0]!({ type: 'items', uid: 2 });
+
+		expect(readings).toEqual([
+			[{ collection: 'articles' }],
+			[{ collection: 'articles' }],
+		]);
+
+		expect(send).not.toHaveBeenCalled();
 	});
 });

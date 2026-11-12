@@ -56,8 +56,7 @@ vi.mock('../../scoped-cache/index.js', async (importOriginal) => {
 const { createScopedCacheExtensionHandle } =
 	await import('./scoped-cache-handle.js');
 
-const { scopedCachePurgedStore } =
-	await import('../../scoped-cache/purged-record.js');
+const { requestStore } = await import('../../utils/request-store.js');
 
 function schemaScopedBy(fields: string[]) {
 	const schema = new SchemaBuilder()
@@ -357,8 +356,13 @@ describe('createScopedCacheExtensionHandle', () => {
 
 		const handle = createScopedCacheExtensionHandle(getSchema);
 
-		const requestPurges = await scopedCachePurgedStore.run(
-			{ purged: [{ collection: 'rounds' }], queuedPurges: [] },
+		const requestPurges = await requestStore.run(
+			{
+				scopedCachePurged: {
+					purged: [{ collection: 'rounds' }],
+					queuedPurges: [],
+				},
+			},
 			async () => {
 				await handle.purgeForMutatedRows('articles', [{ owner: 7 }]);
 
@@ -383,8 +387,13 @@ describe('createScopedCacheExtensionHandle', () => {
 	it('reads the purges the current request reached', async () => {
 		const handle = createScopedCacheExtensionHandle(getSchema);
 
-		const requestPurges = await scopedCachePurgedStore.run(
-			{ purged: [{ collection: 'articles' }], queuedPurges: [] },
+		const requestPurges = await requestStore.run(
+			{
+				scopedCachePurged: {
+					purged: [{ collection: 'articles' }],
+					queuedPurges: [],
+				},
+			},
 			() => handle.readRequestPurges(),
 		);
 

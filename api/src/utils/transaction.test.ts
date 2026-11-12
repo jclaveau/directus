@@ -7,8 +7,8 @@ import { useLogger } from '../logger/index.js';
 import {
 	readRequestScopedCachePurges,
 	recordScopedCachePurged,
-	scopedCachePurgedStore,
 } from '../scoped-cache/purged-record.js';
+import { requestStore } from '../utils/request-store.js';
 import {
 	queueAfterCommit,
 	queueAfterCommitOrRollback,
@@ -237,8 +237,8 @@ describe('queueAfterCommit', () => {
 		createTracker(db);
 		vi.mocked(getDatabase).mockReturnValue(db);
 
-		const requestPurges = await scopedCachePurgedStore.run(
-			{ purged: [], queuedPurges: [] },
+		const requestPurges = await requestStore.run(
+			{ scopedCachePurged: { purged: [], queuedPurges: [] } },
 			async () => {
 				const trx = await db.transaction();
 
@@ -268,8 +268,8 @@ describe('queueAfterCommit', () => {
 			| Awaited<ReturnType<typeof readRequestScopedCachePurges>>
 			| undefined;
 
-		await scopedCachePurgedStore.run(
-			{ purged: [], queuedPurges: [] },
+		await requestStore.run(
+			{ scopedCachePurged: { purged: [], queuedPurges: [] } },
 			async () => {
 				const trx = await db.transaction();
 
@@ -300,8 +300,8 @@ describe('queueAfterCommit', () => {
 			recordScopedCachePurged([{ collection: 'rounds' }]);
 		});
 
-		const requestPurges = await scopedCachePurgedStore.run(
-			{ purged: [], queuedPurges: [] },
+		const requestPurges = await requestStore.run(
+			{ scopedCachePurged: { purged: [], queuedPurges: [] } },
 			async () => {
 				const trx = await db.transaction();
 

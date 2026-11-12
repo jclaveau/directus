@@ -187,9 +187,9 @@ import { readScopedCacheEpochs } from '../scoped-cache/fill-guard.js';
 import {
 	recordQueuedScopedCachePurges,
 	recordScopedCachePurged,
-	scopedCachePurgedStore,
 } from '../scoped-cache/purged-record.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
+import { requestStore } from '../utils/request-store.js';
 import { withMeta } from '../utils/read-meta.js';
 import { respond } from './respond.js';
 
@@ -1507,15 +1507,17 @@ describe('respond middleware', () => {
 
 		const res = makeRes({ data: { id: 1 } });
 
-		await scopedCachePurgedStore.run(
+		await requestStore.run(
 			{
-				purged: [
-					{
-						collection: 'articles',
-						pinnedScope: { owner: ['U2'] },
-					},
-				],
-				queuedPurges: [],
+				scopedCachePurged: {
+					purged: [
+						{
+							collection: 'articles',
+							pinnedScope: { owner: ['U2'] },
+						},
+					],
+					queuedPurges: [],
+				},
 			},
 			() => respond(makeReq({ method: 'PATCH' }), res, next),
 		);
@@ -1531,7 +1533,9 @@ describe('respond middleware', () => {
 
 		const res = makeRes({ data: { id: 1 } });
 
-		await scopedCachePurgedStore.run({ purged: [], queuedPurges: [] }, () => {
+		const requestState = { scopedCachePurged: { purged: [], queuedPurges: [] } };
+
+		await requestStore.run(requestState, () => {
 			recordQueuedScopedCachePurges(
 				{ isCompleted: () => true } as Knex.Transaction,
 				new Promise<void>((resolve) => setTimeout(resolve, 10))
@@ -1558,15 +1562,17 @@ describe('respond middleware', () => {
 
 		const res = makeRes({ data: { id: 1 } });
 
-		await scopedCachePurgedStore.run(
+		await requestStore.run(
 			{
-				purged: [
-					{
-						collection: 'articles',
-						pinnedScope: { owner: ['\x00null'] },
-					},
-				],
-				queuedPurges: [],
+				scopedCachePurged: {
+					purged: [
+						{
+							collection: 'articles',
+							pinnedScope: { owner: ['\x00null'] },
+						},
+					],
+					queuedPurges: [],
+				},
 			},
 			() => respond(makeReq({ method: 'PATCH' }), res, next),
 		);
@@ -1598,8 +1604,8 @@ describe('respond middleware', () => {
 			},
 		);
 
-		await scopedCachePurgedStore.run(
-			{ purged: purgedFingerprints, queuedPurges: [] },
+		await requestStore.run(
+			{ scopedCachePurged: { purged: purgedFingerprints, queuedPurges: [] } },
 			() => respond(makeReq(), res, next),
 		);
 
@@ -1634,8 +1640,13 @@ describe('respond middleware', () => {
 			},
 		);
 
-		await scopedCachePurgedStore.run(
-			{ purged: [{ collection: 'articles' }], queuedPurges: [] },
+		await requestStore.run(
+			{
+				scopedCachePurged: {
+					purged: [{ collection: 'articles' }],
+					queuedPurges: [],
+				},
+			},
 			() => respond(makeReq(), res, next),
 		);
 

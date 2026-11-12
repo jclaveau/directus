@@ -5,8 +5,8 @@ import {
 	readRequestScopedCachePurges,
 	recordQueuedScopedCachePurges,
 	recordScopedCachePurged,
-	scopedCachePurgedStore,
 } from './purged-record.js';
+import { requestStore } from '../utils/request-store.js';
 
 describe('readRequestScopedCachePurges', () => {
 	it('refuses to read outside a request', async () => {
@@ -19,8 +19,8 @@ describe('readRequestScopedCachePurges', () => {
 	});
 
 	it('answers a copy the purges after the read do not reach', async () => {
-		const requestPurges = await scopedCachePurgedStore.run(
-			{ purged: [], queuedPurges: [] },
+		const requestPurges = await requestStore.run(
+			{ scopedCachePurged: { purged: [], queuedPurges: [] } },
 			async () => {
 				recordScopedCachePurged([{ collection: 'rounds' }]);
 
@@ -36,8 +36,8 @@ describe('readRequestScopedCachePurges', () => {
 	});
 
 	it('answers null once a purge flushed the whole namespace', async () => {
-		const requestPurges = await scopedCachePurgedStore.run(
-			{ purged: [], queuedPurges: [] },
+		const requestPurges = await requestStore.run(
+			{ scopedCachePurged: { purged: [], queuedPurges: [] } },
 			async () => {
 				recordScopedCachePurged([{ collection: 'rounds' }]);
 				recordScopedCachePurged(null);
@@ -57,8 +57,8 @@ describe('readRequestScopedCachePurges', () => {
 				isCompleted: () => true,
 			} as Knex.Transaction;
 
-			const requestPurges = await scopedCachePurgedStore.run(
-				{ purged: [], queuedPurges: [] },
+			const requestPurges = await requestStore.run(
+				{ scopedCachePurged: { purged: [], queuedPurges: [] } },
 				async () => {
 					recordQueuedScopedCachePurges(
 						settledTransaction,
@@ -94,8 +94,8 @@ describe('readRequestScopedCachePurges', () => {
 				isCompleted: () => true,
 			} as Knex.Transaction;
 
-			const requestPurges = await scopedCachePurgedStore.run(
-				{ purged: [], queuedPurges: [] },
+			const requestPurges = await requestStore.run(
+				{ scopedCachePurged: { purged: [], queuedPurges: [] } },
 				async () => {
 					recordQueuedScopedCachePurges(
 						settledTransaction,
@@ -130,8 +130,8 @@ describe('readRequestScopedCachePurges', () => {
 				| Awaited<ReturnType<typeof readRequestScopedCachePurges>>
 				| undefined;
 
-			await scopedCachePurgedStore.run(
-				{ purged: [], queuedPurges: [] },
+			await requestStore.run(
+				{ scopedCachePurged: { purged: [], queuedPurges: [] } },
 				async () => {
 					const queuedPurgesRan = drainQueuedScopedCachePurges(
 						settledTransaction,
@@ -159,7 +159,7 @@ describe('readRequestScopedCachePurges', () => {
 
 		const purgedRecord = { purged: [], queuedPurges: [] };
 
-		await scopedCachePurgedStore.run(purgedRecord, async () => {
+		await requestStore.run({ scopedCachePurged: purgedRecord }, async () => {
 			recordQueuedScopedCachePurges(openTransaction, Promise.resolve());
 
 			await new Promise((resolve) => setTimeout(resolve, 0));
@@ -175,8 +175,8 @@ describe('readRequestScopedCachePurges', () => {
 				isCompleted: () => false,
 			} as Knex.Transaction;
 
-			const requestPurges = await scopedCachePurgedStore.run(
-				{ purged: [], queuedPurges: [] },
+			const requestPurges = await requestStore.run(
+				{ scopedCachePurged: { purged: [], queuedPurges: [] } },
 				async () => {
 					recordQueuedScopedCachePurges(
 						openTransaction,

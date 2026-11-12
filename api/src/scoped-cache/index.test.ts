@@ -76,7 +76,7 @@ import {
 import emitter from '../emitter.js';
 import { getCache } from '../cache.js';
 import { requestScopedCacheIndexReap } from './reap-requests.js';
-import { scopedCachePurgedStore } from './purged-record.js';
+import { requestStore } from '../utils/request-store.js';
 import { recordScopedCacheBuild } from '../cache-build-identity.js';
 import { useLogger } from '../logger/index.js';
 import { withMeta } from '../utils/read-meta.js';
@@ -3056,7 +3056,7 @@ describe('the request\'s purged list', () => {
 	`, async () => {
 		const purgedRecord = { purged: [], queuedPurges: [] };
 
-		await scopedCachePurgedStore.run(purgedRecord, () => {
+		await requestStore.run({ scopedCachePurged: purgedRecord }, () => {
 			return purgeScopedCache(cache as any, 'rounds', [
 				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
 			]);
@@ -3074,7 +3074,7 @@ describe('the request\'s purged list', () => {
 	it('names a slice its old and new rows share once', async () => {
 		const purgedRecord = { purged: [], queuedPurges: [] };
 
-		await scopedCachePurgedStore.run(purgedRecord, () => {
+		await requestStore.run({ scopedCachePurged: purgedRecord }, () => {
 			return purgeScopedCache(cache as any, 'rounds', [
 				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
 				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
@@ -3093,7 +3093,7 @@ describe('the request\'s purged list', () => {
 	it('names the slices of the rows a row-driven purge was handed', async () => {
 		const purgedRecord = { purged: [], queuedPurges: [] };
 
-		await scopedCachePurgedStore.run(purgedRecord, () => {
+		await requestStore.run({ scopedCachePurged: purgedRecord }, () => {
 			return purgeScopedCache(cache as any, 'rounds', [], null, {
 				rowFingerprints: [
 					scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
@@ -3113,7 +3113,7 @@ describe('the request\'s purged list', () => {
 	it('names the collection a collection-wide purge reached', async () => {
 		const purgedRecord = { purged: [], queuedPurges: [] };
 
-		await scopedCachePurgedStore.run(purgedRecord, () => {
+		await requestStore.run({ scopedCachePurged: purgedRecord }, () => {
 			return purgeScopedCache(cache as any, 'articles', null);
 		});
 
@@ -3131,7 +3131,7 @@ describe('the request\'s purged list', () => {
 
 		const purgedRecord = { purged: [], queuedPurges: [] };
 
-		await scopedCachePurgedStore.run(purgedRecord, () => {
+		await requestStore.run({ scopedCachePurged: purgedRecord }, () => {
 			return purgeScopedCache(cache as any, 'rounds', [], null, {
 				rowFingerprints: [
 					scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
@@ -3156,7 +3156,7 @@ describe('the request\'s purged list', () => {
 			queuedPurges: [],
 		};
 
-		await scopedCachePurgedStore.run(purgedRecord, () => {
+		await requestStore.run({ scopedCachePurged: purgedRecord }, () => {
 			return flushResponseCache(cache as any);
 		});
 
@@ -3171,7 +3171,7 @@ describe('the request\'s purged list', () => {
 			queuedPurges: [],
 		};
 
-		await scopedCachePurgedStore.run(purgedRecord, () => {
+		await requestStore.run({ scopedCachePurged: purgedRecord }, () => {
 			return purgeScopedCache(cache as any, 'articles', []);
 		});
 

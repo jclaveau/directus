@@ -28,16 +28,14 @@ import {
 	type ScopedCacheEpochs,
 } from '../scoped-cache/index.js';
 import { readWhileServingOff } from '../scoped-cache/fill-guard.js';
-import {
-	readRequestScopedCachePurges,
-	scopedCachePurgedStore,
-} from '../scoped-cache/purged-record.js';
+import { readRequestScopedCachePurges } from '../scoped-cache/purged-record.js';
 import {
 	recordPendingScopedCachePurge,
 } from '../scoped-cache-pending-purges.js';
 import { ExportService } from '../services/import-export.js';
 import { Meta } from '../types/meta.js';
 import asyncHandler from '../utils/async-handler.js';
+import { requestStore } from '../utils/request-store.js';
 import {
 	CACHE_AUDIT_PINS_HEADER,
 	isCacheAuditReplay,
@@ -103,7 +101,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	if (env['CACHE_PURGED_TAGS_HEADER']) {
 		// Every purge the request ran, a raw transaction's commit drain included
 		// (see ScopedCachePurgedRecord for what is left out).
-		const purged = scopedCachePurgedStore.getStore()
+		const purged = requestStore.getStore()?.scopedCachePurged
 			? await readRequestScopedCachePurges()
 			: undefined;
 

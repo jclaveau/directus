@@ -1,7 +1,7 @@
 import { useEnv } from '@directus/env';
 import type { Knex } from 'knex';
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { performance } from 'node:perf_hooks';
+import { requestStore } from '../utils/request-store.js';
 
 type TransactionOutcome = 'commit' | 'rollback';
 
@@ -136,8 +136,6 @@ type DriverQueryObject = {
 	context?: unknown;
 };
 
-export const queryAuditStore = new AsyncLocalStorage<QueryAudit>();
-
 const TRANSACTION_KEYWORDS = new Set([
 	'begin',
 	'start',
@@ -239,7 +237,7 @@ export function emptyQueryAudit(
 }
 
 /**
- * Audit every statement the request in `queryAuditStore` sends through this
+ * Audit every statement the request in `requestStore` sends through this
  * knex instance's dialect. The driver call is the one seam every statement
  * crosses: knex's `query` event never fires for a transaction's own
  * `BEGIN` / `COMMIT` / `SAVEPOINT`, and the transaction client is built off the
@@ -320,7 +318,7 @@ function auditedAcquireConnection(
 	acquireConnection: AcquireConnection,
 ): AcquireConnection {
 	return function (this: unknown, ...acquireArguments) {
-		const audit = queryAuditStore.getStore();
+		const audit = requestStore.getStore()?.queryAudit;
 
 		if (!audit) {
 			return acquireConnection.apply(this, acquireArguments);
@@ -349,7 +347,7 @@ function auditedAcquireConnection(
 
 function auditedDriverMethod(runDriverMethod: DriverQuery): DriverQuery {
 	return function (this, connection, queryObject, ...streamArguments) {
-		const audit = queryAuditStore.getStore();
+		const audit = requestStore.getStore()?.queryAudit;
 
 		if (!audit) {
 			return runDriverMethod.call(

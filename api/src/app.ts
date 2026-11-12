@@ -89,7 +89,7 @@ import cors from './middleware/cors.js';
 import { errorHandler } from './middleware/error-handler.js';
 import extractToken from './middleware/extract-token.js';
 import auditRequestQueries from './middleware/query-audit.js';
-import recordRequestScopedCachePurges from './middleware/scoped-cache-purged.js';
+import openRequestStore from './middleware/request-store.js';
 import rateLimiterGlobal from './middleware/rate-limiter-global.js';
 import {
 	refuseExtensionChangeInProduction,
@@ -279,12 +279,12 @@ export default async function createApp(): Promise<express.Application> {
 		app.use(cors);
 	}
 
+	app.use(openRequestStore);
+
 	// After `cors`, so a browser can read the 400 of a level outside the list.
 	if (queryAuditEnabled()) {
 		app.use(auditRequestQueries);
 	}
-
-	app.use(recordRequestScopedCachePurges);
 
 	app.use((req, res, next) => {
 		(

@@ -12,8 +12,8 @@ import {
 	type QueryAudit,
 	type QueryAuditLevel,
 	queryAuditEnabled,
-	queryAuditStore,
 } from '../database/query-audit.js';
+import { requestStore } from '../utils/request-store.js';
 import { WebSocketError, handleWebSocketError } from './errors.js';
 import type { WebSocketClient } from './types.js';
 import { getMessageType } from './utils/message.js';
@@ -79,7 +79,10 @@ export async function auditMessageQueries(
 	// A handler settling unreplied (an error sent without its uid) ends its
 	// message: what still runs after it belongs to no reply.
 	try {
-		return await queryAuditStore.run(audit, handleMessage);
+		return await requestStore.run(
+			{ ...requestStore.getStore(), queryAudit: audit },
+			handleMessage,
+		);
 	}
 	finally {
 		if (unrepliedAuditsOf(client).delete(audit)) {
@@ -118,7 +121,7 @@ export function reportQueryAuditInReplies(client: WebSocketClient): void {
 
 // Every reply is a JSON object in a text frame: other data is sent as is.
 function repliedDataOf(client: WebSocketClient, sentData: unknown): unknown {
-	const audit = queryAuditStore.getStore();
+	const audit = requestStore.getStore()?.queryAudit;
 	const messageAudit = audit && messageAudits.get(audit);
 
 	if (

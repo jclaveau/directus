@@ -6,8 +6,8 @@ import { performance } from 'node:perf_hooks';
 import { afterEach, expect, test, vi } from 'vitest';
 import {
 	auditStatementStart,
-	queryAuditStore,
 } from '../database/query-audit.js';
+import { requestStore } from '../utils/request-store.js';
 import auditRequestQueries from './query-audit.js';
 
 vi.mock('@directus/env');
@@ -36,7 +36,7 @@ test('writes the audit of the request when its headers flush', () => {
 	const req = { get: vi.fn() } as unknown as Request;
 
 	auditRequestQueries(req, res, () => {
-		const audit = queryAuditStore.getStore()!;
+		const audit = requestStore.getStore()!.queryAudit!;
 
 		auditStatementStart(audit, 'select * from "articles"', 'a')();
 	});
@@ -75,7 +75,7 @@ test('takes the level the request sends over QUERY_AUDIT_LEVEL', () => {
 	const req = { get: vi.fn().mockReturnValue('counts') } as unknown as Request;
 
 	auditRequestQueries(req, res, () => {
-		const audit = queryAuditStore.getStore()!;
+		const audit = requestStore.getStore()!.queryAudit!;
 
 		auditStatementStart(audit, 'select * from "articles"', 'a')();
 	});
@@ -115,7 +115,7 @@ test('reports the bound values to an admin asking bindings', () => {
 	} as unknown as Request;
 
 	auditRequestQueries(req, res, () => {
-		const audit = queryAuditStore.getStore()!;
+		const audit = requestStore.getStore()!.queryAudit!;
 
 		auditStatementStart(audit, 'select * from "articles" where "id" = ?', 'a', [
 			7,
@@ -156,7 +156,7 @@ test('lists every run in order to an admin asking full', () => {
 	} as unknown as Request;
 
 	auditRequestQueries(req, res, () => {
-		const audit = queryAuditStore.getStore()!;
+		const audit = requestStore.getStore()!.queryAudit!;
 
 		auditStatementStart(audit, 'BEGIN;', 'a')();
 		auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [7])();
@@ -206,7 +206,7 @@ test.each(['bindings', 'full'])(
 		} as unknown as Request;
 
 		auditRequestQueries(req, res, () => {
-			const audit = queryAuditStore.getStore()!;
+			const audit = requestStore.getStore()!.queryAudit!;
 
 			auditStatementStart(audit, 'select * from "articles" where "id" = ?', 'a', [
 				7,
@@ -308,7 +308,7 @@ test('caps nothing when QUERY_AUDIT_HEADER_MAX_SIZE is 0', () => {
 	const req = { get: vi.fn() } as unknown as Request;
 
 	auditRequestQueries(req, res, () => {
-		const audit = queryAuditStore.getStore()!;
+		const audit = requestStore.getStore()!.queryAudit!;
 
 		auditStatementStart(audit, `select * from "${'a'.repeat(9000)}"`, 'a')();
 	});
@@ -380,7 +380,7 @@ test.each([
 	const req = { get: vi.fn().mockReturnValue(askedValue) } as unknown as Request;
 
 	auditRequestQueries(req, res, () => {
-		const audit = queryAuditStore.getStore()!;
+		const audit = requestStore.getStore()!.queryAudit!;
 
 		auditStatementStart(audit, 'BEGIN;', 'a')();
 		auditStatementStart(audit, 'select * from "articles"', 'a')();
@@ -407,10 +407,10 @@ test('records nothing once the headers flushed', () => {
 	}) as unknown as Response;
 
 	const req = { get: vi.fn() } as unknown as Request;
-	let requestAudit = queryAuditStore.getStore();
+	let requestAudit = requestStore.getStore()?.queryAudit;
 
 	auditRequestQueries(req, res, () => {
-		requestAudit = queryAuditStore.getStore();
+		requestAudit = requestStore.getStore()?.queryAudit;
 	});
 
 	res.writeHead(200);
@@ -432,10 +432,10 @@ test('records nothing once the connection closed', () => {
 	}) as unknown as Response;
 
 	const req = { get: vi.fn() } as unknown as Request;
-	let requestAudit = queryAuditStore.getStore();
+	let requestAudit = requestStore.getStore()?.queryAudit;
 
 	auditRequestQueries(req, res, () => {
-		requestAudit = queryAuditStore.getStore();
+		requestAudit = requestStore.getStore()?.queryAudit;
 	});
 
 	res.emit('close');
@@ -466,10 +466,10 @@ test.each([
 	}) as unknown as Response;
 
 	const req = { get: vi.fn() } as unknown as Request;
-	let requestAudit = queryAuditStore.getStore();
+	let requestAudit = requestStore.getStore()?.queryAudit;
 
 	auditRequestQueries(req, res, () => {
-		requestAudit = queryAuditStore.getStore();
+		requestAudit = requestStore.getStore()?.queryAudit;
 		auditStatementStart(requestAudit!, 'BEGIN;', 'a')();
 		auditStatementStart(requestAudit!, 'select * from "a"', 'a', [1]);
 	});
@@ -498,10 +498,10 @@ test('records no bound value once anyone else authenticated', () => {
 	}) as unknown as Response;
 
 	const req = { get: vi.fn().mockReturnValue('full') } as unknown as Request;
-	let requestAudit = queryAuditStore.getStore();
+	let requestAudit = requestStore.getStore()?.queryAudit;
 
 	auditRequestQueries(req, res, () => {
-		requestAudit = queryAuditStore.getStore();
+		requestAudit = requestStore.getStore()?.queryAudit;
 	});
 
 	req.accountability = { admin: false } as NonNullable<Request['accountability']>;

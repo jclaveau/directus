@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ScopedCacheFingerprint } from '@directus/types';
 import type { Knex } from 'knex';
+import { requestStore } from '../utils/request-store.js';
 
 /**
  * What the scoped-cache purges of one request reached, read by the
@@ -20,13 +21,10 @@ export type ScopedCachePurgedRecord = {
 	queuedPurges: { transaction: Knex.Transaction; settled: Promise<void> }[];
 };
 
-export const scopedCachePurgedStore =
-	new AsyncLocalStorage<ScopedCachePurgedRecord>();
-
 export function recordScopedCachePurged(
 	purged: ScopedCacheFingerprint[] | null,
 ): void {
-	const purgedRecord = scopedCachePurgedStore.getStore();
+	const purgedRecord = requestStore.getStore()?.scopedCachePurged;
 
 	if (purgedRecord === undefined || purgedRecord.purged === null) {
 		return;
@@ -66,7 +64,7 @@ export function recordQueuedScopedCachePurges(
 	transaction: Knex.Transaction,
 	settled: Promise<void>,
 ): void {
-	const purgedRecord = scopedCachePurgedStore.getStore();
+	const purgedRecord = requestStore.getStore()?.scopedCachePurged;
 
 	if (purgedRecord === undefined) {
 		return;
@@ -93,7 +91,7 @@ export function recordQueuedScopedCachePurges(
 export async function readRequestScopedCachePurges(): Promise<
 	ScopedCacheFingerprint[] | null
 > {
-	const purgedRecord = scopedCachePurgedStore.getStore();
+	const purgedRecord = requestStore.getStore()?.scopedCachePurged;
 
 	if (purgedRecord === undefined) {
 		throw new Error(
