@@ -6,6 +6,7 @@ import {
 	type StepCallback,
 } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
+import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
@@ -72,6 +73,10 @@ const accessFeature = loadFeature(
 
 const lifecycleFeature = loadFeature(
 	'./tests/db/routes/system/subscription-lifecycle.feature',
+);
+
+const schemaApplyFeature = loadFeature(
+	'./tests/db/routes/system/subscription-schema-apply.feature',
 );
 
 describe.each(vendors)('%s', (vendor) => {
@@ -526,6 +531,94 @@ describe.each(vendors)('%s', (vendor) => {
 		[/^the providers eventually received these writes:$/, expectReceivedWrites],
 	];
 
+	type DiffEntry = { collection: string; diff: { kind: string }[] };
+
+	let appliedDiff: Record<'collections' | 'fields' | 'relations', DiffEntry[]>
+		| undefined;
+
+	function sendAsAdmin(method: string, routePath: string, payload?: unknown) {
+		return fetch(`${vendorEnv['PUBLIC_URL']}${routePath}`, {
+			method,
+			headers: {
+				'Authorization': `Bearer ${USER.ADMIN.TOKEN}`,
+				'Content-Type': 'application/json',
+			},
+			body: payload === undefined
+				? undefined
+				: JSON.stringify(payload),
+		});
+	}
+
+	// Another file moving the schema between the diff and the apply makes the
+	// hash stale: the apply is then taken again from a fresh snapshot.
+	async function applySnapshotWithout(droppedCollection: string) {
+		for (let applyAttempt = 1; applyAttempt <= 3; applyAttempt++) {
+			const snapshotResponse = await sendAsAdmin('GET', '/schema/snapshot');
+
+			expect(snapshotResponse.status).toBe(200);
+
+			const { data: fullSnapshot } = await snapshotResponse.json();
+
+			const isKept = (snapshotEntry: { collection: string }) => {
+				return snapshotEntry.collection !== droppedCollection;
+			};
+
+			const diffResponse = await sendAsAdmin('POST', '/schema/diff', {
+				...fullSnapshot,
+				collections: fullSnapshot.collections.filter(isKept),
+				fields: fullSnapshot.fields.filter(isKept),
+				relations: fullSnapshot.relations.filter(isKept),
+			});
+
+			expect(diffResponse.status).toBe(200);
+
+			const { data: { hash: schemaHash, diff: fullDiff } } = await diffResponse
+				.json();
+
+			const isDropped = (diffEntry: DiffEntry) => !isKept(diffEntry);
+
+			appliedDiff = {
+				collections: fullDiff.collections.filter(isDropped),
+				fields: fullDiff.fields.filter(isDropped),
+				relations: fullDiff.relations.filter(isDropped),
+			};
+
+			const applyResponse = await sendAsAdmin('POST', '/schema/apply', {
+				hash: schemaHash,
+				diff: appliedDiff,
+			});
+
+			const applyBody = await applyResponse.text();
+
+			if (applyResponse.status === 400 && applyBody.includes('hash')) {
+				continue;
+			}
+
+			expect({ status: applyResponse.status, body: applyBody })
+				.toEqual({ status: 204, body: '' });
+
+			return;
+		}
+
+		throw new Error(
+			`The schema moved during each of 3 applies without`
+			+ ` ${JSON.stringify(droppedCollection)}`,
+		);
+	}
+
+	function expectDeletedCollections(
+		rowsTable: { collection: string; kind: string }[],
+	) {
+		expect(appliedDiff?.collections.map(({ collection, diff }) => {
+			return { collection, kind: diff[0]?.kind };
+		}))
+			.toEqual(rowsTable);
+	}
+
+	async function expectNoTable(tableName: string) {
+		expect(await database.schema.hasTable(tableName)).toBe(false);
+	}
+
 	// Bound off each scenario's own steps: the library binds by position.
 	defineFeature(lifecycleFeature, (scenario) => {
 		for (const { title, steps: scenarioSteps } of lifecycleFeature.scenarios) {
@@ -543,5 +636,18 @@ describe.each(vendors)('%s', (vendor) => {
 				}
 			}, 180_000);
 		}
+	});
+
+	// Last: the apply drops the sync queue every scenario above relies on.
+	defineFeature(schemaApplyFeature, (scenario) => {
+		scenario(schemaApplyFeature.scenarios[0]!.title, ({ when, then, and }) => {
+			when(
+				/^the admin applies a snapshot of this instance without (\w+)$/,
+				applySnapshotWithout,
+			);
+
+			then('the diff deletes these collections:', expectDeletedCollections);
+			and(/^table (\w+) no longer exists$/, expectNoTable);
+		}, 60_000);
 	});
 });
