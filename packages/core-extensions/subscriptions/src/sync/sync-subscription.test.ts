@@ -188,7 +188,7 @@ describe('syncSubscription', () => {
 		}]);
 	});
 
-	test('regrants access when the plan changed policy', async () => {
+	test('moves its access to the policy the plan changed to', async () => {
 		await database('subscribers').insert({ user: 'user-1' });
 
 		await database('subscriber_customers')
@@ -234,7 +234,8 @@ describe('syncSubscription', () => {
 		});
 
 		const accessService = {
-			createOne: vi.fn().mockResolvedValue('access-2'),
+			createOne: vi.fn(),
+			updateOne: vi.fn(),
 			deleteOne: vi.fn(),
 		};
 
@@ -255,20 +256,21 @@ describe('syncSubscription', () => {
 			syncedAt: new Date('2026-11-05T00:00:00Z'),
 		});
 
-		expect(accessService.deleteOne).toHaveBeenCalledWith('access-1');
-
-		expect(accessService.createOne).toHaveBeenCalledWith({
+		// A resumed subscription shares this row, so it moves rather than splits.
+		expect(accessService.updateOne).toHaveBeenCalledWith('access-1', {
 			user: 'user-1',
 			policy: 'policy-2',
-			managed_by: '@scalabus/subscriptions',
 		});
+
+		expect(accessService.deleteOne).not.toHaveBeenCalled();
+		expect(accessService.createOne).not.toHaveBeenCalled();
 
 		expect(await database('subscriptions')
 			.select('plan_reference', 'access'))
-			.toEqual([{ plan_reference: 2, access: 'access-2' }]);
+			.toEqual([{ plan_reference: 2, access: 'access-1' }]);
 	});
 
-	test('regrants access when the subscriber changed user', async () => {
+	test('moves its access to the user the subscriber changed to', async () => {
 		await database('subscribers').insert({ user: 'user-2' });
 
 		await database('subscriber_customers')
@@ -302,7 +304,8 @@ describe('syncSubscription', () => {
 		});
 
 		const accessService = {
-			createOne: vi.fn().mockResolvedValue('access-2'),
+			createOne: vi.fn(),
+			updateOne: vi.fn(),
 			deleteOne: vi.fn(),
 		};
 
@@ -323,13 +326,13 @@ describe('syncSubscription', () => {
 			syncedAt: new Date('2026-11-05T00:00:00Z'),
 		});
 
-		expect(accessService.deleteOne).toHaveBeenCalledWith('access-1');
-
-		expect(accessService.createOne).toHaveBeenCalledWith({
+		expect(accessService.updateOne).toHaveBeenCalledWith('access-1', {
 			user: 'user-2',
 			policy: 'policy-1',
-			managed_by: '@scalabus/subscriptions',
 		});
+
+		expect(accessService.deleteOne).not.toHaveBeenCalled();
+		expect(accessService.createOne).not.toHaveBeenCalled();
 	});
 
 	test('revokes the access of an ended subscription', async () => {

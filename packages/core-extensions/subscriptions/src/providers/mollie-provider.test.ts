@@ -660,6 +660,59 @@ describe('resumeCancel', () => {
 		expect(mollieClient.customerSubscriptions.create).not.toHaveBeenCalled();
 	});
 
+	test(oneLine`
+		starts another subscription past a canceled resume, keyed on its attempt
+	`, async () => {
+		const mollieClient = {
+			customerSubscriptions: {
+				iterate: vi.fn().mockReturnValue([
+					{ id: 'sub_1', status: 'canceled', metadata: { plan: 'monthly' } },
+					{
+						id: 'sub_2',
+						status: 'canceled',
+						metadata: { plan: 'monthly', resumes: 'sub_1' },
+					},
+				]),
+				get: vi.fn().mockResolvedValue({
+					id: 'sub_1',
+					status: 'canceled',
+					amount: { currency: 'EUR', value: '9.90' },
+					interval: '1 month',
+					description: 'Monthly',
+					mandateId: 'mdt_1',
+					times: null,
+					timesRemaining: null,
+					metadata: { plan: 'monthly' },
+				}),
+				create: vi.fn().mockResolvedValue({ id: 'sub_3' }),
+			},
+			customerMandates: {
+				iterate: vi.fn().mockReturnValue([{ id: 'mdt_1', status: 'valid' }]),
+			},
+		};
+
+		await expect(createMollieProvider(mollieClient as unknown as MollieClient)
+			.resumeCancel({
+				customerId: 'cst_1',
+				subscriptionId: 'sub_1',
+				periodEnd: new Date('2026-12-01T00:00:00Z'),
+			})).resolves.toEqual({
+			resourceId: 'cst_1/sub_3',
+			isNewSubscription: true,
+		});
+
+		expect(mollieClient.customerSubscriptions.create).toHaveBeenCalledWith({
+			customerId: 'cst_1',
+			amount: { currency: 'EUR', value: '9.90' },
+			interval: '1 month',
+			description: 'Monthly',
+			mandateId: 'mdt_1',
+			startDate: '2026-12-01',
+			metadata: { plan: 'monthly', resumes: 'sub_1' },
+			idempotencyKey: 'resume-sub_1-2',
+		});
+	});
+
 	test('refuses a customer without a valid mandate', async () => {
 		const mollieClient = {
 			customerSubscriptions: {

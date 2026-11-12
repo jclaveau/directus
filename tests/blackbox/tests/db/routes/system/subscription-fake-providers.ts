@@ -205,7 +205,8 @@ export async function startFakeProviders() {
 	}
 
 	// What the bundle sends to resume a cancel: a subscription named after the
-	// one it resumes, so a scenario knows its id up front.
+	// one it resumes and its attempt, `sub_x_2` then `sub_x_3`, so a scenario
+	// knows its id up front.
 	function createMollieSubscription(
 		customerId: string,
 		requestBody: string | object | null,
@@ -215,10 +216,18 @@ export async function startFakeProviders() {
 			startDate: string;
 		};
 
+		const resumeCount = [...mollieHoldings.values()]
+			.filter((mollieHolding) => {
+				return mollieHolding.resumes === metadata.resumes;
+			})
+			.length;
+
+		const createdSubscription = `${metadata.resumes}_${resumeCount + 2}`;
+
 		const createdHolding: MollieHolding = {
-			payment: `tr_${metadata.resumes}_2`,
+			payment: `tr_${createdSubscription}`,
 			customer: customerId,
-			subscription: `${metadata.resumes}_2`,
+			subscription: createdSubscription,
 			plan_reference: metadata.plan,
 			status: 'active',
 			resumes: metadata.resumes,

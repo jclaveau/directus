@@ -126,6 +126,120 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       |                             |       extensions:                       |
       |                             |         code: NO_SUBSCRIPTION_TO_RESUME |
 
+  Scenario: a user cancels their resume, then resumes the period still paid again
+    Given these subscribers, each with its own plan:
+      | id | provider | customer  | reference  | plan_status |
+      | 25 | mollie   | cst_twice | twice-plan | active      |
+    And Mollie holds this subscription:
+      | payment  | customer  | subscription | plan_reference | status   | paid_at    |
+      | tr_twice | cst_twice | sub_twice    | twice-plan     | canceled | 2099-01-01 |
+    And Mollie holds this mandate:
+      | mandate   | customer  | status |
+      | mdt_twice | cst_twice | valid  |
+    When these requests get these responses:
+      | request                              | response  |
+      | as: anonymous                        | code: 200 |+
+      | method: POST                         |           |
+      | path: /subscriptions/webhooks/mollie |           |
+      | payload: id=tr_twice                 |           |
+      | as: lifecycle-25-token               | code: 204 |+
+      | method: POST                         |           |
+      | path: /subscriptions/resume          |           |
+    Then Mollie eventually received this subscription for cst_twice:
+      | field       | value                                       |
+      | amount      | {"currency":"EUR","value":"10.00"}          |
+      | interval    | 1 month                                     |
+      | description | Plan twice-plan                             |
+      | mandateId   | mdt_twice                                   |
+      | startDate   | 2099-02-01                                  |
+      | metadata    | {"plan":"twice-plan","resumes":"sub_twice"} |
+    And subscription sub_twice_2 is eventually stored:
+      | status | cancel_at_period_end | current_period_end       |
+      | active | false                | 2099-02-01T00:00:00.000Z |
+    When these requests get these responses:
+      | request                     | response  |
+      | as: lifecycle-25-token      | code: 204 |+
+      | method: POST                |           |
+      | path: /subscriptions/cancel |           |
+    Then the providers eventually received these writes:
+      | method | path                                              | body |
+      | DELETE | /v2/customers/cst_twice/subscriptions/sub_twice_2 |      |
+    And subscription sub_twice_2 is eventually stored:
+      | status   | cancel_at_period_end | current_period_end |
+      | canceled | true                 |                    |
+    When these requests get these responses:
+      | request                     | response  |
+      | as: lifecycle-25-token      | code: 204 |+
+      | method: POST                |           |
+      | path: /subscriptions/resume |           |
+    Then Mollie eventually received this subscription for cst_twice:
+      | field       | value                                       |
+      | amount      | {"currency":"EUR","value":"10.00"}          |
+      | interval    | 1 month                                     |
+      | description | Plan twice-plan                             |
+      | mandateId   | mdt_twice                                   |
+      | startDate   | 2099-02-01                                  |
+      | metadata    | {"plan":"twice-plan","resumes":"sub_twice"} |
+    And subscription sub_twice_3 eventually resumes sub_twice
+    And this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_25> | <policy_25> | @scalabus/subscriptions |
+
+  Scenario: a plan policy change moves the access a resumed subscription shares
+    Given these subscribers, each with its own plan:
+      | id | provider | customer  | reference  | plan_status |
+      | 26 | mollie   | cst_split | split-plan | active      |
+      | 27 | mollie   | cst_other | other-plan | active      |
+    And Mollie holds this subscription:
+      | payment  | customer  | subscription | plan_reference | status   | paid_at    |
+      | tr_split | cst_split | sub_split    | split-plan     | canceled | 2099-01-01 |
+    And Mollie holds this mandate:
+      | mandate   | customer  | status |
+      | mdt_split | cst_split | valid  |
+    When these requests get these responses:
+      | request                              | response  |
+      | as: anonymous                        | code: 200 |+
+      | method: POST                         |           |
+      | path: /subscriptions/webhooks/mollie |           |
+      | payload: id=tr_split                 |           |
+      | as: lifecycle-26-token               | code: 204 |+
+      | method: POST                         |           |
+      | path: /subscriptions/resume          |           |
+    Then Mollie eventually received this subscription for cst_split:
+      | field       | value                                       |
+      | amount      | {"currency":"EUR","value":"10.00"}          |
+      | interval    | 1 month                                     |
+      | description | Plan split-plan                             |
+      | mandateId   | mdt_split                                   |
+      | startDate   | 2099-02-01                                  |
+      | metadata    | {"plan":"split-plan","resumes":"sub_split"} |
+    And subscription sub_split_2 eventually resumes sub_split
+    When these requests get these responses:
+      | request                              | response  |
+      | method: PATCH                        | code: 200 |+
+      | path: /items/subscription_plans/26   |           |
+      | payload:                             |           |
+      |   policy: <policy_27>                |           |
+      | as: anonymous                        | code: 200 |+
+      | method: POST                         |           |
+      | path: /subscriptions/webhooks/mollie |           |
+      | payload: id=tr_split                 |           |
+    Then this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_26> | <policy_27> | @scalabus/subscriptions |
+    When these requests get these responses:
+      | request                              | response  |
+      | as: anonymous                        | code: 200 |+
+      | method: POST                         |           |
+      | path: /subscriptions/webhooks/mollie |           |
+      | payload: id=tr_sub_split_2           |           |
+    Then subscription sub_split_2 is eventually stored:
+      | status | access           |
+      | active | <granted_access> |
+    And this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_26> | <policy_27> | @scalabus/subscriptions |
+
   Scenario: a cancel naming two ongoing subscriptions is refused, none is canceled
     Given these subscribers, each with its own plan:
       | id | provider | customer   | reference | plan_status |
@@ -564,3 +678,29 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | user             | active   | true                 | <user_91> |
       | provider_missing | canceled | true                 |           |
     And the sync queue eventually holds no row for sub_stripe
+
+  Scenario: Stripe cancels at once a subscription set to end: its access goes at once
+    Given these subscribers, each with its own plan:
+      | id | provider | customer | reference | plan_status |
+      | 92 | stripe   | cus_now  | price_now | active      |
+    And Stripe holds this subscription:
+      | subscription | customer | price     | status | cancel_at_period_end |
+      | sub_now      | cus_now  | price_now | active | true                 |
+    When Stripe sends these events:
+      | type                          | subscription |
+      | customer.subscription.updated | sub_now      |
+    Then this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_92> | <policy_92> | @scalabus/subscriptions |
+    When Stripe holds this subscription:
+      | subscription | customer | price     | status   | cancel_at_period_end |
+      | sub_now      | cus_now  | price_now | canceled | true                 |
+    And Stripe sends these events:
+      | type                          | subscription |
+      | customer.subscription.deleted | sub_now      |
+    Then subscription sub_now is eventually stored:
+      | status   | cancel_at_period_end | current_period_end       |
+      | canceled | false                | 2099-01-01T00:00:00.000Z |
+    And this user eventually holds no access:
+      | user      |
+      | <user_92> |
