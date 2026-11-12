@@ -2,6 +2,10 @@
 
 Full hooks for this area. The routing keys live in `../MEMORY.md`.
 
+- [#679 managed_by on directus_access](../project_directus_pr679_managed_by.md) — guard refuses request grant changes on a managed row; bb select counts +1; rulings; #680 bundle rulings (subscription_events, archive sentence, 404 closes)
+
+- [Bind-limit chunking plan](../project_directus_bind_limit_chunking_plan.md) — fix in knex fork (knex#10 arrayParameterThreshold, -1 = never), not call-site chunk(); #645 post-commit 500; non-PG → #610 pt 9
+
 - [get-schema raw-knex reads JSON meta dialect-native](../project_directus_get_schema_raw_knex_json.md) — get-schema bypasses the cast-json pipeline → JSON meta cols come back parsed on PG, string on mysql/sqlite; normalize with @directus/utils parseJSON + array passthrough
 - [Directus DB clients & batch-insert RETURNING support](../project_directus_db_clients.md) — canonical list in `api/src/types/database.ts`; MariaDB rides under `mysql`; mysql/mariadb/sqlite hit the fallback loop
 - [knex >=3.2 breaks Directus deep sort](../project_directus_knex_deepsort_regression.md) — knex 3.2.10 #6392 wraps window aliases; Directus pre-wraps directus_row_number → double-escape → 500 on every o2m/m2m/m2a sort; pin knex 3.1.0
@@ -33,6 +37,11 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [Bus subscribe-before-ready race (issue #496/PR #497)](../project_directus_bus_subscribe_race_pr497.md) — MERGED; ioredis 5.11 subscribe in the ~1-2ms connect-not-ready window silently drops the subscription forever; PR #492 reordered boot timing into the losing window; fix = wait-then-subscribe + resubscribe-on-every-ready in BusRedis
 - [Wiring scalabus-dev system-mcp](../reference_directus_system_mcp_wiring.md) — SYSTEM_MCP_ENABLED+TOOLS env, static token (not session token), client needs a session restart, use #448's `details` param to avoid the 98KB env-dump response
 - [Public share auth](../reference_directus_share_auth.md) — share token hardcodes role:null; permissions resolve at consume from directus_shares.role; routing accountability ≠ permission accountability
-- [Issues #653/#654 extension design](../project_directus_issues653_654_extension_design.md) — #654 coverage dump settled (no auth, single process, SDK instruments from extension.config.js `coverage`, bundle registers its dir, 404 unless instrumented); #653 migrations-from-extensions open points awaiting jean; drop-EXTENSIONS_PATH idea
+- [Issue #652 user subscriptions + Stripe survey](../project_directus_issue652_subscriptions_stripe_survey.md) — survey (none installable, write own) + rounds 1-5 rulings; bundle = PR #680 stacked on #679
 - [Migration-deploy data-loss window (#451/#452)](../project_directus_migration_deploy_data_loss_window.md) — health-hold protects HTTP traffic, not Api's own background writers; ~2700 cache-stats events dropped 2026-09-07; Api never got traffic (drain reads the SHARED redis stream), and the migration-blind node also stole the cluster's synchronized-job slot — gate now sits before the claim
+- [Extension migrations #653](../project_directus_extension_migrations_653.md) — why upstream dropped them (Marketplace, untrusted, cross-DB), options A/B/C, keep the before-schema-sync ordering case
+- [Marketplace closed in production](../project_directus_marketplace_dev_only.md) — #670 replaces #668: registry routes 404 in prod, dev keeps installs; extension (re)load failures are non-critical (dev restarts)
+- [Extensions as packages only #667](../project_directus_extensions_packages_only_667.md) — EXTENSIONS_PATH refused at boot, bb fixtures = one bundle with fan-out entries, registry removal #668 closed → #670
+- [Mollie 410 on a deleted customer](../reference_mollie_410_deleted_customer.md) — subscriptions of a deleted customer answer 410, not 404; treat both as gone
+- [Issues #653/#654 extension design](../project_directus_issues653_654_extension_design.md) — #654 coverage dump settled (no auth, single process, SDK instruments from extension.config.js `coverage`, bundle registers its dir, 404 unless instrumented); #653 migrations-from-extensions open points awaiting jean; drop-EXTENSIONS_PATH idea
 - [Issue #653 entries + migrations design](../project_directus_issue653_entries_and_migrations_design.md) — SETTLED 2026-11-03: runtime entry factories (@directus/extensions/scalabus), date-versioned bundle-prefixed migrations, before/after-schema phase, migrate:latest --snapshot, EXTENSIONS_AUTO_MIGRATE, one PR

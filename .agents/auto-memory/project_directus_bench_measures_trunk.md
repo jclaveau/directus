@@ -25,4 +25,11 @@ git log --oneline -1 origin/v11.10.1-hhh-dev   # same sha → the red is the tru
 
 To measure an actual ref, use the `workflow_dispatch` input (`ref`, `baseline`, `reps`).
 
+**Boot-refusal trap (2026-11-02, #667):** `workflow_run` uses the TRUNK's `bench.yml` but boots the PR's
+code. A PR that turns an env var into a boot refusal (`EXTENSIONS_PATH`) turns all 4 Bench checks red
+("Environment Variable is … Unset it") while the trunk file still sets it. Don't waive: land a tiny
+trunk PR dropping the var from `bench.yml` first (#669), merge trunk into the PR, Bench measures it.
+Interim proof: `gh workflow run bench.yml --ref <branch>` (own `bench.yml`; set `baseline` to the
+merge-base, else it compares the PR to its own previous commit). A rerun reuses the old `bench.yml`.
+
 See [[feedback_ci_attribute_via_base_sha]], [[project_directus_blackbox_flakes]].

@@ -2,6 +2,8 @@
 
 Full hooks for this area. The routing keys live in `../MEMORY.md`.
 
+- [PR #641 raw-trx purge](../project_directus_raw_trx_purge_pr641.md) — raw knex trx now queues after-commit; OPEN HIGH gap: cache-events.ts raw writes to directus_cache_stats_* never purge
+
 - [Service-level read-through cache + CACHE_TYPES](../project_directus_service_cache.md) — NOT on hhh-dev (PR #207 closed unmerged); design kept: readByQuery caches via service-cache.ts (dual-write, own key namespace, HTTP fast-path intact); CACHE_TYPES array selects api/service consumers; settled decisions (system-collection excluded for security, TTL shared, gql out-of-scope) so review doesn't re-litigate; PR #207
 - [Cache admin page + TTL telemetry (PR #227)](../project_directus_cache_admin_page.md) — path→method+query→item tree, drawer w/ live Redis (tags/SCARD blast-radius/timestamps/size/recommended-TTL), pagination; Redis-stream→PG star schema (events fact + descriptors dim); recommended TTL = p95 re-request age; ACCEPTED (don't re-raise): content-type dropped (HIT=res.json), client-side filter (/items bans directus_*), p95/±25% knobs, group agg=max
 - [Cache namespaces (PR #225)](../project_directus_cache_namespaces.md) — root system-cache→scalabus (fork's new name); layers scalabus_response/_system/_schema/_lock, tag index scalabus:tag:*; scoped purge transparent to the _response split (tags key off root, Keyv prefixes members); CACHE_STORE narrowed to Store at the boundary
@@ -31,3 +33,5 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [cache flush vs offline tiers (#581)](../project_directus_cache_flush_offline_tiers_581.md) — KeyvRedis connecting-not-ready refused the flush yet exit 0; awaitStoresReady + storeErrorsDuring, 503 on the route; accepted trade-offs, valid red proof
 - [Cache tier switches](../project_directus_cache_tier_switches.md) — only response+schema switchable; CACHE_RESPONSE (CACHE_ENABLED fallback, decided) / CACHE_PERMISSIONS naming
 - [Permissions cache namespace](../project_directus_permissions_cache_namespace.md) — fixed `permissions` namespace on shared Redis ignored CACHE_NAMESPACE: cross-deployment clears + stale risk, root cause of the redis-commands flake (#602)
+- [PR #643 deny list for cache tables](../project_directus_pr643_graphql_deny_cache_tables.md) — 9 raw-written tables denied in /graphql; autoreview added unregistered scoped_cache_pending_purges + 3 raw system writes needing a purge; MERGED ddcc750441
+- [Gate closed routes before the cache](../project_directus_gate_routes_before_cache.md) — router-level 404 gate runs after app.use(cache): a cached 200 leaks through; mount in app.ts first
