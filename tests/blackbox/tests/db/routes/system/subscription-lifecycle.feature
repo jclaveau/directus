@@ -142,9 +142,14 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | method: POST                         |           |
       | path: /subscriptions/webhooks/mollie |           |
       | payload: id=tr_twice                 |           |
-      | as: lifecycle-25-token               | code: 204 |+
-      | method: POST                         |           |
-      | path: /subscriptions/resume          |           |
+    Then subscription sub_twice is eventually stored:
+      | status   | cancel_at_period_end | current_period_end       |
+      | canceled | true                 | 2099-02-01T00:00:00.000Z |
+    When these requests get these responses:
+      | request                     | response  |
+      | as: lifecycle-25-token      | code: 204 |+
+      | method: POST                |           |
+      | path: /subscriptions/resume |           |
     Then Mollie eventually received this subscription for cst_twice:
       | field       | value                                       |
       | amount      | {"currency":"EUR","value":"10.00"}          |
@@ -189,7 +194,7 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
     Given these subscribers, each with its own plan:
       | id | provider | customer  | reference  | plan_status |
       | 26 | mollie   | cst_split | split-plan | active      |
-      | 27 | mollie   | cst_other | other-plan | active      |
+      | 27 | mollie   | cst_moved | moved-plan | active      |
     And Mollie holds this subscription:
       | payment  | customer  | subscription | plan_reference | status   | paid_at    |
       | tr_split | cst_split | sub_split    | split-plan     | canceled | 2099-01-01 |
@@ -202,9 +207,14 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | method: POST                         |           |
       | path: /subscriptions/webhooks/mollie |           |
       | payload: id=tr_split                 |           |
-      | as: lifecycle-26-token               | code: 204 |+
-      | method: POST                         |           |
-      | path: /subscriptions/resume          |           |
+    Then subscription sub_split is eventually stored:
+      | status   | cancel_at_period_end | current_period_end       |
+      | canceled | true                 | 2099-02-01T00:00:00.000Z |
+    When these requests get these responses:
+      | request                     | response  |
+      | as: lifecycle-26-token      | code: 204 |+
+      | method: POST                |           |
+      | path: /subscriptions/resume |           |
     Then Mollie eventually received this subscription for cst_split:
       | field       | value                                       |
       | amount      | {"currency":"EUR","value":"10.00"}          |
