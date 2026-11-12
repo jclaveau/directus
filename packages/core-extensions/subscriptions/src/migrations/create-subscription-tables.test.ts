@@ -68,6 +68,7 @@ describe('createSubscriptionTables', () => {
 				'subscriptions_customer_index',
 				'subscriptions_plan_reference_index',
 				'subscriptions_provider_provider_subscription_id_unique',
+				'subscriptions_resumes_index',
 				'subscriptions_subscriber_index',
 				'subscriptions_user_updated_index',
 			]);

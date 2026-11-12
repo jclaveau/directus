@@ -87,6 +87,15 @@ export function createStripeProvider(
 			);
 		},
 
+		async resumeCancel({ subscriptionId }) {
+			await stripeClient.subscriptions.update(
+				subscriptionId,
+				{ cancel_at_period_end: false },
+			);
+
+			return { resourceId: subscriptionId, isNewSubscription: false };
+		},
+
 		composeResourceId({ subscriptionId }) {
 			return subscriptionId;
 		},

@@ -72,6 +72,53 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       |                             |       extensions:                         |
       |                             |         code: NO_SUBSCRIPTION_TO_CANCEL   |
 
+  Scenario: a user takes back a Mollie cancel: a new subscription starts at period end
+    Given these subscribers, each with its own plan:
+      | id | provider | customer   | reference   | plan_status |
+      | 23 | mollie   | cst_resume | resume-plan | active      |
+    And Mollie holds this subscription:
+      | payment   | customer   | subscription | plan_reference | status   | paid_at    |
+      | tr_resume | cst_resume | sub_resume   | resume-plan    | canceled | 2099-01-01 |
+    And Mollie holds this mandate:
+      | mandate    | customer   | status |
+      | mdt_resume | cst_resume | valid  |
+    When these requests get these responses:
+      | request                              | response  |
+      | as: anonymous                        | code: 200 |+
+      | method: POST                         |           |
+      | path: /subscriptions/webhooks/mollie |           |
+      | payload: id=tr_resume                |           |
+    Then subscription sub_resume is eventually stored:
+      | status   | cancel_at_period_end | current_period_end       |
+      | canceled | true                 | 2099-02-01T00:00:00.000Z |
+    When these requests get these responses:
+      | request                     | response  |
+      | as: lifecycle-23-token      | code: 204 |+
+      | method: POST                |           |
+      | path: /subscriptions/resume |           |
+    Then Mollie eventually received this subscription for cst_resume:
+      | field       | value                                         |
+      | amount      | {"currency":"EUR","value":"10.00"}            |
+      | interval    | 1 month                                       |
+      | description | Plan resume-plan                              |
+      | mandateId   | mdt_resume                                    |
+      | startDate   | 2099-02-01                                    |
+      | metadata    | {"plan":"resume-plan","resumes":"sub_resume"} |
+    And subscription sub_resume_2 is eventually stored:
+      | status | cancel_at_period_end | current_period_end       |
+      | active | false                | 2099-02-01T00:00:00.000Z |
+    And subscription sub_resume_2 eventually resumes sub_resume
+    And these requests get these responses:
+      | request                     | response                                |
+      | as: lifecycle-23-token      | code: 404                               |+
+      | method: POST                | body:                                   |
+      | path: /subscriptions/resume |   errors:                               |
+      |                             |     - message: >-                       |
+      |                             |         No canceled subscription to     |
+      |                             |         resume                          |
+      |                             |       extensions:                       |
+      |                             |         code: NO_SUBSCRIPTION_TO_RESUME |
+
   Scenario: a cancel naming two ongoing subscriptions is refused, none is canceled
     Given these subscribers, each with its own plan:
       | id | provider | customer   | reference | plan_status |

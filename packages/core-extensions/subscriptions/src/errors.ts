@@ -60,3 +60,39 @@ export const SeveralSubscriptionsToCancelError = createError<{
 	},
 	409,
 );
+
+export const NoSubscriptionToResumeError = createError(
+	'NO_SUBSCRIPTION_TO_RESUME',
+	'No canceled subscription to resume',
+	404,
+);
+
+export const SeveralSubscriptionsToResumeError = createError<{
+	subscriptionCount: number;
+}>(
+	'SEVERAL_SUBSCRIPTIONS_TO_RESUME',
+	({ subscriptionCount }) => {
+		return `Found ${JSON.stringify(subscriptionCount)}`
+			+ ' canceled subscriptions to resume, expected one';
+	},
+	409,
+);
+
+export const ArchivedPlanResumeError = createError<{ planCode: string }>(
+	'ARCHIVED_PLAN_RESUME',
+	({ planCode }) => {
+		return `Plan ${JSON.stringify(planCode)} is archived,`
+			+ ' its subscriptions cannot resume';
+	},
+	409,
+);
+
+/** A new first payment sets up a mandate: the checkout's job, not a resume's. */
+export const NoValidMandateError = createError<{ customerId: string }>(
+	'NO_VALID_MANDATE',
+	({ customerId }) => {
+		return `Customer ${JSON.stringify(customerId)} has no valid mandate`
+			+ ' to resume with';
+	},
+	409,
+);
