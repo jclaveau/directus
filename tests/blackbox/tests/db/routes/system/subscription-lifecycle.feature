@@ -75,7 +75,7 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
   Scenario: a user takes back a Mollie cancel: a new subscription starts at period end
     Given these subscribers, each with its own plan:
       | id | provider | customer   | reference   | plan_status |
-      | 23 | mollie   | cst_resume | resume-plan | active      |
+      | 24 | mollie   | cst_resume | resume-plan | active      |
     And Mollie holds this subscription:
       | payment   | customer   | subscription | plan_reference | status   | paid_at    |
       | tr_resume | cst_resume | sub_resume   | resume-plan    | canceled | 2099-01-01 |
@@ -93,7 +93,7 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | canceled | true                 | 2099-02-01T00:00:00.000Z |
     When these requests get these responses:
       | request                     | response  |
-      | as: lifecycle-23-token      | code: 204 |+
+      | as: lifecycle-24-token      | code: 204 |+
       | method: POST                |           |
       | path: /subscriptions/resume |           |
     Then Mollie eventually received this subscription for cst_resume:
@@ -110,7 +110,7 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
     And subscription sub_resume_2 eventually resumes sub_resume
     And these requests get these responses:
       | request                     | response                                |
-      | as: lifecycle-23-token      | code: 404                               |+
+      | as: lifecycle-24-token      | code: 404                               |+
       | method: POST                | body:                                   |
       | path: /subscriptions/resume |   errors:                               |
       |                             |     - message: >-                       |
