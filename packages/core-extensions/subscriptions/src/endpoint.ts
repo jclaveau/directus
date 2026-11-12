@@ -3,6 +3,7 @@ import { defineEndpoint } from '@directus/extensions-sdk/scalabus';
 import type { Accountability } from '@directus/types';
 import type { Request } from 'express';
 import { cancelOwnSubscription } from './cancel/cancel-own-subscription.js';
+import { resumeOwnSubscription } from './cancel/resume-own-subscription.js';
 import { readSubscriptionsConfig } from './config/read-subscriptions-config.js';
 import { archivePlan } from './plans/archive-plan.js';
 import { createProviders } from './providers/create-providers.js';
@@ -40,6 +41,18 @@ export const subscriptionsEndpoint = defineEndpoint(
 
 		router.post('/cancel', (request: AccountableRequest, response, next) => {
 			cancelOwnSubscription({
+				database,
+				enabledProviders,
+				userId: request.accountability?.user ?? null,
+			})
+				.then(() => {
+					response.status(204)
+						.end();
+				}, next);
+		});
+
+		router.post('/resume', (request: AccountableRequest, response, next) => {
+			resumeOwnSubscription({
 				database,
 				enabledProviders,
 				userId: request.accountability?.user ?? null,

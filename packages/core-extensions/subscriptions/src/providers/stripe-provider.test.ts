@@ -384,6 +384,27 @@ describe('cancelAtPeriodEnd', () => {
 	});
 });
 
+describe('resumeCancel', () => {
+	test('clears cancel_at_period_end on the same subscription', async () => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		vi.spyOn(stripeClient.subscriptions, 'update')
+			.mockResolvedValue({} as never);
+
+		await expect(createStripeProvider(stripeClient, 'whsec_1')
+			.resumeCancel({
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				periodEnd: new Date('2026-12-01T00:00:00Z'),
+			})).resolves.toEqual({ resourceId: 'sub_1', isNewSubscription: false });
+
+		expect(stripeClient.subscriptions.update).toHaveBeenCalledWith(
+			'sub_1',
+			{ cancel_at_period_end: false },
+		);
+	});
+});
+
 describe('composeResourceId', () => {
 	test('keys Stripe resources on the subscription id', () => {
 		expect(createStripeProvider(new Stripe('sk_test_1'), 'whsec_1')
