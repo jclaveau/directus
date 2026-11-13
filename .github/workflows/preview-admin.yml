@@ -474,6 +474,17 @@ jobs:
           JS
           node /tmp/seed.mjs
 
+      - name: Seed the previewed ref's fixtures
+        run: |
+          # One script per feature the ref ships (e.g. the subscriptions bundle's
+          # plans and users), so a PR seeds what it adds without a change here.
+          # This job already runs the ref's code: its scripts add no trust.
+          shopt -s nullglob
+          for fixture_script in scripts/preview-admin/fixtures/*.mjs; do
+            echo "running $fixture_script"
+            node "$fixture_script"
+          done
+
       - name: Provoke + verify cache anomalies
         run: |
           # coarse_scope needs a scoped field on sub_items — set it in the DB (the API
