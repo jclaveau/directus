@@ -15,7 +15,7 @@ unaffected.
 switchover, so the 503 already fails a deploy and leaves the previous deployment serving
 ([[reference_railway_healthcheck_gates_switchover]]). Refusing the port adds nothing
 there and would take the service down on any restart landing while migrations are
-outstanding — Planner's PM2 `cron_restart` at 03:00, say — with nothing watching to put
+outstanding — a consumer's nightly PM2 `cron_restart`, say — with nothing watching to put
 it back, since Railway does not probe a live deployment.
 
 - The watch starts **pessimistic**: before its first reading it holds health down, because

@@ -14,7 +14,8 @@ import { getColumnPreprocessor } from '../utils/get-column-pre-processor.js';
 import { getNodeAlias } from '../utils/get-field-alias.js';
 import { getInnerQueryColumnPreProcessor } from '../utils/get-inner-query-column-pre-processor.js';
 import { withPreprocessBindings } from '../utils/with-preprocess-bindings.js';
-import applyQuery, { generateAlias } from './apply-query/index.js';
+import { createAliasGenerator } from './apply-query/create-alias-generator.js';
+import applyQuery from './apply-query/index.js';
 import { applyLimit } from './apply-query/pagination.js';
 
 export type DBQueryOptions = {
@@ -32,8 +33,20 @@ export function getDBQuery(
 	{ knex, schema }: Context,
 ): Knex.QueryBuilder {
 	const aliasMap: AliasMap = Object.create(null);
+	const generateAlias = createAliasGenerator();
 	const env = useEnv();
-	const preProcess = getColumnPreprocessor(knex, schema, table, cases, permissions, aliasMap, permissionsOnly);
+
+	const preProcess = getColumnPreprocessor(
+		knex,
+		schema,
+		table,
+		cases,
+		permissions,
+		aliasMap,
+		generateAlias,
+		permissionsOnly,
+	);
+
 	const queryCopy = cloneDeep(query);
 	const helpers = getHelpers(knex);
 
@@ -46,6 +59,43 @@ export function getDBQuery(
 	// Queries with aggregates and groupBy will not have duplicate result
 	if (queryCopy.aggregate || queryCopy.group) {
 		const flatQuery = knex.from(table);
+		const keyColumn = `${table}.${schema.collections[table]!.primary}`;
+
+		const matchingQuery: Query = {
+			filter: queryCopy.filter ?? null,
+			search: queryCopy.search ?? null,
+		};
+
+		// A filter through an o2m joins one row per child: the aggregate reads
+		// the distinct keys it matches instead, so a parent counts once. Search
+		// follows, its permission cases reading the joins made in that subquery
+		const { hasMultiRelationalFilter: filtersThroughChildren } = applyQuery(
+			knex,
+			table,
+			knex.from(table),
+			matchingQuery,
+			schema,
+			cases,
+			permissions,
+			createAliasGenerator(),
+		);
+
+		if (filtersThroughChildren) {
+			const matchedKeys = knex.from(table).distinct(keyColumn);
+
+			applyQuery(
+				knex,
+				table,
+				matchedKeys,
+				matchingQuery,
+				schema,
+				cases,
+				permissions,
+				generateAlias,
+			);
+
+			flatQuery.whereIn(keyColumn, matchedKeys);
+		}
 
 		const fieldNodeMap = Object.fromEntries(
 			fieldNodes.map((node, index): [string, [FieldNode | FunctionFieldNode, number]] => [
@@ -69,13 +119,26 @@ export function getDBQuery(
 		// The positions need to be offset by the number of aggregate terms, since the aggregate terms are selected first
 		const groupColumnPositions = queryCopy.group?.map((field) => fieldNodeMap[field]![1] + 1 + aggregateCount) ?? [];
 
-		const dbQuery = applyQuery(knex, table, flatQuery, queryCopy, schema, cases, permissions, {
-			aliasMap,
-			groupWhenCases,
-			groupColumnPositions,
-		}).query;
+		const dbQuery = applyQuery(
+			knex,
+			table,
+			flatQuery,
+			queryCopy,
+			schema,
+			cases,
+			permissions,
+			generateAlias,
+			{
+				aliasMap,
+				groupWhenCases,
+				groupColumnPositions,
+				filteredInSubquery: filtersThroughChildren,
+			},
+		).query;
 
-		flatQuery.select(fieldNodes.map((node) => preProcess(node)));
+		flatQuery.select(fieldNodes.map((node) => {
+			return preProcess(node, { readsCasesByKey: filtersThroughChildren });
+		}));
 
 		if (
 			helpers.capabilities.supportsDeduplicationOfParameters() &&
@@ -94,7 +157,17 @@ export function getDBQuery(
 	let hasMultiRelationalSort: boolean | undefined;
 
 	if (queryCopy.sort) {
-		const sortResult = applySort(knex, schema, dbQuery, queryCopy.sort, queryCopy.aggregate, table, aliasMap, true);
+		const sortResult = applySort(
+			knex,
+			schema,
+			dbQuery,
+			queryCopy.sort,
+			queryCopy.aggregate,
+			table,
+			aliasMap,
+			generateAlias,
+			true,
+		);
 
 		if (sortResult) {
 			sortRecords = sortResult.sortRecords;
@@ -102,11 +175,21 @@ export function getDBQuery(
 		}
 	}
 
-	const { hasMultiRelationalFilter } = applyQuery(knex, table, dbQuery, queryCopy, schema, cases, permissions, {
-		aliasMap,
-		isInnerQuery: true,
-		hasMultiRelationalSort,
-	});
+	const { hasMultiRelationalFilter } = applyQuery(
+		knex,
+		table,
+		dbQuery,
+		queryCopy,
+		schema,
+		cases,
+		permissions,
+		generateAlias,
+		{
+			aliasMap,
+			isInnerQuery: true,
+			hasMultiRelationalSort,
+		},
+	);
 
 	const needsInnerQuery = hasMultiRelationalSort || hasMultiRelationalFilter;
 
@@ -133,6 +216,7 @@ export function getDBQuery(
 							table,
 							alias: node.fieldKey,
 							permissions,
+							generateAlias,
 						},
 						{ knex, schema },
 					);
@@ -160,15 +244,33 @@ export function getDBQuery(
 				if (sortRecord.column.includes('.')) {
 					const [alias, field] = sortRecord.column.split('.');
 					const originalCollectionName = getCollectionFromAlias(alias!, aliasMap);
-					dbQuery.select(getColumn(knex, alias!, field!, sortAlias, schema, { originalCollectionName }));
+
+					dbQuery.select(getColumn(knex, alias!, field!, sortAlias, schema, {
+						originalCollectionName,
+						generateAlias,
+					}));
 
 					orderByString += `?? ${sortRecord.order}`;
-					orderByColumn = getColumn(knex, alias!, field!, false, schema, { originalCollectionName });
+
+					orderByColumn = getColumn(knex, alias!, field!, false, schema, {
+						originalCollectionName,
+						generateAlias,
+					});
 				} else {
-					dbQuery.select(getColumn(knex, table, sortRecord.column, sortAlias, schema));
+					dbQuery.select(getColumn(
+						knex,
+						table,
+						sortRecord.column,
+						sortAlias,
+						schema,
+						{ generateAlias },
+					));
 
 					orderByString += `?? ${sortRecord.order}`;
-					orderByColumn = getColumn(knex, table, sortRecord.column, false, schema);
+
+					orderByColumn = getColumn(knex, table, sortRecord.column, false, schema, {
+						generateAlias,
+					});
 				}
 
 				orderByFields.push(orderByColumn);
@@ -177,7 +279,9 @@ export function getDBQuery(
 
 			if (hasMultiRelationalSort) {
 				dbQuery.rowNumber(
-					knex.ref('directus_row_number').toQuery(),
+					// Bare: knex >= 3.2.10 wraps the window alias itself,
+					// so a pre-wrapped one gets quoted twice
+					'directus_row_number',
 					knex.raw(`partition by ?? order by ${orderByString}`, [`${table}.${primaryKey}`, ...orderByFields]),
 				);
 
@@ -199,9 +303,17 @@ export function getDBQuery(
 
 					sortRecord.column = getColumn(knex, alias!, field!, false, schema, {
 						originalCollectionName: getCollectionFromAlias(alias!, aliasMap),
+						generateAlias,
 					}) as any;
 				} else {
-					sortRecord.column = getColumn(knex, table, sortRecord.column, false, schema) as any;
+					sortRecord.column = getColumn(
+						knex,
+						table,
+						sortRecord.column,
+						false,
+						schema,
+						{ generateAlias },
+					) as any;
 				}
 			});
 
@@ -254,6 +366,7 @@ export function getDBQuery(
 			permissions,
 			aliasMap,
 			innerCaseWhenAliasPrefix,
+			generateAlias,
 		);
 
 		// To optimize the query we avoid having unnecessary columns in the inner query, that don't have a caseWhen, since

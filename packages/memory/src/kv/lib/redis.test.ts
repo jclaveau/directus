@@ -305,6 +305,12 @@ describe('clear', () => {
 
 		expect(kv['redis'].pipeline).toHaveBeenCalledOnce();
 		expect(withNamespace).toHaveBeenCalledWith('*', mockNamespace);
+
+		expect(kv['redis'].scanStream).toHaveBeenCalledWith({
+			match: mockNamespacedKey,
+			count: 1000,
+		});
+
 		expect(unlinkFn).toHaveBeenCalledTimes(2); // See the mocked key chunks from `scanStream`
 		expect(execFn).toHaveBeenCalledOnce();
 	});

@@ -1,8 +1,7 @@
 import knex from 'knex';
 import type { Knex } from 'knex';
-import { dirname } from 'node:path';
+import path, { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import path from 'path';
 import type { Driver } from '@directus/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

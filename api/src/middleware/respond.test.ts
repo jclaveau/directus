@@ -1,6 +1,8 @@
 import { oneLine } from '@directus/utils';
 import type { Request, Response } from 'express';
+import type { Knex } from 'knex';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import type { CacheSettingField } from '../cache-settings.js';
 
 // Hoisted, because `scoped-cache.js` is now imported for real (see its mock
 // below) and reads `useEnv()` at module scope — which runs while the mock
@@ -18,11 +20,25 @@ const env: Record<string, any> = vi.hoisted(() => {
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
+const cacheLayer = vi.hoisted(() => ({}) as Record<string, unknown>);
+
+vi.mock('../cache-settings.js', async (importOriginal) => {
+	const original = await importOriginal<typeof import('../cache-settings.js')>();
+
+	return {
+		...original,
+		cacheSetting: (field: CacheSettingField) => {
+			return cacheLayer[field] ?? original.cacheSetting(field);
+		},
+	};
+});
+
 const mocks = vi.hoisted(() => {
 	return {
 		mockCache: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
-		tagScopedCacheKeys: vi.fn(),
+		indexScopedCacheEntry: vi.fn(),
 		scopedCachePurgeEnabled: vi.fn(() => false),
+		scopedCacheFillPaused: vi.fn(() => false),
 		warn: vi.fn(),
 		permissionsCachable: vi.fn(),
 		queryCachable: vi.fn(() => true),
@@ -34,7 +50,7 @@ const mocks = vi.hoisted(() => {
 		evictCacheEntry: vi.fn(async (cache: any, redisKey: string) => {
 			await cache.delete(redisKey);
 			await cache.delete(`${redisKey}__expires_at`);
-			await cache.delete(`${redisKey}__tags`);
+			await cache.delete(`${redisKey}__pins`);
 
 			// The real one reads the key back, because a store reports an error by
 			// answering `undefined` rather than throwing.
@@ -43,10 +59,17 @@ const mocks = vi.hoisted(() => {
 		recordPendingScopedCachePurge: vi.fn().mockResolvedValue(undefined),
 		queueMissLatency: vi.fn(),
 		stringByteSize: vi.fn((s: string) => Buffer.byteLength(s, 'utf8')),
+		resolvedCacheTtl: vi.fn((): unknown => env['CACHE_TTL']),
 	};
 });
 
-const { mockCache, tagScopedCacheKeys, warn, permissionsCachable, transform } = mocks;
+const {
+	mockCache,
+	indexScopedCacheEntry,
+	warn,
+	permissionsCachable,
+	transform,
+} = mocks;
 
 vi.mock('../cache.js', () => {
 	return {
@@ -55,26 +78,32 @@ vi.mock('../cache.js', () => {
 	};
 });
 
-vi.mock('../scoped-cache.js', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('../scoped-cache.js')>();
+vi.mock('../scoped-cache/index.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../scoped-cache/index.js')>();
 
 	return {
-		tagScopedCacheKeys: mocks.tagScopedCacheKeys,
+		indexScopedCacheEntry: mocks.indexScopedCacheEntry,
 		scopedCachePurgeEnabled: mocks.scopedCachePurgeEnabled,
+		scopedCacheFillPaused: mocks.scopedCacheFillPaused,
 		scopedCacheSweptDuringFill: mocks.scopedCacheSweptDuringFill,
 		// Real, so the unguarded cases below assert the predicate rather than a
 		// stand-in agreeing with them: it is pure, and reaches no Redis.
 		scopedCacheCollectionsWithoutGuard: actual.scopedCacheCollectionsWithoutGuard,
 		mergedScopedCacheEpochs: actual.mergedScopedCacheEpochs,
-		// The real one, not a stand-in. The descriptor assertion reads the tag
-		// SPELLING, and a copy here drifts off `canonicalScopedCacheValue` — it
+		// The real one, not a stand-in. The descriptor assertion reads the pin
+		// SPELLING, and a copy here drifts off `canonicalizeScopedCachePinValue` — it
 		// would render a boolean slice `=1` where production writes `=true`, so
 		// the test would agree with itself while the purge join matched nothing.
-		scopedCacheTagLabel: actual.scopedCacheTagLabel,
+		scopedCachePinKeys: actual.scopedCachePinKeys,
+		// Same reason, for the form a recorded purge is retried from.
+		renderScopedCacheFingerprint: actual.renderScopedCacheFingerprint,
+		// And for the coarse flag the descriptor cases below assert: which shapes
+		// count as bare is the predicate's answer, not a second one written here.
+		scopedCacheFingerprintIsBare: actual.scopedCacheFingerprintIsBare,
 	};
 });
 
-// Stats active so the descriptor/tombstone capture on a fill is exercised.
+// Stats active so the descriptor/tombstone snapshot on a fill is exercised.
 vi.mock('../cache-events.js', () => {
 	return {
 		cacheStatsActive: () => true,
@@ -95,7 +124,7 @@ vi.mock('../utils/get-string-byte-size.js', () => {
 
 vi.mock('../utils/cache-audit-replay.js', () => {
 	return {
-		CACHE_AUDIT_TAGS_HEADER: 'x-cache-audit-tags',
+		CACHE_AUDIT_PINS_HEADER: 'x-cache-audit-pins',
 		isCacheAuditReplay: vi.fn(() => false),
 	};
 });
@@ -106,7 +135,13 @@ vi.mock('../utils/report-cache-anomaly.js', () => {
 
 vi.mock('../database/index.js', () => ({ default: () => ({}) }));
 
-vi.mock('../logger/index.js', () => ({ useLogger: () => ({ warn: mocks.warn }) }));
+vi.mock('../cache-config.js', () => {
+	return { resolvedCacheTtl: mocks.resolvedCacheTtl };
+});
+
+vi.mock('../logger/index.js', () => {
+	return { useLogger: () => ({ debug: vi.fn(), warn: mocks.warn }) };
+});
 
 vi.mock('../utils/permissions-cachable.js', () => {
 	return { permissionsCachable: mocks.permissionsCachable };
@@ -139,13 +174,22 @@ vi.mock('../utils/get-date-formatted.js', () => {
 
 vi.mock('../services/import-export.js', () => {
 	return {
-		ExportService: vi.fn().mockImplementation(() => ({ transform: mocks.transform })),
+		ExportService: vi.fn(function () {
+			return { transform: mocks.transform };
+		}),
 	};
 });
 
 import { setCacheValue } from '../cache.js';
+import emitter from '../emitter.js';
 import { isCacheAuditReplay } from '../utils/cache-audit-replay.js';
+import { readScopedCacheEpochs } from '../scoped-cache/fill-guard.js';
+import {
+	recordQueuedScopedCachePurges,
+	recordScopedCachePurged,
+} from '../scoped-cache/purged-record.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
+import { requestStore } from '../utils/request-store.js';
 import { withMeta } from '../utils/read-meta.js';
 import { respond } from './respond.js';
 
@@ -176,7 +220,7 @@ function makeReq(
 		method: 'GET',
 		originalUrl: '/items/articles',
 		sanitizedQuery: {},
-		schema: {},
+		schema: { collections: {}, relations: [] },
 		accountability: null,
 		collection: 'articles',
 		...overrides,
@@ -186,12 +230,15 @@ function makeReq(
 beforeEach(() => {
 	env['CACHE_ENABLED'] = true;
 	env['CACHE_VALUE_MAX_SIZE'] = false;
+	delete cacheLayer['value_max_size'];
 	delete env['CACHE_TAGS_HEADER'];
 	delete env['CACHE_PURGED_TAGS_HEADER'];
 	delete env['CACHE_TAGS_HEADER_MAX_SIZE'];
 	permissionsCachable.mockResolvedValue(true);
 	mocks.queryCachable.mockReturnValue(true);
 	mocks.scopedCachePurgeEnabled.mockReturnValue(false);
+	mocks.scopedCacheFillPaused.mockReturnValue(false);
+	mocks.resolvedCacheTtl.mockImplementation(() => env['CACHE_TTL']);
 });
 
 afterEach(() => {
@@ -201,11 +248,15 @@ afterEach(() => {
 
 describe('respond middleware', () => {
 	test(oneLine`
-		cacheable GET MISS: sets cache value + expires_at and tags the scoped-cache keys
+		cacheable GET MISS: sets cache value + expires_at and pins the scoped-cache keys
 	`, async () => {
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheTags: [{ collection: 'articles' }] },
+			{
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+				}],
+			},
 		);
 
 		const req = makeReq();
@@ -235,13 +286,55 @@ describe('respond middleware', () => {
 			expect.any(Number),
 		);
 
-		// #205 scoped-cache tagging fires with the request's tags
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [
-			{ collection: 'articles' },
-		], []);
+		// #205 scoped-cache pinning fires with the request's fingerprints, the legacy
+		// flat pins the old index is still written under, and the schema the index
+		// path of each collection is read off — this one declares no scope field, so
+		// every fingerprint goes in the bare set.
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
+			'cache-key',
+			[{ collection: 'articles' }],
+			[],
+			{ collections: {}, relations: [] },
+			'5m',
+		);
 
 		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'max-age=300');
 		expect(res.json).toHaveBeenCalledWith({ data: [{ id: 1 }] });
+	});
+
+	test(oneLine`
+		announces the entry between its index and its value, and waits for the hook
+	`, async () => {
+		const writesWhenIndexed: unknown[] = [];
+
+		const holdIndexed = vi.fn(async () => {
+			writesWhenIndexed.push([
+				indexScopedCacheEntry.mock.calls.length,
+				vi.mocked(setCacheValue).mock.calls.length,
+			]);
+		});
+
+		emitter.onAction('cache.indexed', holdIndexed);
+
+		await respond(makeReq(), makeRes(
+			{ data: [{ id: 1 }] },
+			{ scopedCacheFingerprints: [{ collection: 'articles' }] },
+		), next);
+
+		emitter.offAction('cache.indexed', holdIndexed);
+
+		expect(holdIndexed).toHaveBeenCalledWith(
+			{
+				event: 'cache.indexed',
+				redisKey: 'cache-key',
+				fingerprints: [{ collection: 'articles' }],
+			},
+			expect.anything(),
+		);
+
+		// Indexed once, written not yet.
+		expect(writesWhenIndexed).toEqual([[1, 0]]);
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalledOnce();
 	});
 
 	test(oneLine`
@@ -251,7 +344,9 @@ describe('respond middleware', () => {
 		await respond(makeReq(), makeRes(
 			{ data: [{ id: 1 }] },
 			{
-				scopedCacheTags: [{ collection: 'articles' }],
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+				}],
 				httpRequestCacheKey: {
 					redisKey: 'middleware-key',
 					cacheKey: 'middleware-hash',
@@ -273,7 +368,9 @@ describe('respond middleware', () => {
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
 			{
-				scopedCacheTags: [{ collection: 'articles' }],
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+				}],
 				requestStart: Date.now() - 10,
 			},
 		);
@@ -336,7 +433,9 @@ describe('respond middleware', () => {
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
 			{
-				scopedCacheTags: [{ collection: 'articles' }],
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+				}],
 				requestStart: 900,
 			},
 		);
@@ -362,9 +461,12 @@ describe('respond middleware', () => {
 		mocks.stringByteSize.mockClear();
 
 		const payload = { data: [{ id: 1, blob: 'x'.repeat(200) }] };
-		const res = makeRes(payload, { scopedCacheTags: [{ collection: 'articles' }] });
 
-		await respond(makeReq(), res, next);
+		await respond(makeReq(), makeRes(payload, {
+			scopedCacheFingerprints: [{
+				collection: 'articles',
+			}],
+		}), next);
 
 		// The size cap + the descriptor bytes share ONE payload serialization, not two.
 		expect(mocks.stringByteSize).toHaveBeenCalledTimes(1);
@@ -379,7 +481,11 @@ describe('respond middleware', () => {
 	test('a graphql fill captures a blank url and the graphql query', async () => {
 		const res = makeRes(
 			{ data: { me: 1 } },
-			{ scopedCacheTags: [{ collection: 'articles' }] },
+			{
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+				}],
+			},
 		);
 
 		await respond(makeReq({ method: 'POST', originalUrl: '/graphql' }), res, next);
@@ -393,52 +499,94 @@ describe('respond middleware', () => {
 		);
 	});
 
-	test('falls back to the bare collection tag when tags are absent', async () => {
+	test('falls back to the bare collection pin when pins are absent', async () => {
 		const res = makeRes({ data: [] });
 		const req = makeReq();
 
 		await respond(req, res, next);
 
-		// A controller that set no tags → the bare `{ collection }` tag, so a mutation
+		// A controller that set no pins → the bare `{ collection }` pin, so a mutation
 		// on that collection still purges the cached response (the settings fix).
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
 			[{ collection: 'articles' }],
 			[],
+			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 
 	test(oneLine`
-		reads the tags off the payload when the controller forwarded none — a system
-		route hands over the service's result as is, and the relations it nested
-		would otherwise be invisible to every purge (#505)
+		files the index under the TTL the entry was written with, even when the
+		override changes during the fill
+	`, async () => {
+		mocks.resolvedCacheTtl
+			.mockReturnValueOnce('5m')
+			.mockReturnValue(undefined);
+
+		await respond(makeReq(), makeRes({ data: [] }), next);
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
+			mockCache,
+			'cache-key',
+			{ data: [] },
+			300000,
+		);
+
+		// A second read answering no TTL (the override cleared, CACHE_TTL unset) would
+		// file the index and the entry under different lifetimes: an entry outliving
+		// its index serves stale.
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
+			'cache-key',
+			[{ collection: 'articles' }],
+			[],
+			{ collections: {}, relations: [] },
+			'5m',
+		);
+	});
+
+	test(oneLine`
+		reads the fingerprints off the payload when the controller forwarded none — a
+		system route hands over the service's result as is, and the relations it
+		nested would otherwise be invisible to every purge (#505)
 	`, async () => {
 		await respond(
 			makeReq({ originalUrl: '/users/me', collection: 'directus_users' }),
 			makeRes({
-				data: withMeta({ id: 'u1', student_profile: [] }, {
-					scopedCacheTags: [
-						{ collection: 'directus_users', field: 'id', value: 'u1', type: 'uuid' },
-						{ collection: 'student' },
-					],
-				}),
+				data: withMeta(
+					{ id: 'u1', student_profile: [] },
+					{
+						scopedCacheFingerprints: [
+							{
+								collection: 'directus_users',
+								pinnedScope: { id: ['u1'] },
+							},
+							{ collection: 'student' },
+						],
+					},
+				),
 			}),
 			next,
 		);
 
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
 			[
-				{ collection: 'directus_users', field: 'id', value: 'u1', type: 'uuid' },
+				{
+					collection: 'directus_users',
+					pinnedScope: { id: ['u1'] },
+				},
 				{ collection: 'student' },
 			],
 			[],
+			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 
 	test(oneLine`
-		guards the payload's tags by the capture the read took, folded into the one
-		useCollection took for the route's own collection
+		guards the payload's pins by the counters the read took before its query,
+		folded into the ones useCollection took for the route's own collection
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
@@ -447,14 +595,16 @@ describe('respond middleware', () => {
 			makeRes(
 				{
 					data: withMeta({ id: 'u1' }, {
-						scopedCacheTags: [
+						scopedCacheFingerprints: [
 							{ collection: 'directus_users' },
 							{ collection: 'student' },
 						],
-						scopedCacheEpochs: { directus_users: '4', student: '5', '*': '1' },
+						scopedCacheEpochs: {
+							directus_users: '4', student: '5', '*': '1',
+						},
 					}),
 				},
-				{ scopedCacheEpochsAtRequest: { directus_users: '3', '*': '1' } },
+				{ scopedCacheEpochsBeforeQuery: { directus_users: '3', '*': '1' } },
 			),
 			next,
 		);
@@ -467,8 +617,8 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		refuses to cache a payload whose meta names unautopurgeable tags, the same as
-		when a controller forwards them
+		refuses to cache a payload whose meta names unautopurgeable fingerprints, the
+		same as when a controller forwards them
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
@@ -476,10 +626,13 @@ describe('respond middleware', () => {
 			makeReq({ originalUrl: '/users/me', collection: 'directus_users' }),
 			makeRes({
 				data: withMeta({ id: 'u1' }, {
-					scopedCacheTags: [{ collection: 'directus_users' }],
-					scopedCacheUnautopurgeableTags: [
-						{ collection: 'student', field: 'level', value: 3, type: 'integer' },
+					scopedCacheFingerprints: [
+						{ collection: 'directus_users' },
 					],
+					scopedCacheUnautopurgeableFingerprints: [{
+						collection: 'student',
+						pinnedScope: { level: ['3'] },
+					}],
 				}),
 			}),
 			next,
@@ -495,14 +648,14 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		a pinned read reporting total_count keeps the bare collection tag beside its
+		a pinned read reporting total_count keeps the bare collection pin beside its
 		pins — the count drops the filter, so a row the pins never bounded changes it
 	`, async () => {
 		const res = makeRes(
 			{ meta: { total_count: 2 }, data: [{ id: 1 }] },
 			{
-				scopedCacheTags: [
-					{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
+				scopedCacheFingerprints: [
+					{ collection: 'articles', pinnedScope: { id: ['1'] } },
 				],
 			},
 		);
@@ -511,13 +664,14 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[
-				{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'articles' },
-			],
+			// The count drops the filter, so the fingerprint drops the pin with it:
+			// bound to nothing, any write to the collection moves the number.
+			[{ collection: 'articles' }],
 			[],
+			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 
@@ -528,8 +682,8 @@ describe('respond middleware', () => {
 		const res = makeRes(
 			{ meta: { filter_count: 1 }, data: [{ id: 1 }] },
 			{
-				scopedCacheTags: [
-					{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
+				scopedCacheFingerprints: [
+					{ collection: 'articles', pinnedScope: { id: ['1'] } },
 				],
 			},
 		);
@@ -538,22 +692,24 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[{ collection: 'articles', field: 'id', value: 1, type: 'integer' }],
+			[{ collection: 'articles', pinnedScope: { id: ['1'] } }],
 			[],
+			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 
 	test(oneLine`
-		meta=* keeps the bare tag too — it expands to every counter, so the read carries
+		meta=* keeps the bare pin too — it expands to every counter, so the read carries
 		total_count without ever naming it
 	`, async () => {
 		const res = makeRes(
 			{ meta: { total_count: 2, filter_count: 1 }, data: [{ id: 1 }] },
 			{
-				scopedCacheTags: [
-					{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
+				scopedCacheFingerprints: [
+					{ collection: 'articles', pinnedScope: { id: ['1'] } },
 				],
 			},
 		);
@@ -566,34 +722,39 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[
-				{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'articles' },
-			],
+			// The count drops the filter, so the fingerprint drops the pin with it:
+			// bound to nothing, any write to the collection moves the number.
+			[{ collection: 'articles' }],
 			[],
+			// The schema the index path is read off: this one declares no scope
+			// field on `articles`, so it is filed in the bare set.
+			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 
 	test(oneLine`
-		total_count on an unpinned read adds no duplicate — the bare collection tag it
-		already fell back to is the same tag the count needs
+		total_count on an unpinned read adds no duplicate — the bare collection pin it
+		already fell back to is the same pin the count needs
 	`, async () => {
 		const res = makeRes({ meta: { total_count: 2 }, data: [{ id: 1 }] });
 		const req = makeReq({ sanitizedQuery: { meta: ['total_count'] } });
 
 		await respond(req, res, next);
 
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
 			[{ collection: 'articles' }],
 			[],
+			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 
 	test(oneLine`
-		a cache-audit replay answers the tags a fill would pin, and stores nothing
+		a cache-audit replay answers the pins a fill would set, and stores nothing
 	`, async () => {
 		vi.mocked(isCacheAuditReplay).mockReturnValue(true);
 
@@ -601,8 +762,11 @@ describe('respond middleware', () => {
 			{ data: [{ id: 1 }] },
 			{
 				cache: false,
-				scopedCacheTags: [
-					{ collection: 'articles', field: 'owner', value: 'U1' },
+				scopedCacheFingerprints: [
+					{
+						collection: 'articles',
+						pinnedScope: { owner: ['U1'] },
+					},
 					{ collection: 'authors' },
 				],
 			},
@@ -611,17 +775,17 @@ describe('respond middleware', () => {
 		await respond(makeReq(), res, next);
 
 		expect(res.setHeader).toHaveBeenCalledWith(
-			'x-cache-audit-tags',
-			'articles:owner=U1,authors',
+			'x-cache-audit-pins',
+			'["articles:owner=U1","authors"]',
 		);
 
 		expect(res.json).toHaveBeenCalledWith({ data: [{ id: 1 }] });
 		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
-		expect(tagScopedCacheKeys).not.toHaveBeenCalled();
+		expect(indexScopedCacheEntry).not.toHaveBeenCalled();
 	});
 
 	test(oneLine`
-		a replay of a tagless collection-less read answers an empty tags header
+		a replay of a pinless collection-less read answers an empty pins header
 	`, async () => {
 		vi.mocked(isCacheAuditReplay).mockReturnValue(true);
 		const res = makeRes({ data: {} }, { cache: false });
@@ -629,7 +793,7 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		expect(res.setHeader).toHaveBeenCalledWith('x-cache-audit-tags', '');
+		expect(res.setHeader).toHaveBeenCalledWith('x-cache-audit-pins', '[]');
 	});
 
 	test('skips caching a collection-less response in scoped mode', async () => {
@@ -639,14 +803,14 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		// No tags AND no collection under scoped purge → nothing could target it, so
+		// No pins AND no collection under scoped purge → nothing could target it, so
 		// it is not cached (rather than orphan a stale entry no purge can drop).
 		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
-		expect(tagScopedCacheKeys).not.toHaveBeenCalled();
+		expect(indexScopedCacheEntry).not.toHaveBeenCalled();
 	});
 
 	test('caches a collection-less response in full-purge mode', async () => {
-		// scopedCachePurgeEnabled defaults to false → full mode. The same tagless,
+		// scopedCachePurgeEnabled defaults to false → full mode. The same pinless,
 		// collection-less response IS cached (a mutation clears the whole cache).
 		const res = makeRes({ data: {} });
 		const req = makeReq({ collection: undefined, originalUrl: '/server/info' });
@@ -654,7 +818,14 @@ describe('respond middleware', () => {
 		await respond(req, res, next);
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [], []);
+
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
+			'cache-key',
+			[],
+			[],
+			{ collections: {}, relations: [] },
+			'5m',
+		);
 	});
 
 	test(oneLine`
@@ -665,7 +836,9 @@ describe('respond middleware', () => {
 		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
 
 		const res = makeRes({ data: [] }, {
-			scopedCacheTags: [{ collection: 'articles' }],
+			scopedCacheFingerprints: [{
+				collection: 'articles',
+			}],
 			scopedCacheEpochs: { articles: '7' },
 		});
 
@@ -695,7 +868,9 @@ describe('respond middleware', () => {
 		mocks.evictCacheEntry.mockResolvedValueOnce(false);
 
 		const res = makeRes({ data: [] }, {
-			scopedCacheTags: [{ collection: 'articles', field: 'author', value: 7 }],
+			scopedCacheFingerprints: [
+				{ collection: 'articles', pinnedScope: { author: ['7'] } },
+			],
 			scopedCacheEpochs: { articles: '7' },
 		});
 
@@ -705,7 +880,7 @@ describe('respond middleware', () => {
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:author=7'],
+				scopedCacheFingerprints: ['articles:&author=,7,&'],
 			},
 			expect.any(Error),
 		);
@@ -723,7 +898,9 @@ describe('respond middleware', () => {
 		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
 
 		const res = makeRes({ data: [] }, {
-			scopedCacheTags: [{ collection: 'articles' }],
+			scopedCacheFingerprints: [{
+				collection: 'articles',
+			}],
 			scopedCacheEpochs: { articles: '7' },
 		});
 
@@ -734,7 +911,7 @@ describe('respond middleware', () => {
 
 	test(oneLine`
 		a purge that swept while the fill was writing takes the entry back out — its
-		sweep read the tag index before this key was filed into it
+		sweep read the fingerprint index before this key was filed into it
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
@@ -743,7 +920,9 @@ describe('respond middleware', () => {
 		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
 
 		const res = makeRes({ data: [] }, {
-			scopedCacheTags: [{ collection: 'articles' }],
+			scopedCacheFingerprints: [{
+				collection: 'articles',
+			}],
 			scopedCacheEpochs: { articles: '7' },
 		});
 
@@ -762,7 +941,9 @@ describe('respond middleware', () => {
 		mocks.scopedCacheSweptDuringFill.mockResolvedValue(undefined);
 
 		const res = makeRes({ data: [] }, {
-			scopedCacheTags: [{ collection: 'articles' }],
+			scopedCacheFingerprints: [{
+				collection: 'articles',
+			}],
 			scopedCacheEpochs: { articles: '7' },
 		});
 
@@ -772,14 +953,35 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		refuses to cache a response scoped to a collection the capture never covered —
-		a hook's scopeTo runs after it, so no counter can show a purge of that
-		collection landed mid-read
+		serves a read uncached and indexes nothing while a deploy's fill pause runs
+		— the build before still files sets this build's entries would escape
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+		mocks.scopedCacheFillPaused.mockReturnValue(true);
+
+		const res = makeRes({ data: [] }, {
+			scopedCacheFingerprints: [{
+				collection: 'articles',
+			}],
+			scopedCacheEpochs: { articles: '7' },
+		});
+
+		await respond(makeReq(), res, next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+		expect(mocks.indexScopedCacheEntry).not.toHaveBeenCalled();
+		expect(res.json).toHaveBeenCalledWith({ data: [] });
+	});
+
+	test(oneLine`
+		refuses to cache a response scoped to a collection the before-query reading
+		never covered — a hook's scopeTo runs after it, so no counter can show a
+		purge of that collection landed mid-read
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
 		await respond(makeReq(), makeRes({ data: [] }, {
-			scopedCacheTags: [
+			scopedCacheFingerprints: [
 				{ collection: 'articles' },
 				{ collection: 'authors' },
 			],
@@ -802,7 +1004,7 @@ describe('respond middleware', () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
 		await respond(makeReq(), makeRes({ data: [] }, {
-			scopedCacheTags: [
+			scopedCacheFingerprints: [
 				{ collection: 'articles' },
 				{ collection: 'authors' },
 			],
@@ -814,14 +1016,14 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		guards a system route's fallback tag by the capture useCollection took, so a
-		read handing over no capture of its own is still compared after the fill
+		guards a system route's fallback pin by the reading useCollection took, so a
+		read handing over no reading of its own is still compared after the fill
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 		mocks.scopedCacheSweptDuringFill.mockResolvedValueOnce('directus_users');
 
 		await respond(makeReq({ collection: 'directus_users' }), makeRes({ data: [] }, {
-			scopedCacheEpochsAtRequest: { directus_users: '3', '*': '1' },
+			scopedCacheEpochsBeforeQuery: { directus_users: '3', '*': '1' },
 		}), next);
 
 		expect(mocks.scopedCacheSweptDuringFill).toHaveBeenCalledWith(
@@ -832,14 +1034,17 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		folds the request capture into the read's own, earlier reading first, so a
-		purge between the two is still visible at fill time
+		folds the request's before-query reading into the read's own, earlier
+		reading first, so a purge between the two is still visible at fill time
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
 		await respond(makeReq(), makeRes({ data: [] }, {
-			scopedCacheTags: [{ collection: 'articles' }, { collection: 'authors' }],
-			scopedCacheEpochsAtRequest: { articles: '7', '*': '1' },
+			scopedCacheFingerprints: [
+				{ collection: 'articles' },
+				{ collection: 'authors' },
+			],
+			scopedCacheEpochsBeforeQuery: { articles: '7', '*': '1' },
 			scopedCacheEpochs: { articles: '8', authors: '4', '*': '1' },
 		}), next);
 
@@ -851,14 +1056,16 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		leaves a response alone when no capture ran at all — with no wholesale entry
-		there is no guard to be outside of, and refusing would take the whole cache
-		down wherever the counters are off
+		leaves a response alone when no reading was taken at all — with no wholesale
+		entry there is no guard to be outside of, and refusing would take the whole
+		cache down wherever the counters are off
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
 		await respond(makeReq(), makeRes({ data: [] }, {
-			scopedCacheTags: [{ collection: 'authors' }],
+			scopedCacheFingerprints: [{
+				collection: 'authors',
+			}],
 			scopedCacheEpochs: {},
 		}), next);
 
@@ -866,10 +1073,10 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		a refused tag index leaves NO value cached: an untagged entry is unreachable to
-		every purge and would serve stale for its whole TTL
+		a refused fingerprint index leaves NO value cached: an unpinned entry is
+		unreachable to every purge and would serve stale for its whole TTL
 	`, async () => {
-		vi.mocked(tagScopedCacheKeys).mockRejectedValueOnce(new Error('OOM'));
+		vi.mocked(indexScopedCacheEntry).mockRejectedValueOnce(new Error('OOM'));
 		const res = makeRes({ data: [] });
 		const req = makeReq();
 
@@ -894,7 +1101,7 @@ describe('respond middleware', () => {
 		await respond(req, res, next);
 
 		expect(warn).toHaveBeenCalled();
-		// The tag index is written first, so a failed value write leaves a tag naming
+		// The pin index is written first, so a failed value write leaves a pin naming
 		// a key that never landed — one wasted `del` on the next purge, nothing stale.
 		expect(res.json).toHaveBeenCalled();
 
@@ -924,6 +1131,34 @@ describe('respond middleware', () => {
 			expect.any(Number),
 			'anomaly',
 		);
+	});
+
+	test('caps the value by the cache layer over the environment', async () => {
+		cacheLayer['value_max_size'] = '1b';
+		const res = makeRes({ data: [{ id: 1, blob: 'x'.repeat(100) }] });
+
+		await respond(makeReq(), res, next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+	});
+
+	// The counters are skipped while serving is off, so a read that started then
+	// and answers once it is back on has nothing to compare a purge against.
+	test(oneLine`
+		fills nothing from a read whose purge counters were skipped while serving
+		was off
+	`, async () => {
+		env['CACHE_ENABLED'] = false;
+		const epochsWhileOff = await readScopedCacheEpochs(['articles']);
+		env['CACHE_ENABLED'] = true;
+
+		await respond(
+			makeReq(),
+			makeRes({ data: [{ id: 1 }] }, { scopedCacheEpochs: epochsWhileOff }),
+			next,
+		);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
 	});
 
 	test('$NOW query filter is not cached', async () => {
@@ -968,18 +1203,23 @@ describe('respond middleware', () => {
 
 	const scopedSchema = {
 		collections: { articles: { scopedCacheFields: ['owner_field'] } },
+		relations: [],
 	} as unknown as Request['schema'];
 
 	test(oneLine`
-		a scoped collection tagged bare is marked coarse on the descriptor
+		a scoped collection pinned bare is marked coarse on the descriptor
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 
-		// articles has scoped_cache_fields but the read tagged bare (no value slice) →
+		// articles has scoped_cache_fields but the read pinned bare (no value slice) →
 		// over-purges → coarse recorded on the descriptor, not raised as an anomaly.
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheTags: [{ collection: 'articles' }] },
+			{
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+				}],
+			},
 		);
 
 		await respond(makeReq({ schema: scopedSchema }), res, next);
@@ -998,8 +1238,11 @@ describe('respond middleware', () => {
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
 			{
-				scopedCacheTags: [
-					{ collection: 'articles', field: 'owner_field', value: 'u1' },
+				scopedCacheFingerprints: [
+					{
+						collection: 'articles',
+						pinnedScope: { owner_field: ['u1'] },
+					},
 				],
 			},
 		);
@@ -1012,20 +1255,23 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		the descriptor carries the tags in the same spelling the purge side records
+		the descriptor carries the pins in the same spelling the purge side records
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 
-		// A boolean slice, because that is where a re-implementation of the label
+		// A boolean slice, because that is where a re-implementation of the pin
 		// would diverge: the driver hands back `1`, and only
-		// `canonicalScopedCacheValue` turns it into the `true` the Redis key and
+		// `canonicalizeScopedCachePinValue` turns it into the `true` the Redis key and
 		// the purge row both use. Written `=1` here, every purge of that slice
 		// would fail to join back to this entry and its purge count would read 0.
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
 			{
-				scopedCacheTags: [
-					{ collection: 'articles', field: 'active', value: 1, type: 'boolean' },
+				scopedCacheFingerprints: [
+					{
+						collection: 'articles',
+						pinnedScope: { active: ['true'] },
+					},
 				],
 			},
 		);
@@ -1033,17 +1279,21 @@ describe('respond middleware', () => {
 		await respond(makeReq({ schema: scopedSchema }), res, next);
 
 		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
-			expect.objectContaining({ scopedCacheTags: ['articles:active=true'] }),
+			expect.objectContaining({ scopedCachePins: ['articles:active=true'] }),
 		);
 	});
 
-	test('a bare tag on a NON-scoped collection is not coarse', async () => {
+	test('a bare pin on a NON-scoped collection is not coarse', async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 
-		// No scoped_cache_fields → the bare tag is the only correct tag, not a fallback.
+		// No scoped_cache_fields → the bare pin is the only correct pin, not a fallback.
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheTags: [{ collection: 'articles' }] },
+			{
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+				}],
+			},
 		);
 
 		await respond(makeReq(), res, next);
@@ -1086,7 +1336,7 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		expect(tagScopedCacheKeys).not.toHaveBeenCalled();
+		expect(indexScopedCacheEntry).not.toHaveBeenCalled();
 		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache');
 	});
 
@@ -1123,10 +1373,12 @@ describe('respond middleware', () => {
 		await respond(req, res, next);
 
 		// falsy payload → size 0, under the limit, so caching still proceeds and 204 flushes
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
 			[{ collection: 'articles' }],
 			[],
+			{ collections: {}, relations: [] },
+			'5m',
 		);
 
 		expect(res.status).toHaveBeenCalledWith(204);
@@ -1182,15 +1434,18 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		CACHE_TAGS_HEADER MISS: emits the pins header, tags the __tags sibling
+		CACHE_TAGS_HEADER MISS: emits the pins header, writes the __pins sibling
 	`, async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
 
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
 			{
-				scopedCacheTags: [
-					{ collection: 'articles', field: 'owner', value: 'U1' },
+				scopedCacheFingerprints: [
+					{
+						collection: 'articles',
+						pinnedScope: { owner: ['U1'] },
+					},
 				],
 			},
 		);
@@ -1204,31 +1459,68 @@ describe('respond middleware', () => {
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
 			mockCache,
-			'cache-key__tags',
-			{ tags: ['articles:owner=U1'] },
+			'cache-key__pins',
+			{ pins: ['articles:owner=U1'] },
 			expect.any(Number),
 		);
 
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[{ collection: 'articles', field: 'owner', value: 'U1' }],
-			['cache-key__tags'],
+			[{ collection: 'articles', pinnedScope: { owner: ['U1'] } }],
+			['cache-key__pins'],
+			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 
-	test('CACHE_PURGED_TAGS_HEADER emits purged tags on a mutation', async () => {
+	test(oneLine`
+		CACHE_TAGS_HEADER MISS swept by a purge during the fill: writes no __pins
+		sibling after the eviction dropped it
+	`, async () => {
+		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+		mocks.scopedCacheSweptDuringFill.mockResolvedValueOnce('articles');
+
+		await respond(makeReq(), makeRes({ data: [{ id: 1 }] }, {
+			scopedCacheFingerprints: [
+				{
+					collection: 'articles',
+					pinnedScope: { owner: ['U1'] },
+				},
+			],
+			scopedCacheEpochs: { articles: '7' },
+		}), next);
+
+		expect(mocks.evictCacheEntry).toHaveBeenCalledWith(mockCache, 'cache-key');
+
+		// Written after the eviction, it would outlive the entry it describes.
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalledWith(
+			mockCache,
+			'cache-key__pins',
+			{ pins: ['articles:owner=U1'] },
+			expect.any(Number),
+		);
+	});
+
+	test('CACHE_PURGED_TAGS_HEADER emits purged pins on a mutation', async () => {
 		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
 
-		const res = makeRes(
-			{ data: { id: 1 } },
-			{
-				scopedCachePurged: [
-					{ collection: 'articles', field: 'owner', value: 'U2' },
-				],
-			},
-		);
+		const res = makeRes({ data: { id: 1 } });
 
-		await respond(makeReq({ method: 'PATCH' }), res, next);
+		await requestStore.run(
+			{
+				scopedCachePurged: {
+					purged: [
+						{
+							collection: 'articles',
+							pinnedScope: { owner: ['U2'] },
+						},
+					],
+					queuedPurges: [],
+				},
+			},
+			() => respond(makeReq({ method: 'PATCH' }), res, next),
+		);
 
 		expect(res.setHeader).toHaveBeenCalledWith(
 			'X-Scoped-Cache-Purged-Tags',
@@ -1236,21 +1528,54 @@ describe('respond middleware', () => {
 		);
 	});
 
-	// The label keeps the raw NUL (it is the Redis key), so the escaping has to happen
+	test('names a purge a raw transaction commit is still draining', async () => {
+		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
+
+		const res = makeRes({ data: { id: 1 } });
+
+		const requestState = { scopedCachePurged: { purged: [], queuedPurges: [] } };
+
+		await requestStore.run(requestState, () => {
+			recordQueuedScopedCachePurges(
+				{ isCompleted: () => true } as Knex.Transaction,
+				new Promise<void>((resolve) => setTimeout(resolve, 10))
+					.then(() => {
+						recordScopedCachePurged([
+							{ collection: 'articles', pinnedScope: { owner: ['U2'] } },
+						]);
+					}),
+			);
+
+			return respond(makeReq({ method: 'PATCH' }), res, next);
+		});
+
+		expect(res.setHeader).toHaveBeenCalledWith(
+			'X-Scoped-Cache-Purged-Tags',
+			'articles:owner=U2',
+		);
+	});
+
+	// The pin keeps the raw NUL (it is the Redis key), so the escaping has to happen
 	// on the way out — `res.setHeader` throws ERR_INVALID_CHAR otherwise.
 	test('escapes a control byte on its way into the header', async () => {
 		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
 
-		const res = makeRes(
-			{ data: { id: 1 } },
-			{
-				scopedCachePurged: [
-					{ collection: 'articles', field: 'owner', value: null },
-				],
-			},
-		);
+		const res = makeRes({ data: { id: 1 } });
 
-		await respond(makeReq({ method: 'PATCH' }), res, next);
+		await requestStore.run(
+			{
+				scopedCachePurged: {
+					purged: [
+						{
+							collection: 'articles',
+							pinnedScope: { owner: ['\x00null'] },
+						},
+					],
+					queuedPurges: [],
+				},
+			},
+			() => respond(makeReq({ method: 'PATCH' }), res, next),
+		);
 
 		expect(res.setHeader).toHaveBeenCalledWith(
 			'X-Scoped-Cache-Purged-Tags',
@@ -1258,24 +1583,31 @@ describe('respond middleware', () => {
 		);
 	});
 
-	// A batch write pins one tag per row; past CACHE_TAGS_HEADER_MAX_SIZE the header
-	// stops and the __tags sibling still keeps every pin.
+	// A batch write pins one pin per row; past CACHE_TAGS_HEADER_MAX_SIZE the header
+	// stops and the __pins sibling still keeps every pin.
 	test('clamps both tag headers, the sibling keeps every pin', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
 		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
 		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '5b';
 
-		const pins = [
-			{ collection: 'a', field: 'b', value: '1' },
-			{ collection: 'a', field: 'b', value: '2' },
+		const purgedFingerprints = [
+			{ collection: 'a', pinnedScope: { b: ['1'] } },
+			{ collection: 'a', pinnedScope: { b: ['2'] } },
 		];
 
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheTags: pins, scopedCachePurged: pins },
+			{
+				scopedCacheFingerprints: [
+					{ collection: 'a', pinnedScope: { b: ['1', '2'] } },
+				],
+			},
 		);
 
-		await respond(makeReq(), res, next);
+		await requestStore.run(
+			{ scopedCachePurged: { purged: purgedFingerprints, queuedPurges: [] } },
+			() => respond(makeReq(), res, next),
+		);
 
 		expect(res.setHeader).toHaveBeenCalledWith('X-Scoped-Cache-Tags', 'a:b=1');
 		expect(res.setHeader).toHaveBeenCalledWith('X-Scoped-Cache-Tags-omitted', '1');
@@ -1292,8 +1624,8 @@ describe('respond middleware', () => {
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
 			mockCache,
-			'cache-key__tags',
-			{ tags: ['a:b=1', 'a:b=2'] },
+			'cache-key__pins',
+			{ pins: ['a:b=1', 'a:b=2'] },
 			expect.any(Number),
 		);
 	});
@@ -1302,12 +1634,21 @@ describe('respond middleware', () => {
 		const res = makeRes(
 			{ data: [] },
 			{
-				scopedCacheTags: [{ collection: 'articles' }],
-				scopedCachePurged: [{ collection: 'articles' }],
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+				}],
 			},
 		);
 
-		await respond(makeReq(), res, next);
+		await requestStore.run(
+			{
+				scopedCachePurged: {
+					purged: [{ collection: 'articles' }],
+					queuedPurges: [],
+				},
+			},
+			() => respond(makeReq(), res, next),
+		);
 
 		const names = vi.mocked(res.setHeader).mock.calls.map((call) => call[0]);
 		expect(names).not.toContain('X-Scoped-Cache-Tags');

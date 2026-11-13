@@ -6,6 +6,7 @@ import {
 } from '@directus/errors';
 import { parseJSON } from '@directus/utils';
 import type { Knex } from 'knex';
+import { randomUUID } from 'node:crypto';
 import {
 	auditCache,
 	CACHE_AUDIT_VERDICTS,
@@ -15,7 +16,13 @@ import {
 	type CacheAuditVerdict,
 } from './cache-audit.js';
 import type { CacheEntryPurgeRecord } from './cache-events.js';
+import { cacheSetting } from './cache-settings.js';
 import { getCache } from './cache.js';
+import {
+	holdCacheLock,
+	readCacheLockHolder,
+	releaseCacheLock,
+} from './cache-lock.js';
 import getDatabase from './database/index.js';
 import { cacheAuditEnabled } from './utils/cache-audit-enabled.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -43,6 +50,7 @@ export interface CacheAuditRunOptions {
 	user: string | null;
 	collection: string | null;
 	purge: boolean;
+	maxDurationMs: number | null;
 }
 
 export interface CacheAuditRun {
@@ -113,7 +121,7 @@ function retentionMs(): number {
 // and the time budget the in-flight claim is sized to.
 function maxDurationMs(): number {
 	const configured = getMilliseconds(
-		useEnv()['CACHE_AUDIT_MAX_DURATION'],
+		cacheSetting('audit_max_duration'),
 		DEFAULT_MAX_DURATION_MS,
 	);
 
@@ -126,11 +134,37 @@ function maxDurationMs(): number {
 // knob, and what keeps "Audit now" on a large cache from outliving the
 // request. 0 is the whole queue.
 function defaultLimit(): number | undefined {
-	const configured = Number(useEnv()['CACHE_AUDIT_LIMIT'] ?? 0);
+	const configured = Number(cacheSetting('audit_limit') ?? 0);
 
 	return Number.isInteger(configured) && configured > 0
 		? configured
 		: undefined;
+}
+
+/**
+ * When the run holding the claim began: what this build's token leads with, or
+ * what a node of an older build stored as the claim's Keyv value, raw on Redis
+ * and as is in a memory lock cache.
+ */
+function claimStartOf(holderToken: unknown): number {
+	if (typeof holderToken === 'number') {
+		return holderToken;
+	}
+
+	if (typeof holderToken !== 'string') {
+		return Number.NaN;
+	}
+
+	if (holderToken.startsWith('{')) {
+		try {
+			return Number(JSON.parse(holderToken).value);
+		}
+		catch {
+			return Number.NaN;
+		}
+	}
+
+	return Number(holderToken.split(':')[0]);
 }
 
 /**
@@ -145,9 +179,9 @@ function defaultLimit(): number | undefined {
  * which is what the limit and the budget are there to bound. So a run that
  * finds another in flight is refused rather than started: a cron tick that
  * outlives its interval skips the next, and "Audit now" during one says so.
- * The claim is a read then a write, not one atomic step: two asks landing
- * within a round-trip of each other could both pass, which costs one doubled
- * run and nothing else.
+ * The claim names the run, so a run that lost it to its TTL never renews or
+ * releases the one another run claimed since. On Redis it is one script, so
+ * two asks never both win it. A memory claim is one process's.
  */
 export async function runCacheAudit(
 	trigger: CacheAuditTrigger,
@@ -162,23 +196,38 @@ export async function runCacheAudit(
 
 	const budgetMs = maxDurationMs();
 	const { lockCache } = getCache();
-	const inFlightSince = await lockCache.get(RUN_LOCK);
+	// Led by when the run began, which a run it refuses reads back.
+	const runToken = `${Date.now()}:${randomUUID()}`;
 
-	if (inFlightSince !== undefined) {
-		const since = new Date(Number(inFlightSince)).toISOString();
+	// A claim Redis refuses to answer is Redis down, and the run goes on to fail
+	// on it and be recorded failed, which is the outage's trace in the history.
+	const runClaimed = await holdCacheLock(
+		lockCache,
+		RUN_LOCK,
+		runToken,
+		RUN_LOCK_TTL_MS,
+	).catch(() => true);
+
+	if (!runClaimed) {
+		const holderToken = await readCacheLockHolder(lockCache, RUN_LOCK)
+			.catch(() => null);
+
+		// None when the run in flight ended since.
+		const inFlightSince = claimStartOf(holderToken);
 
 		throw new ServiceUnavailableError({
 			service: 'cache-audit',
-			reason: `${IN_FLIGHT_REASON}, since ${since}`,
+			reason: Number.isFinite(inFlightSince)
+				? `${IN_FLIGHT_REASON}, since ${new Date(inFlightSince).toISOString()}`
+				: IN_FLIGHT_REASON,
 		});
 	}
 
-	const since = Date.now();
-	await lockCache.set(RUN_LOCK, since, RUN_LOCK_TTL_MS);
 	let renewing: Promise<unknown> = Promise.resolve();
 
 	const renewal = setInterval(() => {
-		renewing = lockCache.set(RUN_LOCK, since, RUN_LOCK_TTL_MS).catch(() => {});
+		renewing = holdCacheLock(lockCache, RUN_LOCK, runToken, RUN_LOCK_TTL_MS)
+			.catch(() => {});
 	}, RUN_LOCK_RENEW_MS);
 
 	renewal.unref();
@@ -212,7 +261,8 @@ export async function runCacheAudit(
 		// A renewal still on the wire would land after the release and hold
 		// the claim for one more TTL.
 		await renewing;
-		await lockCache.delete(RUN_LOCK);
+		// Refused, the claim stays until its TTL: only the next run waits longer.
+		await releaseCacheLock(lockCache, RUN_LOCK, runToken).catch(() => {});
 
 		// Once per run rather than on a schedule of its own: a history that is
 		// only written by runs only needs pruning when one happens — and a run
@@ -243,6 +293,7 @@ export async function startCacheAuditRun(
 		user: options.user ?? null,
 		collection: options.collection ?? null,
 		purge: options.purge === true,
+		maxDurationMs: options.maxDurationMs ?? null,
 	};
 
 	const [row] = await getDatabase()('directus_cache_audits')
@@ -313,8 +364,8 @@ function findingRow(audit: number, finding: CacheAuditFinding) {
 		collection: finding.collection,
 		filled_at: new Date(finding.filledAt),
 		age_ms: finding.ageMs,
-		tags: JSON.stringify(finding.tags),
-		replay_tags: jsonOrNull(finding.replayTags),
+		pins: JSON.stringify(finding.pins),
+		replay_pins: jsonOrNull(finding.replayPins),
 		diff: jsonOrNull(finding.diff),
 		purges_since_filled: jsonOrNull(finding.purgesSinceFilled),
 	};
@@ -359,9 +410,11 @@ async function closeUnclaimedCacheAuditRuns(db: Knex): Promise<void> {
 		return;
 	}
 
-	const claimed = await getCache().lockCache.get(RUN_LOCK);
+	// A claim Redis cannot be asked about may still be held.
+	const holderToken = await readCacheLockHolder(getCache().lockCache, RUN_LOCK)
+		.catch(() => undefined);
 
-	if (claimed !== undefined) {
+	if (holderToken !== null) {
 		return;
 	}
 
@@ -429,10 +482,28 @@ export async function reapCacheAuditRuns(): Promise<number> {
 	const db = getDatabase();
 	const now = Date.now();
 
-	await db('directus_cache_audits')
-		.whereNull('finished_at')
-		.where('started_at', '<', new Date(now - 2 * maxDurationMs() - ORPHAN_GRACE_MS))
-		.update({ finished_at: new Date(now), error: DIED_ERROR });
+	const openRuns = await db('directus_cache_audits')
+		.select('id', 'started_at', 'options')
+		.whereNull('finished_at');
+
+	// Each run is judged by the budget it started with: a budget lowered since
+	// must not close a run still inside its own.
+	const diedRunIds = openRuns
+		.filter((openRun) => {
+			const runBudgetMs = (json(openRun['options']) as
+				Partial<CacheAuditRunOptions> | null)?.maxDurationMs ?? maxDurationMs();
+
+			const startedAt = new Date(openRun['started_at']).getTime();
+
+			return startedAt < now - 2 * runBudgetMs - ORPHAN_GRACE_MS;
+		})
+		.map((openRun) => openRun['id']);
+
+	if (diedRunIds.length > 0) {
+		await db('directus_cache_audits')
+			.whereIn('id', diedRunIds)
+			.update({ finished_at: new Date(now), error: DIED_ERROR });
+	}
 
 	return db('directus_cache_audits')
 		.where('started_at', '<', new Date(now - retentionMs()))
@@ -488,13 +559,29 @@ function findingOf(row: Record<string, unknown>): CacheAuditFinding {
 		collection: (row['collection'] as string | null) ?? null,
 		filledAt: new Date(row['filled_at'] as string).getTime(),
 		ageMs: Number(row['age_ms']),
-		tags: (json(row['tags']) as string[] | null) ?? [],
-		replayTags: json(row['replay_tags']) as string[] | null,
+		pins: (json(row['pins']) as string[] | null) ?? [],
+		replayPins: json(row['replay_pins']) as string[] | null,
 		diff: json(row['diff']) as string[] | null,
-		purgesSinceFilled: json(
-			row['purges_since_filled'],
-		) as CacheEntryPurgeRecord[] | null,
+		purgesSinceFilled: purgeRecordsOf(json(row['purges_since_filled'])),
 	};
+}
+
+// 20260924B renamed the columns, not the key inside a finding stored before it,
+// which still names its pin `scopedCacheTag`.
+function purgeRecordsOf(stored: unknown): CacheEntryPurgeRecord[] | null {
+	if (!Array.isArray(stored)) {
+		return null;
+	}
+
+	return stored.map((record: Record<string, unknown>) => {
+		if (!('scopedCacheTag' in record)) {
+			return record as unknown as CacheEntryPurgeRecord;
+		}
+
+		const { scopedCacheTag, ...rest } = record;
+
+		return { ...rest, scopedCachePin: scopedCacheTag } as CacheEntryPurgeRecord;
+	});
 }
 
 function nullableNumber(value: unknown): number | null {

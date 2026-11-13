@@ -5,7 +5,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -22,7 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // Read via `x-cache-status` on a scoped-purge redis instance:
 //
 //   - the report is served from cache at all: the counters of five collections the
-//     host never captured were handed over, else the response is left uncached
+//     host never snapshotted were handed over, else the response is left uncached
 //     (`unguarded_scope`).
 //   - a create in any depended-on slice (owner=acme), whatever shape fetched it,
 //     invalidates the cached report → MISS.
@@ -114,7 +114,7 @@ describe(oneLine`
 				}),
 			]);
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
@@ -208,14 +208,14 @@ describe(oneLine`
 		it(oneLine`
 			refuses to cache a read whose own write landed between two lookups of one
 			collection, folded later-first — the counters are each lookup's pre-query
-			capture, judged on the earlier
+			snapshot, judged on the earlier
 		`, async () => {
 			await request(getUrl(vendor, env))
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
 			// The raced read: its payload holds the pre-write metric count, and the
-			// write it made moved metric's counter after the first lookup captured it.
+			// write it made moved metric's counter after the first lookup snapshotted it.
 			const raced = await readReport('race');
 			const again = await readReport('race');
 

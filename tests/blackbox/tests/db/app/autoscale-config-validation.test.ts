@@ -3,7 +3,7 @@ import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -52,7 +52,7 @@ describe('The autoscale configuration is checked before it is stored', () => {
 			env[vendor]['SYSTEM_MCP_ENABLED'] = 'true';
 			env[vendor]['SYSTEM_MCP_TOOLS'] = 'autoscale';
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 			envs[vendor] = env;
 
@@ -67,7 +67,7 @@ describe('The autoscale configuration is checked before it is stored', () => {
 
 			busless[vendor]['REDIS_ENABLED'] = 'false';
 
-			const buslessPort = await getPort();
+			const buslessPort = await freePortOfWorker();
 			busless[vendor].PORT = String(buslessPort);
 			buslessEnvs[vendor] = busless;
 

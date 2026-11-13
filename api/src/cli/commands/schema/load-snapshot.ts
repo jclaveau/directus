@@ -5,9 +5,9 @@ import type {
 	SnapshotRelation,
 } from '@directus/types';
 import { parseJSON } from '@directus/utils';
-import { promises as fs } from 'fs';
+import { promises as fs } from 'node:fs';
 import { load as loadYaml } from 'js-yaml';
-import path from 'path';
+import path from 'node:path';
 
 // The exporter strips `collection` off every field and relation; a hand edit
 // may have put one back

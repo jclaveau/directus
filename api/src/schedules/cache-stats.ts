@@ -7,9 +7,9 @@ import {
 	reapCacheConfigEvents,
 	reapCacheDescriptors,
 	reapCacheEvents,
-	reapScopedCacheEntryTags,
+	reapScopedCacheEntryPins,
 	reapCachePurges,
-	reapScopedCachePurgeTags,
+	reapScopedCachePurgePins,
 	refreshCacheStatsFlag,
 	subscribeCacheStatsToggle,
 } from '../cache-events.js';
@@ -66,7 +66,7 @@ export default async function schedule(): Promise<boolean> {
 
 	// One sweep for everything retention leaves behind, in the order the rules
 	// depend on each other: the facts age out on CACHE_STATS_RETENTION, which is
-	// what turns a descriptor into an orphan, which is what turns its entry tags
+	// what turns a descriptor into an orphan, which is what turns its entry pins
 	// into orphans. Two jobs on two cadences would have raced that chain.
 	//
 	// Every ten minutes rather than nightly because half of it is not a retention
@@ -82,10 +82,10 @@ export default async function schedule(): Promise<boolean> {
 				await reapCacheEvents();
 				await reapCacheAnomalies();
 				await reapCachePurges();
-				await reapScopedCachePurgeTags();
+				await reapScopedCachePurgePins();
 				await reapCacheConfigEvents();
 				await reapCacheDescriptors();
-				await reapScopedCacheEntryTags();
+				await reapScopedCacheEntryPins();
 			}
 			catch (err: any) {
 				logger.warn(err, `[cache-stats] reap failed. ${err.message}`);

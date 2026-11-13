@@ -47,7 +47,7 @@
 		"deep-diff": "catalog:",
 		"express": "catalog:",
 		"graphql": "catalog:",
-		"knex": "catalog:",
+		"knex": "^3.1.0",
 		"nodemailer": "catalog:",
 		"openapi3-ts": "catalog:",
 		"pino": "catalog:",

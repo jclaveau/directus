@@ -1,4 +1,5 @@
 import { InvalidPayloadError } from '@directus/errors';
+import { oneLine } from '@directus/utils';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { validateKeys } from './validate-keys.js';
@@ -8,8 +9,18 @@ const schema = new SchemaBuilder()
 	.collection('pk_integer', (c) => {
 		c.field('id').integer().primary();
 	})
+	.collection('pk_big_integer', (c) => {
+		c.field('id')
+			.bigInteger()
+			.primary();
+	})
 	.collection('pk_uuid', (c) => {
 		c.field('id').uuid().primary();
+	})
+	.collection('pk_string', (c) => {
+		c.field('id')
+			.string()
+			.primary();
 	})
 	.build();
 
@@ -39,6 +50,113 @@ describe('validate keys', () => {
 		it('Does not throw an error when provided with an array of valid integer keys', () => {
 			expect(() => validateKeys(schema, 'pk_integer', 'id', [111, 222, 333])).not.toThrowError();
 			expect(() => validateKeys(schema, 'pk_integer', 'id', ['444', '555', '666'])).not.toThrowError();
+		});
+	});
+
+	describe('of integer type spelled as a string', () => {
+		it.each([
+			[
+				'',
+				'Primary key of pk_integer must be an integer instead of ""',
+			],
+			[
+				' ',
+				'Primary key of pk_integer must be an integer instead of " "',
+			],
+			[
+				' 5',
+				'Primary key of pk_integer must be an integer instead of " 5"',
+			],
+			[
+				'0x10',
+				'Primary key of pk_integer must be an integer instead of "0x10"',
+			],
+			[
+				'1e2',
+				'Primary key of pk_integer must be an integer instead of "1e2"',
+			],
+			[
+				'0b1',
+				'Primary key of pk_integer must be an integer instead of "0b1"',
+			],
+			[
+				'1.0',
+				'Primary key of pk_integer must be an integer instead of "1.0"',
+			],
+			[
+				'+',
+				'Primary key of pk_integer must be an integer instead of "+"',
+			],
+		])(
+			'refuses the spelling %j',
+			(spelledKey, reason) => {
+				expect(() => validateKeys(schema, 'pk_integer', 'id', spelledKey))
+					.toThrowError(new InvalidPayloadError({ reason }));
+			},
+		);
+
+		it('accepts a signed decimal spelling', () => {
+			expect(() => validateKeys(schema, 'pk_integer', 'id', ['-3', '+4', '07']))
+				.not.toThrowError();
+		});
+	});
+
+	describe('of bigInteger type', () => {
+		it.each([
+			[
+				'invalid',
+				oneLine`
+					Primary key of pk_big_integer must be an integer instead of
+					"invalid"
+				`,
+			],
+			[
+				'',
+				oneLine`
+					Primary key of pk_big_integer must be an integer instead of
+					""
+				`,
+			],
+			[
+				'0x10',
+				oneLine`
+					Primary key of pk_big_integer must be an integer instead of
+					"0x10"
+				`,
+			],
+			[
+				'1e2',
+				oneLine`
+					Primary key of pk_big_integer must be an integer instead of
+					"1e2"
+				`,
+			],
+			[
+				1.5,
+				oneLine`
+					Primary key of pk_big_integer must be an integer instead of
+					1.5
+				`,
+			],
+			[
+				Number.NaN,
+				oneLine`
+					Primary key of pk_big_integer must be an integer instead of
+					null
+				`,
+			],
+		])(
+			'refuses the key %j',
+			(invalidKey, reason) => {
+				expect(() => validateKeys(schema, 'pk_big_integer', 'id', invalidKey))
+					.toThrowError(new InvalidPayloadError({ reason }));
+			},
+		);
+
+		it('accepts a key past the safe integer range spelled in decimal', () => {
+			expect(() => {
+				validateKeys(schema, 'pk_big_integer', 'id', ['9007199254740993', 12]);
+			}).not.toThrowError();
 		});
 	});
 
@@ -85,6 +203,38 @@ describe('validate keys', () => {
 			expect(() =>
 				validateKeys(schema, 'pk_uuid', 'id', [randomUUID(), randomUUID(), randomUUID()]),
 			).not.toThrowError();
+		});
+	});
+
+	describe('of string type', () => {
+		it.each([
+			[
+				undefined,
+				'Primary key of "pk_string" must be a "string" instead of undefined',
+			],
+			[
+				null,
+				'Primary key of "pk_string" must be a "string" instead of null',
+			],
+		])('refuses a missing key: %s', (key, reason) => {
+			expect(() => validateKeys(schema, 'pk_string', 'id', key as never))
+				.toThrow(new InvalidPayloadError({ reason }));
+		});
+
+		it('refuses a missing key in an array', () => {
+			const keysMissingOne = ['k1', undefined] as never;
+
+			expect(() => validateKeys(schema, 'pk_string', 'id', keysMissingOne))
+				.toThrow(new InvalidPayloadError({
+					reason: oneLine`
+						Primary key of "pk_string" must be a "string" instead of
+						undefined
+					`,
+				}));
+		});
+
+		it.each(['k5', ''])('accepts a key the database can store: %j', (key) => {
+			expect(() => validateKeys(schema, 'pk_string', 'id', key)).not.toThrow();
 		});
 	});
 });

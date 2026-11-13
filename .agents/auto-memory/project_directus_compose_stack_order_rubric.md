@@ -1,5 +1,5 @@
 ---
-name: directus-compose-stack-order-rubric
+name: project_directus_compose_stack_order_rubric
 description:
   How to order the upstream-draft PR copies in the hhh-main compose stack (root→leaf) and which PRs are tree roots — the
   ranking rubric driving the rebased hhh-main-stacked tree and compose's auto-proposal.
@@ -31,4 +31,4 @@ tier is human-maintained).
 
 Worked example (2026-06-16, PRs into the fork): roots `#55 #57`; component bottom→top `#54 #48 #60` (bugfix) → `#50`
 (perf) → `#62 #61` (payload, reasons) → `#59 #58 #51 #52` (contract light→heavy) → `#46` (refused). See
-[[directus-fork-integration-branches]] and [[directus-v12-license-dual-compose]].
+[[project_directus_fork_integration_branches]] and [[project_directus_v12_license_dual_compose]].

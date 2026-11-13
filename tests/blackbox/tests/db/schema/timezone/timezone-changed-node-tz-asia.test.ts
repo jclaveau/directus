@@ -5,7 +5,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { sleep } from '@utils/sleep';
 import { validateDateDifference } from '@utils/validate-date-difference';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import type { Knex } from 'knex';
 import knex from 'knex';
 import { cloneDeep } from 'lodash-es';
@@ -78,7 +78,7 @@ describe('schema', () => {
 		for (const vendor of vendors) {
 			databases.set(vendor, knex(config.knexConfig[vendor]!));
 
-			const newServerPort = await getPort();
+			const newServerPort = await freePortOfWorker();
 
 			env[vendor]['TZ'] = newTz;
 			env[vendor].PORT = String(newServerPort);

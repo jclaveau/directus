@@ -13,6 +13,7 @@ export const DEFAULTS = {
 	QUERYSTRING_MAX_PARSE_DEPTH: 10,
 	QUERY_LIMIT_DEFAULT: 100,
 	MAX_BATCH_MUTATION: Infinity,
+	DEFAULT_MUTATION_BATCHING: 'preserveMutationOrder',
 	ROBOTS_TXT: 'User-agent: *\nDisallow: /',
 
 	TEMP_PATH: './node_modules/.directus',
@@ -78,7 +79,14 @@ export const DEFAULTS = {
 	CACHE_AUTO_PURGE_MODE: 'scoped',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'directus_activity,directus_presets',
 	CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
+	CACHE_SCOPED_MAX_QUERY_CASES: 16,
+	CACHE_SCOPED_INDEX_SCAN_COUNT: 1000,
+	CACHE_SCOPED_INDEX_TTL_FACTOR: 2,
 	CACHE_SCOPED_PURGE_RETRY_INTERVAL: '1m',
+	CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS: 100,
+	CACHE_SCOPED_EPOCH_TTL: '24h',
+	CACHE_SCOPED_INDEX_REAP_SCHEDULE: '0 * * * *',
+	CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '5m',
 	// Default on for the formats a cached endpoint might content-negotiate. Safe
 	// because browsers/SDKs collapse to json (only an explicit text/csv etc. gets
 	// its own bucket). Deliberately NOT xml/html: browsers send them high-q in
@@ -109,9 +117,14 @@ export const DEFAULTS = {
 	// `!== false`. No single type-map entry fits, so it stays on per-value guessType.
 	CACHE_VALUE_MAX_SIZE: false,
 	// Node's fetch refuses a response past 16kb of headers in total, a batch write
-	// pins one tag per row and answers with both tag headers. `0` or an unparseable
-	// size emits every tag.
+	// carries one pin per row and answers with both tag headers. `0` or an
+	// unparseable size emits every pin.
 	CACHE_TAGS_HEADER_MAX_SIZE: '4kb',
+	QUERY_AUDIT_LEVEL: 'counts',
+	// Runs are grouped, then bound values and statements dropped past it, largest
+	// entries first:
+	// node's fetch refuses a response past 16kb of headers in total.
+	QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
 	CACHE_SKIP_ALLOWED: false,
 	// Opt-in: the cache page + its telemetry writes are off unless explicitly
 	// enabled (and only work with CACHE_STORE=redis). When on, growth is bounded
@@ -136,9 +149,9 @@ export const DEFAULTS = {
 	AUTH_DISABLE_DEFAULT: false,
 
 	PACKAGE_FILE_LOCATION: '.',
-	EXTENSIONS_PATH: './extensions',
 	EXTENSIONS_MUST_LOAD: false,
 	EXTENSIONS_AUTO_RELOAD: false,
+	EXTENSIONS_AUTO_MIGRATE: false,
 	EXTENSIONS_SANDBOX_MEMORY: 100,
 	EXTENSIONS_SANDBOX_TIMEOUT: 1000,
 	EXTENSIONS_ROLLDOWN: false,

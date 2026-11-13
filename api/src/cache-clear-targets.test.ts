@@ -1,6 +1,8 @@
+import { oneLine } from '@directus/utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache } from './cache.js';
-import { dropScopedCacheIndex } from './scoped-cache.js';
+import { clearCache as clearPermissionCache } from './permissions/cache.js';
+import { dropScopedCacheIndex } from './scoped-cache/index.js';
 
 // hoisted: cache.ts reads `const env = useEnv()` at module load, before a plain
 // `const env` below would be initialised (temporal dead zone).
@@ -15,11 +17,17 @@ const env = vi.hoisted(() => {
 });
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
-vi.mock('./redis/index.js', () => ({ redisConfigAvailable: () => false }));
+
+vi.mock('./redis/index.js', () => {
+	return {
+		cacheRedisDatabase: () => undefined,
+		redisConfigAvailable: () => false,
+	};
+});
 
 // Answers with a tally rather than with nothing: `clearCacheTargets` reads
 // `refused` off it to decide whether the clear it was asked for actually happened.
-vi.mock('./scoped-cache.js', () => {
+vi.mock('./scoped-cache/index.js', () => {
 	return {
 		clearResponseCache: vi.fn(async (cache) => cache?.clear()),
 		dropScopedCacheIndex: vi.fn(async () => ({ dropped: 0, refused: 0 })),
@@ -55,7 +63,9 @@ afterEach(() => {
 });
 
 describe('clearCacheTargets', () => {
-	it('response: drops response cache + tag index, spares the rest', async () => {
+	it(oneLine`
+		response: drops response cache + fingerprint index, spares the rest
+	`, async () => {
 		const { cache, systemCache, lockCache } = await seedAllTiers();
 
 		await clearCacheTargets(['response']);
@@ -89,6 +99,60 @@ describe('clearCacheTargets', () => {
 		expect(await lockCache.get('lock-key')).toBeUndefined();
 		expect(await cache.get('response-key')).toBe('r');
 		expect(await systemCache.get('system-key')).toBe('s');
+	});
+
+	it('permissions: clears only the permission cache', async () => {
+		const { cache, systemCache, lockCache } = await seedAllTiers();
+
+		await clearCacheTargets(['permissions']);
+
+		expect(clearPermissionCache).toHaveBeenCalledOnce();
+		expect(await cache.get('response-key')).toBe('r');
+		expect(await systemCache.get('system-key')).toBe('s');
+		expect(await lockCache.get('lock-key')).toBe('l');
+
+		expect(mockBus.publish).not.toHaveBeenCalledWith(
+			'schemaChanged',
+			expect.anything(),
+		);
+	});
+
+	it('permissions: fails the clear redis refused', async () => {
+		vi.mocked(clearPermissionCache).mockRejectedValueOnce(new Error('READONLY'));
+
+		await expect(clearCacheTargets(['permissions'])).rejects.toMatchObject({
+			message: oneLine`
+				Service "cache" is unavailable.
+				redis refused the permissions clear.
+			`,
+		});
+	});
+
+	it('system, permissions: clears the permission cache once', async () => {
+		await clearCacheTargets(['system', 'permissions']);
+
+		expect(clearPermissionCache).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
+		system: a refused permission clear fails the system clear,
+		after the other targets
+	`, async () => {
+		const { cache } = await seedAllTiers();
+		vi.mocked(clearPermissionCache).mockRejectedValueOnce(new Error('READONLY'));
+
+		await expect(clearCacheTargets(['system', 'response'])).rejects.toMatchObject({
+			message: oneLine`
+				Service "cache" is unavailable.
+				redis refused the system clear.
+			`,
+		});
+
+		expect(await cache.get('response-key')).toBeUndefined();
+
+		expect(mockBus.publish).toHaveBeenCalledWith('cacheCleared', {
+			targets: ['system', 'response'],
+		});
 	});
 
 	it('broadcasts the exact targets for peers to drop the same subset', async () => {

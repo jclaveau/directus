@@ -1,5 +1,10 @@
 import type { DirectusShare } from '../../../schema/share.js';
-import type { ApplyQueryFields, NestedPartial, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	NestedPartial,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import { throwIfEmpty } from '../../utils/index.js';
 import type { RestCommand } from '../../types.js';
 
@@ -18,7 +23,7 @@ export type UpdateShareOutput<
  * @throws Will throw if keys is empty
  */
 export const updateShares =
-	<Schema, const TQuery extends Query<Schema, DirectusShare<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusShare<Schema>>>(
 		keys: DirectusShare<Schema>['id'][],
 		item: Partial<DirectusShare<Schema>>,
 		query?: TQuery,
@@ -41,7 +46,7 @@ export const updateShares =
  * @returns Returns the share objects for the updated shares.
  */
 export const updateSharesBatch =
-	<Schema, const TQuery extends Query<Schema, DirectusShare<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusShare<Schema>>>(
 		items: NestedPartial<DirectusShare<Schema>>[],
 		query?: TQuery,
 	): RestCommand<UpdateShareOutput<Schema, TQuery>[], Schema> =>
@@ -61,7 +66,7 @@ export const updateSharesBatch =
  * @throws Will throw if key is empty
  */
 export const updateShare =
-	<Schema, const TQuery extends Query<Schema, DirectusShare<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusShare<Schema>>>(
 		key: DirectusShare<Schema>['id'],
 		item: Partial<DirectusShare<Schema>>,
 		query?: TQuery,

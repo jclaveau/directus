@@ -16,7 +16,7 @@ const accountability = {
 	admin: true,
 } as Accountability;
 
-const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+const db = knex.default({ client: Client_SQLite3 });
 
 const schema = new SchemaBuilder()
 	.collection('articles', (c) => {

@@ -73,6 +73,21 @@ describe('create and build', () => {
 		// Bump up timeout duration as the build process can take slightly longer to complete
 		30_000,
 	);
+
+	test(
+		'a scaffolded bundle carries the settings its own install needs',
+		async () => {
+			const testExtensionPath = `${TEST_PREFIX}-bundle-${Date.now()}`;
+
+			await create('bundle', testExtensionPath, { install: false });
+
+			const settingsPath = resolve(testExtensionPath, 'pnpm-workspace.yaml');
+			const settings = await fse.readFile(settingsPath, 'utf8');
+
+			expect(settings).toBe('strictDepBuilds: false\n');
+		},
+		30_000,
+	);
 });
 
 describe('validate extension', async () => {

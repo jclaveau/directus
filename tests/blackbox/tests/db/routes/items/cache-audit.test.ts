@@ -13,18 +13,26 @@ import { ROLE, USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
+import Redis from 'ioredis';
 import knex, { type Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+	afterAll,
+	beforeAll,
+	describe,
+	expect,
+	it,
+	onTestFinished,
+} from 'vitest';
 
 // `POST /utils/cache/audit` replays every live entry against the database and
 // says which ones the database no longer agrees with (jclaveau/directus#498).
 // The unit tests drive the engine over a fake cache and a scripted replayer;
 // these drive the real one: entries a running node filled through Redis,
 // descriptors drained to Postgres, and replays over the node's own loopback,
-// through the hooks that pin a read's tags.
+// through the hooks that pin a read's pins.
 //
 // Every write that makes an entry stale here bypasses the API on purpose — a
 // raw UPDATE fires no purge, which is exactly the class of write the audit
@@ -41,7 +49,7 @@ const HOLD_FLAG = 'test_cache_audit_hold_flag';
 const WIDE = 'test_cache_audit_wide';
 const WIDE_PARENT = 'test_cache_audit_wide_parent';
 
-// Nested one per row and pinned one tag each, they run the replay's tags
+// Nested one per row and pinned one pin each, they run the replay's pins
 // header past node's 16KB parser default (jclaveau/directus#510).
 const WIDE_ROWS = 600;
 
@@ -187,7 +195,7 @@ describe('The cache audit replays live entries against the database', () => {
 
 			appUserId = appUser.id;
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
@@ -395,7 +403,7 @@ describe('The cache audit replays live entries against the database', () => {
 				collection: ROWS,
 				diff: ['/data/0/amount'],
 				purgesSinceFilled: [],
-				tags: expect.arrayContaining([`${ROWS}:owner=acme`]),
+				pins: expect.arrayContaining([`${ROWS}:owner=acme`]),
 			});
 
 			expect(report.findings[0].ageMs).toBeGreaterThanOrEqual(0);
@@ -472,8 +480,8 @@ describe('The cache audit replays live entries against the database', () => {
 		}, 60_000);
 
 		it(oneLine`
-			finds a replay pinning other tags than the entry was filled under:
-			tag_drift, the body agreeing, with both tag sets and an anomaly
+			finds a replay pinning other pins than the entry was filled under:
+			pin_drift, the body agreeing, with both pin sets and an anomaly
 		`, async () => {
 			await clearCache();
 			await db(DRIFT_DEP).update({ owner: 'first' });
@@ -486,19 +494,19 @@ describe('The cache audit replays live entries against the database', () => {
 
 			const report = await auditSettled();
 
-			expect(report.counts.tag_drift).toBe(1);
+			expect(report.counts.pin_drift).toBe(1);
 
 			expect(report.findings[0]).toMatchObject({
-				verdict: 'tag_drift',
+				verdict: 'pin_drift',
 				url: `/items/${DRIFT}`,
 				diff: null,
-				tags: expect.arrayContaining([`${DRIFT_DEP}:owner=first`]),
-				replayTags: expect.arrayContaining([`${DRIFT_DEP}:owner=moved`]),
+				pins: expect.arrayContaining([`${DRIFT_DEP}:owner=first`]),
+				replayPins: expect.arrayContaining([`${DRIFT_DEP}:owner=moved`]),
 			});
 
-			expect(report.findings[0].tags).not.toContain(`${DRIFT_DEP}:owner=moved`);
+			expect(report.findings[0].pins).not.toContain(`${DRIFT_DEP}:owner=moved`);
 
-			const flagged = await anomaly('tag_drift', `/items/${DRIFT}`);
+			const flagged = await anomaly('pin_drift', `/items/${DRIFT}`);
 
 			expect(flagged).toBeDefined();
 			expect(flagged.sample).toContain(`replay pinned`);
@@ -604,6 +612,42 @@ describe('The cache audit replays live entries against the database', () => {
 		}, 60_000);
 
 		it(oneLine`
+			leaves the claim another node took once the run's own lapsed, rather
+			than dropping it as the run ends
+		`, async () => {
+			const namespace = env[vendor]['CACHE_NAMESPACE'];
+			// Namespaced twice, as Keyv names every lock-cache key.
+			const runLockKey = `${namespace}_lock::${namespace}_lock:cache-audit:run`;
+			const redisClient = new Redis({ host: 'localhost', port: 6108 });
+
+			onTestFinished(async () => {
+				await redisClient.del(runLockKey);
+				await redisClient.quit();
+			});
+
+			await clearCache();
+			await warm(() => readCollection(HOLD));
+			await auditSettled({ collection: HOLD });
+
+			await request(url)
+				.patch(`/items/${HOLD_FLAG}/${holdFlagId}`)
+				.send({ armed: 'yes' })
+				.set('Authorization', auth);
+
+			// On the wire now, answered once the held replay lets it go.
+			const heldAudit = audit({ collection: HOLD }).then((response) => response);
+
+			// What a node writes once the claim expired under a slow run: XX, so
+			// it lands only while the held run holds the claim.
+			await expect.poll(() => {
+				return redisClient.set(runLockKey, 'another-node', 'PX', 60_000, 'XX');
+			}, { interval: 5, timeout: 15_000 }).toBe('OK');
+
+			expect((await heldAudit).statusCode).toBe(200);
+			expect(await redisClient.get(runLockKey)).toBe('another-node');
+		}, 60_000);
+
+		it(oneLine`
 			lists a run its process died on as finished, with the reason, rather
 			than in flight until the reap: no claim is held behind it
 		`, async () => {
@@ -638,7 +682,7 @@ describe('The cache audit replays live entries against the database', () => {
 		});
 
 		it(oneLine`
-			replays an entry whose tags outgrow node's 16KB header cap, one pin per
+			replays an entry whose pins outgrow node's 16KB header cap, one pin per
 			nested parent, and finds it fresh rather than unreplayable
 		`, async () => {
 			await clearCache();
@@ -655,10 +699,10 @@ describe('The cache audit replays live entries against the database', () => {
 			expect(report.counts.unreplayable).toBe(0);
 			expect(report.counts.fresh).toBe(1);
 
-			// The witness holds only past the cap: the tags the entry was filled
+			// The witness holds only past the cap: the pins the entry was filled
 			// under are what the replay hands back, in one header.
 			const pinned: string[] = await db(
-				'directus_cache_stats_scoped_entry_tags as t',
+				'directus_cache_stats_scoped_entry_pins as t',
 			)
 				.join(
 					'directus_cache_stats_descriptors as d',
@@ -666,9 +710,9 @@ describe('The cache audit replays live entries against the database', () => {
 					't.cache_key',
 				)
 				.where({ 'd.collection': WIDE, 'd.path': `/items/${WIDE}` })
-				.pluck('t.scoped_cache_tag');
+				.pluck('t.scoped_cache_pin');
 
-			expect(pinned.filter((tag) => tag.startsWith(`${WIDE_PARENT}:id=`)))
+			expect(pinned.filter((pin) => pin.startsWith(`${WIDE_PARENT}:id=`)))
 				.toHaveLength(WIDE_ROWS);
 
 			expect(Buffer.byteLength(pinned.join(','))).toBeGreaterThan(16 * 1024);
@@ -1106,7 +1150,7 @@ describe('The cache audit replays live entries against the database', () => {
 			]);
 
 			// One verdict at a time, the total counted under the same narrowing.
-			const drifted = await readRun({ verdict: 'tag_drift' });
+			const drifted = await readRun({ verdict: 'pin_drift' });
 
 			expect(drifted.body.data.findings).toEqual([]);
 			expect(drifted.body.data.findingsTotal).toBe(0);
@@ -1200,9 +1244,19 @@ describe('The cache audit replays live entries against the database', () => {
 			// A stale entry nothing has flagged yet, for the schedule to find.
 			await clearCache();
 			await warm(() => readOwner('globex'));
+			await warm(() => readCollection(HOLD));
+			// Both in the queue, so the scheduled run replays them in one page.
+			await auditSettled({}, 2);
 
 			await db(ROWS).where({ owner: 'globex' })
 				.update({ amount: '13' });
+
+			// The HOLD replay answers 6s late: the run records its counts that
+			// long after the globex replay raised its anomaly.
+			await request(url)
+				.patch(`/items/${HOLD_FLAG}/${holdFlagId}`)
+				.send({ armed: 'yes' })
+				.set('Authorization', auth);
 
 			const before = Date.now();
 
@@ -1210,6 +1264,15 @@ describe('The cache audit replays live entries against the database', () => {
 				.patch('/utils/cache/audit/schedule')
 				.send({ rule: '* * * * * *' })
 				.set('Authorization', auth);
+
+			// Cleared however the test ends: a rule left in the settings keeps
+			// this node auditing, and every node booted after reads it.
+			onTestFinished(async () => {
+				await request(url)
+					.patch('/utils/cache/audit/schedule')
+					.send({ rule: null })
+					.set('Authorization', auth);
+			});
 
 			expect(scheduled.statusCode).toBe(200);
 
@@ -1230,21 +1293,32 @@ describe('The cache audit replays live entries against the database', () => {
 			expect(settings.body.data.cache_audit_schedule).toBe('* * * * * *');
 
 			// Nothing calls the endpoint: the node's own schedule, taken off the
-			// bus, replays the entry and lands its finding.
+			// bus, replays the entry and records the run. Waited on by its row:
+			// the anomaly drains on its own tick, before the run has ended.
+			let cronRun: any;
+
+			for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
+				cronRun = await db('directus_cache_audits')
+					.where({ trigger: 'cron' })
+					.where('started_at', '>', new Date(before))
+					.whereNotNull('finished_at')
+					.first();
+
+				if (cronRun) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+			}
+
+			expect(cronRun?.stale).toBe(1);
+
 			const flagged = await anomaly(
 				'stale_entry',
 				`/items/${ROWS}?filter[owner][_eq]=globex`,
 			);
 
 			expect(flagged).toBeDefined();
-
-			const cronRun = await db('directus_cache_audits')
-				.where({ trigger: 'cron' })
-				.where('started_at', '>', new Date(before))
-				.where('stale', '>', 0)
-				.first();
-
-			expect(cronRun).toBeDefined();
 
 			const cleared = await request(url)
 				.patch('/utils/cache/audit/schedule')
@@ -1294,6 +1368,7 @@ describe('The cache audit replays live entries against the database', () => {
 				user: null,
 				collection: ROWS,
 				purge: false,
+				maxDurationMs: 600_000,
 			});
 		}, 60_000);
 
@@ -1340,7 +1415,7 @@ describe('The cache audit replays live entries against the database', () => {
 			const cutOffLog: string[] = [];
 
 			beforeAll(async () => {
-				const proxyPort = await getPort();
+				const proxyPort = await freePortOfWorker();
 				proxy = createRedisProxy(6108, proxyPort);
 				await proxy.open();
 
@@ -1358,7 +1433,7 @@ describe('The cache audit replays live entries against the database', () => {
 				cutOffEnv[vendor]['CACHE_SCHEMA'] = 'false';
 				cutOffEnv[vendor]['CACHE_AUDIT_IDENTITY_TOKEN'] = USER.ADMIN.TOKEN;
 
-				const cutOffPort = await getPort();
+				const cutOffPort = await freePortOfWorker();
 				cutOffEnv[vendor].PORT = String(cutOffPort);
 
 				cutOff = spawn('node', [paths.cli, 'start'], {

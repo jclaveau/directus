@@ -1,10 +1,16 @@
+import { InvalidQueryError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const updateOne = vi.fn();
+const readOne = vi.fn();
 
 vi.mock('../services/users.js', () => {
-	return { UsersService: vi.fn(() => ({ updateOne })) };
+	return {
+		UsersService: vi.fn(function () {
+			return { updateOne, readOne };
+		}),
+	};
 });
 
 vi.mock('../services/authentication.js', () => ({ AuthenticationService: vi.fn() }));
@@ -18,7 +24,7 @@ vi.mock('../middleware/rate-limiter-registration.js', () => {
 
 const scopedCachePurgeEnabled = vi.fn();
 
-vi.mock('../scoped-cache.js', () => {
+vi.mock('../scoped-cache/index.js', () => {
 	return { scopedCachePurgeEnabled: () => scopedCachePurgeEnabled() };
 });
 
@@ -49,7 +55,7 @@ describe('users controller /me/track/page', () => {
 
 	test(oneLine`
 		lets the scoped purge hear the write, so /users/me follows — the user's own
-		slices only, the bare tag any session could drain at the limiter's rate stays
+		slices only, the bare pin any session could drain at the limiter's rate stays
 	`, async () => {
 		scopedCachePurgeEnabled.mockReturnValue(true);
 
@@ -58,7 +64,7 @@ describe('users controller /me/track/page', () => {
 		expect(updateOne).toHaveBeenCalledWith(
 			'u-1',
 			{ last_page: '/content/articles' },
-			{ autoPurgeCache: true, purgeCollectionTag: false },
+			{ autoPurgeCache: true, purgeBareFingerprint: false },
 		);
 
 		expect(next).toHaveBeenCalledWith();
@@ -74,9 +80,65 @@ describe('users controller /me/track/page', () => {
 		expect(updateOne).toHaveBeenCalledWith(
 			'u-1',
 			{ last_page: '/content/articles' },
-			{ autoPurgeCache: false, purgeCollectionTag: false },
+			{ autoPurgeCache: false, purgeBareFingerprint: false },
 		);
 
 		expect(next).toHaveBeenCalledWith();
+	});
+});
+
+describe('users controller PATCH /:pk', () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	test('passes mutationBatching to the update', async () => {
+		updateOne.mockResolvedValueOnce('u-2');
+		readOne.mockResolvedValueOnce({ id: 'u-2' });
+
+		await router.stack.find((l: any) => {
+			return l.route?.path === '/:pk' && l.route.methods.patch;
+		})!.route!.stack[0]!.handle(
+			{
+				accountability: null,
+				schema: {},
+				params: { pk: 'u-2' },
+				query: { mutationBatching: 'preserveMutationOrder' },
+				body: { first_name: 'Ada' },
+				sanitizedQuery: {},
+			} as any,
+			{ locals: {} } as any,
+			vi.fn(),
+		);
+
+		expect(updateOne).toHaveBeenCalledWith(
+			'u-2',
+			{ first_name: 'Ada' },
+			{ mutationBatching: 'preserveMutationOrder' },
+		);
+	});
+
+	test('refuses an unknown mutationBatching before updating', async () => {
+		const next = vi.fn();
+
+		await router.stack.find((l: any) => {
+			return l.route?.path === '/:pk' && l.route.methods.patch;
+		})!.route!.stack[0]!.handle(
+			{
+				accountability: null,
+				schema: {},
+				params: { pk: 'u-2' },
+				query: { mutationBatching: 'batchEverything' },
+				body: { first_name: 'Ada' },
+				sanitizedQuery: {},
+			} as any,
+			{ locals: {} } as any,
+			next,
+		);
+
+		expect(next).toHaveBeenCalledWith(new InvalidQueryError({
+			reason: '"mutationBatching" must be one of minimizeMutations, '
+				+ 'preserveMutationOrder, disableBatching',
+		}));
+
+		expect(updateOne).not.toHaveBeenCalled();
 	});
 });

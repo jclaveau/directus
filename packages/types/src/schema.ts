@@ -15,6 +15,8 @@ export type FieldOverview = {
 	note: string | null;
 	validation: Filter | null;
 	alias: boolean;
+	/** Whether its column is in a unique index other than the primary key's */
+	inUniqueIndex?: boolean;
 };
 
 export type CollectionOverview = {

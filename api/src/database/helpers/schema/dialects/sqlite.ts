@@ -1,4 +1,3 @@
-import type { Knex } from 'knex';
 import { getDefaultIndexName } from '../../../../utils/get-default-index-name.js';
 import { SchemaHelper } from '../types.js';
 
@@ -9,14 +8,6 @@ export class SchemaHelperSQLite extends SchemaHelper {
 		fields: string | string[],
 	): string {
 		return getDefaultIndexName(type, collection, fields, { maxLength: Infinity });
-	}
-
-	// SQLite has no ALTER TABLE ... DROP CONSTRAINT; a unique is backed by a unique index, so drop
-	// the index instead of the base class's DROP CONSTRAINT IF EXISTS.
-	override async dropUniqueIfExists(knex: Knex, collection: string, field: string): Promise<void> {
-		const constraintName = this.generateIndexName('unique', collection, field);
-
-		await knex.raw('DROP INDEX IF EXISTS ??', [constraintName]);
 	}
 
 	override async preColumnChange(): Promise<boolean> {

@@ -10,13 +10,13 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // A sort across a relation is kept out of `beyond` when the sorted collection
-// declares scope fields — `read-tags.ts` reads a sort as a reorder the collection's
+// declares scope fields — `read-pins.ts` reads a sort as a reorder the collection's
 // own slice catches, rather than a change of membership. What makes that sound is
 // not the declaration: it is that the exemption is only ever reached by a
 // collection the filter already NAMED by key (`namedByFilter`), and a keyed filter
@@ -102,7 +102,7 @@ describe(oneLine`
 
 			offPageRootId = roots[2].id;
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {

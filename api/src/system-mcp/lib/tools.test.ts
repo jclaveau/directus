@@ -30,6 +30,9 @@ const service = vi.hoisted(() => {
 		getCacheAuditSchedule: vi.fn(),
 		getCacheAuditQueue: vi.fn(),
 		updateCacheAuditSchedule: vi.fn(),
+		readCacheSettings: vi.fn(),
+		updateCacheSettings: vi.fn(),
+		clearCacheSettings: vi.fn(),
 		constructed: [] as unknown[],
 	};
 });
@@ -63,6 +66,9 @@ vi.mock('../../services/utils.js', () => {
 			getCacheAuditSchedule = service.getCacheAuditSchedule;
 			getCacheAuditQueue = service.getCacheAuditQueue;
 			updateCacheAuditSchedule = service.updateCacheAuditSchedule;
+			readCacheSettings = service.readCacheSettings;
+			updateCacheSettings = service.updateCacheSettings;
+			clearCacheSettings = service.clearCacheSettings;
 		},
 	};
 });
@@ -128,7 +134,10 @@ import {
 import type { CacheAuditFinding } from '../../cache-audit.js';
 import type { CacheAuditRun } from '../../cache-audit-runs.js';
 // Type-only, so the mock above still stands in for the module at runtime.
-import type { UtilsService as GuardedUtils } from '../../services/utils.js';
+import type {
+	CacheSettingsAnswer,
+	UtilsService as GuardedUtils,
+} from '../../services/utils.js';
 import { allSystemMcpTools, findSystemMcpTool, systemMcpTools } from './tools.js';
 
 const context = {
@@ -149,6 +158,7 @@ beforeEach(() => {
 		'autoscale',
 		'autoscale_drill',
 		'cache',
+		'cache_settings',
 		'cache_audit',
 	]);
 
@@ -183,6 +193,8 @@ test('Every tool is described well enough for a model to choose it', () => {
 		'list_cache_latencies',
 		'read_cache_timeseries',
 		'read_cache_stats_state',
+		'read_cache_settings',
+		'write_cache_settings',
 		'run_cache_audit',
 		'list_cache_audits',
 		'read_cache_audit',
@@ -220,6 +232,7 @@ test('Only the reads declare themselves reads', () => {
 		'write_supervisor_config',
 		'restart_autoscale_pool',
 		'run_autoscale_drill',
+		'write_cache_settings',
 		'run_cache_audit',
 		'write_cache_audit_schedule',
 	]);
@@ -333,6 +346,8 @@ test('A deployment that reports no processes offers no tool for them', () => {
 			'list_cache_latencies',
 			'read_cache_timeseries',
 			'read_cache_stats_state',
+			'read_cache_settings',
+			'write_cache_settings',
 			'run_cache_audit',
 			'list_cache_audits',
 			'read_cache_audit',
@@ -403,6 +418,8 @@ test('Every tool declares the subsystem it reads', () => {
 		'cache',
 		'cache',
 		'cache',
+		'cache',
+		'cache_settings',
 		'cache_audit',
 		'cache_audit',
 		'cache_audit',
@@ -533,6 +550,54 @@ test('The configuration write refuses a patch that is not an object', async () =
 	).rejects.toThrowError('`config` has to be an object of configuration fields');
 });
 
+test('The cache settings write sends the fields down from the MCP', async () => {
+	await findSystemMcpTool('write_cache_settings')!.run(
+		{ settings: { audit_limit: 40, value_max_size: null } },
+		context,
+	);
+
+	expect(service.updateCacheSettings)
+		.toHaveBeenCalledWith({ audit_limit: 40, value_max_size: null }, 'mcp');
+});
+
+test('The cache settings write drops them all on clear', async () => {
+	await findSystemMcpTool('write_cache_settings')!.run({ clear: true }, context);
+
+	expect(service.clearCacheSettings).toHaveBeenCalledOnce();
+	expect(service.updateCacheSettings).not.toHaveBeenCalled();
+});
+
+// The cache group is on by default and was read-only, so a deployment exposing
+// it did not hand an agent the switch that clears the response cache.
+test('The cache settings write is a group of its own, off by default', () => {
+	expect(findSystemMcpTool('write_cache_settings')!.group)
+		.toBe('cache_settings');
+
+	config.groups.mockReturnValue(['processes', 'cache']);
+
+	expect(findSystemMcpTool('write_cache_settings')).toBeUndefined();
+	expect(findSystemMcpTool('read_cache_settings')).toBeDefined();
+});
+
+test('The cache settings write refuses a clear sent with fields', async () => {
+	await expect(
+		findSystemMcpTool('write_cache_settings')!
+			.run({ clear: true, settings: { audit_limit: 40 } }, context),
+	).rejects.toThrowError('`clear` and `settings` cannot be sent together');
+
+	expect(service.clearCacheSettings).not.toHaveBeenCalled();
+	expect(service.updateCacheSettings).not.toHaveBeenCalled();
+});
+
+test('The cache settings write refuses fields that are not an object', async () => {
+	await expect(
+		findSystemMcpTool('write_cache_settings')!
+			.run({ settings: 'audit_limit=40' }, context),
+	).rejects.toThrowError('`settings` has to be an object of cache settings');
+
+	expect(service.updateCacheSettings).not.toHaveBeenCalled();
+});
+
 test('The supervisor write sends the note down with the options', async () => {
 	service.updateSupervisorConfig
 		.mockResolvedValue({ key: 'k', sharedSettings: {}, setByEmail: null });
@@ -659,8 +724,8 @@ test('The entry read never answers with the response inside it', async () => {
 	service.readCacheEntry.mockResolvedValue({
 		exists: true,
 		value: { data: [{ id: 1, email: 'ann@corp.io' }] },
-		tags: ['collection:articles'],
-		tagCounts: { 'collection:articles': 2 },
+		pins: ['collection:articles'],
+		pinCounts: { 'collection:articles': 2 },
 		expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },
 		sizes: { uncompressed: 100, compressed: 40 },
 		tombstone: null,
@@ -675,8 +740,8 @@ test('The entry read never answers with the response inside it', async () => {
 
 	expect(answer).toEqual({
 		exists: true,
-		tags: ['collection:articles'],
-		tagCounts: { 'collection:articles': 2 },
+		pins: ['collection:articles'],
+		pinCounts: { 'collection:articles': 2 },
 		expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },
 		sizes: { uncompressed: 100, compressed: 40 },
 		tombstone: null,
@@ -909,10 +974,36 @@ const auditFinding: CacheAuditFinding = {
 	collection: 'articles',
 	filledAt: 1_700_000_000_000,
 	ageMs: 1000,
-	tags: ['articles'],
-	replayTags: ['articles'],
+	pins: ['articles'],
+	replayPins: ['articles'],
 	diff: ['/data/0/title'],
 	purgesSinceFilled: [],
+};
+
+const cacheSettingsAnswer: CacheSettingsAnswer = {
+	key: 'directus_settings.cache_settings',
+	sharedSettings: {
+		audit_limit: 40,
+		setBy: 'jean-id',
+		setAt: '2026-09-30T08:00:00.000Z',
+		setFrom: 'mcp',
+	},
+	setByEmail: 'jean@example.com',
+	resolved: {
+		response: { value: true, source: 'env', fallback: true },
+		value_max_size: { value: false, source: 'env', fallback: false },
+		stats_max_bytes: { value: '2gb', source: 'env', fallback: '2gb' },
+		audit_limit: { value: 40, source: 'settings', fallback: 0 },
+		audit_max_duration: { value: '10m', source: 'env', fallback: '10m' },
+		scoped_index_scan_count: { value: 1000, source: 'env', fallback: 1000 },
+		scoped_index_ttl_factor: { value: 2, source: 'env', fallback: 2 },
+		scoped_max_pins_per_collection: { value: 250, source: 'env', fallback: 250 },
+		scoped_purge_retry_max_fingerprints: {
+			value: 100,
+			source: 'env',
+			fallback: 100,
+		},
+	},
 };
 
 const auditRun: CacheAuditRun = {
@@ -920,12 +1011,18 @@ const auditRun: CacheAuditRun = {
 	startedAt: 1_700_000_000_000,
 	finishedAt: 1_700_000_000_012,
 	trigger: 'mcp',
-	options: { limit: null, user: null, collection: null, purge: false },
+	options: {
+		limit: null,
+		user: null,
+		collection: null,
+		purge: false,
+		maxDurationMs: 600_000,
+	},
 	scanned: 2,
 	counts: {
 		fresh: 1,
 		stale: 1,
-		tag_drift: 0,
+		pin_drift: 0,
 		raced: 0,
 		time_varying: 0,
 		expired: 0,
@@ -976,6 +1073,10 @@ test('Every declared output property is one the tool actually answers', () => {
 		list_cache_latencies: CacheGroupLatencyRecord[];
 		read_cache_timeseries: CacheTimeseries;
 		read_cache_stats_state: CacheStatsState;
+		read_cache_settings:
+			Awaited<ReturnType<GuardedUtils['readCacheSettings']>>;
+		write_cache_settings:
+			Awaited<ReturnType<GuardedUtils['updateCacheSettings']>>;
 		run_cache_audit: Awaited<ReturnType<GuardedUtils['auditCache']>>;
 		list_cache_audits: Awaited<ReturnType<GuardedUtils['getCacheAudits']>>;
 		read_cache_audit: Awaited<ReturnType<GuardedUtils['getCacheAudit']>>;
@@ -1181,8 +1282,8 @@ test('Every declared output property is one the tool actually answers', () => {
 		],
 		read_cache_entry: {
 			exists: true,
-			tags: ['collection:articles'],
-			tagCounts: { 'collection:articles': 2 },
+			pins: ['collection:articles'],
+			pinCounts: { 'collection:articles': 2 },
 			expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },
 			sizes: { uncompressed: 100, compressed: 40 },
 			tombstone: null,
@@ -1194,7 +1295,7 @@ test('Every declared output property is one the tool actually answers', () => {
 					time: 4,
 					mode: 'slices',
 					collection: 'articles',
-					scopedCacheTag: 'articles:id=5',
+					scopedCachePin: 'articles:id=5',
 					evicted: 2,
 				},
 			],
@@ -1257,6 +1358,8 @@ test('Every declared output property is one the tool actually answers', () => {
 			bufferLength: 0,
 			droppedEvents: 0,
 		},
+		read_cache_settings: cacheSettingsAnswer,
+		write_cache_settings: cacheSettingsAnswer,
 		run_cache_audit: auditRun,
 		list_cache_audits: [auditRun],
 		read_cache_audit: { ...auditRun, findings: [auditFinding], findingsTotal: 1 },

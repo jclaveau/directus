@@ -1,5 +1,13 @@
-import { InvalidPayloadError } from '@directus/errors';
+import {
+	ForbiddenError,
+	InvalidPayloadError,
+	RecordNotUniqueError,
+	ServiceUnavailableError,
+} from '@directus/errors';
+import { SchemaBuilder } from '@directus/schema-builder';
 import { Driver, StorageManager } from '@directus/storage';
+import type { File } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import type { Knex } from 'knex';
 import knex from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
@@ -11,32 +19,159 @@ import {
 	describe,
 	expect,
 	it,
+	onTestFinished,
 	vi,
 	type MockInstance,
-	type MockedFunction,
 } from 'vitest';
+import { getDatabaseClient } from '../database/index.js';
+import emitter from '../emitter.js';
+import { useLogger } from '../logger/index.js';
+import {
+	validateAccess,
+} from '../permissions/modules/validate-access/validate-access.js';
 import { getStorage } from '../storage/index.js';
+import { extractMetadata } from './files/lib/extract-metadata.js';
+import { withMeta } from '../utils/read-meta.js';
 import { FilesService, ItemsService } from './index.js';
+
+vi.mock('../database/index.js', () => {
+	return {
+		default: vi.fn(),
+		getDatabaseClient: vi.fn(() => 'postgres'),
+	};
+});
 
 vi.mock('../storage/index.js');
 vi.mock('@directus/storage');
 vi.mock('./files/lib/extract-metadata.js');
+vi.mock('../permissions/modules/validate-access/validate-access.js');
+
+vi.mock('../logger/index.js', () => {
+	const logger = { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), trace: vi.fn() };
+
+	return { useLogger: () => logger };
+});
 
 describe('Integration Tests', () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(() => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 	});
 
 	afterEach(() => {
 		tracker.reset();
+		vi.restoreAllMocks();
 		vi.clearAllMocks();
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 	});
 
 	describe('Services / Files', () => {
+		describe('a disk name the unique index refuses', () => {
+			it('refuses a created row with the guard reason', async () => {
+				vi.spyOn(ItemsService.prototype, 'createMany')
+					.mockRejectedValue(new RecordNotUniqueError({
+						collection: 'directus_files',
+						field: 'filename_disk',
+						value: 'taken.txt',
+					}));
+
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				await expect(service.createMany([
+					{ type: 'text/plain', filename_disk: 'taken.txt' },
+				])).rejects.toStrictEqual(new InvalidPayloadError({
+					reason: '"filename_disk" "taken.txt" is already used by another file',
+				}));
+			});
+
+			it('refuses a batch insert naming no disk name', async () => {
+				vi.spyOn(ItemsService.prototype, 'createMany')
+					.mockRejectedValue(new RecordNotUniqueError({
+						collection: 'directus_files',
+						field: 'filename_disk',
+						value: null,
+					}));
+
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				await expect(service.createMany([
+					{ type: 'text/plain', filename_disk: 'one.txt' },
+					{ type: 'text/plain', filename_disk: 'two.txt' },
+				])).rejects.toStrictEqual(new InvalidPayloadError({
+					reason: '"filename_disk" is already used by another file',
+				}));
+			});
+
+			it('refuses an updated row with the guard reason', async () => {
+				vi.spyOn(ItemsService.prototype, 'updateGroups')
+					.mockRejectedValue(new RecordNotUniqueError({
+						collection: 'directus_files',
+						field: 'filename_disk',
+						value: 'taken.txt',
+					}));
+
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				await expect(service.updateGroups([
+					{ keys: ['file-1'], data: { filename_disk: 'taken.txt' } },
+				])).rejects.toStrictEqual(new InvalidPayloadError({
+					reason: '"filename_disk" "taken.txt" is already used by another file',
+				}));
+			});
+
+			it('keeps a unique error on another field', async () => {
+				const uniqueError = new RecordNotUniqueError({
+					collection: 'directus_files',
+					field: 'title',
+					value: 'Same title',
+				});
+
+				vi.spyOn(ItemsService.prototype, 'updateGroups')
+					.mockRejectedValue(uniqueError);
+
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				await expect(service.updateGroups([
+					{ keys: ['file-1'], data: { title: 'Same title' } },
+				])).rejects.toBe(uniqueError);
+			});
+
+			it('keeps a unique error on another collection\'s filename_disk', async () => {
+				const uniqueError = new RecordNotUniqueError({
+					collection: 'scans',
+					field: 'filename_disk',
+					value: 'scan.txt',
+				});
+
+				vi.spyOn(ItemsService.prototype, 'updateGroups')
+					.mockRejectedValue(uniqueError);
+
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				await expect(service.updateGroups([
+					{ keys: ['file-1'], data: { title: 'Scanned' } },
+				])).rejects.toBe(uniqueError);
+			});
+		});
+
 		describe('createMany', () => {
 			let service: FilesService;
 			let superCreateMany: MockInstance;
@@ -107,6 +242,8 @@ describe('Integration Tests', () => {
 		describe('uploadOne', () => {
 			let service: FilesService;
 			let superUpdateOne: MockInstance;
+			let superCreateOne: MockInstance;
+			let mockDriver: Partial<Driver>;
 
 			let sample: {
 				id: string;
@@ -127,10 +264,13 @@ describe('Integration Tests', () => {
 					filesize: 500,
 				};
 
-				const mockDriver: Partial<Driver> = {
+				mockDriver = {
 					read: vi.fn().mockResolvedValue(new PassThrough()),
 					write: vi.fn(),
 					stat: vi.fn().mockReturnValue({ size: sample.filesize }),
+					exists: vi.fn().mockResolvedValue(false),
+					list: vi.fn(async function* () {}),
+					move: vi.fn(),
 				};
 
 				const mockStorage: Partial<StorageManager> = {
@@ -141,7 +281,10 @@ describe('Integration Tests', () => {
 
 				tracker.on.select('select "storage_default_folder" from "directus_settings"').response([]);
 
-				vi.spyOn(ItemsService.prototype, 'createOne').mockResolvedValue(sample.id);
+				superCreateOne = vi
+					.spyOn(ItemsService.prototype, 'createOne')
+					.mockResolvedValue(sample.id);
+
 				superUpdateOne = vi.spyOn(ItemsService.prototype, 'updateOne').mockResolvedValue(sample.id);
 			});
 
@@ -224,6 +367,1249 @@ describe('Integration Tests', () => {
 				);
 
 				vi.useRealTimers();
+			});
+
+			it('refuses a filename_disk another file holds, writing nothing', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response(null);
+
+				vi.mocked(mockDriver.exists!).mockResolvedValue(true);
+
+				await expect(
+					service.uploadOne(new PassThrough(), {
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+						filename_disk: 'held.txt',
+					}),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: '"filename_disk" "held.txt" is already used by another file',
+					}),
+				);
+
+				expect(mockDriver.exists).toHaveBeenCalledWith('held.txt');
+				expect(superCreateOne).not.toHaveBeenCalled();
+				expect(mockDriver.write).not.toHaveBeenCalled();
+			});
+
+			it('refuses a new id whose disk name only the disk holds', async () => {
+				tracker.on
+					.select('select "id" from "directus_files" where "filename_disk" = ?')
+					.response(undefined);
+
+				vi.mocked(mockDriver.exists!).mockResolvedValue(true);
+
+				await expect(
+					service.uploadOne(new PassThrough(), {
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+						id: 'test-file-id-123',
+					}),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: oneLine`
+							"filename_disk" "test-file-id-123.txt" is already used by
+							another file
+						`,
+					}),
+				);
+
+				expect(mockDriver.exists).toHaveBeenCalledWith('test-file-id-123.txt');
+				expect(superCreateOne).not.toHaveBeenCalled();
+				expect(mockDriver.write).not.toHaveBeenCalled();
+			});
+
+			it('refuses a new id whose disk name another row holds', async () => {
+				tracker.on
+					.select('select "id" from "directus_files" where "filename_disk" = ?')
+					.response({ id: 'other-file-id' });
+
+				await expect(
+					service.uploadOne(new PassThrough(), {
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+						id: 'test-file-id-123',
+					}),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: oneLine`
+							"filename_disk" "test-file-id-123.txt" is already used by
+							another file
+						`,
+					}),
+				);
+
+				expect(superCreateOne).not.toHaveBeenCalled();
+				expect(mockDriver.write).not.toHaveBeenCalled();
+			});
+
+			it('derives the disk name of a new id from its type', async () => {
+				tracker.on
+					.select('select "id" from "directus_files" where "filename_disk" = ?')
+					.response(undefined);
+
+				vi.mocked(mockDriver.exists!).mockResolvedValue(true);
+
+				await expect(
+					service.uploadOne(new PassThrough(), {
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes',
+						id: 'test-file-id-123',
+					}),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: oneLine`
+							"filename_disk" "test-file-id-123.txt" is already used by
+							another file
+						`,
+					}),
+				);
+			});
+
+			it('derives a bare disk name when nothing names an extension', async () => {
+				tracker.on
+					.select('select "id" from "directus_files" where "filename_disk" = ?')
+					.response(undefined);
+
+				vi.mocked(mockDriver.exists!).mockResolvedValue(true);
+
+				await expect(
+					service.uploadOne(new PassThrough(), {
+						storage: 'local',
+						filename_download: 'notes',
+						id: 'test-file-id-123',
+					}),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: oneLine`
+							"filename_disk" "test-file-id-123" is already used by
+							another file
+						`,
+					}),
+				);
+			});
+
+			it('refuses a filename_disk that is not a normalised path', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response(null);
+
+				await expect(
+					service.uploadOne(new PassThrough(), {
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+						filename_disk: 'up/../notes.txt',
+					}),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: oneLine`
+							"filename_disk" "up/../notes.txt" must be a relative path
+							without empty, "." or ".." segments
+						`,
+					}),
+				);
+
+				expect(mockDriver.exists).not.toHaveBeenCalled();
+				expect(superCreateOne).not.toHaveBeenCalled();
+			});
+
+			it('derives the disk name of an upload sending an empty one', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response(null);
+
+				// uploadOne goes on to fill the payload it created the row with.
+				const createdPayloads: unknown[] = [];
+
+				superCreateOne.mockImplementationOnce(async (createdPayload: object) => {
+					createdPayloads.push({ ...createdPayload });
+					return sample.id;
+				});
+
+				await service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+					filename_disk: '',
+				});
+
+				expect(createdPayloads).toStrictEqual([
+					{
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+					},
+				]);
+
+				expect(mockDriver.write).toHaveBeenCalledWith(
+					'test-file-id-123.txt',
+					expect.anything(),
+					'text/plain',
+				);
+			});
+
+			it('lets a replacement keep its own disk name', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response({ filename_disk: 'test-file-id-123.txt' });
+
+				vi.mocked(mockDriver.exists!).mockResolvedValue(true);
+
+				await service.uploadOne(
+					new PassThrough(),
+					{
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+						filename_disk: 'test-file-id-123.txt',
+					},
+					sample.id,
+				);
+
+				expect(mockDriver.move).toHaveBeenCalledWith(
+					'temp_test-file-id-123.txt',
+					'test-file-id-123.txt',
+				);
+			});
+
+			it('hands mutationBatching to the writes of a new upload', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response(null);
+
+				await service.uploadOne(
+					new PassThrough(),
+					{
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+					},
+					undefined,
+					{ mutationBatching: 'disableBatching' },
+				);
+
+				expect(superCreateOne).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+					emitEvents: false,
+					mutationBatching: 'disableBatching',
+				});
+
+				expect(superUpdateOne).toHaveBeenCalledExactlyOnceWith(
+					sample.id,
+					expect.anything(),
+					{ emitEvents: false, mutationBatching: 'disableBatching' },
+				);
+			});
+
+			it('hands mutationBatching to the writes of a replacement', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response({ filename_disk: 'test-file-id-123.txt' });
+
+				vi.mocked(mockDriver.exists!).mockResolvedValue(true);
+
+				await service.uploadOne(
+					new PassThrough(),
+					{
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+						filename_disk: 'test-file-id-123.txt',
+					},
+					sample.id,
+					{ mutationBatching: 'disableBatching' },
+				);
+
+				expect(superUpdateOne).toHaveBeenNthCalledWith(
+					1,
+					sample.id,
+					expect.anything(),
+					{ emitEvents: false, mutationBatching: 'disableBatching' },
+				);
+
+				expect(superUpdateOne).toHaveBeenNthCalledWith(
+					2,
+					sample.id,
+					expect.anything(),
+					{ emitEvents: false, mutationBatching: 'disableBatching' },
+				);
+			});
+
+			it('replaces a file without deleting one its id prefixes', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response({ filename_disk: 'test-file-id-123.jpg' });
+
+				const thumbnailHash = 'b'.repeat(40);
+
+				mockDriver.list = vi.fn(async function* () {
+					yield* [
+						'test-file-id-123.jpg',
+						`test-file-id-123__${thumbnailHash}.webp`,
+						'test-file-id-123-copy.jpg',
+					];
+				});
+
+				mockDriver.delete = vi.fn();
+
+				await service.uploadOne(
+					new PassThrough(),
+					{
+						storage: 'local',
+						type: 'image/jpeg',
+						filename_download: 'photo.jpg',
+					},
+					sample.id,
+				);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.jpg'],
+					[`test-file-id-123__${thumbnailHash}.webp`],
+				]);
+			});
+
+			it('deletes a new file whose bytes write fails', async () => {
+				vi.mocked(mockDriver.write!).mockRejectedValue(new Error('disk full'));
+				mockDriver.delete = vi.fn();
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toStrictEqual(new ServiceUnavailableError({
+					service: 'files',
+					reason: 'Couldn\'t save file test-file-id-123.txt',
+				}));
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123'], { emitEvents: false }]]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes a new file whose stat fails', async () => {
+				const statError = new Error('stat failed');
+				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
+				mockDriver.delete = vi.fn();
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(statError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123'], { emitEvents: false }]]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes a new file whose metadata extraction fails', async () => {
+				const extractionError = new Error('extraction failed');
+				vi.mocked(extractMetadata).mockRejectedValueOnce(extractionError);
+				mockDriver.delete = vi.fn();
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(extractionError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123'], { emitEvents: false }]]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes a new file whose row update fails', async () => {
+				const updateError = new Error('update failed');
+				superUpdateOne.mockRejectedValue(updateError);
+				mockDriver.delete = vi.fn();
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(updateError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123'], { emitEvents: false }]]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes a new file its uploader may not delete', async () => {
+				const uploaderService = new FilesService({
+					knex: db,
+					schema: new SchemaBuilder()
+						.collection('directus_files', (collection) => {
+							collection.field('id').string()
+								.primary();
+						})
+						.build(),
+					accountability: {
+						admin: false,
+						app: false,
+						ip: null,
+						role: 'uploader-role',
+						roles: ['uploader-role'],
+						user: 'uploader-id',
+					},
+				});
+
+				tracker.on.delete('directus_files').response(1);
+				vi.mocked(validateAccess).mockRejectedValue(new ForbiddenError());
+
+				onTestFinished(() => {
+					vi.mocked(validateAccess).mockResolvedValue(undefined);
+				});
+
+				const statError = new Error('stat failed');
+				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
+				mockDriver.delete = vi.fn();
+
+				await expect(uploaderService.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(statError);
+
+				expect(tracker.history.delete).toHaveLength(1);
+
+				expect(tracker.history.delete[0]?.sql).toBe(
+					'delete from "directus_files" where "id" in (?)',
+				);
+
+				expect(tracker.history.delete[0]?.bindings)
+					.toStrictEqual(['test-file-id-123']);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes a new file a files.delete hook refuses', async () => {
+				const hookedFilesService = new FilesService({
+					knex: db,
+					schema: new SchemaBuilder()
+						.collection('directus_files', (collection) => {
+							collection.field('id').string()
+								.primary();
+						})
+						.build(),
+				});
+
+				const refusingHook = vi.fn(() => {
+					throw new Error('hook refused');
+				});
+
+				emitter.onFilter('files.delete', refusingHook);
+				onTestFinished(() => emitter.offFilter('files.delete', refusingHook));
+
+				tracker.on.delete('directus_files').response(1);
+				const statError = new Error('stat failed');
+				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
+				mockDriver.delete = vi.fn();
+
+				await expect(hookedFilesService.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(statError);
+
+				expect(refusingHook.mock.calls).toStrictEqual([]);
+				expect(tracker.history.delete).toHaveLength(1);
+
+				expect(tracker.history.delete[0]?.sql).toBe(
+					'delete from "directus_files" where "id" in (?)',
+				);
+
+				expect(tracker.history.delete[0]?.bindings)
+					.toStrictEqual(['test-file-id-123']);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+			});
+
+			it('deletes the bytes of a new file whose row delete fails', async () => {
+				const statError = new Error('stat failed');
+				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
+				mockDriver.delete = vi.fn();
+				const rowDeleteError = new Error('transaction aborted');
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockRejectedValue(rowDeleteError);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(statError);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.txt'],
+				]);
+
+				expect(vi.mocked(useLogger().warn).mock.calls).toStrictEqual([
+					[
+						rowDeleteError,
+						'Couldn\'t delete the row "test-file-id-123" of a failed upload',
+					],
+				]);
+			});
+
+			it('deletes the row of a new file whose bytes delete fails', async () => {
+				const statError = new Error('stat failed');
+				vi.mocked(mockDriver.stat!).mockRejectedValue(statError);
+				const bytesDeleteError = new Error('disk unreachable');
+				mockDriver.delete = vi.fn().mockRejectedValue(bytesDeleteError);
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+				})).rejects.toBe(statError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([[['test-file-id-123'], { emitEvents: false }]]);
+
+				expect(vi.mocked(useLogger().warn).mock.calls).toStrictEqual([
+					[
+						bytesDeleteError,
+						'Couldn\'t delete the file "test-file-id-123.txt" of a failed upload',
+					],
+				]);
+			});
+
+			it('logs the temp file a failed replacement cannot delete', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response({ filename_disk: 'test-file-id-123.txt' });
+
+				const writeError = new Error('disk full');
+				vi.mocked(mockDriver.write!).mockRejectedValue(writeError);
+				const tempDeleteError = new Error('disk unreachable');
+				mockDriver.delete = vi.fn().mockRejectedValue(tempDeleteError);
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(
+					new PassThrough(),
+					{
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+					},
+					sample.id,
+				)).rejects.toStrictEqual(new ServiceUnavailableError({
+					service: 'files',
+					reason: 'Couldn\'t save file test-file-id-123.txt',
+				}));
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['temp_test-file-id-123.txt'],
+				]);
+
+				expect(vi.mocked(useLogger().warn).mock.calls).toStrictEqual([
+					['Couldn\'t save file test-file-id-123.txt'],
+					[writeError],
+					['Couldn\'t delete temp file temp_test-file-id-123.txt'],
+					[tempDeleteError],
+				]);
+			});
+
+			it('keeps a replaced file whose metadata extraction fails', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response({ filename_disk: 'test-file-id-123.txt' });
+
+				const extractionError = new Error('extraction failed');
+				vi.mocked(extractMetadata).mockRejectedValueOnce(extractionError);
+				mockDriver.delete = vi.fn();
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([sample.id]);
+
+				await expect(service.uploadOne(
+					new PassThrough(),
+					{
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+					},
+					sample.id,
+				)).rejects.toBe(extractionError);
+
+				expect(vi.mocked(ItemsService.prototype.deleteMany).mock.calls)
+					.toStrictEqual([]);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([]);
+			});
+		});
+
+		describe('disk names held by rows', () => {
+			let service: FilesService;
+
+			beforeEach(() => {
+				service = new FilesService({
+					knex: db,
+					schema: new SchemaBuilder()
+						.collection('directus_files', (collection) => {
+							collection.field('id').uuid()
+								.primary();
+
+							collection.field('type').string();
+							collection.field('title').string();
+							collection.field('filename_disk').string();
+						})
+						.build(),
+				});
+			});
+
+			it('refuses a created row naming a disk name another row holds', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000002',
+							filename_disk: 'held.txt',
+						}]);
+
+				await expect(
+					service.createMany([{ type: 'text/plain', filename_disk: 'held.txt' }]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: '"filename_disk" "held.txt" is already used by another file',
+					}),
+				);
+
+				expect(tracker.history.insert).toStrictEqual([]);
+			});
+
+			it('refuses a held disk name a create filter hook claims', async () => {
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([
+					{ data: { type: 'text/plain', filename_disk: 'held.txt' } },
+				]);
+
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000002',
+							filename_disk: 'held.txt',
+						}]);
+
+				tracker.on.insert('directus_files').response([
+					{ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000001' },
+				]);
+
+				await expect(
+					service.createMany([{ type: 'text/plain' }]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: '"filename_disk" "held.txt" is already used by another file',
+					}),
+				);
+
+				expect(tracker.history.insert).toStrictEqual([]);
+			});
+
+			it('refuses a created row whose disk name is rooted', async () => {
+				await expect(
+					service.createMany([
+						{ type: 'text/plain', filename_disk: '/rooted.txt' },
+					]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: oneLine`
+							"filename_disk" "/rooted.txt" must be a relative path
+							without empty, "." or ".." segments
+						`,
+					}),
+				);
+
+				expect(tracker.history.select).toStrictEqual([]);
+				expect(tracker.history.insert).toStrictEqual([]);
+			});
+
+			it('refuses an update to a disk name with a dot segment', async () => {
+				await expect(
+					service.updateGroups([
+						{
+							keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+							data: { filename_disk: 'folder/./dotted.txt' },
+						},
+					]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: oneLine`
+							"filename_disk" "folder/./dotted.txt" must be a relative path
+							without empty, "." or ".." segments
+						`,
+					}),
+				);
+
+				expect(tracker.history.update).toStrictEqual([]);
+			});
+
+			it('refuses an update to an empty disk name', async () => {
+				await expect(
+					service.updateGroups([
+						{
+							keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+							data: { filename_disk: '' },
+						},
+					]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: '"filename_disk" can\'t be empty',
+					}),
+				);
+
+				expect(tracker.history.update).toStrictEqual([]);
+			});
+
+			it('refuses a created row with an empty disk name', async () => {
+				await expect(
+					service.createMany([{ type: 'text/plain', filename_disk: '' }]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: '"filename_disk" can\'t be empty',
+					}),
+				);
+
+				expect(tracker.history.insert).toStrictEqual([]);
+			});
+
+			it('creates a row whose disk name sits in a folder', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([]);
+
+				tracker.on.insert('directus_files').response([
+					{ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000005' },
+				]);
+
+				await expect(
+					service.createMany([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000005',
+							type: 'text/plain',
+							filename_disk: 'folder/stored.txt',
+						},
+					]),
+				).resolves.toStrictEqual(['8e2b4c10-5d3a-4f6e-9a7b-000000000005']);
+			});
+
+			it('refuses two created rows sharing a disk name', async () => {
+				await expect(
+					service.createMany([
+						{ type: 'text/plain', filename_disk: 'twin.txt' },
+						{ type: 'text/plain', filename_disk: 'twin.txt' },
+					]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: '"filename_disk" "twin.txt" is already used by another file',
+					}),
+				);
+
+				expect(tracker.history.insert).toStrictEqual([]);
+			});
+
+			it('creates a row for a file only the disk holds', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([]);
+
+				tracker.on.insert('directus_files').response([
+					{
+						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000005',
+					}]);
+
+				await expect(
+					service.createMany([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000005',
+							type: 'text/plain',
+							filename_disk: 'stored.txt',
+						},
+					]),
+				).resolves.toStrictEqual(['8e2b4c10-5d3a-4f6e-9a7b-000000000005']);
+			});
+
+			it('refuses an update naming a disk name another row holds', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000002',
+							filename_disk: 'held.txt',
+						}]);
+
+				await expect(
+					service.updateGroups([
+						{
+							keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+							data: { filename_disk: 'held.txt' },
+						},
+					]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: '"filename_disk" "held.txt" is already used by another file',
+					}),
+				);
+
+				expect(tracker.history.update).toStrictEqual([]);
+			});
+
+			it('refuses a held disk name an update filter hook claims', async () => {
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([
+					{
+						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+						data: { filename_disk: 'held.txt' },
+					},
+				]);
+
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000002',
+							filename_disk: 'held.txt',
+						}]);
+
+				tracker.on.update('directus_files').response(1);
+
+				await expect(
+					service.updateGroups([
+						{
+							keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+							data: { title: 'Own' },
+						},
+					]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: '"filename_disk" "held.txt" is already used by another file',
+					}),
+				);
+
+				expect(tracker.history.update).toStrictEqual([]);
+			});
+
+			it('refuses an update giving several rows one disk name', async () => {
+				await expect(
+					service.updateGroups([
+						{
+							keys: [
+								'8e2b4c10-5d3a-4f6e-9a7b-000000000003',
+								'8e2b4c10-5d3a-4f6e-9a7b-000000000004',
+							],
+							data: { filename_disk: 'twin.txt' },
+						},
+					]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: '"filename_disk" "twin.txt" is already used by another file',
+					}),
+				);
+
+				expect(tracker.history.update).toStrictEqual([]);
+			});
+
+			it('updates a row keeping its own disk name', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000001',
+							filename_disk: 'own.txt',
+						}]);
+
+				tracker.on.update('directus_files').response(1);
+
+				await expect(
+					service.updateGroups(
+						[
+							{
+								keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+								data: { filename_disk: 'own.txt', title: 'Own' },
+							},
+						],
+					),
+				).resolves.toStrictEqual(['8e2b4c10-5d3a-4f6e-9a7b-000000000001']);
+			});
+
+			it(oneLine`
+				gives a row the disk name the same batch moves another row off
+			`, async () => {
+				// One statement per group: this MockClient has no dialect to compile
+				// the postgres batch with.
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([{
+						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000002',
+						filename_disk: 'held.txt',
+					}]);
+
+				tracker.on.update('directus_files').response(1);
+
+				await expect(
+					service.updateGroups([
+						{
+							keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000002'],
+							data: { filename_disk: 'moved.txt' },
+						},
+						{
+							keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+							data: { filename_disk: 'held.txt' },
+						},
+					]),
+				).resolves.toStrictEqual([
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000002',
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000001',
+				]);
+			});
+
+			it('updates a row keeping its disk name under an uppercase key', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([{
+						id: '8e2b4c10-5d3a-4f6e-9a7b-00000000000a',
+						filename_disk: 'own.txt',
+					}]);
+
+				tracker.on.update('directus_files').response(1);
+
+				await expect(
+					service.updateGroups([{
+						keys: ['8E2B4C10-5D3A-4F6E-9A7B-00000000000A'],
+						data: { filename_disk: 'own.txt' },
+					}]),
+				).resolves.toStrictEqual(['8E2B4C10-5D3A-4F6E-9A7B-00000000000A']);
+			});
+
+			it('refuses an update group holding no data object', async () => {
+				await expect(
+					service.updateGroups([{
+						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+						data: null as unknown as Partial<File>,
+					}]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: 'Each update group needs a "data" object',
+					}),
+				);
+			});
+
+			it('writes a disk name to a row one group names twice', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([]);
+
+				tracker.on.update('directus_files').response(1);
+
+				await expect(
+					service.updateGroups([{
+						keys: [
+							'8e2b4c10-5d3a-4f6e-9a7b-000000000001',
+							'8e2b4c10-5d3a-4f6e-9a7b-000000000001',
+						],
+						data: { filename_disk: 'renamed.txt' },
+					}]),
+				).resolves.toStrictEqual([
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000001',
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000001',
+				]);
+			});
+
+			it('refuses two last-winning groups naming one row a disk name', async () => {
+				await expect(
+					service.updateGroups(
+						[
+							{
+								keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000003'],
+								data: { filename_disk: 'moved.txt' },
+							},
+							{
+								keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000003'],
+								data: { filename_disk: 'kept.txt' },
+							},
+						],
+						{ onRepeatedPk: 'lastWins' },
+					),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: oneLine`
+							Row 8e2b4c10-5d3a-4f6e-9a7b-000000000003 is sent more than
+							once; send each row once
+						`,
+					}),
+				);
+			});
+
+			it('lets last-winning groups name a row one disk name', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([]);
+
+				tracker.on.update('directus_files').response(1);
+
+				await expect(
+					service.updateGroups(
+						[
+							{
+								keys: [
+									'8e2b4c10-5d3a-4f6e-9a7b-000000000003',
+									'8e2b4c10-5d3a-4f6e-9a7b-000000000003',
+								],
+								data: { filename_disk: 'moved.txt' },
+							},
+							{
+								keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000003'],
+								data: { title: 'Moved' },
+							},
+						],
+						{ onRepeatedPk: 'lastWins' },
+					),
+				).resolves.toStrictEqual([
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000003',
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000003',
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000003',
+				]);
+			});
+
+			it('judges no disk name for an update naming no row', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000002',
+							filename_disk: 'held.txt',
+						}]);
+
+				await expect(
+					service.updateGroups([
+						{ keys: [], data: { filename_disk: 'held.txt' } },
+					]),
+				).resolves.toStrictEqual([]);
+			});
+
+		});
+
+		describe('deleteMany', () => {
+			it('deletes a file and its thumbnails, nothing else', async () => {
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				const thumbnailHash = 'a'.repeat(40);
+
+				const mockDriver: Partial<Driver> = {
+					list: vi.fn(async function* (listedPrefix: string) {
+						if (listedPrefix === 'photos/a') {
+							yield* ['photos/a.jpg', 'photos/a1.jpg'];
+
+							return;
+						}
+
+						yield* [
+							'a.jpg',
+							`a__${thumbnailHash}.webp`,
+							`A__${thumbnailHash}.webp`,
+							'a1b2c3.jpg',
+							'A9f0e1.jpg',
+							'albums/cover.jpg',
+							'a__short.jpg',
+						];
+					}),
+					delete: vi.fn(),
+				};
+
+				vi.mocked(getStorage).mockResolvedValue({
+					location: vi.fn(() => mockDriver as Driver),
+				} as Partial<StorageManager> as StorageManager);
+
+				vi.spyOn(ItemsService.prototype, 'readMany').mockResolvedValue(withMeta(
+					[
+						{ id: 'root-id', storage: 'local', filename_disk: 'a.jpg' },
+						{ id: 'folder-id', storage: 'local', filename_disk: 'photos/a.jpg' },
+					],
+					{ scopedCacheFingerprints: [] },
+				));
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany').mockResolvedValue([]);
+
+				await service.deleteMany(['root-id', 'folder-id']);
+
+				expect(vi.mocked(mockDriver.delete!).mock.calls).toStrictEqual([
+					['a.jpg'],
+					[`a__${thumbnailHash}.webp`],
+					['photos/a.jpg'],
+					[`a__${thumbnailHash}.webp`],
+				]);
+			});
+
+			it('deletes a file a rooted bucket lists with a leading slash', async () => {
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				const thumbnailHash = 'c'.repeat(40);
+
+				const mockDriver: Partial<Driver> = {
+					list: vi.fn(async function* (listedPrefix: string) {
+						if (listedPrefix === 'photos/a') {
+							yield* ['/photos/a.jpg', '/photos/a1.jpg'];
+
+							return;
+						}
+
+						yield* ['/a.jpg', `/a__${thumbnailHash}.webp`, '/a1.jpg'];
+					}),
+					delete: vi.fn(),
+				};
+
+				vi.mocked(getStorage).mockResolvedValue({
+					location: vi.fn(() => mockDriver as Driver),
+				} as Partial<StorageManager> as StorageManager);
+
+				vi.spyOn(ItemsService.prototype, 'readMany').mockResolvedValue(withMeta(
+					[
+						{ id: 'root-id', storage: 's3', filename_disk: 'a.jpg' },
+						{ id: 'folder-id', storage: 's3', filename_disk: 'photos/a.jpg' },
+					],
+					{ scopedCacheFingerprints: [] },
+				));
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany').mockResolvedValue([]);
+
+				await service.deleteMany(['root-id', 'folder-id']);
+
+				expect(vi.mocked(mockDriver.delete!).mock.calls).toStrictEqual([
+					['/a.jpg'],
+					[`/a__${thumbnailHash}.webp`],
+					['/photos/a.jpg'],
+					[`/a__${thumbnailHash}.webp`],
+				]);
+			});
+
+			it('deletes the thumbnails of a file whose folder is gone', async () => {
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				const thumbnailHash = 'b'.repeat(40);
+
+				const mockDriver: Partial<Driver> = {
+					list: vi.fn(async function* (listedPrefix: string) {
+						if (listedPrefix === 'gone/x') {
+							throw Object.assign(
+								new Error('ENOENT: no such file or directory, opendir'),
+								{ code: 'ENOENT' },
+							);
+						}
+
+						yield* [`x__${thumbnailHash}.webp`];
+					}),
+					delete: vi.fn(),
+				};
+
+				vi.mocked(getStorage).mockResolvedValue({
+					location: vi.fn(() => mockDriver as Driver),
+				} as Partial<StorageManager> as StorageManager);
+
+				vi.spyOn(ItemsService.prototype, 'readMany').mockResolvedValue(withMeta(
+					[{ id: 'gone-id', storage: 'local', filename_disk: 'gone/x.jpg' }],
+					{ scopedCacheFingerprints: [] },
+				));
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany').mockResolvedValue([]);
+
+				await expect(service.deleteMany(['gone-id']))
+					.resolves.toStrictEqual(['gone-id']);
+
+				expect(vi.mocked(mockDriver.delete!).mock.calls).toStrictEqual([
+					[`x__${thumbnailHash}.webp`],
+				]);
+			});
+
+			it('deletes past a thumbnail gone since the listing', async () => {
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				const thumbnailHash = 'd'.repeat(40);
+
+				const mockDriver: Partial<Driver> = {
+					list: vi.fn(async function* () {
+						yield* [`a__${thumbnailHash}.webp`, 'a.jpg'];
+					}),
+					delete: vi.fn(async (filepath: string) => {
+						if (filepath === `a__${thumbnailHash}.webp`) {
+							throw Object.assign(
+								new Error('ENOENT: no such file or directory, unlink'),
+								{ code: 'ENOENT' },
+							);
+						}
+					}),
+				};
+
+				vi.mocked(getStorage).mockResolvedValue({
+					location: vi.fn(() => mockDriver as Driver),
+				} as Partial<StorageManager> as StorageManager);
+
+				vi.spyOn(ItemsService.prototype, 'readMany').mockResolvedValue(withMeta(
+					[{ id: 'root-id', storage: 'local', filename_disk: 'a.jpg' }],
+					{ scopedCacheFingerprints: [] },
+				));
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany').mockResolvedValue([]);
+
+				await service.deleteMany(['root-id']);
+
+				expect(vi.mocked(mockDriver.delete!).mock.calls).toStrictEqual([
+					[`a__${thumbnailHash}.webp`],
+					['a.jpg'],
+				]);
 			});
 		});
 	});

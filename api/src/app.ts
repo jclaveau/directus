@@ -1,12 +1,13 @@
 import { useEnv } from '@directus/env';
 import { InvalidPayloadError, ServiceUnavailableError } from '@directus/errors';
+import { MutationBatchingModes } from '@directus/types';
 import cookieParser from 'cookie-parser';
 import type { Request, RequestHandler, Response, Router } from 'express';
 import express from 'express';
-import type { ServerResponse } from 'http';
+import type { ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import path from 'path';
+import path from 'node:path';
 import qs from 'qs';
 import { registerAuthProviders } from './auth.js';
 import accessRouter from './controllers/access.js';
@@ -55,11 +56,29 @@ import { initAutoscaleDrill } from './processes/autoscale/lib/drill.js';
 import { flushCachesIfBuildChanged } from './cache-build-identity.js';
 import { type CoreMountPath, coreMountPaths } from './core-mounts.js';
 import { initCacheConfig } from './cache-config.js';
+import {
+	initCacheSettings,
+	seedCacheSettings,
+	validateCacheSettingsEnv,
+} from './cache-settings.js';
 import { PROCESSES_BOOLEAN_ENV } from './processes/lib/boolean-env.js';
-import { validateBooleanEnv } from './utils/validate-env.js';
+import {
+	validateBooleanEnv,
+	validateBytesEnv,
+	validateChoiceEnv,
+	validateDurationEnv,
+	validateHeaderNameEnv,
+	validateUnreadEnv,
+	validateAutoMigrateEnv,
+} from './utils/validate-env.js';
 import { initSharedSettings } from './processes/lib/shared-settings.js';
 import { initPoolHealthMirror } from './processes/lib/pool-health.js';
 import { initSharedSettingsGuard } from './processes/lib/settings-guard.js';
+import {
+	QUERY_AUDIT_LEVELS,
+	QUERY_AUDIT_MIN_SIZE,
+	queryAuditEnabled,
+} from './database/query-audit.js';
 import emitter from './emitter.js';
 import { getExtensionManager } from './extensions/index.js';
 import { getFlowManager } from './flows.js';
@@ -69,7 +88,12 @@ import cache from './middleware/cache.js';
 import cors from './middleware/cors.js';
 import { errorHandler } from './middleware/error-handler.js';
 import extractToken from './middleware/extract-token.js';
+import auditRequestQueries from './middleware/query-audit.js';
+import openRequestStore from './middleware/request-store.js';
 import rateLimiterGlobal from './middleware/rate-limiter-global.js';
+import {
+	refuseExtensionChangeInProduction,
+} from './middleware/refuse-extension-change-in-production.js';
 import rateLimiter, {
 	resolvedRateLimiterCharge,
 	type RateLimiterCharge,
@@ -86,12 +110,15 @@ import cacheAuditSchedule from './schedules/cache-audit.js';
 import cacheStatsSchedule from './schedules/cache-stats.js';
 import metricsSchedule from './schedules/metrics.js';
 import retentionSchedule from './schedules/retention.js';
+import scopedCacheReapSchedule from './schedules/scoped-cache-reap.js';
 import telemetrySchedule from './schedules/telemetry.js';
 import tusSchedule from './schedules/tus.js';
 import {
-	assertScopedCacheRedisSupported,
+	assertScopedCacheStoreSupported,
 	startScopedCachePurgeRecovery,
-} from './scoped-cache.js';
+	warnFullPurgeDeprecated,
+} from './scoped-cache/index.js';
+import { initNotificationEmails } from './services/notifications.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { merge } from './utils/lodash-es-used.js';
 import { Url } from './utils/url.js';
@@ -108,6 +135,14 @@ export default async function createApp(): Promise<express.Application> {
 	// turns its feature off silently, and every line after here would run as
 	// though the deployment had asked for that.
 	validateBooleanEnv(PROCESSES_BOOLEAN_ENV);
+
+	// Ending the process after the listen would pass the deployment's healthcheck
+	// and crash-loop behind it.
+	validateDurationEnv(['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX']);
+	validateChoiceEnv('DEFAULT_MUTATION_BATCHING', MutationBatchingModes);
+	validateCacheSettingsEnv();
+	validateUnreadEnv();
+	validateAutoMigrateEnv();
 
 	await validateDatabaseConnection();
 
@@ -137,7 +172,8 @@ export default async function createApp(): Promise<express.Application> {
 	await validateDatabaseExtensions();
 	await validateStorage();
 
-	assertScopedCacheRedisSupported();
+	assertScopedCacheStoreSupported();
+	warnFullPurgeDeprecated();
 
 	await registerAuthProviders();
 
@@ -148,6 +184,8 @@ export default async function createApp(): Promise<express.Application> {
 	await flowManager.initialize();
 
 	// Extensions + core loaded; heal a redis cache left stale by a code-only deploy.
+	// Before the deploy flush, which asks whether this node holds a response cache.
+	await seedCacheSettings();
 	await flushCachesIfBuildChanged(extensionManager);
 
 	// And finish any purge that failed after its mutation committed — a previous
@@ -159,6 +197,12 @@ export default async function createApp(): Promise<express.Application> {
 	app.disable('x-powered-by');
 	app.set('trust proxy', env['IP_TRUST_PROXY']);
 	app.set('query parser', (str: string) => qs.parse(str, { depth: Number(env['QUERYSTRING_MAX_PARSE_DEPTH']) }));
+
+	if (queryAuditEnabled()) {
+		validateHeaderNameEnv('QUERY_AUDIT_HEADER');
+		validateChoiceEnv('QUERY_AUDIT_LEVEL', QUERY_AUDIT_LEVELS);
+		validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE'], QUERY_AUDIT_MIN_SIZE);
+	}
 
 	if (env['PRESSURE_LIMITER_ENABLED']) {
 		const sampleInterval = Number(env['PRESSURE_LIMITER_SAMPLE_INTERVAL']);
@@ -233,6 +277,14 @@ export default async function createApp(): Promise<express.Application> {
 
 	if (env['CORS_ENABLED'] === true) {
 		app.use(cors);
+	}
+
+	// Before `auditRequestQueries`, which adds its audit to this store.
+	app.use(openRequestStore);
+
+	// After `cors`, so a browser can read the 400 of a level outside the list.
+	if (queryAuditEnabled()) {
+		app.use(auditRequestQueries);
 	}
 
 	app.use((req, res, next) => {
@@ -325,6 +377,10 @@ export default async function createApp(): Promise<express.Application> {
 
 	app.get('/server/ping', (_req, res) => res.send('pong'));
 
+	// Above the response cache, which would otherwise serve a registry answer
+	// cached by a replica outside production until its TTL.
+	app.use('/extensions/registry', refuseExtensionChangeInProduction);
+
 	app.use(authenticate);
 
 	app.use(schema);
@@ -412,11 +468,14 @@ export default async function createApp(): Promise<express.Application> {
 	await metricsSchedule();
 	await cacheStatsSchedule();
 	await cacheAuditSchedule();
+	await scopedCacheReapSchedule();
 	await initCacheConfig();
+	await initCacheSettings();
 	await initSharedSettings();
 	initPoolHealthMirror();
 	await initSharedSettingsGuard();
 	await initProcessReports();
+	initNotificationEmails();
 	initAutoscaleDrill();
 	assertPgBouncerConnections();
 

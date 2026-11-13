@@ -80,8 +80,11 @@ export const ExtensionOptionsBundle = z.object({
 	type: z.literal('bundle'),
 	partial: z.boolean().optional(),
 	path: SplitEntrypoint,
-	entries: z.array(ExtensionOptionsBundleEntry),
+	entries: z.array(ExtensionOptionsBundleEntry).optional(),
+	source: SplitEntrypoint.partial().optional(),
 });
+
+export type ExtensionOptionsBundle = z.infer<typeof ExtensionOptionsBundle>;
 
 export const ExtensionOptionsBundleEntries = z.array(ExtensionOptionsBundleEntry);
 

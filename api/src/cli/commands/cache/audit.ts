@@ -26,7 +26,7 @@ export interface CacheAuditCommandOptions {
  * on a loopback-only ephemeral port, and replays every live entry through
  * that, so a replay exercises exactly what filled the entry.
  *
- * Exit 0 when nothing is stale, 1 on any `stale` or `tag_drift` entry, and 2
+ * Exit 0 when nothing is stale, 1 on any `stale` or `pin_drift` entry, and 2
  * when `--strict` and an entry could not be replayed at all.
  */
 export default async function cacheAudit(
@@ -96,7 +96,7 @@ export default async function cacheAudit(
 }
 
 export function exitCodeFor(report: CacheAuditReport, strict: boolean): number {
-	if (report.counts.stale > 0 || report.counts.tag_drift > 0) {
+	if (report.counts.stale > 0 || report.counts.pin_drift > 0) {
 		return 1;
 	}
 
@@ -142,11 +142,11 @@ function renderFinding(finding: CacheAuditFinding): string[] {
 		`  user ${finding.user ?? 'public'}`
 		+ `  collection ${finding.collection ?? '-'}`
 		+ `  age ${Math.round(finding.ageMs / 1000)}s`,
-		`  tags ${finding.tags.join(', ') || '-'}`,
+		`  pins ${finding.pins.join(', ') || '-'}`,
 	];
 
-	if (finding.replayTags !== null) {
-		lines.push(`  replay tags ${finding.replayTags.join(', ') || '-'}`);
+	if (finding.replayPins !== null) {
+		lines.push(`  replay pins ${finding.replayPins.join(', ') || '-'}`);
 	}
 
 	if (finding.url.startsWith('/graphql')) {
@@ -159,13 +159,13 @@ function renderFinding(finding: CacheAuditFinding): string[] {
 
 	if (finding.purgesSinceFilled !== null) {
 		lines.push(finding.purgesSinceFilled.length === 0
-			? '  no purge covered it since the fill: its tags never named the write'
+			? '  no purge covered it since the fill: its pins never named the write'
 			: '  purged since the fill and still held:');
 
 		for (const purge of finding.purgesSinceFilled) {
 			lines.push(
 				`    ${new Date(purge.time).toISOString()} ${purge.mode}`
-				+ ` ${purge.scopedCacheTag ?? purge.collection ?? '*'}`,
+				+ ` ${purge.scopedCachePin ?? purge.collection ?? '*'}`,
 			);
 		}
 	}

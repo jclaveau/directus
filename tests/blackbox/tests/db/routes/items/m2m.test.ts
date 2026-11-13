@@ -7,7 +7,7 @@ import { PRIMARY_KEY_TYPES, USER } from '@common/variables';
 import { findIndex, without } from 'lodash-es';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { beforeAll, describe, expect, it, test } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { CheckQueryFilters, type CachedTestsSchema, type TestsSchemaVendorValues } from '../../query/filter';
 import {
 	collectionFoods,
@@ -2720,8 +2720,8 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								fields: [
 									'*',
 									'ingredients.id',
-									`ingredients.${localCollectionIngredients}.id`,
-									`ingredients.${localCollectionIngredients}.name`,
+									`ingredients.${localCollectionIngredients}_id.id`,
+									`ingredients.${localCollectionIngredients}_id.name`,
 								],
 								filter: { id: { _in: foodsID } },
 							});
@@ -2751,10 +2751,14 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								};
 							}
 
+							// the junction rows a list sends back as they are count for nothing,
+							// so the rows it creates alone cross the limit
+							const countCreateInList = 10;
+
 							for (const food of foods2) {
 								food.ingredients = [
 									...food.ingredients,
-									...Array(countCreate)
+									...Array(countCreateInList)
 										.fill(0)
 										.map(() => {
 											return { [`${localCollectionIngredients}_id`]: createIngredient(pkType) };
@@ -2882,9 +2886,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 			});
 		});
 
-		test('Auto Increment Tests', (ctx) => {
-			if (pkType !== 'integer') ctx.skip();
-
+		describe.skipIf(pkType !== 'integer')('Auto Increment Tests', () => {
 			describe('updates the auto increment value correctly', () => {
 				it.each(without(vendors, 'cockroachdb', 'mssql', 'oracle'))('%s', async (vendor) => {
 					// Setup

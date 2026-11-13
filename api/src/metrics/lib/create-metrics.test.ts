@@ -48,6 +48,7 @@ beforeEach(() => {
 	responseCache.current = null;
 	env['METRICS_SERVICES'] = ['cache'];
 	env['CACHE_ENABLED'] = true;
+	env['CACHE_STORE'] = 'redis';
 });
 
 afterEach(() => {
@@ -81,6 +82,39 @@ describe('getCacheResponseMetric', () => {
 	it('returns null when the cache is disabled', () => {
 		env['CACHE_ENABLED'] = false;
 		expect(createMetrics().getCacheResponseMetric()).toBeNull();
+	});
+});
+
+describe('getScopedCacheIndexReadMetric', () => {
+	it('registers a counter labelled by mode and reuses it', async () => {
+		const metrics = createMetrics();
+
+		const first = metrics.getScopedCacheIndexReadMetric();
+
+		first!.inc({ mode: 'scan' });
+
+		expect(metrics.getScopedCacheIndexReadMetric()).toBe(first);
+
+		expect((await register.getMetricsAsJSON())
+			.find((metric) => {
+				return metric.name === 'directus_scoped_cache_index_reads_total';
+			})
+			?.values)
+			.toEqual([{ labels: { mode: 'scan' }, value: 1 }]);
+	});
+
+	// Serving off still purges on redis, so the purges' reads still count.
+	it('counts on a redis store whose response cache serves nothing', () => {
+		env['CACHE_ENABLED'] = false;
+
+		expect(createMetrics().getScopedCacheIndexReadMetric()).not.toBeNull();
+	});
+
+	it('returns null on a store that holds no response cache', () => {
+		env['CACHE_STORE'] = 'memory';
+		env['CACHE_ENABLED'] = false;
+
+		expect(createMetrics().getScopedCacheIndexReadMetric()).toBeNull();
 	});
 });
 

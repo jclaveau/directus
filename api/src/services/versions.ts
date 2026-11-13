@@ -9,12 +9,13 @@ import type {
 	MutationOptions,
 	PrimaryKey,
 	Query,
+	UpdateGroup,
 } from '@directus/types';
 import Joi from 'joi';
 import objectHash from 'object-hash';
 import { getCache } from '../cache.js';
 import emitter from '../emitter.js';
-import { purgeScopedCache } from '../scoped-cache.js';
+import { purgeScopedCache } from '../scoped-cache/index.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { assign, pick } from '../utils/lodash-es-used.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
@@ -136,16 +137,6 @@ export class VersionsService extends ItemsService {
 		return null;
 	}
 
-	override async createOne(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
-		await this.validateCreateData(data);
-
-		const mainItem = await this.getMainItem(data['collection'], data['item']);
-
-		data['hash'] = objectHash(mainItem);
-
-		return super.createOne(data, opts);
-	}
-
 	override async createMany(data: Partial<Item>[], opts?: MutationOptions): Promise<PrimaryKey[]> {
 		if (!Array.isArray(data)) {
 			throw new InvalidPayloadError({ reason: 'Input should be an array of items' });
@@ -154,7 +145,11 @@ export class VersionsService extends ItemsService {
 		const keyCombos = new Set();
 
 		for (const item of data) {
-			const keyCombo = `${item['key']}-${item['collection']}-${item['item']}`;
+			const keyCombo = JSON.stringify([
+				item['key'],
+				item['collection'],
+				String(item['item']),
+			]);
 
 			if (keyCombos.has(keyCombo)) {
 				throw new UnprocessableContentError({
@@ -165,29 +160,60 @@ export class VersionsService extends ItemsService {
 			keyCombos.add(keyCombo);
 		}
 
+		for (const versionRow of data) {
+			await this.validateCreateData(versionRow);
+
+			const mainItem = await this.getMainItem(
+				versionRow['collection'],
+				versionRow['item'],
+			);
+
+			versionRow['hash'] = objectHash(mainItem);
+		}
+
 		return super.createMany(data, opts);
 	}
 
-	override async updateMany(keys: PrimaryKey[], data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey[]> {
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
 		// Only allow updates on "key" and "name" fields
 		const versionUpdateSchema = Joi.object({
 			key: Joi.string(),
 			name: Joi.string().allow(null),
 		});
 
-		const { error } = versionUpdateSchema.validate(data);
-		if (error) throw new InvalidPayloadError({ reason: error.message });
+		const keyCombos = new Set();
 
-		if ('key' in data) {
+		// A version the batch renames frees its old key; keyCombos still refuses
+		// two rows claiming one.
+		const renamedKeys = groups
+			.filter(({ data }) => {
+				return 'key' in data;
+			})
+			.flatMap(({ keys }) => {
+				return keys;
+			});
+
+		for (const { data, keys } of groups) {
+			const { error } = versionUpdateSchema.validate(data);
+
+			if (error) {
+				throw new InvalidPayloadError({ reason: error.message });
+			}
+
+			if (!('key' in data)) {
+				continue;
+			}
+
 			// Reserves the "main" version key for the version query parameter
 			if (data['key'] === 'main') throw new InvalidPayloadError({ reason: `"main" is a reserved version key` });
-
-			const keyCombos = new Set();
 
 			for (const pk of keys) {
 				const { collection, item } = await this.readOne(pk, { fields: ['collection', 'item'] });
 
-				const keyCombo = `${data['key']}-${collection}-${item}`;
+				const keyCombo = JSON.stringify([data['key'], collection, String(item)]);
 
 				if (keyCombos.has(keyCombo)) {
 					throw new UnprocessableContentError({
@@ -199,7 +225,12 @@ export class VersionsService extends ItemsService {
 
 				const existingVersions = await super.readByQuery({
 					aggregate: { count: ['*'] },
-					filter: { id: { _neq: pk }, key: { _eq: data['key'] }, collection: { _eq: collection }, item: { _eq: item } },
+					filter: {
+						id: { _nin: renamedKeys },
+						key: { _eq: data['key'] },
+						collection: { _eq: collection },
+						item: { _eq: item },
+					},
 				});
 
 				if (existingVersions[0]!['count'] > 0) {
@@ -210,7 +241,7 @@ export class VersionsService extends ItemsService {
 			}
 		}
 
-		return super.updateMany(keys, data, opts);
+		return super.updateGroups(groups, opts);
 	}
 
 	async save(key: PrimaryKey, data: Partial<Item>): Promise<Partial<Item>> {

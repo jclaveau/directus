@@ -82,7 +82,13 @@ export async function watchOutstandingMigrations(): Promise<void> {
 
 	while (!stopped) {
 		try {
-			outstanding = await outstandingMigrations();
+			// Loaded on demand: the extensions pull the whole service layer in, and
+			// this module is imported by the scheduler.
+			const { getExtensionManager } = await import('./extensions/index.js');
+
+			outstanding = await outstandingMigrations(
+				getExtensionManager().migrationEntries(),
+			);
 		}
 		catch (error) {
 			// Transient while another service is mid-migration. Health stays down

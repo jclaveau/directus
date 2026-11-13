@@ -1,15 +1,11 @@
 # syntax=docker/dockerfile:1.4
 
-ARG NODE_VERSION=22
+ARG NODE_VERSION=24
 
 ####################################################################################################
 ## Build Packages
 
 FROM node:${NODE_VERSION}-alpine AS builder
-
-# Remove again once corepack >= 0.31 made it into base image
-# (see https://github.com/directus/directus/issues/24514)
-RUN npm install --global corepack@latest
 
 RUN apk --no-cache add python3 py3-setuptools build-base
 

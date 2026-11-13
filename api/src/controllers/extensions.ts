@@ -15,6 +15,9 @@ import { isIn } from '@directus/utils';
 import express from 'express';
 import { UUID_REGEX } from '../constants.js';
 import { getExtensionManager } from '../extensions/index.js';
+import {
+	refuseExtensionChangeInProduction,
+} from '../middleware/refuse-extension-change-in-production.js';
 import { respond } from '../middleware/respond.js';
 import useCollection from '../middleware/use-collection.js';
 import { ExtensionReadError, ExtensionsService } from '../services/extensions.js';
@@ -236,6 +239,8 @@ router.delete(
 
 router.patch(
 	`/:pk(${UUID_REGEX})`,
+	// Enabling or disabling reloads the extensions in place.
+	refuseExtensionChangeInProduction,
 	asyncHandler(async (req, res, next) => {
 		if (req.accountability && req.accountability.admin !== true) {
 			throw new ForbiddenError({
@@ -295,6 +300,57 @@ router.delete(
 		}
 
 		await service.deleteOne(pk);
+
+		return next();
+	}),
+	respond,
+);
+
+router.patch(
+	`/:pk(${UUID_REGEX})/entries/:name`,
+	refuseExtensionChangeInProduction,
+	asyncHandler(async (req, res, next) => {
+		if (req.accountability && req.accountability.admin !== true) {
+			throw new ForbiddenError({
+				reason: `${JSON.stringify(req.accountability.user)}`
+					+ ' cannot update extension',
+			});
+		}
+
+		const service = new ExtensionsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		try {
+			res.locals['payload'] = {
+				data: await service.updateEntry(
+					req.params['pk']!,
+					req.params['name']!,
+					req.body,
+				),
+			};
+		}
+		catch (error) {
+			throw error instanceof ExtensionReadError
+				? error.originalError
+				: error;
+		}
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
+	'/app-chunk',
+	asyncHandler(async (_req, res, next) => {
+		// A chunk rebuild writes no row, so no purge would drop a cached hash.
+		res.locals['cache'] = false;
+
+		res.locals['payload'] = {
+			data: { chunk: getExtensionManager().getAppChunkHash() },
+		};
 
 		return next();
 	}),

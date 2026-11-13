@@ -59,8 +59,8 @@
 	],
 	"scripts": {
 		"build": "tsdown && copyfiles \"src/**/*.{yaml,liquid,md}\" -u 1 dist",
-		"cli": "NODE_ENV=development SERVE_APP=false tsx src/cli/run.ts",
-		"dev": "NODE_ENV=development SERVE_APP=true tsx watch --ignore extensions --clear-screen=false src/start.ts",
+		"cli": "NODE_ENV=development SERVE_APP=false node --import @oxc-node/core/register src/cli/run.ts",
+		"dev": "NODE_ENV=development SERVE_APP=true node --watch --watch-path=./src --watch-preserve-output --import @oxc-node/core/register src/start.ts",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:coverage": "vitest run --coverage"
@@ -179,7 +179,6 @@
 		"snappy": "catalog:",
 		"stream-json": "catalog:",
 		"tar": "catalog:",
-		"tsx": "catalog:",
 		"uuid": "catalog:",
 		"wellknown": "catalog:",
 		"ws": "catalog:",
@@ -192,6 +191,7 @@
 		"@directus/types": "workspace:*",
 		"@keyv/serialize": "catalog:",
 		"@ngneat/falso": "catalog:",
+		"@oxc-node/core": "catalog:",
 		"@types/async": "catalog:",
 		"@types/busboy": "catalog:",
 		"@types/bytes": "catalog:",

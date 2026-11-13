@@ -66,7 +66,10 @@ describe('WebSocket heartbeat handler', () => {
 	});
 
 	test('invalid collection should error', async () => {
-		(getSchema as Mock).mockImplementation(() => ({ collections: {} }));
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: {} };
+		});
+
 		// receive message
 		const fakeClient = mockClient();
 
@@ -89,12 +92,17 @@ describe('WebSocket heartbeat handler', () => {
 
 	test('create one item', async () => {
 		// do mocking
-		(getSchema as Mock).mockImplementation(() => ({ collections: { test: [] } }));
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
 
 		const createOne = vi.fn(),
 			readOne = vi.fn();
 
-		(ItemsService as Mock).mockImplementation(() => ({ createOne, readOne }));
+		(ItemsService as Mock).mockImplementation(function () {
+			return { createOne, readOne };
+		});
+
 		// receive message
 		const fakeClient = mockClient();
 
@@ -116,14 +124,19 @@ describe('WebSocket heartbeat handler', () => {
 
 	test('create multiple items', async () => {
 		// do mocking
-		(getSchema as Mock).mockImplementation(() => ({ collections: { test: [] } }));
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
 
 		// A filter hook may cancel an individual create, leaving a null in place; the handler
 		// must drop those before reading back, so the read only sees the surviving key.
 		const createMany = vi.fn().mockResolvedValue([1, null]),
 			readMany = vi.fn();
 
-		(ItemsService as Mock).mockImplementation(() => ({ createMany, readMany }));
+		(ItemsService as Mock).mockImplementation(function () {
+			return { createMany, readMany };
+		});
+
 		// receive message
 		const fakeClient = mockClient();
 
@@ -145,11 +158,22 @@ describe('WebSocket heartbeat handler', () => {
 
 	test('read by query', async () => {
 		// do mocking
-		(getSchema as Mock).mockImplementation(() => ({ collections: { test: [] } }));
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
+
 		const readByQuery = vi.fn();
-		(ItemsService as Mock).mockImplementation(() => ({ readByQuery }));
+
+		(ItemsService as Mock).mockImplementation(function () {
+			return { readByQuery };
+		});
+
 		const getMetaForQuery = vi.fn();
-		(MetaService as Mock).mockImplementation(() => ({ getMetaForQuery }));
+
+		(MetaService as Mock).mockImplementation(function () {
+			return { getMetaForQuery };
+		});
+
 		// receive message
 		const fakeClient = mockClient();
 
@@ -171,12 +195,17 @@ describe('WebSocket heartbeat handler', () => {
 
 	test('update one item', async () => {
 		// do mocking
-		(getSchema as Mock).mockImplementation(() => ({ collections: { test: [] } }));
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
 
 		const updateOne = vi.fn(),
 			readOne = vi.fn();
 
-		(ItemsService as Mock).mockImplementation(() => ({ updateOne, readOne }));
+		(ItemsService as Mock).mockImplementation(function () {
+			return { updateOne, readOne };
+		});
+
 		// receive message
 		const fakeClient = mockClient();
 
@@ -198,16 +227,25 @@ describe('WebSocket heartbeat handler', () => {
 
 	test('update multiple items', async () => {
 		// do mocking
-		(getSchema as Mock).mockImplementation(() => ({ collections: { test: [] } }));
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
 
 		// A filter hook may cancel an individual update, leaving a null in place; the handler
 		// must drop those before reading back, so the read only sees the surviving key.
 		const updateMany = vi.fn().mockResolvedValue([1, null]),
 			readMany = vi.fn();
 
-		(ItemsService as Mock).mockImplementation(() => ({ updateMany, readMany }));
+		(ItemsService as Mock).mockImplementation(function () {
+			return { updateMany, readMany };
+		});
+
 		const getMetaForQuery = vi.fn();
-		(MetaService as Mock).mockImplementation(() => ({ getMetaForQuery }));
+
+		(MetaService as Mock).mockImplementation(function () {
+			return { getMetaForQuery };
+		});
+
 		// receive message
 		const fakeClient = mockClient();
 
@@ -230,14 +268,23 @@ describe('WebSocket heartbeat handler', () => {
 
 	test('batch update multiple items', async () => {
 		// do mocking
-		(getSchema as Mock).mockImplementation(() => ({ collections: { test: [] } }));
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
 
 		const updateBatch = vi.fn(),
 			readMany = vi.fn();
 
-		(ItemsService as Mock).mockImplementation(() => ({ updateBatch, readMany }));
+		(ItemsService as Mock).mockImplementation(function () {
+			return { updateBatch, readMany };
+		});
+
 		const getMetaForQuery = vi.fn();
-		(MetaService as Mock).mockImplementation(() => ({ getMetaForQuery }));
+
+		(MetaService as Mock).mockImplementation(function () {
+			return { getMetaForQuery };
+		});
+
 		// receive message
 		const fakeClient = mockClient();
 
@@ -251,18 +298,277 @@ describe('WebSocket heartbeat handler', () => {
 		);
 
 		await vi.runAllTimersAsync(); // flush promises to make sure the event is handled
+
 		// expect service functions
-		expect(updateBatch).toBeCalled();
+		// No onRepeatedPk to pass, so a refusal names no option.
+		expect(updateBatch).toHaveBeenCalledWith(
+			[{ id: '123' }, { id: '456' }],
+			{ mutationBatching: undefined },
+		);
+
 		expect(getMetaForQuery).toBeCalled();
 		expect(readMany).toBeCalled();
 		expect(fakeClient.send).toBeCalled();
 	});
 
+	test('passes mutationBatching to the create', async () => {
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
+
+		const createMany = vi.fn().mockResolvedValue([1]),
+			readMany = vi.fn();
+
+		(ItemsService as Mock).mockImplementation(function () {
+			return { createMany, readMany };
+		});
+
+		emitter.emitAction(
+			'websocket.message',
+			{
+				client: mockClient(),
+				message: {
+					type: 'items',
+					collection: 'test',
+					action: 'create',
+					data: [{}],
+					mutationBatching: 'preserveMutationOrder',
+				},
+			},
+			{} as EventContext,
+		);
+
+		await vi.runAllTimersAsync();
+
+		expect(createMany).toHaveBeenCalledWith([{}], {
+			allowFilterCancel: true,
+			mutationBatching: 'preserveMutationOrder',
+		});
+	});
+
+	test('passes mutationBatching to the batch update', async () => {
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
+
+		const updateBatch = vi.fn().mockResolvedValue(['123']),
+			readMany = vi.fn();
+
+		(ItemsService as Mock).mockImplementation(function () {
+			return { updateBatch, readMany };
+		});
+
+		(MetaService as Mock).mockImplementation(function () {
+			return { getMetaForQuery: vi.fn() };
+		});
+
+		emitter.emitAction(
+			'websocket.message',
+			{
+				client: mockClient(),
+				message: {
+					type: 'items',
+					collection: 'test',
+					action: 'update',
+					data: [{ id: '123' }],
+					mutationBatching: 'disableBatching',
+				},
+			},
+			{} as EventContext,
+		);
+
+		await vi.runAllTimersAsync();
+
+		expect(updateBatch).toHaveBeenCalledWith(
+			[{ id: '123' }],
+			{ mutationBatching: 'disableBatching' },
+		);
+	});
+
+	test('refuses an unknown mutationBatching before creating', async () => {
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
+
+		const createMany = vi.fn();
+
+		(ItemsService as Mock).mockImplementation(function () {
+			return { createMany };
+		});
+
+		const fakeClient = mockClient();
+
+		emitter.emitAction(
+			'websocket.message',
+			{
+				client: fakeClient,
+				message: {
+					type: 'items',
+					collection: 'test',
+					action: 'create',
+					data: [{}],
+					mutationBatching: 'batchEverything',
+				},
+			},
+			{} as EventContext,
+		);
+
+		await vi.runAllTimersAsync();
+
+		expect(fakeClient.send).toHaveBeenCalledWith(JSON.stringify({
+			type: 'items',
+			status: 'error',
+			error: {
+				code: 'INVALID_PAYLOAD',
+				message: 'Validation error: Invalid option: expected one of '
+					+ '"minimizeMutations"|"preserveMutationOrder"|"disableBatching" '
+					+ 'at "mutationBatching" or Invalid input: expected "read" at '
+					+ '"action" or Invalid input: expected "update" at "action"; '
+					+ 'Invalid option: expected one of '
+					+ '"minimizeMutations"|"preserveMutationOrder"|"disableBatching" '
+					+ 'at "mutationBatching" or Invalid input: expected "delete" at '
+					+ '"action"',
+			},
+		}));
+
+		expect(createMany).not.toHaveBeenCalled();
+	});
+
+	test('passes nestedUpdates to the create', async () => {
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
+
+		const createMany = vi.fn().mockResolvedValue([1]),
+			readMany = vi.fn();
+
+		(ItemsService as Mock).mockImplementation(function () {
+			return { createMany, readMany };
+		});
+
+		emitter.emitAction(
+			'websocket.message',
+			{
+				client: mockClient(),
+				message: {
+					type: 'items',
+					collection: 'test',
+					action: 'create',
+					data: [{}],
+					nestedUpdates: 'refuse',
+				},
+			},
+			{} as EventContext,
+		);
+
+		await vi.runAllTimersAsync();
+
+		expect(createMany).toHaveBeenCalledWith([{}], {
+			allowFilterCancel: true,
+			nestedUpdates: 'refuse',
+		});
+	});
+
+	test('passes nestedUpdates to the batch update', async () => {
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
+
+		const updateBatch = vi.fn().mockResolvedValue(['123']),
+			readMany = vi.fn();
+
+		(ItemsService as Mock).mockImplementation(function () {
+			return { updateBatch, readMany };
+		});
+
+		(MetaService as Mock).mockImplementation(function () {
+			return { getMetaForQuery: vi.fn() };
+		});
+
+		emitter.emitAction(
+			'websocket.message',
+			{
+				client: mockClient(),
+				message: {
+					type: 'items',
+					collection: 'test',
+					action: 'update',
+					data: [{ id: '123' }],
+					nestedUpdates: 'skip',
+				},
+			},
+			{} as EventContext,
+		);
+
+		await vi.runAllTimersAsync();
+
+		expect(updateBatch).toHaveBeenCalledWith(
+			[{ id: '123' }],
+			{ nestedUpdates: 'skip' },
+		);
+	});
+
+	test('refuses an unknown nestedUpdates before creating', async () => {
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
+
+		const createMany = vi.fn();
+
+		(ItemsService as Mock).mockImplementation(function () {
+			return { createMany };
+		});
+
+		const fakeClient = mockClient();
+
+		emitter.emitAction(
+			'websocket.message',
+			{
+				client: fakeClient,
+				message: {
+					type: 'items',
+					collection: 'test',
+					action: 'create',
+					data: [{}],
+					nestedUpdates: 'ignore',
+				},
+			},
+			{} as EventContext,
+		);
+
+		await vi.runAllTimersAsync();
+
+		expect(fakeClient.send).toHaveBeenCalledWith(JSON.stringify({
+			type: 'items',
+			status: 'error',
+			error: {
+				code: 'INVALID_PAYLOAD',
+				message: 'Validation error: Invalid option: expected one of '
+					+ '"apply"|"refuse"|"skip" '
+					+ 'at "nestedUpdates" or Invalid input: expected "read" at '
+					+ '"action" or Invalid input: expected "update" at "action"; '
+					+ 'Invalid option: expected one of '
+					+ '"apply"|"refuse"|"skip" '
+					+ 'at "nestedUpdates" or Invalid input: expected "delete" at '
+					+ '"action"',
+			},
+		}));
+
+		expect(createMany).not.toHaveBeenCalled();
+	});
+
 	test('delete one item', async () => {
 		// do mocking
-		(getSchema as Mock).mockImplementation(() => ({ collections: { test: [] } }));
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
+
 		const deleteOne = vi.fn();
-		(ItemsService as Mock).mockImplementation(() => ({ deleteOne }));
+
+		(ItemsService as Mock).mockImplementation(function () {
+			return { deleteOne };
+		});
+
 		// receive message
 		const fakeClient = mockClient();
 
@@ -283,9 +589,16 @@ describe('WebSocket heartbeat handler', () => {
 
 	test('delete multiple items by id', async () => {
 		// do mocking
-		(getSchema as Mock).mockImplementation(() => ({ collections: { test: [] } }));
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
+
 		const deleteMany = vi.fn();
-		(ItemsService as Mock).mockImplementation(() => ({ deleteMany }));
+
+		(ItemsService as Mock).mockImplementation(function () {
+			return { deleteMany };
+		});
+
 		// receive message
 		const fakeClient = mockClient();
 
@@ -306,9 +619,16 @@ describe('WebSocket heartbeat handler', () => {
 
 	test('delete multiple items by query', async () => {
 		// do mocking
-		(getSchema as Mock).mockImplementation(() => ({ collections: { test: [] } }));
+		(getSchema as Mock).mockImplementation(function () {
+			return { collections: { test: [] } };
+		});
+
 		const deleteByQuery = vi.fn();
-		(ItemsService as Mock).mockImplementation(() => ({ deleteByQuery }));
+
+		(ItemsService as Mock).mockImplementation(function () {
+			return { deleteByQuery };
+		});
+
 		// receive message
 		const fakeClient = mockClient();
 

@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
         with:
           # A `pull_request` checkout lands on the merge commit, whose dist would carry
           # a merge nobody asked for. `<branch>-dist` means the branch, so take its head.

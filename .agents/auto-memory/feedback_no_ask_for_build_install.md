@@ -1,5 +1,5 @@
 ---
-name: feedback-no-ask-for-build-install-in-pr-flow
+name: feedback_no_ask_for_build_install
 description:
   In the Directus PR-flow context on this fork, do NOT ask before running pnpm install / pnpm build / workspace builds.
   The global ask-before-install rule is overridden here.

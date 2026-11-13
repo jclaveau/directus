@@ -7,14 +7,12 @@ describe('generateExtensionsEntrypoint', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
 			registry: Map<string, Extension>;
-			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
 			registry: new Map(),
-			local: new Map(),
 		};
 
-		mockExtensions.local.set('mock-bundle0-extension', {
+		mockExtensions.module.set('mock-bundle0-extension', {
 			path: './extensions/bundle',
 			name: 'mock-bundle0-extension',
 			version: '1.0.0',
@@ -27,7 +25,13 @@ describe('generateExtensionsEntrypoint', () => {
 		});
 
 		const mockSettings: ExtensionSettings[] = [
-			{ id: 'x', folder: 'mock-bundle0-extension', enabled: true, source: 'local', bundle: null },
+			{
+				id: 'x',
+				folder: 'mock-bundle0-extension',
+				enabled: true,
+				source: 'module',
+				bundle: null,
+			},
 		];
 
 		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toMatchInlineSnapshot(
@@ -39,14 +43,12 @@ describe('generateExtensionsEntrypoint', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
 			registry: Map<string, Extension>;
-			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
 			registry: new Map(),
-			local: new Map(),
 		};
 
-		mockExtensions.local.set('mock-display-extension', {
+		mockExtensions.module.set('mock-display-extension', {
 			path: './extensions/display',
 			name: 'mock-display-extension',
 			type: 'display',
@@ -54,7 +56,7 @@ describe('generateExtensionsEntrypoint', () => {
 			local: true,
 		});
 
-		mockExtensions.local.set('mock-operation-extension', {
+		mockExtensions.module.set('mock-operation-extension', {
 			path: './extensions/operation',
 			name: 'mock-operation-extension',
 			type: 'operation',
@@ -62,7 +64,7 @@ describe('generateExtensionsEntrypoint', () => {
 			local: true,
 		});
 
-		mockExtensions.local.set('mock-bundle0-extension', {
+		mockExtensions.module.set('mock-bundle0-extension', {
 			path: './extensions/bundle',
 			name: 'mock-bundle0-extension',
 			version: '1.0.0',
@@ -78,7 +80,7 @@ describe('generateExtensionsEntrypoint', () => {
 			partial: false,
 		});
 
-		mockExtensions.local.set('mock-bundle-no-app-extension', {
+		mockExtensions.module.set('mock-bundle-no-app-extension', {
 			path: './extensions/bundle-no-app',
 			name: 'mock-bundle-no-app-extension',
 			version: '1.0.0',
@@ -108,14 +110,12 @@ describe('generateExtensionsEntrypoint', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
 			registry: Map<string, Extension>;
-			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
 			registry: new Map(),
-			local: new Map(),
 		};
 
-		mockExtensions.local.set('mock-panel-extension', {
+		mockExtensions.module.set('mock-panel-extension', {
 			path: './extensions/panel',
 			name: 'mock-panel-extension',
 			type: 'panel',
@@ -123,7 +123,13 @@ describe('generateExtensionsEntrypoint', () => {
 			local: true,
 		});
 
-		const mockSettings = [{ source: 'local', folder: 'mock-panel-extension', enabled: true }] as ExtensionSettings[];
+		const mockSettings = [
+			{
+				source: 'module',
+				folder: 'mock-panel-extension',
+				enabled: true,
+			},
+		] as ExtensionSettings[];
 
 		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toMatchInlineSnapshot(
 			`"import panel0 from './extensions/panel/index.js';export const interfaces = [];export const displays = [];export const layouts = [];export const modules = [];export const panels = [panel0];export const themes = [];export const operations = [];"`,
@@ -134,14 +140,12 @@ describe('generateExtensionsEntrypoint', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
 			registry: Map<string, Extension>;
-			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
 			registry: new Map(),
-			local: new Map(),
 		};
 
-		mockExtensions.local.set('mock-operation-extension', {
+		mockExtensions.module.set('mock-operation-extension', {
 			path: './extensions/operation',
 			name: 'mock-operation-extension',
 			type: 'operation',
@@ -150,7 +154,7 @@ describe('generateExtensionsEntrypoint', () => {
 		});
 
 		const mockSettings = [
-			{ source: 'local', folder: 'mock-operation-extension', enabled: true },
+			{ source: 'module', folder: 'mock-operation-extension', enabled: true },
 		] as ExtensionSettings[];
 
 		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toMatchInlineSnapshot(
@@ -162,14 +166,12 @@ describe('generateExtensionsEntrypoint', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
 			registry: Map<string, Extension>;
-			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
 			registry: new Map(),
-			local: new Map(),
 		};
 
-		mockExtensions.local.set('mock-bundle-extension', {
+		mockExtensions.module.set('mock-bundle-extension', {
 			path: './extensions/bundle',
 			name: 'mock-bundle-extension',
 			version: '1.0.0',
@@ -186,24 +188,29 @@ describe('generateExtensionsEntrypoint', () => {
 		});
 
 		const mockSettings = [
-			{ id: 'mock-bundle-id', source: 'local', folder: 'mock-bundle-extension', enabled: true },
+			{
+				id: 'mock-bundle-id',
+				source: 'module',
+				folder: 'mock-bundle-extension',
+				enabled: true,
+			},
 			{
 				id: 'mock-bundle-interface-id',
-				source: 'local',
+				source: 'module',
 				folder: 'mock-bundle-interface',
 				enabled: true,
 				bundle: 'mock-bundle-id',
 			},
 			{
 				id: 'mock-bundle-operation-id',
-				source: 'local',
+				source: 'module',
 				folder: 'mock-bundle-operation',
 				enabled: true,
 				bundle: 'mock-bundle-id',
 			},
 			{
 				id: 'mock-bundle-hook-id',
-				source: 'local',
+				source: 'module',
 				folder: 'mock-bundle-hook',
 				enabled: true,
 				bundle: 'mock-bundle-id',
@@ -219,14 +226,12 @@ describe('generateExtensionsEntrypoint', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
 			registry: Map<string, Extension>;
-			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
 			registry: new Map(),
-			local: new Map(),
 		};
 
-		mockExtensions.local.set('mock-display-extension', {
+		mockExtensions.module.set('mock-display-extension', {
 			path: './extensions/display',
 			name: 'mock-display-extension',
 			type: 'display',
@@ -234,7 +239,7 @@ describe('generateExtensionsEntrypoint', () => {
 			local: true,
 		});
 
-		mockExtensions.local.set('mock-operation-extension', {
+		mockExtensions.module.set('mock-operation-extension', {
 			path: './extensions/operation',
 			name: 'mock-operation-extension',
 			type: 'operation',
@@ -242,7 +247,7 @@ describe('generateExtensionsEntrypoint', () => {
 			local: true,
 		});
 
-		mockExtensions.local.set('mock-bundle0-extension', {
+		mockExtensions.module.set('mock-bundle0-extension', {
 			path: './extensions/bundle',
 			name: 'mock-bundle0-extension',
 			version: '1.0.0',
@@ -258,7 +263,7 @@ describe('generateExtensionsEntrypoint', () => {
 			partial: true,
 		});
 
-		mockExtensions.local.set('mock-bundle-no-app-extension', {
+		mockExtensions.module.set('mock-bundle-no-app-extension', {
 			path: './extensions/bundle-no-app',
 			name: 'mock-bundle-no-app-extension',
 			version: '1.0.0',
@@ -275,49 +280,240 @@ describe('generateExtensionsEntrypoint', () => {
 				id: 'mock-display-extension-id',
 				folder: 'mock-display-extension',
 				enabled: true,
-				source: 'local',
+				source: 'module',
 				bundle: null,
 			},
 			{
 				id: 'mock-operation-extension-id',
 				folder: 'mock-operation-extension',
 				enabled: true,
-				source: 'local',
+				source: 'module',
 				bundle: null,
 			},
-			{ id: 'mock-bundle-id', folder: 'mock-bundle0-extension', enabled: true, source: 'local', bundle: null },
+			{
+				id: 'mock-bundle-id',
+				folder: 'mock-bundle0-extension',
+				enabled: true,
+				source: 'module',
+				bundle: null,
+			},
 			{
 				id: 'mock-bundle-layout-id',
 				folder: 'mock-bundle-layout',
 				enabled: true,
-				source: 'local',
+				source: 'module',
 				bundle: 'mock-bundle-id',
 			},
 			{
 				id: 'mock-bundle-operation-id',
 				folder: 'mock-bundle-operation',
 				enabled: true,
-				source: 'local',
+				source: 'module',
 				bundle: 'mock-bundle-id',
 			},
 			{
 				id: 'mock-bundle-hook-id',
 				folder: 'mock-bundle-hook',
 				enabled: true,
-				source: 'local',
+				source: 'module',
 				bundle: 'mock-bundle-id',
 			},
 			{
 				id: 'mock-bundle-no-app-endpoint-id',
 				folder: 'mock-bundle-no-app-endpoint',
 				enabled: true,
-				source: 'local',
+				source: 'module',
 				bundle: null,
 			},
 		];
 
 		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toMatchInlineSnapshot(
 			`"import display0 from './extensions/display/index.js';import operation0 from './extensions/operation/app.js';import {layouts as layoutBundle0,operations as operationBundle0} from './extensions/bundle/app.js';export const interfaces = [];export const displays = [display0];export const layouts = [...layoutBundle0];export const modules = [];export const panels = [];export const themes = [];export const operations = [operation0,...operationBundle0];"`,
+		);
+	});
+
+	it('imports a bundle declaring its entries in code, '
+		+ 'leaving its disabled entries out', () => {
+		const mockExtensions: {
+			module: Map<string, Extension>;
+			registry: Map<string, Extension>;
+		} = {
+			module: new Map(),
+			registry: new Map(),
+		};
+
+		mockExtensions.module.set('@consumer/domain', {
+			path: './extensions/domain',
+			name: '@consumer/domain',
+			version: '1.0.0',
+			type: 'bundle',
+			entrypoint: { app: 'dist/app.js', api: 'dist/api.js' },
+			entries: [],
+			entriesFrom: 'code',
+			host: '^11.0.0',
+			local: true,
+			partial: undefined,
+		});
+
+		const mockSettings: ExtensionSettings[] = [
+			{
+				id: 'domain-id',
+				folder: '@consumer/domain',
+				enabled: true,
+				source: 'module',
+				bundle: null,
+			},
+			{
+				id: 'audit-panel-id',
+				folder: 'audit-panel',
+				enabled: false,
+				source: 'module',
+				bundle: 'domain-id',
+				type: 'panel',
+			},
+			{
+				id: 'picker-id',
+				folder: 'picker',
+				enabled: true,
+				source: 'module',
+				bundle: 'domain-id',
+				type: 'interface',
+			},
+		];
+
+		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toBe(
+			"import bundleCode0 from './extensions/domain/dist/app.js';"
+				+ 'const sharedName0 = bundleCode0.entries.find((entry) => '
+				+ '[].some((apiEntry) => apiEntry.name === entry.name && '
+				+ '(apiEntry.type !== "operation" || entry.type !== "operation")));'
+				+ 'if (sharedName0) console.error("Bundle \\"@consumer/domain\\" names " '
+				+ '+ JSON.stringify(sharedName0.name) + " on both sides");'
+				+ 'const codeEntries0 = sharedName0 ? [] : '
+				+ 'bundleCode0.entries.filter((entry) => '
+				+ '!["audit-panel"].includes(entry.name));'
+				+ 'export const interfaces = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "interface").map((entry) => entry.config)];'
+				+ 'export const displays = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "display").map((entry) => entry.config)];'
+				+ 'export const layouts = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "layout").map((entry) => entry.config)];'
+				+ 'export const modules = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "module").map((entry) => entry.config)];'
+				+ 'export const panels = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "panel").map((entry) => entry.config)];'
+				+ 'export const themes = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "theme").map((entry) => entry.config)];'
+				+ 'export const operations = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "operation").map((entry) => entry.config)];'
+				+ 'export const bundleEntries = [{source:"module",folder:"@consumer/domain",'
+				+ 'entries:bundleCode0.entries.map((entry) => '
+				+ '({type:entry.type,name:entry.name}))}];',
+		);
+	});
+
+	it('leaves out a disabled bundle declaring its entries in code', () => {
+		const mockExtensions: {
+			module: Map<string, Extension>;
+			registry: Map<string, Extension>;
+		} = {
+			module: new Map(),
+			registry: new Map(),
+		};
+
+		mockExtensions.module.set('@consumer/domain', {
+			path: './extensions/domain',
+			name: '@consumer/domain',
+			version: '1.0.0',
+			type: 'bundle',
+			entrypoint: { app: 'dist/app.js', api: 'dist/api.js' },
+			entries: [],
+			entriesFrom: 'code',
+			host: '^11.0.0',
+			local: true,
+			partial: undefined,
+		});
+
+		const mockSettings: ExtensionSettings[] = [
+			{
+				id: 'domain-id',
+				folder: '@consumer/domain',
+				enabled: false,
+				source: 'module',
+				bundle: null,
+			},
+		];
+
+		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toBe(
+			'export const interfaces = [];export const displays = [];'
+				+ 'export const layouts = [];export const modules = [];'
+				+ 'export const panels = [];export const themes = [];'
+				+ 'export const operations = [];',
+		);
+	});
+
+	it('leaves out the app entries of a bundle naming one on both sides', () => {
+		const mockExtensions: {
+			module: Map<string, Extension>;
+			registry: Map<string, Extension>;
+		} = {
+			module: new Map(),
+			registry: new Map(),
+		};
+
+		mockExtensions.module.set('@consumer/domain', {
+			path: './extensions/domain',
+			name: '@consumer/domain',
+			version: '1.0.0',
+			type: 'bundle',
+			entrypoint: { app: 'dist/app.js', api: 'dist/api.js' },
+			entries: [
+				{ type: 'hook', name: 'audit' },
+				{ type: 'operation', name: 'notify' },
+			],
+			entriesFrom: 'code',
+			host: '^11.0.0',
+			local: true,
+			partial: undefined,
+		});
+
+		const mockSettings: ExtensionSettings[] = [
+			{
+				id: 'domain-id',
+				folder: '@consumer/domain',
+				enabled: true,
+				source: 'module',
+				bundle: null,
+			},
+		];
+
+		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toBe(
+			"import bundleCode0 from './extensions/domain/dist/app.js';"
+				+ 'const sharedName0 = bundleCode0.entries.find((entry) => '
+				+ '[{"type":"hook","name":"audit"},'
+				+ '{"type":"operation","name":"notify"}]'
+				+ '.some((apiEntry) => apiEntry.name === entry.name && '
+				+ '(apiEntry.type !== "operation" || entry.type !== "operation")));'
+				+ 'if (sharedName0) console.error("Bundle \\"@consumer/domain\\" names " '
+				+ '+ JSON.stringify(sharedName0.name) + " on both sides");'
+				+ 'const codeEntries0 = sharedName0 ? [] : '
+				+ 'bundleCode0.entries.filter((entry) => ![].includes(entry.name));'
+				+ 'export const interfaces = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "interface").map((entry) => entry.config)];'
+				+ 'export const displays = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "display").map((entry) => entry.config)];'
+				+ 'export const layouts = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "layout").map((entry) => entry.config)];'
+				+ 'export const modules = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "module").map((entry) => entry.config)];'
+				+ 'export const panels = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "panel").map((entry) => entry.config)];'
+				+ 'export const themes = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "theme").map((entry) => entry.config)];'
+				+ 'export const operations = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "operation").map((entry) => entry.config)];'
+				+ 'export const bundleEntries = [{source:"module",folder:"@consumer/domain",'
+				+ 'entries:bundleCode0.entries.map((entry) => '
+				+ '({type:entry.type,name:entry.name}))}];',
 		);
 	});
 });

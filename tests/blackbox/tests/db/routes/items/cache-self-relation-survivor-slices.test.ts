@@ -4,20 +4,21 @@ import {
 	CreateFieldM2O,
 	CreateItem,
 	DeleteCollection,
+	DeleteField,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // Deleting a parent through a direct self-relation that SETS NULL / SETS DEFAULT
 // rewrites the surviving children's fk at the database level: they are changed
-// rows, and the delete captures them like an update — every slice a survivor sits
+// rows, and the delete snapshots them like an update — every slice a survivor sits
 // in (its own key, another scope field) drops, and so does the slice the survivors
 // ARRIVE in (the default). Purging only the vacated `parent=<deleted>` slice left
 // all of those serving the fk the database had already rewritten.
@@ -107,7 +108,7 @@ describe(oneLine`
 			survivorNodeId = nodes[0].id;
 			bystanderNodeId = nodes[1].id;
 
-			// The doomed root sits in a slice no reader pins: its own capture must not
+			// The doomed root sits in a slice no reader pins: its own snapshot must not
 			// be what evicts the survivors' slice.
 			const ownedRoots = await CreateItem(vendor, {
 				collection: OWNED,
@@ -167,7 +168,7 @@ describe(oneLine`
 				});
 			}
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
@@ -181,10 +182,14 @@ describe(oneLine`
 		afterAll(async () => {
 			instance.kill();
 
+			// Directus drops the table before the self-FK, then fails on it.
+			await DeleteField(vendor, { collection: NODE, field: 'parent' });
 			await DeleteCollection(vendor, { collection: NODE });
+			await DeleteField(vendor, { collection: OWNED, field: 'parent' });
 			await DeleteCollection(vendor, { collection: OWNED });
 
 			if (supportsSetDefault) {
+				await DeleteField(vendor, { collection: DEFAULTED, field: 'parent' });
 				await DeleteCollection(vendor, { collection: DEFAULTED });
 			}
 		});
@@ -226,7 +231,7 @@ describe(oneLine`
 			expect(survivor.headers[cacheStatusHeader]).toBe('MISS');
 			expect(bystander.headers[cacheStatusHeader]).toBe('MISS');
 
-			// Non-vacuity: the key slice alone, which the bare tag a delete emits
+			// Non-vacuity: the key slice alone, which the bare pin a delete emits
 			// never reaches.
 			expect(survivor.headers[cacheTagsHeader])
 				.toBe(`${NODE}:id=${survivorNodeId}`);

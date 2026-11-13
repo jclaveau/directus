@@ -9,20 +9,20 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import knex, { type Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// The host captures a read's purge counters BEFORE its query, for the collections
+// The host snapshots a read's purge counters BEFORE its query, for the collections
 // it can name from the AST and the filter. A read hook's `scopeTo` names one it
 // cannot: it runs after those rows are already fetched, so a purge of that
 // collection landing mid-read passes the post-fill comparison unnoticed and the
 // response is stored already stale, under an index the purge just swept.
 //
 // A hook keeps such a response cacheable by handing over the counters its own
-// dependent read captured, which is the right value by construction. The two
+// dependent read snapshotted, which is the right value by construction. The two
 // collections below are the same dependency declared each way.
 
 const UNGUARDED_READ = 'unguarded_read';
@@ -33,7 +33,7 @@ const ANOMALIES = 'directus_cache_stats_anomalies';
 const cacheStatusHeader = 'x-cache-status';
 
 describe(oneLine`
-	a read scoped to a collection whose purge counter it never captured is not
+	a read scoped to a collection whose purge counter it never snapshot is not
 	cached; handing the counters over is what keeps it cacheable
 `, () => {
 	describe.each(vendors)('%s', (vendor) => {
@@ -85,7 +85,7 @@ describe(oneLine`
 				});
 			}));
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {

@@ -1,7 +1,6 @@
 import type { Knex } from 'knex';
 import knex from 'knex';
 import { createTracker, MockClient, Tracker } from 'knex-mock-client';
-import type { MockedFunction } from 'vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { snapshotApplyTestSchema } from '../__utils__/schemas.js';
 import {
@@ -18,7 +17,7 @@ import * as getSchema from './get-schema.js';
 class Client_PG extends MockClient {}
 
 describe('applySnapshot', () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	const mutationOptions = {
@@ -28,7 +27,7 @@ describe('applySnapshot', () => {
 	};
 
 	beforeEach(() => {
-		db = vi.mocked(knex.default({ client: Client_PG }));
+		db = knex.default({ client: Client_PG });
 		tracker = createTracker(db);
 	});
 

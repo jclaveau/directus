@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import createApp from './app.js';
 import { resolvedRateLimiterCharge } from './middleware/rate-limiter-ip.js';
+import { validateChoiceEnv } from './utils/validate-env.js';
 
 vi.mock('./database', () => ({
 	default: vi.fn(),
@@ -21,7 +22,6 @@ vi.mock('./telemetry/index.js');
 // reduce to just mock the file when logger is also using useLogger everywhere @TODO
 vi.mock('@directus/env', () => ({
 	useEnv: vi.fn().mockReturnValue({
-		EXTENSIONS_PATH: './extensions',
 		STORAGE_LOCATIONS: ['local'],
 		EMAIL_TEMPLATES_PATH: './templates',
 	}),
@@ -87,7 +87,6 @@ const BASE_ENV = {
 	PUBLIC_URL: 'http://localhost:8055/directus',
 	TELEMETRY: 'false',
 	LOG_STYLE: 'raw',
-	EXTENSIONS_PATH: './extensions',
 	STORAGE_LOCATIONS: ['local'],
 	ROBOTS_TXT: 'User-agent: *\nDisallow: /',
 	ROOT_REDIRECT: './admin',
@@ -102,14 +101,14 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
-const request = async (path: string = '') => {
+const request = async (path: string = '', init: RequestInit = {}) => {
 	const app = await createApp();
 	const server = http.createServer(app);
 	server.listen(0);
 	const address = server.address() as AddressInfo;
 	const baseUrl = `http://127.0.0.1:${address.port}`;
 
-	const response = await fetch(`${baseUrl}${path}`, { redirect: 'manual' });
+	const response = await fetch(`${baseUrl}${path}`, { redirect: 'manual', ...init });
 
 	server.close();
 
@@ -228,6 +227,16 @@ describe('createApp', async () => {
 		});
 	});
 
+	test('validates DEFAULT_MUTATION_BATCHING at boot', async () => {
+		await createApp();
+
+		expect(validateChoiceEnv).toHaveBeenCalledWith('DEFAULT_MUTATION_BATCHING', [
+			'minimizeMutations',
+			'preserveMutationOrder',
+			'disableBatching',
+		]);
+	});
+
 	// What a rate-limit token buys is decided by where the limiter is registered, so
 	// the contract worth pinning is the position itself rather than any response.
 	describe('Rate limiter charge', () => {
@@ -270,6 +279,75 @@ describe('createApp', async () => {
 			// unparseable value must not break a deployment that runs no limiter.
 			expect(names).not.toContain('rateLimiterIp');
 			expect(resolvedRateLimiterCharge).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('Marketplace', () => {
+		afterEach(() => {
+			vi.unstubAllEnvs();
+		});
+
+		test('refuses a registry read in production', async () => {
+			vi.stubEnv('NODE_ENV', 'production');
+
+			const response = await request('/extensions/registry?search=a');
+
+			expect(response.status).toBe(404);
+
+			expect(await response.json()).toEqual({
+				errors: [
+					{
+						extensions: {
+							code: 'ROUTE_NOT_FOUND',
+							path: '/extensions/registry',
+						},
+						message: "Route /extensions/registry doesn't exist.",
+					},
+				],
+			});
+		});
+
+		// Enabling or disabling reloads the extensions in place: in production they
+		// change only with a deploy.
+		test('refuses an extension update in production', async () => {
+			vi.stubEnv('NODE_ENV', 'production');
+
+			const response = await request(
+				'/extensions/9f2b8c1e-4d3a-4b5c-8e7f-1a2b3c4d5e6f',
+				{
+					method: 'PATCH',
+					body: '{}',
+					headers: { 'content-type': 'application/json' },
+				},
+			);
+
+			expect(response.status).toBe(404);
+
+			expect(await response.json()).toEqual({
+				errors: [
+					{
+						extensions: {
+							code: 'ROUTE_NOT_FOUND',
+							path: '/extensions/9f2b8c1e-4d3a-4b5c-8e7f-1a2b3c4d5e6f',
+						},
+						message: 'Route /extensions/9f2b8c1e-4d3a-4b5c-8e7f-1a2b3c4d5e6f'
+							+ " doesn't exist.",
+					},
+				],
+			});
+		});
+
+		// A gate below the cache lets a registry answer cached by a replica outside
+		// production through until its TTL.
+		test('registers the production gate above the cache', async () => {
+			const app = await createApp();
+
+			const names = (app as any)._router.stack.map((layer: any) => layer.name);
+
+			expect(names).toContain('refuseExtensionChangeInProduction');
+
+			expect(names.indexOf('refuseExtensionChangeInProduction'))
+				.toBeLessThan(names.indexOf('checkCache'));
 		});
 	});
 

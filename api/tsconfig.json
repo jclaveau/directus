@@ -3,6 +3,8 @@
 	"compilerOptions": {
 		"isolatedDeclarations": false,
 		"verbatimModuleSyntax": false,
+		"module": "Preserve",
+		"moduleResolution": "Bundler",
 		"outDir": "dist"
 	},
 	"include": ["src"]

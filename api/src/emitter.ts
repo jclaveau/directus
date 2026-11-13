@@ -1,10 +1,20 @@
-import type { ActionHandler, EventContext, FilterHandler, InitHandler } from '@directus/types';
-import ee2 from 'eventemitter2';
+import type {
+	ActionHandler,
+	EventContext,
+	FilterHandler,
+	InitHandler,
+	MutationEventContext,
+	WrittenEventContext,
+} from '@directus/types';
+import { InvalidPayloadError } from '@directus/errors';
+import { oneLine } from '@directus/utils';
+import EventEmitter2 from 'eventemitter2';
 import getDatabase from './database/index.js';
 import { useLogger } from './logger/index.js';
 
 export class Emitter {
 	private filterEmitter;
+	private lastFilterEmitter;
 	private actionEmitter;
 	private initEmitter;
 
@@ -18,9 +28,10 @@ export class Emitter {
 			ignoreErrors: true,
 		};
 
-		this.filterEmitter = new ee2.EventEmitter2(emitterOptions);
-		this.actionEmitter = new ee2.EventEmitter2(emitterOptions);
-		this.initEmitter = new ee2.EventEmitter2(emitterOptions);
+		this.filterEmitter = new EventEmitter2(emitterOptions);
+		this.lastFilterEmitter = new EventEmitter2(emitterOptions);
+		this.actionEmitter = new EventEmitter2(emitterOptions);
+		this.initEmitter = new EventEmitter2(emitterOptions);
 	}
 
 	private getDefaultContext(): EventContext {
@@ -35,14 +46,9 @@ export class Emitter {
 		event: string | string[],
 		payload: TIn,
 		meta: Record<string, any>,
-		context: EventContext | null = null,
+		context: EventContext | MutationEventContext | null = null,
 	): Promise<TIn | TOut> {
-		const events = Array.isArray(event) ? event : [event];
-
-		const eventListeners = events.map((event) => ({
-			event,
-			listeners: this.filterEmitter.listeners(event) as FilterHandler<TIn, TOut>[],
-		}));
+		const eventListeners = this.filterListenersOf<TIn, TOut>(event);
 
 		let updatedPayload: TIn | TOut = payload;
 
@@ -61,6 +67,83 @@ export class Emitter {
 		}
 
 		return updatedPayload;
+	}
+
+	/**
+	 * Hand every filter of these events the rows a mutation already wrote. No
+	 * answer has a reader, so a filter answering anything is refused, naming the
+	 * event it listens on.
+	 */
+	public async emitWrittenFilter(
+		event: string | string[],
+		payload: unknown,
+		meta: Record<string, any>,
+		context: WrittenEventContext,
+	): Promise<void> {
+		const eventListeners = this.filterListenersOf(event);
+
+		for (const { event: listenedEvent, listeners } of eventListeners) {
+			for (const listener of listeners) {
+				const answer = await listener(
+					payload,
+					{ event: listenedEvent, ...meta, originalPayload: payload },
+					context,
+				);
+
+				if (answer !== undefined) {
+					throw new InvalidPayloadError({
+						reason: oneLine`
+							A "${listenedEvent}" filter hook must return nothing: the rows are
+							already written
+						`,
+					});
+				}
+			}
+		}
+	}
+
+	/**
+	 * The filters of each event, then the last filters of each: a last filter
+	 * runs after every other filter of every event emitted, so it sees the
+	 * payload all of them left.
+	 */
+	private filterListenersOf<TIn = unknown, TOut = TIn>(event: string | string[]) {
+		const events = Array.isArray(event)
+			? event
+			: [event];
+
+		const listenersOf = (filterEmitter: EventEmitter2) => {
+			return events.map((event) => {
+				return {
+					event,
+					listeners: filterEmitter.listeners(event) as FilterHandler<TIn, TOut>[],
+				};
+			});
+		};
+
+		return [
+			...listenersOf(this.filterEmitter),
+			...listenersOf(this.lastFilterEmitter),
+		];
+	}
+
+	public hasFilterListeners(event: string | string[]): boolean {
+		const events = Array.isArray(event)
+			? event
+			: [event];
+
+		return events.some((name) => {
+			return this.filterEmitter.listeners(name).length > 0
+				|| this.lastFilterEmitter.listeners(name).length > 0;
+		});
+	}
+
+	public hasActionListeners(event: string | string[]): boolean {
+		const events = Array.isArray(event)
+			? event
+			: [event];
+
+		return events.some((name) => this.actionEmitter.listeners(name).length > 0);
 	}
 
 	public async emitAction(
@@ -94,7 +177,16 @@ export class Emitter {
 		}
 	}
 
-	public onFilter<TIn = unknown, TOut = TIn>(event: string, handler: FilterHandler<TIn, TOut>): void {
+	public onFilter<TIn = unknown, TOut = TIn>(
+		event: string,
+		handler: FilterHandler<TIn, TOut>,
+		options?: { runsLast?: boolean },
+	): void {
+		if (options?.runsLast) {
+			this.lastFilterEmitter.on(event, handler);
+			return;
+		}
+
 		this.filterEmitter.on(event, handler);
 	}
 
@@ -108,6 +200,7 @@ export class Emitter {
 
 	public offFilter<TIn = unknown, TOut = TIn>(event: string, handler: FilterHandler<TIn, TOut>): void {
 		this.filterEmitter.off(event, handler);
+		this.lastFilterEmitter.off(event, handler);
 	}
 
 	public offAction(event: string, handler: ActionHandler): void {
@@ -120,6 +213,7 @@ export class Emitter {
 
 	public offAll(): void {
 		this.filterEmitter.removeAllListeners();
+		this.lastFilterEmitter.removeAllListeners();
 		this.actionEmitter.removeAllListeners();
 		this.initEmitter.removeAllListeners();
 	}

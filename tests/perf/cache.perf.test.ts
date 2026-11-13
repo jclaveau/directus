@@ -1,9 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Redis from 'ioredis';
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { createExtensionPackage } from './extension-package.js';
 import { summarise, summaryRow, type Summary } from './measure.js';
 
 /**
@@ -38,9 +39,29 @@ import { summarise, summaryRow, type Summary } from './measure.js';
  * it is what latency becomes once Redis is a network hop away rather than a
  * container on the same host. So every phase is also counted, not just timed, and
  * the counts carry the tighter gates.
+ *
+ * A local Redis also hides CPU: each command costs the server an encode, a promise
+ * and a reply parse, which stays a few milliseconds here and becomes vCPU under 32
+ * production workers. So each arm's server process is also charged the CPU time a
+ * request costs it, and that is gated against `off` like the latencies.
+ *
+ * Two rules keep these gates able to stop a regression rather than record one:
+ *
+ * 1. The bench lands before the change it measures. When a PR changes what the
+ *    cache costs, the arm that measures that cost goes in first, in a PR of its
+ *    own merged to the trunk, so the change is compared against a trunk number.
+ *    A gate written on the branch that pays the cost is set from that cost.
+ * 2. A ceiling is raised only with the maintainer's explicit OK, and the commit
+ *    that raises it states the figure before, the figure after, and why. A raise
+ *    whose only reason is that the run was red is refused.
+ *
+ * `workflow_dispatch` on bench.yml with `ref` measures any commit with the bench
+ * of the dispatched branch, which is how a new arm gets its trunk baseline.
  */
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+let extensionPackage: string;
 
 // The bundle `pnpm --filter directus deploy` produces, as the startup bench uses:
 // measuring a shape nobody deploys measures nothing.
@@ -76,12 +97,24 @@ const warmSizes = [25, 200];
 const censusRequests = Number(process.env['PERF_CACHE_CENSUS_REQUESTS'] ?? 50);
 const censusWriteReps = Number(process.env['PERF_CACHE_CENSUS_WRITE_REPS'] ?? 3);
 
+// Unlike a command count, CPU time is noisy, so it is sampled several times with
+// the arms alternating, and the fastest sample is gated: whatever else the runner
+// does only adds CPU time to a sample, so the minimum is the steadiest reading.
+// The median moved 1.64x to 2.24x on scoped fan fill across runs of one trunk.
+const cpuReps = Number(process.env['PERF_CACHE_CPU_REPS'] ?? 9);
+
+// At most 50: the fan sample walks `offset` for a fresh key per request, and past
+// 50 a tenant's 250 notes no longer fill a 200-row page.
+const cpuRequests = Number(process.env['PERF_CACHE_CPU_REQUESTS'] ?? 40);
+
 const knobs = [
 	['PERF_CACHE_REPS', reps],
 	['PERF_CACHE_BATCH', batch],
 	['PERF_CACHE_WRITE_REPS', writeReps],
 	['PERF_CACHE_CENSUS_REQUESTS', censusRequests],
 	['PERF_CACHE_CENSUS_WRITE_REPS', censusWriteReps],
+	['PERF_CACHE_CPU_REPS', cpuReps],
+	['PERF_CACHE_CPU_REQUESTS', cpuRequests],
 ] as const;
 
 for (const [name, value] of knobs) {
@@ -90,14 +123,19 @@ for (const [name, value] of knobs) {
 	}
 }
 
-// The gates are ratchets, not targets: each ceiling is what the previous run
-// measured plus a margin for the runner's own drift, so the suite fails when the
-// cache gets worse rather than when it falls short of an ambition. Where the cache
-// SHOULD be is reported instead, under Headroom, which gates nothing — a red gate
-// nobody can turn green today is noise, and the number is worth more as a number.
+if (cpuRequests > 50) {
+	throw new Error(`PERF_CACHE_CPU_REQUESTS is at most 50, not ${cpuRequests}`);
+}
+
+// Two kinds of gate.
 //
-// A ratio nothing has measured yet is not ratcheted at all. `fan` and the command
-// deltas below are reported on their first run and gated on the next.
+// Ratchets: each ceiling is what the previous run measured plus a margin for the
+// runner's own drift, so the suite fails when the cache gets worse. A ratchet only
+// catches the next step up: a cost already there on its first run is its baseline.
+//
+// Absolute ceilings: the Redis commands a request adds over `off` are held to the
+// target, whatever any run measured. Counts are exact, so a target is as stable a
+// gate as a ratchet. The latency targets stay under Headroom, which gates nothing.
 const maxWriteScaling = Number(process.env['PERF_CACHE_WRITE_SCALING_MAX'] ?? 1.5);
 const maxCommandsPerHit = Number(process.env['PERF_CACHE_MAX_COMMANDS_HIT'] ?? 2);
 const maxCommandsPerFill = Number(process.env['PERF_CACHE_MAX_COMMANDS_FILL'] ?? 15);
@@ -106,15 +144,15 @@ const maxCommandsPerFill = Number(process.env['PERF_CACHE_MAX_COMMANDS_FILL'] ??
 // set per row. Gated on both counts, because the two moved for different reasons —
 // grouping a collection's slices into one index call halved the commands, and
 // sending the tag script by hash cut the bytes without touching the count.
+// Down from 500: 446 measured with the fan read's 200 authors pinned by key under
+// the default pin cap of 250. A cap of 64 falls back to their 8 tenant slices and
+// measured 31, both counted in all rather than over an uncached read (#392).
 const maxCommandsPerFanFill =
-	Number(process.env['PERF_CACHE_MAX_COMMANDS_FAN_FILL'] ?? 900);
+	Number(process.env['PERF_CACHE_MAX_COMMANDS_FAN_FILL'] ?? 460);
 
 const maxKilobytesPerFanFill =
-	// Up from 70 for the two key renames that landed after that ceiling was set
-	// (`scoped-cache-index:` over `tag:`, `scoped-cache-epoch:` over `epoch:`):
-	// the fill sends the same 817 commands, each naming a longer key, 70.3 KB
-	// where 62.8 set the previous ceiling.
-	Number(process.env['PERF_CACHE_MAX_KB_FAN_FILL'] ?? 78);
+	// Down from 78: 57.1 KB measured, 12.8 under a pin cap of 64 (#392).
+	Number(process.env['PERF_CACHE_MAX_KB_FAN_FILL'] ?? 60);
 
 const maxWriteCommandScaling =
 	// Down from 3.2 now that a purge sends one UNLINK per 500 keys rather than one
@@ -126,14 +164,44 @@ const maxWriteCommandScaling =
 const targetMissVsOff = 1.85;
 const targetMissVsFull = 1.45;
 
-// What the counts would be with the response cache alone paying for itself: two
-// reads on a hit, and on a fill the epoch capture, the tag writes, the value and
-// its sidecar, and the post-fill re-read.
-const targetCommandsPerHit = 2;
-const targetCommandsPerFill = 7;
+// The absolute ceilings. What the counts would be with the response cache alone
+// paying for itself: two reads on a hit, and on a fill the value and its sidecar
+// around the read. A fan fill is held to the flat fill's: a read's cost to Redis
+// should not grow with the number of rows it returns. `full` is held to them;
+// `scoped` pays for its filing on top, and its fills are held to their own pair
+// below until the index stops costing a set per pin (#587).
+const maxCommandsAddedPerHit =
+	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_HIT'] ?? 2);
+
+const maxCommandsAddedPerFill =
+	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_FILL'] ?? 7);
+
+const maxCommandsAddedPerFanFill =
+	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_FAN_FILL'] ?? 7);
+
+// A scoped fill adds the epoch capture, its re-read, and the filing script: the
+// script plus a TTL, SADD and EXPIRE per index set, and the same three on the
+// set naming them. One set on a flat fill, 10.99 to 11.08 measured over three
+// runs of one build, so the gate sits a command above. The fan read pins its
+// 200 authors by key under the default pin cap, a set each, 446 measured: Redis
+// has no SADD over many keys, so that is the floor of a key pin (#392).
+const maxCommandsAddedPerScopedFill =
+	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_SCOPED_FILL'] ?? 12);
+
+const maxCommandsAddedPerScopedFanFill =
+	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_SCOPED_FAN_FILL'] ?? 460);
 
 // A purge that drops one slice should cost the same however much the cache holds.
 const targetWriteCommandScaling = 1.5;
+
+// CPU time a request costs the server, the fastest sample as a ratio to the
+// fastest on `off`. Trunk's worst plus the ~0.3 one ratio moves between runs of
+// unchanged code: over four runs trunk measured fill 1.58, fan fill 1.61 and
+// hit 1.09 at worst, where the pin before #438 measured fan fill 2.20.
+const cpuCeilings: Record<string, Record<CpuPhase, number>> = {
+	full: { fill: 1.85, fanFill: 1.85, hit: 1.35 },
+	scoped: { fill: 1.85, fanFill: 1.85, hit: 1.35 },
+};
 
 const STATUS_HEADER = 'x-cache-status';
 const NOTE = 'perf_note';
@@ -175,6 +243,9 @@ const cachedArmEnv = {
 	// `setHeader` per response, where the tag headers would add a Redis write per
 	// fill and a read per hit — so those stay off.
 	CACHE_STATUS_HEADER: STATUS_HEADER,
+	// Every arm boots a build its namespace has not recorded, and a deploy's fill
+	// pause would serve its warm series cold.
+	CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '0',
 };
 
 const arms: Arm[] = [
@@ -203,10 +274,18 @@ const arms: Arm[] = [
 	},
 ];
 
+// Each rep starts one arm further along, so no arm always goes first.
+function armsInRepOrder(rep: number): Arm[] {
+	const firstArm = rep % arms.length;
+
+	return [...arms.slice(firstArm), ...arms.slice(0, firstArm)];
+}
+
 const readShapes = [
 	{
 		name: 'flat',
-		ceilings: { hitVsOff: 1.05, missVsOff: 1.60, hitVsFull: 1.20, missVsFull: 1.35 },
+		// missVsOff up from 1.60: trunk alone measured 1.45 to 1.65 over five runs.
+		ceilings: { hitVsOff: 1.05, missVsOff: 1.75, hitVsFull: 1.20, missVsFull: 1.35 },
 		path: (tenant: string) =>
 			`/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=25`,
 	},
@@ -231,10 +310,10 @@ const readShapes = [
 		// carries a DIFFERENT parent. What separates this from `wide` is the pin
 		// fan-out alone, which is the crossover #392 is about.
 		name: 'fan',
-		// Its own, looser pair: a read that pins one tag per row writes a tag set
-		// per row too, and that is the cost the shape exists to expose rather than
-		// one the ceiling should hide. The target every shape is held to stays in
-		// Headroom.
+		// Its own, looser pair: a read that pins one key per row writes a set per
+		// row too, and that is the cost the shape exists to expose rather than
+		// one the ceiling should hide. The target every shape is held
+		// to stays in Headroom.
 		ceilings: { hitVsOff: 0.85, missVsOff: 2.25, hitVsFull: 1.20, missVsFull: 1.75 },
 		path: (tenant: string) => {
 			return `/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=200`
@@ -304,7 +383,7 @@ async function startInstance(
 			SERVE_APP: 'false',
 			LOG_LEVEL: 'warn',
 			TELEMETRY: 'false',
-			EXTENSIONS_PATH: join(root, 'tests', 'perf', 'cache-extensions'),
+			PACKAGE_FILE_LOCATION: extensionPackage,
 			PORT: String(port),
 			PUBLIC_URL: `http://127.0.0.1:${port}`,
 			...env,
@@ -497,6 +576,36 @@ function clearResponseCache(arm: Arm): Promise<unknown> {
 	}).then((response) => response.text());
 }
 
+/**
+ * Wait for the reap a clear requests on a scoped arm to mark its index complete.
+ * The pass runs a second after the clear, off the request path, and would land in
+ * whatever is measured next. A clear keeps the marker, so once it is complete the
+ * reap a clear requests is turned away and there is nothing left to wait for.
+ */
+async function awaitRequestedReap(arm: Arm): Promise<void> {
+	if (arm.env['CACHE_AUTO_PURGE_MODE'] !== 'scoped') {
+		return;
+	}
+
+	const namespace = `perf-cache-${arms.indexOf(arm)}`;
+	const deadline = performance.now() + 30_000;
+
+	while (performance.now() < deadline) {
+		const [marker, generation] = await redis.mget(
+			`${namespace}:scoped-cache-collection-index-keys-complete`,
+			`${namespace}:scoped-cache-index-generation`,
+		);
+
+		if (marker !== null && marker === generation) {
+			return;
+		}
+
+		await new Promise((wake) => setTimeout(wake, 100));
+	}
+
+	throw new Error(`no reap marked the ${arm.name} index complete in 30 s`);
+}
+
 type ReadSeries = { msPerRequest: number; statuses: Set<string> };
 
 /**
@@ -539,6 +648,10 @@ async function timeReads(
 		}
 
 		statuses.add(response.headers.get(STATUS_HEADER) ?? 'none');
+	}
+
+	if (cold) {
+		await awaitRequestedReap(arm);
 	}
 
 	return { msPerRequest: total / batch, statuses };
@@ -616,6 +729,10 @@ async function readRedisCounters(): Promise<RedisCounters> {
 
 type CensusResult = {
 	perRequest: number;
+	// What the api sent, where `perRequest` is what Redis executed: a command a
+	// script runs counts in Redis's own stats but never crossed the wire, and only
+	// what crossed it costs the api an encode, a promise and a reply parse.
+	sentPerRequest: number;
 	bytesPerRequest: number;
 	// Every command, not a top-N slice: the first run of this bench reported six
 	// commands per hit where the response cache accounts for two, and a truncated
@@ -635,18 +752,24 @@ type CensusResult = {
 async function census(
 	run: () => Promise<void>,
 	requests: number,
-	idleFloor: number,
+	idleFloor: IdleFloor,
 ): Promise<CensusResult> {
-	await redis.config('RESETSTAT');
-	const startedAt = performance.now();
+	const watched = await countSentCommands(async () => {
+		await redis.config('RESETSTAT');
+		const startedAt = performance.now();
 
-	await run();
+		await run();
 
-	const elapsed = (performance.now() - startedAt) / 1000;
-	const counted = await readRedisCounters();
+		return {
+			elapsed: (performance.now() - startedAt) / 1000,
+			counted: await readRedisCounters(),
+		};
+	});
+
+	const { elapsed, counted } = watched.result;
 
 	// The two `info` calls this census makes land in the same counters.
-	const overhead = idleFloor * elapsed + 2;
+	const overhead = idleFloor.executed * elapsed + 2;
 	const net = Math.max(counted.commands - overhead, 0);
 
 	const breakdown = Object.entries(counted.byCommand)
@@ -657,6 +780,8 @@ async function census(
 
 	return {
 		perRequest: net / requests,
+		sentPerRequest:
+			Math.max(watched.sent - idleFloor.sent * watched.seconds, 0) / requests,
 		bytesPerRequest: counted.inputBytes / requests,
 		breakdown,
 		socketReadsPerRequest: counted.socketReads / requests,
@@ -683,14 +808,17 @@ async function traceRedisCommands(
 		lines.push(args.join(' ').slice(0, 140));
 	});
 
-	// The subscription is registered asynchronously on the server, so a command
-	// issued straight after it can be processed before it is.
-	await new Promise((wake) => setTimeout(wake, 250));
-	await run();
-	await new Promise((wake) => setTimeout(wake, 250));
-
-	monitor.disconnect();
-	watcher.disconnect();
+	try {
+		// The subscription is registered asynchronously on the server, so a command
+		// issued straight after it can be processed before it is.
+		await new Promise((wake) => setTimeout(wake, 250));
+		await run();
+		await new Promise((wake) => setTimeout(wake, 250));
+	}
+	finally {
+		monitor.disconnect();
+		watcher.disconnect();
+	}
 
 	return [
 		`${label} — ${lines.length} commands`,
@@ -699,17 +827,171 @@ async function traceRedisCommands(
 	];
 }
 
-async function measureIdleRedisFloor(): Promise<number> {
-	await redis.config('RESETSTAT');
+type IdleFloor = {
+	executed: number;
+	// Apart from `executed`: a script the servers run while idle adds its own
+	// commands to what Redis executed, and only the call to what was sent.
+	sent: number;
+};
+
+/**
+ * Counts the commands put on the wire, which `INFO commandstats` cannot tell
+ * from the ones a script runs: MONITOR names each command's source, `lua` for a
+ * script's own. It slows the server, which costs nothing where commands are
+ * counted rather than timed. The bench's own connection is left out.
+ */
+async function countSentCommands<Result>(
+	run: () => Promise<Result>,
+): Promise<{ result: Result; sent: number; seconds: number }> {
+	const benchAddress = /addr=(\S+)/.exec(String(await redis.client('INFO')))![1];
+	const watcher = new Redis(redisUrl);
+	const monitor = await watcher.monitor();
+	let sent = 0;
+
+	monitor.on('monitor', (_time: string, _args: string[], source: string) => {
+		if (source !== 'lua' && source !== benchAddress) {
+			sent++;
+		}
+	});
+
+	try {
+		// The subscription is registered asynchronously on the server.
+		await new Promise((wake) => setTimeout(wake, 250));
+		const startedAt = performance.now();
+
+		const result = await run();
+
+		// A command reaches the monitor after its reply reaches the api.
+		await new Promise((wake) => setTimeout(wake, 250));
+
+		return { result, sent, seconds: (performance.now() - startedAt) / 1000 };
+	}
+	finally {
+		monitor.disconnect();
+		watcher.disconnect();
+	}
+}
+
+async function measureIdleRedisFloor(): Promise<IdleFloor> {
+	const watched = await countSentCommands(async () => {
+		await redis.config('RESETSTAT');
+		await new Promise((wake) => setTimeout(wake, 3000));
+
+		return readRedisCounters();
+	});
+
+	return {
+		executed: watched.result.commands / 3,
+		sent: watched.sent / watched.seconds,
+	};
+}
+
+type CpuPhase = 'fill' | 'fanFill' | 'hit';
+
+const cpuPhases: CpuPhase[] = ['fill', 'fanFill', 'hit'];
+
+/**
+ * The CPU time the arm's server has spent so far, in nanoseconds, summed over
+ * every thread: the libuv pool and V8's GC threads work for the request too.
+ *
+ * `schedstat` rather than `stat`: `stat` counts clock ticks, 10 ms each, which is
+ * a whole fill on this fixture.
+ */
+async function readServerCpu(arm: Arm): Promise<number> {
+	const pid = arm.process!.pid!;
+	let total = 0;
+
+	for (const thread of await readdir(`/proc/${pid}/task`)) {
+		try {
+			const schedstat = await readFile(
+				`/proc/${pid}/task/${thread}/schedstat`,
+				'utf8',
+			);
+
+			total += Number(schedstat.split(' ')[0]);
+		}
+		catch {
+			// The thread exited between the listing and the read.
+		}
+	}
+
+	return total;
+}
+
+/**
+ * What each arm's server burns per second with nothing driving it — timers, the
+ * stats flush, the bus — so a sample can subtract it the way the Redis census
+ * subtracts its idle floor. Every arm idles at once: each is its own process.
+ */
+async function measureIdleCpu(): Promise<Map<string, number>> {
+	const before = await Promise.all(arms.map((arm) => readServerCpu(arm)));
+	const startedAt = performance.now();
+
 	await new Promise((wake) => setTimeout(wake, 3000));
 
-	const counted = await readRedisCounters();
+	const after = await Promise.all(arms.map((arm) => readServerCpu(arm)));
+	const elapsed = (performance.now() - startedAt) / 1000;
 
-	return counted.commands / 3;
+	return new Map(arms.map((arm, index) => {
+		return [arm.name, (after[index]! - before[index]!) / elapsed];
+	}));
+}
+
+function cpuPhasePath(phase: CpuPhase, tenant: string, index: number): string {
+	if (phase === 'fill') {
+		return `/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=25&offset=${index}`;
+	}
+
+	if (phase === 'fanFill') {
+		return `/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=200`
+			+ `&fields=*,author.*&offset=${index}`;
+	}
+
+	return `/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=25`;
+}
+
+/**
+ * The server CPU one request of `phase` costs, in milliseconds.
+ *
+ * Measured over the whole window rather than around each response, because a fill
+ * keeps working after it answers — the tag writes and the post-fill re-read run
+ * off the response path — and that work is exactly the cost being looked for. The
+ * window ends after a pause long enough for it to finish, and the pause is paid
+ * for by subtracting the idle rate over the whole window.
+ */
+async function sampleCpu(
+	arm: Arm,
+	phase: CpuPhase,
+	tenant: string,
+	idleNsPerSecond: number,
+): Promise<number> {
+	await clearResponseCache(arm);
+	await awaitRequestedReap(arm);
+
+	if (phase === 'hit') {
+		await api(arm.base, cpuPhasePath(phase, tenant, 0));
+	}
+
+	await new Promise((wake) => setTimeout(wake, 100));
+
+	const before = await readServerCpu(arm);
+	const startedAt = performance.now();
+
+	for (let index = 0; index < cpuRequests; index++) {
+		await api(arm.base, cpuPhasePath(phase, tenant, index));
+	}
+
+	await new Promise((wake) => setTimeout(wake, 250));
+
+	const spent = await readServerCpu(arm) - before;
+	const elapsed = (performance.now() - startedAt) / 1000;
+	const net = Math.max(spent - idleNsPerSecond * elapsed, 0);
+
+	return net / cpuRequests / 1e6;
 }
 
 beforeAll(async () => {
-	await mkdir(join(root, 'tests', 'perf', 'cache-extensions'), { recursive: true });
+	extensionPackage = await createExtensionPackage();
 
 	// Seeded from an instance of its own, killed before any arm starts: the arms
 	// cache the schema, and a collection created after they booted would reach some
@@ -759,12 +1041,14 @@ test('the cache costs less than what it replaces', async () => {
 	// Alternating arm by arm inside each rep, not one arm's whole series then the
 	// next: whatever else the machine is doing drifts over minutes, and alternating
 	// spreads that drift over every arm instead of handing it to whoever went last.
+	// The order rotates per rep too: `off` is every ratio's divisor, and going
+	// first in every rep would hand it whatever going first costs.
 	for (let rep = 0; rep < reps; rep++) {
 		const tenant = tenants[rep % TENANTS]!;
 
 		for (const shape of readShapes) {
 			for (const cold of [true, false]) {
-				for (const arm of arms) {
+				for (const arm of armsInRepOrder(rep)) {
 					const phase = `${shape.name}:${cold
 						? 'miss'
 						: 'hit'}`;
@@ -795,7 +1079,7 @@ test('the cache costs less than what it replaces', async () => {
 
 	for (let rep = 0; rep < writeReps; rep++) {
 		for (const entries of warmSizes) {
-			for (const arm of arms) {
+			for (const arm of armsInRepOrder(rep)) {
 				await warmCache(arm, entries);
 
 				const noteId = noteIds[(rep * warmSizes.length) % noteIds.length]!;
@@ -820,12 +1104,15 @@ test('the cache costs less than what it replaces', async () => {
 	const commandsPerFanFill = new Map<string, number>();
 	const kilobytesPerFanFill = new Map<string, number>();
 	const commandsPerWrite = new Map<string, Map<number, number>>();
+	const sentPerHit = new Map<string, number>();
+	const sentPerFill = new Map<string, number>();
+	const sentPerFanFill = new Map<string, number>();
 
 	function describe(counted: CensusResult): string {
 		const bytes = (counted.bytesPerRequest / 1024).toFixed(1);
 
-		return `**${counted.perRequest.toFixed(1)}** (${bytes} KB sent)`
-			+ ` — ${counted.breakdown}`;
+		return `**${counted.perRequest.toFixed(1)}** — ${counted.breakdown}`
+			+ ` | **${counted.sentPerRequest.toFixed(1)}** (${bytes} KB)`;
 	}
 
 	// `off` is counted too, and that is what makes any of these attributable. A
@@ -837,6 +1124,7 @@ test('the cache costs less than what it replaces', async () => {
 	// running at once would each read the other's commands as their own.
 	for (const arm of arms) {
 		await clearResponseCache(arm);
+		await awaitRequestedReap(arm);
 
 		// A distinct key per request rather than a clear between them: clearing is
 		// itself a scan and a delete over the namespace, and it would be counted.
@@ -854,6 +1142,7 @@ test('the cache costs less than what it replaces', async () => {
 		);
 
 		commandsPerFill.set(arm.name, fill.perRequest);
+		sentPerFill.set(arm.name, fill.sentPerRequest);
 		recordCensus('read, fresh key', arm.name, describe(fill));
 
 		// The same again over the fan shape, because the flat one writes two tag
@@ -875,6 +1164,7 @@ test('the cache costs less than what it replaces', async () => {
 		);
 
 		commandsPerFanFill.set(arm.name, fanFill.perRequest);
+		sentPerFanFill.set(arm.name, fanFill.sentPerRequest);
 		kilobytesPerFanFill.set(arm.name, fanFill.bytesPerRequest / 1024);
 		recordCensus('read, fresh key (fan)', arm.name, describe(fanFill));
 
@@ -892,6 +1182,7 @@ test('the cache costs less than what it replaces', async () => {
 		);
 
 		commandsPerHit.set(arm.name, hit.perRequest);
+		sentPerHit.set(arm.name, hit.sentPerRequest);
 		recordCensus('read, repeated', arm.name, describe(hit));
 
 		const perWarmSize = new Map<number, number>();
@@ -902,6 +1193,7 @@ test('the cache costs less than what it replaces', async () => {
 		// in production too, while costing Redis itself N times the work.
 		for (const entries of warmSizes) {
 			const counts: number[] = [];
+			const sentCounts: number[] = [];
 			let breakdown = '';
 
 			for (let rep = 0; rep < censusWriteReps; rep++) {
@@ -918,22 +1210,41 @@ test('the cache costs less than what it replaces', async () => {
 				);
 
 				counts.push(counted.perRequest);
+				sentCounts.push(counted.sentPerRequest);
 				breakdown = counted.breakdown;
 			}
 
 			const label = `${arm.name} write@${entries}`;
 			const perWrite = summarise(label, counts).median;
+			const sentPerWrite = summarise(`${label} sent`, sentCounts).median;
 
 			perWarmSize.set(entries, perWrite);
 
 			recordCensus(
 				`write@${entries}`,
 				arm.name,
-				`**${perWrite.toFixed(1)}** — ${breakdown}`,
+				`**${perWrite.toFixed(1)}** — ${breakdown}`
+				+ ` | **${sentPerWrite.toFixed(1)}**`,
 			);
 		}
 
 		commandsPerWrite.set(arm.name, perWarmSize);
+	}
+
+	const idleCpu = await measureIdleCpu();
+
+	// Arms alternating and rotating inside each rep, as the timed reads do, and a
+	// tenant per rep so no rep reads a key an earlier one left behind.
+	for (let rep = 0; rep < cpuReps; rep++) {
+		const tenant = tenants[rep % TENANTS]!;
+
+		for (const phase of cpuPhases) {
+			for (const arm of armsInRepOrder(rep)) {
+				const idle = idleCpu.get(arm.name)!;
+
+				record(`cpu:${phase}`, arm.name, await sampleCpu(arm, phase, tenant, idle));
+			}
+		}
 	}
 
 	const phases = [
@@ -942,11 +1253,13 @@ test('the cache costs less than what it replaces', async () => {
 	];
 
 	const head = (process.env['PERF_HEAD_SHA'] ?? 'local').slice(0, 10);
+	const bench = (process.env['PERF_BENCH_SHA'] ?? head).slice(0, 10);
 
 	const report: string[] = [
 		'### Response cache — what it costs and what it buys',
 		'',
-		`Measured commit \`${head}\`, Node ${process.version}.`,
+		`Measured commit \`${head}\` with the bench of \`${bench}\`,`
+		+ ` Node ${process.version}.`,
 		'',
 		`${reps} reps of ${batch} reads per arm per shape, ${writeReps} timed writes`
 		+ ` per warm size, arms alternating. Fixture:`
@@ -976,21 +1289,50 @@ test('the cache costs less than what it replaces', async () => {
 	}
 
 	report.push(
+		'#### Server CPU per request',
+		'',
+		`${cpuReps} samples of ${cpuRequests} requests per arm, net of each`
+		+ ' server\'s idle rate. `fill` and `fanFill` read a fresh key each time,'
+		+ ' `hit` the same one. Gated on the min, as a ratio to `off`\'s min.',
+		'',
+		'| phase | arm | min | median | p95 | max | min vs `off` |',
+		'| --- | --- | ---: | ---: | ---: | ---: | ---: |',
+	);
+
+	for (const phase of cpuPhases) {
+		const floor = seriesOf(`cpu:${phase}`, 'off').min;
+
+		for (const arm of arms) {
+			const summary = seriesOf(`cpu:${phase}`, arm.name);
+			const ratio = (summary.min / floor).toFixed(2);
+			const row = summaryRow(summary).replace(`cpu:${phase} / `, '');
+
+			report.push(`| ${phase} ${row} ${ratio}x |`);
+		}
+	}
+
+	report.push(
+		'',
 		'#### Redis commands per request',
 		'',
-		`Net of a ${idleFloor.toFixed(1)}/s background floor measured idle. Counts are`
-		+ ' exact, not sampled: they are what the latency above becomes once Redis is'
-		+ ' a network hop rather than a container on the same host. `off` is the'
+		`Net of a ${idleFloor.executed.toFixed(1)}/s executed and`
+		+ ` ${idleFloor.sent.toFixed(1)}/s sent background floor measured idle.`
+		+ ' Counts are exact, not sampled: they are what the latency above becomes'
+		+ ' once Redis is a network hop rather than a container on the same host.'
+		+ ' `off` is the'
 		+ " control — a request costs Redis something before the response cache is"
 		+ ' reached, so what the cache itself costs is the difference from that row.',
 		'',
-		'| phase | arm | commands |',
-		'| --- | --- | --- |',
+		'Executed is what Redis ran, a script\'s own commands included; sent is what'
+		+ ' the api put on the wire, one per script call.',
+		'',
+		'| phase | arm | commands executed | commands sent |',
+		'| --- | --- | --- | --- |',
 	);
 
 	for (const [phase, byArm] of censuses) {
 		for (const arm of arms) {
-			report.push(`| ${phase} | ${arm.name} | ${byArm.get(arm.name) ?? '—'} |`);
+			report.push(`| ${phase} | ${arm.name} | ${byArm.get(arm.name) ?? '— | —'} |`);
 		}
 	}
 
@@ -1004,6 +1346,7 @@ test('the cache costs less than what it replaces', async () => {
 		const tracePath = `/items/${NOTE}?filter[tenant][_eq]=t5&limit=25`;
 
 		await clearResponseCache(arm);
+		await awaitRequestedReap(arm);
 
 		traces.push(...await traceRedisCommands(`${armName}, one fill`, async () => {
 			await api(arm.base, tracePath);
@@ -1112,11 +1455,6 @@ test('the cache costs less than what it replaces', async () => {
 		commandsPerWrite.get('scoped')!.get(warmSizes[1]!)!
 		/ commandsPerWrite.get('scoped')!.get(warmSizes[0]!)!;
 
-	const hitCommandCost = commandsPerHit.get('scoped')! - commandsPerHit.get('off')!;
-
-	const fillCommandCost =
-		commandsPerFill.get('scoped')! - commandsPerFill.get('off')!;
-
 	verdict(
 		`a scoped write over ${warmSizes[1]} entries against one over ${warmSizes[0]}`,
 		seriesOf(`write@${warmSizes[1]}`, 'scoped').median
@@ -1158,25 +1496,38 @@ test('the cache costs less than what it replaces', async () => {
 		maxWriteCommandScaling,
 	);
 
-	observe(
-		'Redis commands a scoped HIT adds over an uncached read',
-		hitCommandCost,
-		targetCommandsPerHit,
-	);
+	for (const armName of ['full', 'scoped']) {
+		verdict(
+			`Redis commands a ${armName} HIT adds over an uncached read`,
+			commandsPerHit.get(armName)! - commandsPerHit.get('off')!,
+			maxCommandsAddedPerHit,
+		);
 
-	observe(
-		'Redis commands a scoped fill adds over an uncached read',
-		fillCommandCost,
-		targetCommandsPerFill,
-	);
+		verdict(
+			`Redis commands a ${armName} fill adds over an uncached read`,
+			commandsPerFill.get(armName)! - commandsPerFill.get('off')!,
+			armName === 'scoped'
+				? maxCommandsAddedPerScopedFill
+				: maxCommandsAddedPerFill,
+		);
 
-	// One pin per row, so the target is the flat fill's plus a script call per pin.
-	// Reported until a run has measured it.
-	observe(
-		'Redis commands a scoped fan fill adds over an uncached read',
-		commandsPerFanFill.get('scoped')! - commandsPerFanFill.get('off')!,
-		targetCommandsPerFill,
-	);
+		verdict(
+			`Redis commands a ${armName} fan fill adds over an uncached read`,
+			commandsPerFanFill.get(armName)! - commandsPerFanFill.get('off')!,
+			armName === 'scoped'
+				? maxCommandsAddedPerScopedFanFill
+				: maxCommandsAddedPerFanFill,
+		);
+
+		for (const phase of cpuPhases) {
+			verdict(
+				`server CPU per ${armName} ${phase} against no cache at all`,
+				seriesOf(`cpu:${phase}`, armName).min
+				/ seriesOf(`cpu:${phase}`, 'off').min,
+				cpuCeilings[armName]![phase],
+			);
+		}
+	}
 
 	observe(
 		`Redis commands per scoped write, ${warmSizes[1]} entries against`
@@ -1200,7 +1551,8 @@ test('the cache costs less than what it replaces', async () => {
 		'',
 		'#### Gates',
 		'',
-		'Ratchets: each ceiling is what the last run measured plus room for drift.',
+		'Ratchets, where the ceiling is what the last run measured plus room for'
+		+ ' drift, and absolute ceilings on the Redis commands a request adds.',
 		'',
 		'| ratio | measured | ceiling | |',
 		'| --- | ---: | ---: | --- |',
@@ -1218,6 +1570,11 @@ test('the cache costs less than what it replaces', async () => {
 
 	await mkdir(outputDir, { recursive: true });
 
+	const seriesPhases = [
+		...phases,
+		...cpuPhases.map((phase) => `cpu:${phase}`),
+	];
+
 	const result = {
 		commit: process.env['PERF_HEAD_SHA'] ?? 'local',
 		node: process.version,
@@ -1230,9 +1587,10 @@ test('the cache costs less than what it replaces', async () => {
 			notes: TENANTS * NOTES_PER_TENANT,
 			warmSizes,
 		},
-		idleRedisCommandsPerSecond: idleFloor,
+		idleRedisCommandsPerSecond: idleFloor.executed,
+		idleRedisCommandsSentPerSecond: idleFloor.sent,
 		series: Object.fromEntries(
-			phases.map((phase) => {
+			seriesPhases.map((phase) => {
 				const byArm = arms.map((arm) => [arm.name, seriesOf(phase, arm.name)]);
 
 				return [phase, Object.fromEntries(byArm)];
@@ -1241,7 +1599,14 @@ test('the cache costs less than what it replaces', async () => {
 		redisCommandsPerRequest: {
 			hit: Object.fromEntries(commandsPerHit),
 			fill: Object.fromEntries(commandsPerFill),
+			fanFill: Object.fromEntries(commandsPerFanFill),
 		},
+		redisCommandsSentPerRequest: {
+			hit: Object.fromEntries(sentPerHit),
+			fill: Object.fromEntries(sentPerFill),
+			fanFill: Object.fromEntries(sentPerFanFill),
+		},
+		idleServerCpuNsPerSecond: Object.fromEntries(idleCpu),
 	};
 
 	await writeFile(
@@ -1258,6 +1623,9 @@ test('the cache costs less than what it replaces', async () => {
 	const hitMs = seriesOf('flat:hit', 'scoped').median;
 	const uncachedMs = seriesOf('flat:miss', 'off').median;
 
+	const fanFillCpu = seriesOf('cpu:fanFill', 'scoped').min
+		/ seriesOf('cpu:fanFill', 'off').min;
+
 	const breached = over.length > 0
 		? `${over.length} gate(s) OVER — `
 		: '';
@@ -1266,7 +1634,8 @@ test('the cache costs less than what it replaces', async () => {
 		join(outputDir, 'cache.status.txt'),
 		`${breached}flat hit ${hitMs.toFixed(1)} ms vs ${uncachedMs.toFixed(1)} ms`
 		+ ` uncached (${(hitMs / uncachedMs).toFixed(2)}x),`
-		+ ` ${commandsPerHit.get('scoped')!.toFixed(1)} redis cmd/hit\n`,
+		+ ` ${commandsPerHit.get('scoped')!.toFixed(1)} redis cmd/hit,`
+		+ ` fan fill ${fanFillCpu.toFixed(2)}x cpu\n`,
 	);
 
 	expect(over, `gates exceeded:\n${over.join('\n')}`).toEqual([]);

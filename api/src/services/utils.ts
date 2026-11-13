@@ -19,9 +19,19 @@ import type {
 import type { Knex } from 'knex';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
+	assertUsableCacheSettingsPatch,
+	flushBeforeEnabling,
+	markEnablingFlushed,
+	refreshCacheSettings,
+	resolveCacheSettings,
+	usableCacheSettings,
+	type CacheSettingField,
+	type ResolvedCacheSetting,
+} from '../cache-settings.js';
+import {
 	cacheExpiresAtKey,
-	cacheTagsKey,
-	storedScopedCacheTagLabels,
+	cachePinsKey,
+	storedScopedCachePinLabels,
 } from '../cache-sidecars.js';
 import type { CacheAuditOptions } from '../cache-audit.js';
 import {
@@ -91,9 +101,11 @@ import {
 } from '../processes/autoscale/lib/supervisor-shared-settings.js';
 import {
 	SHARED_SETTINGS_COLUMNS,
+	announceSharedSettings,
 	readAllSharedSettings,
 	readSharedSettings,
 	writeSharedSettings,
+	type SharedSettings,
 } from '../processes/lib/shared-settings.js';
 import { assertUsableConfig } from '../processes/autoscale/lib/validate-config.js';
 import {
@@ -105,12 +117,16 @@ import {
 	cacheAuditScheduleState,
 	refreshCacheAuditScheduleOverride,
 } from '../schedules/cache-audit.js';
-import { countScopedCacheTagMembers, flushResponseCache } from '../scoped-cache.js';
+import {
+	countScopedCachePinMembers,
+	flushResponseCache,
+} from '../scoped-cache/index.js';
 import { CacheAuditFindingsPageSchema } from '../utils/cache-audit-options.js';
 import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
+import { transaction } from '../utils/transaction.js';
 
 /**
  * A whole number inside the range the field accepts, or the answer saying it
@@ -222,6 +238,18 @@ export interface AutoscaleConfigAnswer extends AutoscaleSharedSettingsAnswer {
 	 * a value it displays came from.
 	 */
 	supervisor: AutoscaleSharedSettingsAnswer;
+}
+
+/**
+ * What a cache settings read answers with: the stored layer, who left it, and
+ * every field as it resolves on the node answering.
+ */
+export interface CacheSettingsAnswer {
+	key: string;
+	sharedSettings: SharedSettings | null;
+	/** The address behind the stored layer's `setBy`, `null` where there is none. */
+	setByEmail: string | null;
+	resolved: Record<CacheSettingField, ResolvedCacheSetting>;
 }
 
 export class UtilsService {
@@ -435,7 +463,7 @@ export class UtilsService {
 	}
 
 	// The live Redis state for a single key — the cached response plus its
-	// sidecars (scoped-cache tags, expiry metadata) — none of which the Postgres
+	// sidecars (scoped-cache pins, expiry metadata) — none of which the Postgres
 	// descriptor holds. All may be gone: the descriptor outlives the value.
 	/**
 	 * Takes the REDIS key — the same string `evictCacheEntry` takes, and what the
@@ -446,8 +474,8 @@ export class UtilsService {
 	async readCacheEntry(redisKey: string): Promise<{
 		exists: boolean;
 		value: unknown;
-		tags: string[] | null;
-		tagCounts: Record<string, number>;
+		pins: string[] | null;
+		pinCounts: Record<string, number>;
 		expiry: { exp: number; createdAt: number; ttlMs: number | null } | null;
 		sizes: { uncompressed: number; compressed: number } | null;
 		tombstone: number | null;
@@ -482,8 +510,8 @@ export class UtilsService {
 			return {
 				exists: false,
 				value: null,
-				tags: null,
-				tagCounts: {},
+				pins: null,
+				pinCounts: {},
 				expiry: null,
 				sizes: null,
 				tombstone: null,
@@ -499,11 +527,11 @@ export class UtilsService {
 		const expiry =
 			(await getCacheValue(cache, cacheExpiresAtKey(redisKey))) ?? null;
 
-		const tagged = await getCacheValue(cache, cacheTagsKey(redisKey));
+		const storedPins = await getCacheValue(cache, cachePinsKey(redisKey));
 
-		// `__tags` lists the scoped-cache tag labels (only when the dev-only
+		// `__pins` lists the scoped-cache pin labels (only when the dev-only
 		// CACHE_TAGS_HEADER is on, which is what writes this sidecar).
-		const tags = storedScopedCacheTagLabels(tagged);
+		const pinLabels = storedScopedCachePinLabels(storedPins);
 
 		// Re-compress the payload to size its Redis footprint against the raw response.
 		let sizes: { uncompressed: number; compressed: number } | null = null;
@@ -522,10 +550,10 @@ export class UtilsService {
 		return {
 			exists: value !== undefined,
 			value: value ?? null,
-			tags,
-			// Blast radius: how many entries each tag would purge.
-			tagCounts: tags
-				? await countScopedCacheTagMembers(tags)
+			pins: pinLabels,
+			// Blast radius: how many entries each pin would purge.
+			pinCounts: pinLabels
+				? await countScopedCachePinMembers(pinLabels)
 				: {},
 			expiry,
 			sizes,
@@ -686,6 +714,128 @@ export class UtilsService {
 		this.assertAdmin('truncate cache stats');
 
 		await truncateCacheEvents();
+	}
+
+	async readCacheSettings(): Promise<CacheSettingsAnswer> {
+		this.assertAdmin('inspect the cache settings');
+
+		return this.cacheSettingsAnswer(
+			await readSharedSettings(SHARED_SETTINGS_COLUMNS.cache),
+		);
+	}
+
+	private async cacheSettingsAnswer(
+		sharedSettings: SharedSettings | null,
+	): Promise<CacheSettingsAnswer> {
+		return {
+			key: `directus_settings.${SHARED_SETTINGS_COLUMNS.cache}`,
+			sharedSettings,
+			setByEmail: await this.emailOf(sharedSettings?.['setBy']),
+			resolved: resolveCacheSettings(sharedSettings),
+		};
+	}
+
+	/**
+	 * Lay a patch over the cache settings, `null` giving a field back to its
+	 * fallback.
+	 *
+	 * Through the settings singleton, whose guard refuses a value outside its
+	 * rule, and whose filter clears the response cache before a write switches
+	 * it on where the environment leaves it off. The row is read and written
+	 * under one lock, so two patches never both lay a field over the same read.
+	 * A stored field the mirror would not apply is dropped rather than left to
+	 * refuse every patch of the others. The layer is stamped with who wrote it,
+	 * when and through which surface, as the autoscale settings are.
+	 */
+	async updateCacheSettings(
+		patch: Record<string, unknown>,
+		surface: AutoscaleWriteSurface,
+	): Promise<CacheSettingsAnswer> {
+		this.assertAdmin('change the cache settings');
+
+		if (Object.keys(patch).length === 0) {
+			throw new InvalidPayloadError({
+				reason: 'The patch names no cache setting',
+			});
+		}
+
+		assertUsableCacheSettingsPatch(patch);
+
+		// A clear can outlast the database's idle-in-transaction timeout, and it
+		// would hold the row lock every other settings write waits on.
+		const clearedAhead = await flushBeforeEnabling(
+			{ [SHARED_SETTINGS_COLUMNS.cache]: patch },
+			{ accountability: this.accountability },
+		);
+
+		// Through `transaction()`: the purge the write queues runs once the row
+		// committed, and before this answers.
+		// TODO(#610): off postgres, a busy or serialization error re-runs this
+		// handler and, once the retries ran out, answers "Transaction failed after
+		// 4 attempts" rather than the database's own error.
+		const sharedSettings = await transaction(this.knex, async (settingsTrx) => {
+			// Skipped ahead because the row said on, the check runs again under the
+			// lock: a write switching it off in between is now in the row.
+			if (clearedAhead) {
+				markEnablingFlushed(settingsTrx);
+			}
+
+			const mergedSettings = usableCacheSettings(
+				await readSharedSettings(SHARED_SETTINGS_COLUMNS.cache, settingsTrx),
+			);
+
+			for (const [field, value] of Object.entries(patch)) {
+				if (value === null) {
+					delete mergedSettings[field];
+				}
+				else {
+					mergedSettings[field] = value;
+				}
+			}
+
+			const patchedSettings = Object.keys(mergedSettings).length === 0
+				? null
+				: {
+					...mergedSettings,
+					setBy: this.accountability?.user ?? null,
+					setAt: new Date().toISOString(),
+					setFrom: surface,
+				};
+
+			await writeSharedSettings(
+				SHARED_SETTINGS_COLUMNS.cache,
+				patchedSettings,
+				{ ...this.settingsOptions, knex: settingsTrx },
+			);
+
+			return patchedSettings;
+		});
+
+		// The announcement the write fired went out before the commit, so the
+		// other nodes re-read on this one; this node answers from what it just
+		// wrote rather than waiting on its own announcement.
+		announceSharedSettings(SHARED_SETTINGS_COLUMNS.cache);
+		await refreshCacheSettings();
+
+		return this.cacheSettingsAnswer(sharedSettings);
+	}
+
+	/**
+	 * Drop the cache settings, so every field comes from its fallback again.
+	 * Nothing is left to stamp, as with the autoscale settings.
+	 */
+	async clearCacheSettings(): Promise<CacheSettingsAnswer> {
+		this.assertAdmin('clear the cache settings');
+
+		await writeSharedSettings(
+			SHARED_SETTINGS_COLUMNS.cache,
+			null,
+			this.settingsOptions,
+		);
+
+		await refreshCacheSettings();
+
+		return this.cacheSettingsAnswer(null);
 	}
 
 	async readProcesses(details?: ProcessDetail[]): Promise<ProcessesReport> {

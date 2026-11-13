@@ -108,9 +108,9 @@ function makeReq() {
 	} as unknown as Request;
 }
 
-// A cache HIT: payload + expiry sibling exist; `tags` seeds the `__tags` sibling
-// (undefined = absent). `tagsThrows` makes the sibling read reject (hits the catch).
-function primeHit(tags?: unknown, tagsThrows = false) {
+// A cache HIT: payload + expiry sibling exist; `pins` seeds the `__pins` sibling
+// (undefined = absent). `pinsThrows` makes the sibling read reject (hits the catch).
+function primeHit(pins?: unknown, pinsThrows = false) {
 	getCacheValue.mockImplementation(async (_cache: unknown, key: string) => {
 		if (key === 'cache-key') {
 			return { data: [1] };
@@ -120,16 +120,16 @@ function primeHit(tags?: unknown, tagsThrows = false) {
 			return { exp: Date.now() + 1000 };
 		}
 
-		if (key === 'cache-key__tags') {
-			if (tagsThrows) {
+		if (key === 'cache-key__pins') {
+			if (pinsThrows) {
 				throw new Error('boom');
 			}
 
-			if (tags === undefined) {
+			if (pins === undefined) {
 				return undefined;
 			}
 
-			return { tags };
+			return { pins };
 		}
 
 		return undefined;
@@ -197,7 +197,7 @@ describe('checkCacheMiddleware', () => {
 		expect(res.setHeader).not.toHaveBeenCalled();
 	});
 
-	test('HIT emits the __tags sibling under CACHE_TAGS_HEADER', async () => {
+	test('HIT emits the __pins sibling under CACHE_TAGS_HEADER', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
 		primeHit(['articles:owner=U1']);
 
@@ -227,7 +227,7 @@ describe('checkCacheMiddleware', () => {
 		expect(res.json).toHaveBeenCalledWith({ data: [1] });
 	});
 
-	test('HIT emits no tags header when the __tags sibling is empty', async () => {
+	test('HIT emits no tags header when the __pins sibling is empty', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
 		primeHit(undefined);
 
@@ -254,7 +254,7 @@ describe('checkCacheMiddleware', () => {
 		expect(names).not.toContain('X-Scoped-Cache-Tags');
 	});
 
-	test('a __tags read failure is caught and logged, not thrown', async () => {
+	test('a __pins read failure is caught and logged, not thrown', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
 		primeHit(undefined, true);
 

@@ -1,0 +1,135 @@
+// Records what the update events actually deliver, for update-groups.test.ts.
+//
+// Every extension here loads into every instance, so this one only reacts to
+// its own collection and swallows its own failures: the log table exists for
+// this suite alone, and a throwing filter would take unrelated suites down.
+//
+// The update filters write through the extension's `database`, the pool, while
+// the update's transaction holds a connection of its own. On sqlite that is the
+// pool's only connection, so the filter waits out the acquire timeout there;
+// this suite targets Postgres.
+//
+// Row markers drive the behaviours end to end, so the test needs no control
+// endpoint:
+//   name 'cancel-me'  → the grouped filter's mapUpdateRows returns null for that
+//     row, cancelling it.
+//   name 'rewrite-me' → mapUpdateRows rewrites that row, splitting its group.
+//   name 'take-over-me' → mapUpdateRows writes that row's status
+//     'taken-over' itself and returns its key, taking the row over.
+//   status 'one-row-shape' → the grouped filter answers with that group's
+//     payload alone, the shape a hook written for one row returns.
+//   status 'drop-key' → the grouped filter drops that group's first key,
+//     cancelling that row.
+//   status 'repeat-key' → the grouped filter answers with that group's first
+//     key a second time, in a group of its own.
+//   status 'strip-name' → the grouped filter deletes `name` off the list, the
+//     way a hook written for one payload strips a field.
+//   status 'check-status' → the grouped filter reads `status` off the list, the
+//     way a hook written for one payload refuses a value.
+//   status 'add-row' → the grouped filter adds the row named 'added-by-hook' to
+//     that group's keys.
+// The name is read back from the row, since the event carries only what is
+// being written.
+
+import { mapUpdateRows } from '@directus/utils';
+
+const COLLECTION = 'test_update_groups';
+const LOG = 'test_update_groups_log';
+
+export default function registerHooks({ filter, action }, { database }) {
+	async function record(event, phase, payload) {
+		try {
+			await database(LOG).insert({
+				event,
+				phase,
+				payload: JSON.stringify(payload ?? null),
+			});
+		}
+		catch {
+			// Not this suite: the log table isn't there.
+		}
+	}
+
+	filter(`${COLLECTION}.items.update`, async (payload) => {
+		await record('items.update', 'filter', payload);
+
+		const statuses = Array.isArray(payload)
+			? payload.map((group) => group?.data?.status)
+			: [];
+
+		if (statuses.includes('strip-name')) {
+			delete payload.name;
+
+			return payload;
+		}
+
+		if (statuses.includes('check-status')) {
+			if (payload.status === 'check-status') {
+				throw new Error('The status "check-status" is refused');
+			}
+
+			return payload;
+		}
+
+		const oneRowGroup = Array.isArray(payload)
+			? payload.find((group) => group?.data?.status === 'one-row-shape')
+			: undefined;
+
+		if (oneRowGroup) {
+			return oneRowGroup.data;
+		}
+
+		if (!Array.isArray(payload)) {
+			return payload;
+		}
+
+		const addedRow = statuses.includes('add-row')
+			? await database(COLLECTION)
+				.where({ name: 'added-by-hook' })
+				.orderBy('id', 'desc')
+				.first()
+			: undefined;
+
+		const answeredGroups = payload.flatMap((group) => {
+			if (group?.data?.status === 'add-row') {
+				return { ...group, keys: [...group.keys, addedRow.id] };
+			}
+
+			if (group?.data?.status === 'repeat-key') {
+				return [group, { ...group, keys: group.keys.slice(0, 1) }];
+			}
+
+			return group?.data?.status === 'drop-key'
+				? { ...group, keys: group.keys.slice(1) }
+				: group;
+		});
+
+		return mapUpdateRows(answeredGroups, async (data, key) => {
+			const sentRow = await database(COLLECTION)
+				.where({ id: key })
+				.first();
+
+			if (sentRow?.name === 'cancel-me') {
+				return null;
+			}
+
+			if (sentRow?.name === 'rewrite-me') {
+				return { ...data, name: 'rewritten' };
+			}
+
+			if (sentRow?.name === 'take-over-me') {
+				await database(COLLECTION)
+					.where({ id: key })
+					.update({ status: 'taken-over' });
+
+				return key;
+			}
+
+			return data;
+		});
+	});
+
+	action(`${COLLECTION}.items.update`, async (meta) => {
+		await record('items.update', 'action', meta.payload);
+	});
+}

@@ -2,7 +2,7 @@ import config, { getUrl } from '@common/config';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -128,9 +128,11 @@ function drive(url: string, concurrency: number): Traffic {
 
 	const loops = Array.from({ length: concurrency }, async (_, index) => {
 		for (let turn = index; running; turn++) {
+			// Only the id: the pool runs under its own namespace, so it never hears
+			// a field another suite adds to directus_users, then removes.
 			const path = turn % 2 === 0
 				? '/server/ping'
-				: '/users/me';
+				: '/users/me?fields=id';
 
 			try {
 				const response = await request(url)
@@ -255,7 +257,7 @@ function plateausOf(readings: Reading[], heldMs: number): Plateau[] {
  */
 async function deploy(vendor: Vendor): Promise<Deployment> {
 	const env = cloneDeep(config.envs)[vendor]!;
-	const port = await getPort();
+	const port = await freePortOfWorker();
 	const namespace = `blackbox-prewarm-load-${vendor}`;
 
 	env['PORT'] = String(port);

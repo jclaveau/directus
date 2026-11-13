@@ -8,17 +8,18 @@ import path from 'node:path';
 import { searchForWorkspaceRoot } from 'vite';
 import { defineConfig } from 'vitest/config';
 import vueDevtools from 'vite-plugin-vue-devtools';
+import { VITEST_MAX_WORKERS } from '../vitest.max-workers.ts';
 
 const API_PATH = path.join('..', 'api');
 
 /*
- * @TODO This extension path is hardcoded to the env default (./extensions). This won't work
+ * @TODO This registry root is hardcoded to the api's (./extensions). This won't work
  * as expected when extensions are read from a different location locally through the
  * EXTENSIONS_LOCATION env var
  */
-const EXTENSIONS_PATH = path.join(API_PATH, 'extensions');
+const REGISTRY_ROOT_PATH = path.join(API_PATH, 'extensions');
 
-const extensionsPathExists = fs.existsSync(EXTENSIONS_PATH);
+const registryRootExists = fs.existsSync(REGISTRY_ROOT_PATH);
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -53,10 +54,10 @@ export default defineConfig({
 		__VUE_I18N_LEGACY_API__: false,
 	},
 	resolve: {
-		alias: [{ find: '@', replacement: path.resolve(__dirname, 'src') }],
+		alias: [{ find: '@', replacement: path.resolve(import.meta.dirname, 'src') }],
 	},
 	base: process.env.NODE_ENV === 'production' ? '' : '/admin',
-	...(!process.env.HISTOIRE && {
+	...(!process.env.POVESTE && {
 		server: {
 			port: 8080,
 			proxy: {
@@ -70,34 +71,22 @@ export default defineConfig({
 				},
 			},
 			fs: {
-				allow: [searchForWorkspaceRoot(process.cwd()), ...getExtensionsRealPaths()],
+				allow: [searchForWorkspaceRoot(process.cwd())],
 			},
 		},
 	}),
 	test: {
+		maxWorkers: VITEST_MAX_WORKERS,
 		environment: 'happy-dom',
 		deps: {
 			optimizer: {
-				web: {
+				client: {
 					exclude: ['pinia', 'url'],
 				},
 			},
 		},
 	},
 });
-
-function getExtensionsRealPaths() {
-	return extensionsPathExists
-		? fs
-				.readdirSync(EXTENSIONS_PATH)
-				.flatMap((typeDir) => {
-					const extensionTypeDir = path.join(EXTENSIONS_PATH, typeDir);
-					if (!fs.statSync(extensionTypeDir).isDirectory()) return;
-					return fs.readdirSync(extensionTypeDir).map((dir) => fs.realpathSync(path.join(extensionTypeDir, dir)));
-				})
-				.filter((v) => v)
-		: [];
-}
 
 function directusExtensions() {
 	const virtualExtensionsId = '@directus-extensions';
@@ -134,7 +123,7 @@ function directusExtensions() {
 				build: {
 					rollupOptions: {
 						input: {
-							index: path.resolve(__dirname, 'index.html'),
+							index: path.resolve(import.meta.dirname, 'index.html'),
 							...APP_SHARED_DEPS.reduce((acc, dep) => ({ ...acc, [dep.replace(/\//g, '_')]: dep }), {}),
 						},
 						output: {
@@ -149,11 +138,10 @@ function directusExtensions() {
 	];
 
 	async function loadExtensions() {
-		const localExtensions = extensionsPathExists ? await resolveFsExtensions(EXTENSIONS_PATH) : new Map();
 		const moduleExtensions = await resolveModuleExtensions(API_PATH);
 
-		const registryExtensions = extensionsPathExists
-			? await resolveFsExtensions(path.join(EXTENSIONS_PATH, '.registry'))
+		const registryExtensions = registryRootExists
+			? await resolveFsExtensions(path.join(REGISTRY_ROOT_PATH, '.registry'))
 			: new Map();
 
 		const mockSetting = (source, folder, extension) => {
@@ -183,9 +171,6 @@ function directusExtensions() {
 
 		// default to enabled for app extension in developer mode
 		const extensionSettings = [
-			...Array.from(localExtensions.entries()).flatMap(([folder, extension]) =>
-				mockSetting('local', folder, extension),
-			),
 			...Array.from(moduleExtensions.entries()).flatMap(([folder, extension]) =>
 				mockSetting('module', folder, extension),
 			),
@@ -195,7 +180,7 @@ function directusExtensions() {
 		];
 
 		extensionsEntrypoint = generateExtensionsEntrypoint(
-			{ module: moduleExtensions, local: localExtensions, registry: registryExtensions },
+			{ module: moduleExtensions, registry: registryExtensions },
 			extensionSettings,
 		);
 	}

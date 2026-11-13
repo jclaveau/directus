@@ -1,6 +1,7 @@
 import type { ProcessDetail, ProcessRuntimeStats } from '@directus/types';
 import { hostname } from 'node:os';
 import { useBus } from '../../bus/index.js';
+import { resolveCoreBuildId } from '../../core-build-id.js';
 import { useLogger } from '../../logger/index.js';
 import { nodeId } from '../../utils/node-id.js';
 import {
@@ -57,7 +58,8 @@ async function reportSelf(query: ProcessesQueryMessage): Promise<void> {
 	// asked for — a caller narrows what is said about each process, it cannot
 	// remove the spine they are listed on. The size this parameter exists to save
 	// is the env, which is per process and stays narrowable.
-	const reportsSupervisor = allowed.includes('stats');
+	const reportsSupervisor = allowed.includes('stats')
+		&& query.nodeBuildOnly !== true;
 
 	const message: ProcessesReportMessage = {
 		requestId: query.requestId,
@@ -82,6 +84,7 @@ async function reportSelf(query: ProcessesQueryMessage): Promise<void> {
 			// Answered whatever was asked for: it is one small object, and it is
 			// the only channel the process that resizes the pool has.
 			autoscale: autoscaleState(),
+			coreBuildId: resolveCoreBuildId(),
 		},
 		// Every supervised process attaches the container-wide `pm2 list` and the
 		// collector keeps one copy per replica. Electing a single reporter by

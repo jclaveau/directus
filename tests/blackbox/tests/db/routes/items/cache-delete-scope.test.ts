@@ -5,7 +5,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -65,7 +65,7 @@ describe(oneLine`
 				}),
 			});
 
-			// Independent seeds → one round-trip. Capture the charge PKs to delete later.
+			// Independent seeds → one round-trip. Snapshot the charge PKs to delete later.
 			const [charges] = await Promise.all([
 				CreateItem(vendor, {
 					collection: CHARGE,
@@ -87,7 +87,7 @@ describe(oneLine`
 				(charge: { id: number }) => charge.id,
 			);
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {

@@ -3,6 +3,7 @@ import { ServiceUnavailableError } from '@directus/errors';
 import knex, { type Knex } from 'knex';
 import { createTracker, MockClient, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CacheSettingField } from './cache-settings.js';
 import {
 	auditCache,
 	type CacheAuditFinding,
@@ -26,7 +27,7 @@ vi.mock('./cache-audit.js', () => {
 		CACHE_AUDIT_VERDICTS: [
 			'fresh',
 			'stale',
-			'tag_drift',
+			'pin_drift',
 			'raced',
 			'time_varying',
 			'expired',
@@ -38,9 +39,22 @@ vi.mock('./cache-audit.js', () => {
 const env = vi.hoisted(() => ({}) as Record<string, unknown>);
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
+const cacheLayer = vi.hoisted(() => ({}) as Record<string, unknown>);
+
+vi.mock('./cache-settings.js', async (importOriginal) => {
+	const original = await importOriginal<typeof import('./cache-settings.js')>();
+
+	return {
+		...original,
+		cacheSetting: (field: CacheSettingField) => {
+			return cacheLayer[field] ?? original.cacheSetting(field);
+		},
+	};
+});
+
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
 
-// The in-flight claim: a Keyv with a TTL, as the lock cache is.
+// The in-flight claim: a Keyv with a TTL, as the memory lock cache is.
 const lockCache = vi.hoisted(() => {
 	const held = new Map<string, unknown>();
 
@@ -55,6 +69,13 @@ const lockCache = vi.hoisted(() => {
 });
 
 vi.mock('./cache.js', () => ({ getCache: () => ({ lockCache }) }));
+
+vi.mock('node:crypto', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('node:crypto')>(),
+		randomUUID: () => 'run-1',
+	};
+});
 
 import getDatabase from './database/index.js';
 
@@ -71,6 +92,7 @@ beforeEach(() => {
 	delete env['CACHE_AUDIT_LIMIT'];
 	delete env['CACHE_AUDIT_MAX_DURATION'];
 	delete env['CACHE_STORE'];
+	delete cacheLayer['audit_limit'];
 	env['CACHE_AUDIT_ENABLED'] = true;
 	lockCache.held.clear();
 	vi.mocked(getDatabase).mockReturnValue(db);
@@ -95,8 +117,8 @@ const finding: CacheAuditFinding = {
 	collection: 'articles',
 	filledAt: 1_699_999_990_000,
 	ageMs: 10_000,
-	tags: ['articles', 'articles:1'],
-	replayTags: ['articles'],
+	pins: ['articles', 'articles:1'],
+	replayPins: ['articles'],
 	diff: ['/data/0/title'],
 	purgesSinceFilled: [],
 };
@@ -106,13 +128,13 @@ const report: CacheAuditReport = {
 	counts: {
 		fresh: 1,
 		stale: 1,
-		tag_drift: 1,
+		pin_drift: 1,
 		raced: 0,
 		time_varying: 0,
 		expired: 0,
 		unreplayable: 0,
 	},
-	findings: [finding, { ...finding, verdict: 'tag_drift', diff: null }],
+	findings: [finding, { ...finding, verdict: 'pin_drift', diff: null }],
 	evicted: 2,
 	durationMs: 120,
 	timedOut: false,
@@ -128,7 +150,7 @@ function runRow(overrides: Record<string, unknown> = {}) {
 		scanned: 3,
 		fresh: 1,
 		stale: 1,
-		tag_drift: 1,
+		pin_drift: 1,
 		raced: 0,
 		time_varying: 0,
 		expired: 0,
@@ -161,6 +183,7 @@ describe('startCacheAuditRun', () => {
 				user: null,
 				collection: 'articles',
 				purge: true,
+				maxDurationMs: null,
 			}),
 			new Date(1_700_000_000_000),
 			'cli',
@@ -213,7 +236,7 @@ describe('finishCacheAuditRun', () => {
 		// Both findings in one statement, the JSON columns serialised.
 		expect(insert!.bindings).toContain(JSON.stringify(['articles', 'articles:1']));
 		expect(insert!.bindings).toContain(JSON.stringify(['/data/0/title']));
-		expect(insert!.bindings).toContain('tag_drift');
+		expect(insert!.bindings).toContain('pin_drift');
 		expect(insert!.bindings).toContainEqual(new Date(1_699_999_990_000));
 		expect(insert!.bindings.filter((b) => b === 7)).toHaveLength(2);
 
@@ -255,6 +278,7 @@ describe('runCacheAudit', () => {
 	`, async () => {
 		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
 		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.select('directus_cache_audits').response([]);
 		tracker.on.insert('directus_cache_audit_findings').response([]);
 		tracker.on.delete('directus_cache_audits').response(0);
 		vi.mocked(auditCache).mockResolvedValue(report);
@@ -268,9 +292,22 @@ describe('runCacheAudit', () => {
 			maxDurationMs: 600_000,
 		});
 
-		expect(tracker.history.insert[0]!.bindings).toContain('mcp');
-		// The close, then the orphan sweep; then the history is pruned.
-		expect(tracker.history.update).toHaveLength(2);
+		expect(tracker.history.insert[0]!.bindings).toEqual([
+			JSON.stringify({
+				limit: 5,
+				user: null,
+				collection: null,
+				purge: false,
+				maxDurationMs: 600_000,
+			}),
+			new Date(1_700_000_000_000),
+			'mcp',
+		]);
+
+		// The close, then the open runs read for the orphan sweep; then the
+		// history is pruned.
+		expect(tracker.history.update).toHaveLength(1);
+		expect(tracker.history.select).toHaveLength(1);
 		expect(tracker.history.delete).toHaveLength(1);
 	});
 
@@ -304,10 +341,11 @@ describe('runCacheAudit', () => {
 		});
 
 		vi.mocked(auditCache).mockImplementation(async () => {
-			expect(lockCache.held.get('cache-audit:run')).toBe(1_700_000_000_000);
+			expect(lockCache.held.get('cache-audit:run')).toBe('1700000000000:run-1');
 			expect(lockCache.set).toHaveBeenCalledTimes(1);
 
-			vi.advanceTimersByTime(90_000);
+			// Each renewal reads the claim before it writes it.
+			await vi.advanceTimersByTimeAsync(90_000);
 
 			expect(lockCache.set).toHaveBeenCalledTimes(4);
 
@@ -333,7 +371,7 @@ describe('runCacheAudit', () => {
 		});
 
 		expect(lockCache.set)
-			.toHaveBeenCalledWith('cache-audit:run', 1_700_000_000_000, 120_000);
+			.toHaveBeenCalledWith('cache-audit:run', '1700000000000:run-1', 120_000);
 
 		expect(lockCache.delete).toHaveBeenCalledWith('cache-audit:run');
 		expect(lockCache.held.has('cache-audit:run')).toBe(false);
@@ -344,7 +382,7 @@ describe('runCacheAudit', () => {
 	});
 
 	it('refuses a run while another is in flight, before any row', async () => {
-		lockCache.held.set('cache-audit:run', 1_699_999_940_000);
+		lockCache.held.set('cache-audit:run', '1699999940000:run-2');
 
 		await expect(runCacheAudit('rest')).rejects.toThrow(
 			'a cache audit is already running, since 2023-11-14T22:12:20.000Z',
@@ -354,6 +392,75 @@ describe('runCacheAudit', () => {
 		expect(tracker.history.insert).toHaveLength(0);
 		// The refused ask leaves the claim to the run that holds it.
 		expect(lockCache.delete).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		refuses, since the time it was taken, a claim a node of an older build holds
+		as the Keyv value of its start
+	`, async () => {
+		lockCache.held.set('cache-audit:run', 1_699_999_940_000);
+
+		await expect(runCacheAudit('rest')).rejects.toThrow(
+			'a cache audit is already running, since 2023-11-14T22:12:20.000Z',
+		);
+	});
+
+	it(oneLine`
+		refuses, since the time it was taken, a claim a node of an older build holds
+		as that Keyv value read raw from Redis
+	`, async () => {
+		lockCache.held.set(
+			'cache-audit:run',
+			'{"value":1699999940000,"expires":1700000060000}',
+		);
+
+		await expect(runCacheAudit('rest')).rejects.toThrow(
+			'a cache audit is already running, since 2023-11-14T22:12:20.000Z',
+		);
+	});
+
+	it('refuses without a start a claim whose start it cannot read', async () => {
+		lockCache.held.set('cache-audit:run', '{not json');
+
+		await expect(runCacheAudit('rest')).rejects.toThrow(
+			'Service "cache-audit" is unavailable. a cache audit is already running.',
+		);
+	});
+
+	it(oneLine`
+		leaves the claim another run took once its own lapsed, rather than
+		dropping it as the run ends
+	`, async () => {
+		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.insert('directus_cache_audit_findings').response([]);
+		tracker.on.delete('directus_cache_audits').response(0);
+
+		vi.mocked(auditCache).mockImplementation(async () => {
+			lockCache.held.set('cache-audit:run', '1700000060000:run-2');
+
+			return report;
+		});
+
+		await runCacheAudit('rest');
+
+		expect(lockCache.held.get('cache-audit:run')).toBe('1700000060000:run-2');
+	});
+
+	it(oneLine`
+		runs, and records the run, when the claim cannot be asked for — Redis
+		down is the run's failure to record
+	`, async () => {
+		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.insert('directus_cache_audit_findings').response([]);
+		tracker.on.delete('directus_cache_audits').response(0);
+		lockCache.get.mockRejectedValueOnce(new Error('Connection is closed.'));
+		vi.mocked(auditCache).mockResolvedValue(report);
+
+		await runCacheAudit('rest');
+
+		expect(tracker.history.insert[0]!.sql).toMatch(/directus_cache_audits/);
 	});
 
 	it(oneLine`
@@ -392,6 +499,21 @@ describe('runCacheAudit', () => {
 
 		expect(JSON.parse(tracker.history.insert[0]!.bindings[0] as string))
 			.toMatchObject({ limit: 250 });
+	});
+
+	it('slices by the cache layer over CACHE_AUDIT_LIMIT', async () => {
+		env['CACHE_AUDIT_LIMIT'] = 250;
+		cacheLayer['audit_limit'] = 40;
+		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.insert('directus_cache_audit_findings').response([]);
+		tracker.on.delete('directus_cache_audits').response(0);
+		vi.mocked(auditCache).mockResolvedValue(report);
+
+		await runCacheAudit('cron');
+
+		expect(auditCache)
+			.toHaveBeenCalledWith(expect.objectContaining({ limit: 40 }));
 	});
 
 	it(oneLine`
@@ -433,6 +555,7 @@ describe('runCacheAudit', () => {
 	`, async () => {
 		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
 		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.select('directus_cache_audits').response([]);
 		tracker.on.delete('directus_cache_audits').response(0);
 		vi.mocked(auditCache).mockRejectedValue(new Error('redis is away'));
 
@@ -453,13 +576,14 @@ describe('runCacheAudit', () => {
 		tracker.on.insert('directus_cache_audit_findings')
 			.simulateError('disk full');
 
+		tracker.on.select('directus_cache_audits').response([]);
 		tracker.on.delete('directus_cache_audits').response(0);
 		vi.mocked(auditCache).mockResolvedValue(report);
 
 		await expect(runCacheAudit('rest')).rejects.toThrow('disk full');
 
-		// The close's update, then the failure's, then the orphan sweep.
-		expect(tracker.history.update).toHaveLength(3);
+		// The close's update, then the failure's.
+		expect(tracker.history.update).toHaveLength(2);
 
 		expect(tracker.history.update[1]!.bindings)
 			.toContainEqual(expect.stringContaining('disk full'));
@@ -470,7 +594,7 @@ describe('runCacheAudit', () => {
 
 describe('isCacheAuditInFlight', () => {
 	it('tells the refusal for a run in flight from any other failure', async () => {
-		lockCache.held.set('cache-audit:run', 1_699_999_940_000);
+		lockCache.held.set('cache-audit:run', '1699999940000:run-2');
 
 		const refused = await runCacheAudit('rest').catch((error) => error);
 
@@ -501,7 +625,7 @@ describe('listCacheAuditRuns', () => {
 				counts: {
 					fresh: 1,
 					stale: 1,
-					tag_drift: 1,
+					pin_drift: 1,
 					raced: 0,
 					time_varying: 0,
 					expired: 0,
@@ -570,7 +694,17 @@ describe('listCacheAuditRuns', () => {
 
 	it('leaves an open run alone while its claim is held', async () => {
 		env['CACHE_STORE'] = 'redis';
-		lockCache.held.set('cache-audit:run', 1_699_999_999_000);
+		lockCache.held.set('cache-audit:run', '1699999999000:run-2');
+		tracker.on.select('directus_cache_audits').response([]);
+
+		await listCacheAuditRuns();
+
+		expect(tracker.history.update).toHaveLength(0);
+	});
+
+	it('leaves an open run alone while its claim cannot be read', async () => {
+		env['CACHE_STORE'] = 'redis';
+		lockCache.get.mockRejectedValueOnce(new Error('Connection is closed.'));
 		tracker.on.select('directus_cache_audits').response([]);
 
 		await listCacheAuditRuns();
@@ -661,8 +795,8 @@ describe('readCacheAuditFindings', () => {
 				collection: 'articles',
 				filled_at: new Date(1_699_999_990_000),
 				age_ms: 10_000,
-				tags: JSON.stringify(['articles', 'articles:1']),
-				replay_tags: ['articles'],
+				pins: JSON.stringify(['articles', 'articles:1']),
+				replay_pins: ['articles'],
 				diff: JSON.stringify(['/data/0/title']),
 				purges_since_filled: '[]',
 			},
@@ -680,8 +814,8 @@ describe('readCacheAuditFindings', () => {
 				collection: null,
 				filled_at: new Date(1_699_999_990_000),
 				age_ms: 10_000,
-				tags: '[]',
-				replay_tags: null,
+				pins: '[]',
+				replay_pins: null,
 				diff: null,
 				purges_since_filled: null,
 			},
@@ -705,8 +839,8 @@ describe('readCacheAuditFindings', () => {
 				collection: null,
 				filledAt: 1_699_999_990_000,
 				ageMs: 10_000,
-				tags: [],
-				replayTags: null,
+				pins: [],
+				replayPins: null,
 				diff: null,
 				purgesSinceFilled: null,
 			},
@@ -721,6 +855,66 @@ describe('readCacheAuditFindings', () => {
 		expect(count!.bindings).toEqual([7, 1]);
 	});
 
+	it('reads a pre-20260924B purge record\'s scopedCacheTag as its pin', async () => {
+		tracker.on.select('count("id") as "total"').response([{ total: 1 }]);
+
+		tracker.on.select('directus_cache_audit_findings').response([
+			{
+				id: 1,
+				audit: 7,
+				verdict: 'stale',
+				reason: null,
+				redis_key: 'abc',
+				cache_key: 'abc',
+				method: 'GET',
+				url: '/items/articles',
+				query: '',
+				user_id: null,
+				collection: 'articles',
+				filled_at: new Date(1_699_999_990_000),
+				age_ms: 10_000,
+				pins: '[]',
+				replay_pins: null,
+				diff: null,
+				purges_since_filled: JSON.stringify([
+					{
+						time: 5,
+						mode: 'slices',
+						collection: 'articles',
+						scopedCacheTag: 'articles:id=7',
+						evicted: 1,
+					},
+					{
+						time: 6,
+						mode: 'slices',
+						collection: 'articles',
+						scopedCachePin: 'articles:id=8',
+						evicted: 2,
+					},
+				]),
+			},
+		]);
+
+		const page = await readCacheAuditFindings(7, { limit: 100, offset: 0 });
+
+		expect(page.findings[0]!.purgesSinceFilled).toEqual([
+			{
+				time: 5,
+				mode: 'slices',
+				collection: 'articles',
+				scopedCachePin: 'articles:id=7',
+				evicted: 1,
+			},
+			{
+				time: 6,
+				mode: 'slices',
+				collection: 'articles',
+				scopedCachePin: 'articles:id=8',
+				evicted: 2,
+			},
+		]);
+	});
+
 	it('walks the findings by offset, keeping to one verdict when asked', async () => {
 		tracker.on.select('count("id") as "total"').response([{ total: 0 }]);
 		tracker.on.select('directus_cache_audit_findings').response([]);
@@ -728,21 +922,21 @@ describe('readCacheAuditFindings', () => {
 		const page = await readCacheAuditFindings(7, {
 			limit: 10,
 			offset: 30,
-			verdict: 'tag_drift',
+			verdict: 'pin_drift',
 		});
 
 		expect(page).toEqual({ findings: [], findingsTotal: 0 });
 
 		const [rows, count] = tracker.history.select;
 		expect(rows!.sql).toContain('"verdict" = ?');
-		expect(rows!.bindings).toEqual([7, 'tag_drift', 10, 30]);
-		expect(count!.bindings).toEqual([7, 'tag_drift', 1]);
+		expect(rows!.bindings).toEqual([7, 'pin_drift', 10, 30]);
+		expect(count!.bindings).toEqual([7, 'pin_drift', 1]);
 	});
 });
 
 describe('reapCacheAuditRuns', () => {
 	it('drops the runs started before retention, 30 days by default', async () => {
-		tracker.on.update('directus_cache_audits').response(0);
+		tracker.on.select('directus_cache_audits').response([]);
 		tracker.on.delete('directus_cache_audits').response(3);
 
 		expect(await reapCacheAuditRuns()).toBe(3);
@@ -756,25 +950,89 @@ describe('reapCacheAuditRuns', () => {
 		process died, before pruning
 	`, async () => {
 		env['CACHE_AUDIT_MAX_DURATION'] = '10m';
+
+		tracker.on.select('directus_cache_audits').response([
+			{
+				id: 4,
+				started_at: new Date(1_700_000_000_000 - 2 * 600_000 - 3_600_001),
+				options: '{"limit":null,"user":null,"collection":null,"purge":false}',
+			},
+			{
+				id: 5,
+				started_at: new Date(1_700_000_000_000 - 60_000),
+				options: '{"limit":null,"user":null,"collection":null,"purge":false}',
+			},
+		]);
+
 		tracker.on.update('directus_cache_audits').response(1);
 		tracker.on.delete('directus_cache_audits').response(0);
 
 		await reapCacheAuditRuns();
 
-		const [sweep] = tracker.history.update;
-
-		expect(sweep!.sql).toMatch(/finished_at. is null/);
-
-		expect(sweep!.bindings).toEqual([
+		expect(tracker.history.update[0]!.bindings).toEqual([
 			new Date(1_700_000_000_000),
 			'The run did not finish: its process died',
-			new Date(1_700_000_000_000 - 2 * 600_000 - 3_600_000),
+			4,
+		]);
+	});
+
+	it(oneLine`
+		leaves open a run still inside the budget it started with, though the
+		budget was lowered since
+	`, async () => {
+		env['CACHE_AUDIT_MAX_DURATION'] = '10m';
+
+		tracker.on.select('directus_cache_audits').response([
+			{
+				id: 6,
+				started_at: new Date(1_700_000_000_000 - 7_200_000),
+				options: oneLine`
+					{"limit":null,"user":null,"collection":null,"purge":false,
+					"maxDurationMs":86400000}
+				`,
+			},
+		]);
+
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.delete('directus_cache_audits').response(0);
+
+		await reapCacheAuditRuns();
+
+		expect(tracker.history.update).toEqual([]);
+	});
+
+	it(oneLine`
+		closes a run past the budget it started with, though the budget was
+		raised since
+	`, async () => {
+		env['CACHE_AUDIT_MAX_DURATION'] = '24h';
+
+		tracker.on.select('directus_cache_audits').response([
+			{
+				id: 7,
+				started_at: new Date(1_700_000_000_000 - 2 * 60_000 - 3_600_001),
+				options: oneLine`
+					{"limit":null,"user":null,"collection":null,"purge":false,
+					"maxDurationMs":60000}
+				`,
+			},
+		]);
+
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.delete('directus_cache_audits').response(0);
+
+		await reapCacheAuditRuns();
+
+		expect(tracker.history.update[0]!.bindings).toEqual([
+			new Date(1_700_000_000_000),
+			'The run did not finish: its process died',
+			7,
 		]);
 	});
 
 	it('takes CACHE_AUDIT_RETENTION', async () => {
 		env['CACHE_AUDIT_RETENTION'] = '2h';
-		tracker.on.update('directus_cache_audits').response(0);
+		tracker.on.select('directus_cache_audits').response([]);
 		tracker.on.delete('directus_cache_audits').response(0);
 
 		await reapCacheAuditRuns();

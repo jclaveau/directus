@@ -1,6 +1,5 @@
-// Local ambient declarations for the esbuild-yaml plugin's `*.yaml` imports.
-// esbuild-yaml v3.2 dropped the `esbuild-yaml/types` subpath; declaring locally keeps
-// type-checking working across versions without depending on the package's types path.
+// Ambient declarations for the `*.yaml` imports unplugin-yaml resolves at
+// build time, so type-checking does not lean on the plugin's own types path.
 declare module '*.yaml' {
 	const value: Record<string, unknown>;
 	export default value;

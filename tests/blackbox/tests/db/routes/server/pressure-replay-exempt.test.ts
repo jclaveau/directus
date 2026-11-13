@@ -2,7 +2,7 @@ import config, { paths, type Env } from '@common/config';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { sleep } from '@utils/sleep';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import { createHmac } from 'node:crypto';
 import request from 'supertest';
@@ -27,7 +27,7 @@ describe('/server under pressure', () => {
 			env[vendor]['PRESSURE_LIMITER_SAMPLE_INTERVAL'] = '50';
 			env[vendor]['PRESSURE_LIMITER_MAX_MEMORY_RSS'] = '1';
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 			ports[vendor] = port;
 

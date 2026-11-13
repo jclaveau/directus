@@ -1,8 +1,8 @@
-import * as http from 'http';
+import * as http from 'node:http';
 import { useEnv } from '@directus/env';
 import { describe, expect, test, vi } from 'vitest';
 import { getAddress } from './get-address.js';
-import type { ListenOptions } from 'net';
+import type { ListenOptions } from 'node:net';
 import getPort from 'get-port';
 
 vi.mock('@directus/env');

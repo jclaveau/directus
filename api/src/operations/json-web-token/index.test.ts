@@ -4,6 +4,9 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import config from './index.js';
 
 beforeEach(() => {
+	// Spying a method that is already spied returns the standing spy, calls and
+	// all, so each test starts by putting the original back.
+	vi.restoreAllMocks();
 	vi.spyOn(jwt, 'sign');
 	vi.spyOn(jwt, 'verify');
 	vi.spyOn(jwt, 'decode');

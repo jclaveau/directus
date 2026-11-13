@@ -1,0 +1,117 @@
+---
+name: project_directus_pr694_action_hold_ruling
+description: PR #694 (default mutationBatching -> preserveMutationOrder) autoreview — jean's ruling that action hooks NEVER fire for a rolled-back mutation, the audited early-emit sites, and the singular-write-flows flake
+metadata:
+  author: Jean Claveau
+  type: project
+---
+
+**Ruled 2026-11-07 (finding 4, predates the flip):** action events must never fire when the
+mutation was cancelled/rolled back. MERGED 2026-11-07 as d2a0022175, fix in d002605a86: services
+holding events go through `api/src/utils/transaction-holding-actions.ts`, which empties the
+list at each attempt and on failure. Left out: `apply-diff.ts` retry, filed as #610 point 16.
+
+Seen, predates, not fixed: an import hangs if its queue drains before the stream's `end`
+registers `drain` (CSV with an instant mock timed out at 5000ms).
+
+Defect probe: `upsertMany([{id:1,name:'uno'},{id:1,name:'boom'}])` with an update filter
+throwing `boom refused` → update action fired with `[{data:{name:'uno'},keys:[1]}]`, row
+unchanged. Cause: `bypassEmitAction` in `upsertMany` is only set for `disableBatching`.
+
+**Audited sites (what the fix must cover):**
+- `items.ts` `upsertMany`: make the bypass unconditional; `upsertRun`'s own
+  `segmentActionEvents` buffer becomes dead → remove, fix docblock.
+- `createRowByRow`: `rowActionEvents` declared OUTSIDE the transaction handler (TODO #610) →
+  a retried attempt fires the aborted attempt's events; declare in handler, return it
+  (like `updateGroupByGroup`).
+- `roles.ts` `deleteMany`: five sub-calls emit inside the transaction → hold like
+  `UsersService.deleteMany`, emit after commit.
+- `collections/fields/relations`: emit held events inside `finally` → fire even when the
+  transaction failed (13 sites). `extensions.updateOne` emits inside trx too.
+- Bound for PR risks: a caller-supplied knex trx gets actions after the service savepoint;
+  only `bypassEmitAction` can hold them past a later caller rollback.
+
+**Revision parents moved by the flip** (`{keys:[1,3],parent:4}` → `{keys:[1,2],parent:4}`)
+are consistent, not regenerated noise. Raw-SQL-order refusal (`upsertMany([{id:3,name:'one'},
+{id:1,name:'uno'}])` → RecordNotUniqueError) is the intended break.
+
+**Flake, cause unknown:** blackbox `singular-write-flows` request 1 `directus_operations`
+select 3 vs 2 — failed 2 of 5 attempts on #694, both passed `gh run rerun --failed`. Candidate
+(unverified): background flow reload after the preceding `POST /operations`
+(`flows.ts:181-185`). Not in #694's diff; flip timing effect not excluded.
+
+Autoreview comment: pull/694#issuecomment-6705961785 (100%, 81/81 at dd58a1bc75). CodeRabbit
+does not review this repo. Related: [[project_directus_pr686_batched_m2o_a2o]],
+[[feedback_directus_default_matches_dbms]].
+
+**Follow-up review of d002605a86 (2026-11-07, branch `v11.10.1-fix/action-hold-review`, new PR
+into hhh-dev, never merge):** #694 merged at 7.1% autoreviewed (see
+[[feedback_autoreview_percent_before_merge]]), so `dd58a1bc75..d002605a86` was reviewed after.
+Verified: activity/revision writes (`items.ts` createMany/recordUpdatedRows/deleteMany) fired
+inside the trx → now held; `fields.ts` `createField` was the one site left on plain
+`transaction` → `transactionHoldingActions`. Choices left to jean: `roles.ts` `clearCaches()`
+before emit loses held actions when Redis fails (same `finally` class in collections/fields/
+relations, predates); emit awaited before scoped purge; caller-trx failed-upsert `.catch`
+drops actions; roles cascade actions now `Promise.all` (PR-risk line).
+Dropped as not-a-bug: versions.ts/flows.ts (no trx), fields.ts:559 alterTable.
+sqlite/cockroach points → #610 from point 17 (updateBatch `['a','a','b']`, import retry over a
+consumed stream).
+
+**Result (2026-11-07):** fixes in PR #695 (`Refs #694`, not merged); full table and the open choices
+(items 7-11) in the autoreview comment on #694. Item 6 is withheld: see `~/.agents/parked/`, never
+detail it in this public repo. #610 points 17 and 18 filed.
+
+**Flake again on #695 (2026-11-07):** same family, other scenario: `singular-write-flows` "A single
+flow is loaded as it is created", request 3 `directus_operations` select 4 vs 3, shard 5, run
+42372465544; passed on `gh run rerun --failed`. Still no cause.
+
+**Autoreview of #695 (2026-11-07, head 68975afab6, not merged):** open choices 2 (activity/revision
+actions silent under `emitEvents: false`, real on `POST /files`, replacement upload, TUS; rec fire
+them) and 3 (revision snapshot `readMany` fires `<collection>.items.read`, also on rollback; rec
+pass `emitEvents: false`). "Only its `bypassEmitAction` can hold them" was checked and is correct.
+Item 1 is withheld: see `~/.agents/parked/`. #610 point 19 filed.
+
+**Ruled 2026-11-07 on #695's choices, applied in 26741cea0e:** activity and revision actions fire
+whatever `emitEvents` says: tooling, not business events (filter option tracked by #696). An update's
+revision snapshot reads with `emitEvents: false`; consequence: a read filter hook no longer shapes
+`directus_revisions.data`.
+
+**Vocabulary (jean):** one `<collection>.items.read` listener fires twice on a PATCH: the
+**mutation read hook** (revision snapshot `readMany`, inside the trx) and the **response read
+hook** (controller `readOne`, after COMMIT). Choice 3A removes only the mutation read hook.
+
+**3A confirmed 2026-11-07 after these points (do not re-raise):** not a leak: `delta` (update) and
+`data`+`delta` (create) come from `prepareDelta(payload)`, never a read hook, so a masking read hook
+never protected revisions; `conceal` (`processValues('read')`) masks both. A response read hook
+answering `null` now gives a 500 on a committed write (was ROLLBACK): only a hook already failing
+every GET hits it; pinned by blackbox `read-hook-null.test.ts` (ef802be6c3).
+
+**Autoreview rerun of #695 after 3A (2026-11-07, 8839c4f97c, 100% autoreviewed, comment issuecomment-6713825761):** "activity actions fire whatever
+`emitEvents` says" made the `directus_fields` row's `activity.create` (sub-calls with
+`emitEvents: false` in `createField`/`updateField`/`deleteField`) fire before the field's commit
+and past `apply-diff`'s hold → fixed: those sub-calls pass a `bypassEmitAction` forwarding to the
+caller's or to `nestedActionEvents`. Any new `emitEvents: false` sub-write under accountability
+needs the same. Left as a choice: `deleteByQuery`'s `getKeysByQuery` ignores `emitEvents` (mutation
+read hook fires; rec A = pass the caller's flag, not always-false, which would change deleted rows).
+
+**Ruled 2026-11-08:** `deleteByQuery` key read → A (pass the caller's `emitEvents`, default true),
+applied in 28e0aa6d92. `updateByQuery` has the same unflagged `getKeysByQuery` call: not ruled.
+#686 merges after #695.
+
+**Ruled 2026-11-08 (#694 follow-ups, to fix inside #695, test first):** 7 → B (`try`/`finally`
+around the cache clear at every site: a committed write always fires its actions, a rolled-back
+one keeps its own 400; 14 sites); 8 → A (scoped purge BEFORE awaiting the action hooks, so a slow
+hook cannot serve a stale HIT). Items 9-11 not answered separately. Order chosen: crash fix PR,
+then 8, then 7.
+
+**Item 8 scope found 2026-11-08:** the bug was NOT only upsertMany (items.ts ~3682): `createMany`
+(emit ~1118, purge ~1150) had it too; update and delete already purged first. Fixed both by moving
+the purge block above the emit, one red test per site (each site alone turns its own test red).
+Item 7: 14 identical `finally` blocks (collections 7, fields 4, relations 3) + roles.ts; collections'
+ForbiddenError checks sit before `try`, so they never reach the `finally`.
+
+**Applied 2026-11-08:** item 8 in d0b6364c8a, item 7 in 2192abb1ca
+(`api/src/utils/clear-caches-then-fire-actions.ts`; each service's 14 `finally` bodies → one
+private `clearCachesThenFireNestedActions`; a `mutationFailed` catch flag decides rethrow vs log
+of the clear error). JS `finally` cannot see a pending error, hence the flag. Crash fix = public
+PR #698 (upstream warning parked in `~/.agents/parked/`).

@@ -1,0 +1,14 @@
+{
+	"name": "code-entries-probe",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"directus:extension": {
+		"type": "bundle",
+		"path": {
+			"app": "app.mjs",
+			"api": "api.mjs"
+		},
+		"host": "^10.10.0"
+	}
+}

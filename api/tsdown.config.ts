@@ -10,7 +10,7 @@ const coverage = Boolean(process.env['COVERAGE_DIR']);
 // code-only deploy from the next even when directus/version is pinned on the
 // fork's version line. Prefer a CI/platform commit, else read it from git; empty
 // when neither is available (a tarball build with no .git), where the runtime
-// fallback chain in cache-build-identity.ts takes over.
+// fallback chain in core-build-id.ts takes over.
 function resolveBuildCommit(): string {
 	const provided =
 		process.env['SOURCE_COMMIT'] ??

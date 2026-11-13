@@ -4,12 +4,15 @@ import { toArray, toBoolean } from '@directus/utils';
 import { version } from 'directus/version';
 import type { Knex } from 'knex';
 import { Readable } from 'node:stream';
-import { performance } from 'perf_hooks';
+import { performance } from 'node:perf_hooks';
 import { getCache } from '../cache.js';
 import { RESUMABLE_UPLOADS } from '../constants.js';
 import getDatabase, { hasDatabaseConnection } from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import getMailer from '../mailer.js';
+import {
+	isMarketplaceEnabled,
+} from '../middleware/refuse-extension-change-in-production.js';
 import { rateLimiterGlobal } from '../middleware/rate-limiter-global.js';
 import { rateLimiter } from '../middleware/rate-limiter-ip.js';
 import { outstandingMigrationsHoldingHealth } from '../outstanding-migrations.js';
@@ -22,6 +25,7 @@ import { getStorage } from '../storage/index.js';
 import { getAllowedLogLevels } from '../utils/get-allowed-log-levels.js';
 import { merge } from '../utils/lodash-es-used.js';
 import { SettingsService } from './settings.js';
+import { responseCacheWanted } from '../cache-settings.js';
 
 const env = useEnv();
 const logger = useLogger();
@@ -88,6 +92,7 @@ export class ServerService {
 
 			info['extensions'] = {
 				limit: env['EXTENSIONS_LIMIT'] ?? null,
+				marketplace: isMarketplaceEnabled(),
 			};
 
 			info['queryLimit'] = {
@@ -328,7 +333,7 @@ export class ServerService {
 		}
 
 		async function testCache(): Promise<Record<string, HealthCheck[]>> {
-			if (env['CACHE_ENABLED'] !== true) {
+			if (responseCacheWanted() === false) {
 				return {};
 			}
 

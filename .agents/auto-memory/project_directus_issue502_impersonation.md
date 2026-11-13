@@ -1,5 +1,5 @@
 ---
-name: project-directus-issue502-impersonation
+name: project_directus_issue502_impersonation
 description: Issue #502 impersonation design (filed as bug 2026-09-17, deep-reviewed same day) — shares the audit's on-behalf-of mint; settled points so a fresh session doesn't re-derive
 metadata:
   type: project

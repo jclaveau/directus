@@ -9,13 +9,17 @@ export type EventContext = {
 	schema: SchemaOverview | null;
 	accountability: Accountability | null;
 	/**
-	 * Scoped-cache tag channel, carrying ONLY the methods for this filter's event:
+	 * Scoped-cache fingerprint channel, carrying ONLY the methods for this event:
 	 * `scopeTo` and `dependOn` on `items.read`, `purgeBy` on
-	 * `items.create`/`update`/`delete`. Absent on every other event. A hook does not
-	 * see this union: `register.filter` hands a read handler `ReadEventContext` and a
-	 * mutation handler `MutationEventContext`, resolved from the event name.
+	 * `items.create`/`update`/`delete` and `items.created`/`updated`. Absent on every
+	 * other event. A hook does not see this union: `register.filter` hands a read
+	 * handler `ReadEventContext`, a mutation handler `MutationEventContext` and a
+	 * written one `WrittenEventContext`, resolved from the event name.
 	 */
-	scopedCache?: ScopedCacheScopeHandle | ScopedCachePurgeHandle;
+	scopedCache?:
+		| ScopedCacheScopeHandle
+		| ScopedCachePurgeHandle
+		| Pick<ScopedCachePurgeHandle, 'purgeBy'>;
 };
 
 /** What an `ItemsService` read filter receives: the read handle is always there. */
@@ -24,8 +28,31 @@ export type ReadEventContext = Omit<EventContext, 'scopedCache'> & {
 };
 
 /** What an `ItemsService` create/update/delete filter receives. */
-export type MutationEventContext = Omit<EventContext, 'scopedCache'> & {
+export type MutationEventContext = Omit<EventContext, 'database' | 'scopedCache'> & {
+	/**
+	 * The transaction the filter hooks and the write share: a hook writing through
+	 * it commits with the mutation or rolls back with it. On a service handed the
+	 * caller's transaction it is that one, so the write lands when the caller
+	 * commits.
+	 */
+	transaction: Knex;
+	/** @deprecated Use `transaction`, the same object. */
+	database: Knex;
 	scopedCache: ScopedCachePurgeHandle;
+};
+
+/**
+ * What an `ItemsService` created/updated filter receives, once the rows are
+ * written: it may purge, but no row is left to take over, so it has no
+ * `skipPurgeFor` to spare one an update hook took over and moved. The service
+ * always has a schema, so the hook does too.
+ */
+export type WrittenEventContext = Omit<
+	MutationEventContext,
+	'schema' | 'scopedCache'
+> & {
+	schema: SchemaOverview;
+	scopedCache: Pick<ScopedCachePurgeHandle, 'purgeBy'>;
 };
 
 export type FilterHandler<
@@ -37,6 +64,15 @@ export type FilterHandler<
 	meta: Record<string, any>,
 	context: TContext,
 ) => TIn | TOut | Promise<TIn | TOut>;
+/**
+ * What an `ItemsService` created/updated filter is: the rows are already
+ * written, so it answers nothing.
+ */
+export type WrittenFilterHandler<TIn> = (
+	payload: TIn,
+	meta: Record<string, any>,
+	context: WrittenEventContext,
+) => void | Promise<void>;
 export type ActionHandler = (meta: Record<string, any>, context: EventContext) => void;
 export type InitHandler = (meta: Record<string, any>) => void;
 export type ScheduleHandler = PromiseCallback;

@@ -7,7 +7,7 @@ import { PRIMARY_KEY_TYPES, USER } from '@common/variables';
 import { without } from 'lodash-es';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { describe, expect, it, test } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { collectionArtists } from './no-relation.seed';
 
 type Artist = {
@@ -94,8 +94,13 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 						// Assert
 						// A malformed id for an integer/uuid PK is rejected by validateKeys as a payload
 						// error (400); for a string PK 'invalid_id' is a valid-format key that simply
-						// isn't found, so anti-enumeration still returns 403.
-						expect(response.statusCode).toBe(pkType === 'string' ? 403 : 400);
+						// isn't found, which an admin is told with a 404.
+						if (pkType === 'string') {
+							expect(response.statusCode).toBe(404);
+						}
+						else {
+							expect(response.statusCode).toBe(400);
+						}
 
 						expect(gqlResponse.statusCode).toBe(200);
 
@@ -2310,9 +2315,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 			});
 		});
 
-		test('Auto Increment Tests', (ctx) => {
-			if (pkType !== 'integer') ctx.skip();
-
+		describe.skipIf(pkType !== 'integer')('Auto Increment Tests', () => {
 			describe('updates the auto increment value correctly', () => {
 				it.each(without(vendors, 'cockroachdb', 'mssql', 'oracle'))('%s', async (vendor) => {
 					// Setup

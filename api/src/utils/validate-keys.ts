@@ -1,4 +1,5 @@
 import { InvalidPayloadError } from '@directus/errors';
+import { oneLine } from '@directus/utils';
 import type { PrimaryKey, SchemaOverview } from '@directus/types';
 import { isValidUuid } from './is-valid-uuid.js';
 
@@ -22,10 +23,30 @@ export function validateKeys(
 			throw new InvalidPayloadError({
 				reason: `Primary key of ${collection} must be a uuid instead of ${JSON.stringify(keys, null, 2)}`,
 			});
-		} else if (primaryKeyFieldType === 'integer' && !Number.isInteger(Number(keys))) {
+		}
+		else if (
+			(primaryKeyFieldType === 'integer' || primaryKeyFieldType === 'bigInteger')
+			&& !isIntegerKey(keys)
+		) {
 			throw new InvalidPayloadError({
 				reason: `Primary key of ${collection} must be an integer instead of ${JSON.stringify(keys, null, 2)}`,
 			});
 		}
+		// The uuid and integer checks above refuse a missing key already.
+		else if (keys === undefined || keys === null) {
+			throw new InvalidPayloadError({
+				reason: oneLine`
+					Primary key of ${JSON.stringify(collection)} must be a
+					${JSON.stringify(primaryKeyFieldType)} instead of ${JSON.stringify(keys)}
+				`,
+			});
+		}
 	}
+}
+
+// A decimal spelling only: Number() also reads '', ' 5', '0x10' and '1e2'.
+function isIntegerKey(key: PrimaryKey): boolean {
+	return typeof key === 'number'
+		? Number.isInteger(key)
+		: /^[+-]?\d+$/.test(key);
 }

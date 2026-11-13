@@ -8,10 +8,10 @@ import type {
 	PrimaryKey,
 	Query,
 	QueryOptions,
+	UpdateGroup,
 	WithMeta,
 } from '@directus/types';
-import { clearSystemCache } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache.js';
+import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
 import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
 import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
 import { withAppMinimalPermissions } from '../permissions/lib/with-app-minimal-permissions.js';
@@ -27,11 +27,7 @@ export class PermissionsService extends ItemsService {
 	}
 
 	private async clearCaches(opts?: MutationOptions) {
-		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-
-		if (this.cache && opts?.autoPurgeCache !== false) {
-			await flushResponseCache(this.cache);
-		}
+		await clearCachesAfterCommit(this.knex, this.cache, opts);
 	}
 
 	override async readByQuery(
@@ -40,8 +36,8 @@ export class PermissionsService extends ItemsService {
 	): Promise<WithMeta<Partial<Item>[]>> {
 		const result = await super.readByQuery(query, opts);
 
-		// withAppMinimalPermissions returns a fresh array, so carry the read's scoped cache
-		// tag rider across.
+		// withAppMinimalPermissions returns a fresh array, so carry the read's scoped
+		// cache fingerprint rider across.
 		return withMeta(
 			withAppMinimalPermissions(
 				this.accountability,
@@ -52,14 +48,6 @@ export class PermissionsService extends ItemsService {
 		);
 	}
 
-	override async createOne(data: Partial<Item>, opts?: MutationOptions) {
-		const res = await super.createOne(data, opts);
-
-		await this.clearCaches(opts);
-
-		return res;
-	}
-
 	override async createMany(data: Partial<Item>[], opts?: MutationOptions) {
 		const res = await super.createMany(data, opts);
 
@@ -68,16 +56,8 @@ export class PermissionsService extends ItemsService {
 		return res;
 	}
 
-	override async updateBatch(data: Partial<Item>[], opts?: MutationOptions) {
-		const res = await super.updateBatch(data, opts);
-
-		await this.clearCaches(opts);
-
-		return res;
-	}
-
-	override async updateMany(keys: PrimaryKey[], data: Partial<Item>, opts?: MutationOptions) {
-		const res = await super.updateMany(keys, data, opts);
+	override async updateGroups(groups: UpdateGroup<Item>[], opts?: MutationOptions) {
+		const res = await super.updateGroups(groups, opts);
 
 		await this.clearCaches(opts);
 

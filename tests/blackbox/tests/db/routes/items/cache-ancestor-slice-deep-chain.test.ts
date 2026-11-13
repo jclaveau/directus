@@ -11,7 +11,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -134,7 +134,7 @@ describe(oneLine`
 			await one(SLOT, { name: 'sl', part: owned.partId, range: range.id });
 			await one(CONFIG, { name: 'cfg', range: range.id });
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
@@ -148,25 +148,29 @@ describe(oneLine`
 		afterAll(async () => {
 			instance.kill();
 
+			// The slot holds the o2m's reverse fk, so it goes before the range.
 			for (const collection of [
-				CONFIG, RANGE, SLOT, PART, COURSE, UNIT, DISCIPLINE, STUDENT, OWNER,
+				CONFIG, SLOT, RANGE, PART, COURSE, UNIT, DISCIPLINE, STUDENT, OWNER,
 			]) {
 				await DeleteCollection(vendor, { collection });
 			}
 		});
 
-		const ownerPath = [
-			'range', 'slots', 'part', 'course', 'unit', 'discipline', 'student', 'owner',
-		];
-
 		function readConfig() {
-			const ownerKey = `filter[${ownerPath.join('][')}][_eq]`;
-
 			return request(getUrl(vendor, env))
 				.get(`/items/${CONFIG}`)
 				.query({
-					fields: '*,range.slots.part.course.unit.discipline.student.name',
-					[ownerKey]: String(ownedOwnerId),
+					// The unit's own name is read too: a purge drops an entry only for a
+					// write touching a field it is bound to, so a read showing no column
+					// of the ancestor would not be evicted by a rename of it.
+					fields: oneLine`
+						*,
+						range.slots.part.course.unit.name,
+						range.slots.part.course.unit.discipline.student.name
+					`,
+					[oneLine`
+						filter[range][slots][part][course][unit][discipline][student][owner][_eq]
+					`]: String(ownedOwnerId),
 				})
 				.set('Authorization', auth);
 		}
@@ -185,13 +189,13 @@ describe(oneLine`
 		}
 
 		it('slices a beyond ancestor by its ownership chain', async () => {
-			const tags = (await readConfig()).headers[cacheTagsHeader];
+			const pins = (await readConfig()).headers[cacheTagsHeader];
 
-			expect(tags).toMatch(new RegExp(
+			expect(pins).toMatch(new RegExp(
 				`(^|, )${UNIT}:discipline.student.owner=${ownedOwnerId}(,|$)`,
 			));
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${UNIT}(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${UNIT}(,|$)`));
 		});
 
 		it('a write to an ancestor in the owner slice evicts the read', async () => {

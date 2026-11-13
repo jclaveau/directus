@@ -1,5 +1,9 @@
 import type { DirectusSettings } from '../../../schema/settings.js';
-import type { ApplyQueryFields, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import type { RestCommand } from '../../types.js';
 
 export type UpdateSettingOutput<
@@ -15,7 +19,7 @@ export type UpdateSettingOutput<
  * @returns Returns the settings object.
  */
 export const updateSettings =
-	<Schema, const TQuery extends Query<Schema, DirectusSettings<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusSettings<Schema>>>(
 		item: Partial<DirectusSettings<Schema>>,
 		query?: TQuery,
 	): RestCommand<UpdateSettingOutput<Schema, TQuery>[], Schema> =>

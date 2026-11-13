@@ -6,12 +6,17 @@ import type { Filter, SchemaOverview } from '@directus/types';
 import { parseJSON, toArray } from '@directus/utils';
 import type { Knex } from 'knex';
 import { useBus } from '../bus/index.js';
-import { getMemorySchemaCache, setMemorySchemaCache } from '../cache.js';
+import {
+	getMemorySchemaCache,
+	getSchemaCacheGeneration,
+	setMemorySchemaCache,
+} from '../cache.js';
 import { ALIAS_TYPES } from '../constants.js';
 import getDatabase from '../database/index.js';
 import { useLock } from '../lock/index.js';
 import { useLogger } from '../logger/index.js';
 import { RelationsService } from '../services/relations.js';
+import { unfreezeSchema } from './freeze-schema.js';
 import getDefaultValue from './get-default-value.js';
 import { getSystemFieldRowsWithAuthProviders } from './get-field-system-rows.js';
 import getLocalType from './get-local-type.js';
@@ -72,6 +77,8 @@ export async function getSchema(
 		const timeout: Promise<any> = new Promise((_, reject) =>
 			setTimeout(reject, env['CACHE_SCHEMA_SYNC_TIMEOUT'] as number),);
 
+		const waitGeneration = getSchemaCacheGeneration();
+
 		const subscription = new Promise<SchemaOverview>((resolve, reject) => {
 			bus.subscribe(messageKey, busListener).catch(reject);
 
@@ -83,8 +90,12 @@ export async function getSchema(
 				}
 
 				try {
-					setMemorySchemaCache(options.schema);
-					resolve(options.schema);
+					// Built by a process that may have read before this node's last clear.
+					if (waitGeneration === getSchemaCacheGeneration()) {
+						setMemorySchemaCache(options.schema);
+					}
+
+					resolve(schemaForRequest(options.schema));
 				}
 				catch (e) {
 					reject(e);
@@ -105,14 +116,45 @@ export async function getSchema(
 		const database = options?.database || getDatabase();
 		const schemaInspector = createInspector(database);
 
-		schema = await getDatabaseSchema(database, schemaInspector);
+		let buildGeneration: number;
+		let builtSchema: SchemaOverview;
+		let buildCount = 0;
+
+		do {
+			buildGeneration = getSchemaCacheGeneration();
+			builtSchema = await getDatabaseSchema(database, schemaInspector);
+			buildCount++;
+		} while (
+			buildGeneration !== getSchemaCacheGeneration()
+			&& buildCount < MAX_ATTEMPTS
+		);
+
+		// Publishing null makes the waiters retry rather than take a schema a newer
+		// write already outdated.
+		if (buildGeneration !== getSchemaCacheGeneration()) {
+			return builtSchema;
+		}
+
+		schema = builtSchema;
 		setMemorySchemaCache(schema);
-		return schema;
+		return schemaForRequest(schema);
 	}
 	finally {
 		await bus.publish(messageKey, { schema });
 		await lock.delete(lockKey);
 	}
+}
+
+// The cache freezes the schema in place: the request that built it, and those
+// waiting on the bus, get what a cache hit gets.
+function schemaForRequest(schema: SchemaOverview): SchemaOverview {
+	const env = useEnv();
+
+	if (env['CACHE_SCHEMA_FREEZE_ENABLED']) {
+		return schema;
+	}
+
+	return unfreezeSchema(schema);
 }
 
 async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspector): Promise<SchemaOverview> {
@@ -184,6 +226,7 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 					note: null,
 					validation: null,
 					alias: false,
+					inUniqueIndex: column.in_unique_index ?? false,
 				};
 			}),
 		};
@@ -248,6 +291,7 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 			note: field.note,
 			alias: existing?.alias ?? true,
 			validation: (validation as Filter) ?? null,
+			inUniqueIndex: existing?.inUniqueIndex ?? false,
 		};
 	}
 

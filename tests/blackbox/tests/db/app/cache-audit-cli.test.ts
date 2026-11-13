@@ -10,7 +10,7 @@ import { ROLE, USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import knex, { type Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
@@ -101,7 +101,7 @@ describe('`directus cache audit` and the scheduled audit', () => {
 
 			await CreateItem(vendor, { collection: CLOCK, item: { label: 'tick' } });
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
@@ -476,7 +476,7 @@ describe('`directus cache audit` and the scheduled audit', () => {
 			let scheduledUrl: string;
 
 			beforeAll(async () => {
-				const scheduledPort = await getPort();
+				const scheduledPort = await freePortOfWorker();
 				scheduledEnv[vendor].PORT = String(scheduledPort);
 
 				scheduled = spawn('node', [paths.cli, 'start'], {

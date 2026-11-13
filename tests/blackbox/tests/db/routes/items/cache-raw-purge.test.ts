@@ -10,7 +10,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -98,7 +98,7 @@ describe(oneLine`
 				}),
 			]);
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
@@ -112,10 +112,10 @@ describe(oneLine`
 		afterAll(async () => {
 			instance.kill();
 
-			await Promise.all([
-				DeleteCollection(vendor, { collection: LINE }),
-				DeleteCollection(vendor, { collection: DOCUMENT }),
-			]);
+			// One at a time: run together, a drop can fail, and the helper drops the
+			// error, leaving a collection cache-primary-key-home-pin then collides on.
+			await DeleteCollection(vendor, { collection: LINE });
+			await DeleteCollection(vendor, { collection: DOCUMENT });
 		});
 
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;

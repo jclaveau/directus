@@ -1,7 +1,8 @@
-import type { FieldFilter } from '@directus/types';
+import type { FieldFilter, Filter } from '@directus/types';
 import type { AnySchema, StringSchema as BaseStringSchema, DateSchema, NumberSchema } from 'joi';
 import BaseJoi from 'joi';
 import { escapeRegExp, merge } from './lodash-es-used.js';
+import { validatePayload } from './validate-payload.js';
 
 export interface StringSchema extends BaseStringSchema {
 	contains(substring: string): this;
@@ -126,6 +127,55 @@ export function generateJoi(filter: FieldFilter | null, options?: JoiOptions): A
 		const getStringSchema = () => (schema[key] ?? Joi.string()) as StringSchema;
 		const getNumberSchema = () => (schema[key] ?? Joi.number()) as NumberSchema;
 		const getDateSchema = () => (schema[key] ?? Joi.date()) as DateSchema;
+
+		if (operator === '_some' || operator === '_none') {
+			const everyCondition = {
+				_and: Object.entries(compareValue as object).map(([field, rule]) => {
+					return { [field]: rule };
+				}),
+			} as Filter;
+
+			const quantifierOptions = options;
+
+			const matchesCondition = (relatedRow: object, rowOptions: JoiOptions) => {
+				return validatePayload(
+					everyCondition,
+					relatedRow as Record<string, unknown>,
+					rowOptions,
+				).length === 0;
+			};
+
+			schema[key] = Joi.any().custom((relatedValue, helpers) => {
+				// A bare key or a `{ create, update, delete }` names rows whose content it
+				// does not carry: a `_some` may be met by the row a key names, and a
+				// `_none` refuses only a row stating every condition.
+				if (!Array.isArray(relatedValue)) {
+					return relatedValue;
+				}
+
+				const relatedRows: object[] = relatedValue.filter((relatedRow) => {
+					return typeof relatedRow === 'object' && relatedRow !== null;
+				});
+
+				if (operator === '_none') {
+					return relatedRows.some((relatedRow) => {
+						return matchesCondition(relatedRow, {
+							...quantifierOptions,
+							requireAll: true,
+						});
+					})
+						? helpers.error('any.invalid')
+						: relatedValue;
+				}
+
+				return relatedRows.length < relatedValue.length
+					|| relatedRows.some((relatedRow) => {
+						return matchesCondition(relatedRow, quantifierOptions);
+					})
+					? relatedValue
+					: helpers.error('any.invalid');
+			});
+		}
 
 		if (operator === '_eq') {
 			let typecastedValue: string | number;

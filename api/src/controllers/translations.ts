@@ -7,6 +7,7 @@ import { validateBatch } from '../middleware/validate-batch.js';
 import { MetaService } from '../services/meta.js';
 import { TranslationsService } from '../services/translations.js';
 import asyncHandler from '../utils/async-handler.js';
+import { mutationBatchingFromQuery } from '../utils/mutation-batching-from-query.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
 const router = express.Router();
@@ -21,13 +22,17 @@ router.post(
 			schema: req.schema,
 		});
 
+		const mutationOptions = {
+			mutationBatching: mutationBatchingFromQuery(req.query),
+		};
+
 		const savedKeys: PrimaryKey[] = [];
 
 		if (Array.isArray(req.body)) {
-			const keys = await service.createMany(req.body);
+			const keys = await service.createMany(req.body, mutationOptions);
 			savedKeys.push(...keys);
 		} else {
-			const primaryKey = await service.createOne(req.body);
+			const primaryKey = await service.createOne(req.body, mutationOptions);
 			savedKeys.push(primaryKey);
 		}
 
@@ -107,15 +112,28 @@ router.patch(
 			schema: req.schema,
 		});
 
+		const mutationOptions = {
+			mutationBatching: mutationBatchingFromQuery(req.query),
+		};
+
 		let keys: PrimaryKey[] = [];
 
 		if (Array.isArray(req.body)) {
-			keys = await service.updateBatch(req.body);
+			keys = await service.updateBatch(req.body, mutationOptions);
 		} else if (req.body.keys) {
-			keys = await service.updateMany(req.body.keys, req.body.data);
+			keys = await service.updateMany(
+				req.body.keys,
+				req.body.data,
+				mutationOptions,
+			);
 		} else {
 			const sanitizedQuery = await sanitizeQuery(req.body.query, req.schema, req.accountability);
-			keys = await service.updateByQuery(sanitizedQuery, req.body.data);
+
+			keys = await service.updateByQuery(
+				sanitizedQuery,
+				req.body.data,
+				mutationOptions,
+			);
 		}
 
 		try {
@@ -142,7 +160,11 @@ router.patch(
 			schema: req.schema,
 		});
 
-		const primaryKey = await service.updateOne(req.params['pk']!, req.body);
+		const primaryKey = await service.updateOne(
+			req.params['pk']!,
+			req.body,
+			{ mutationBatching: mutationBatchingFromQuery(req.query) },
+		);
 
 		try {
 			const record = await service.readOne(primaryKey, req.sanitizedQuery);

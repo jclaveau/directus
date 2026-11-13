@@ -1234,7 +1234,6 @@ installed: 설치됨
 reinstall: 재설치
 open_in_marketplace: 마켓플레이스에서 열기
 source_registry: 마켓플레이스
-source_local: 로컬
 source_module: 노드 모듈
 collection: 컬렉션
 collections: 컬렉션

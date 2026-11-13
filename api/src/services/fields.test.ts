@@ -6,14 +6,18 @@ import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Knex } from 'knex';
 import type { Tracker } from 'knex-mock-client';
+import emitter from '../emitter.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { FieldsService } from './fields.js';
 import { ItemsService } from './items.js';
+import { RelationsService } from './relations.js';
 
 vi.mock('../../src/database/index', () => ({
 	default: vi.fn(),
 	getDatabaseClient: vi.fn().mockReturnValue('postgres'),
 }));
+
+vi.mock('../utils/get-schema.js', () => ({ getSchema: vi.fn() }));
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -66,6 +70,26 @@ describe('Services / Fields', () => {
 				'does not have the permission to update the field',
 			);
 		});
+
+		it('rejects with the error the column builder throws', async () => {
+			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValueOnce({
+				name: 'title',
+				table: 'test',
+				data_type: 'varchar',
+			} as any);
+
+			const service = new FieldsService({ knex: db, schema, accountability: admin });
+
+			const promise = service.updateField(
+				'test',
+				{ field: 'title', type: 'illegal', schema: { is_nullable: true } } as any,
+				{ emitEvents: false, autoPurgeCache: false, autoPurgeSystemCache: false },
+			);
+
+			await expect(promise).rejects.toThrowError(
+				'Invalid payload. Illegal type passed: "illegal".',
+			);
+		});
 	});
 
 	describe('deleteField', () => {
@@ -77,6 +101,49 @@ describe('Services / Fields', () => {
 			await expect(service.deleteField('test', 'foo')).rejects.toThrowError(
 				'does not have the permission to delete the field',
 			);
+		});
+	});
+
+	describe('deleteField that rolled back', () => {
+		it('fires no action of its nested relation delete', async () => {
+			const emitActionSpy = vi
+				.spyOn(emitter, 'emitAction')
+				.mockResolvedValue(undefined);
+
+			vi.spyOn(RelationsService.prototype, 'deleteOne')
+				.mockImplementationOnce(async (_collection, _field, opts) => {
+					opts!.bypassEmitAction!({
+						event: 'relations.delete',
+						meta: {},
+						context: {},
+					} as any);
+				});
+
+			tracker.on.any(/alter table/).simulateError('column refused');
+
+			const service = new FieldsService({
+				knex: db,
+				schema: new SchemaBuilder()
+					.collection('articles', (c) => {
+						c.field('id')
+							.uuid()
+							.primary();
+
+						c.field('author').m2o('authors');
+					})
+					.collection('authors', (c) => {
+						c.field('id')
+							.uuid()
+							.primary();
+					})
+					.build(),
+				accountability: admin,
+			});
+
+			await expect(service.deleteField('articles', 'author'))
+				.rejects.toThrow('column refused');
+
+			expect(emitActionSpy).not.toHaveBeenCalled();
 		});
 	});
 
@@ -97,9 +164,9 @@ describe('Services / Fields', () => {
 	// Last, since the spies below survive clearAllMocks and would otherwise leak the
 	// stubbed columnInfo into readOne (which needs the real one to throw).
 	describe('readAll', () => {
-		it('tags the result with directus_fields', async () => {
+		it('pins the result with directus_fields', async () => {
 			vi.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(withMeta([], { scopedCacheTags: [] }));
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
 
 			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
 
@@ -108,7 +175,7 @@ describe('Services / Fields', () => {
 			const service = new FieldsService({ knex: db, schema });
 			const result = await service.readAll();
 
-			expect(readMeta(result)?.scopedCacheTags).toEqual([
+			expect(readMeta(result)?.scopedCacheFingerprints).toEqual([
 				{ collection: 'directus_fields' },
 			]);
 		});
@@ -116,7 +183,7 @@ describe('Services / Fields', () => {
 		it('reads only the field rows of the given collection', async () => {
 			const readByQuery = vi
 				.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(withMeta([], { scopedCacheTags: [] }));
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
 
 			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
 

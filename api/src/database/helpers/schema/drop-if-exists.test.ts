@@ -1,10 +1,11 @@
-import type { Knex } from 'knex';
+import knexFactory, { type Knex } from 'knex';
 import { describe, expect, it, vi } from 'vitest';
 
 // Break the schema/types.ts -> database/index.ts -> schema/index.ts -> dialects circular import,
 // which otherwise leaves SchemaHelper undefined when a dialect is imported directly under vitest.
 vi.mock('../../index.js', () => ({ default: vi.fn(), getDatabaseClient: vi.fn(() => 'postgres') }));
 
+import { SchemaHelperCockroachDb } from './dialects/cockroachdb.js';
 import { SchemaHelperDefault } from './dialects/default.js';
 import { SchemaHelperMSSQL } from './dialects/mssql.js';
 import { SchemaHelperMySQL } from './dialects/mysql.js';
@@ -42,26 +43,78 @@ function makeKnex(firstResult: unknown = undefined) {
 	return { knex: knex as unknown as Knex, raw: knex.raw, alterTable: knex.schema.alterTable, table, first: qb.first };
 }
 
+// A knex stand-in whose `schema.alterTable` compiles through a real,
+// unconnected knex of `client` and records the DDL it would run.
+function makeCompilingKnex(client: string) {
+	const compiler = knexFactory({ client, useNullAsDefault: true });
+	const emitted: string[] = [];
+
+	const knex = {
+		schema: {
+			alterTable: async (
+				collection: string,
+				cb: (t: Knex.AlterTableBuilder) => void,
+			) => {
+				const compiled = compiler.schema.alterTable(collection, cb);
+
+				emitted.push(compiled.toString());
+			},
+		},
+	};
+
+	return { knex: knex as unknown as Knex, emitted };
+}
+
 describe('dropUniqueIfExists / dropIndexIfExists', () => {
 	describe('postgres (base SchemaHelper)', () => {
 		it('drops a unique via ALTER TABLE ... DROP CONSTRAINT IF EXISTS', async () => {
-			const { knex, raw } = makeKnex();
+			const { knex, emitted } = makeCompilingKnex('pg');
+
 			const helper = new SchemaHelperPostgres(knex);
-			const name = helper.generateIndexName('unique', COLLECTION, FIELD);
 
 			await helper.dropUniqueIfExists(knex, COLLECTION, FIELD);
 
-			expect(raw).toHaveBeenCalledWith('ALTER TABLE ?? DROP CONSTRAINT IF EXISTS ??', [COLLECTION, name]);
+			expect(emitted).toEqual([
+				'alter table "articles" drop constraint if exists "articles_slug_unique"',
+			]);
 		});
 
 		it('drops an index via DROP INDEX IF EXISTS', async () => {
-			const { knex, raw } = makeKnex();
+			const { knex, emitted } = makeCompilingKnex('pg');
+
 			const helper = new SchemaHelperPostgres(knex);
-			const name = helper.generateIndexName('index', COLLECTION, FIELD);
 
 			await helper.dropIndexIfExists(knex, COLLECTION, FIELD);
 
-			expect(raw).toHaveBeenCalledWith('DROP INDEX IF EXISTS ??', [name]);
+			expect(emitted).toEqual([
+				'drop index if exists "articles_slug_index"',
+			]);
+		});
+	});
+
+	describe('cockroachdb', () => {
+		it('drops a unique via DROP INDEX IF EXISTS ... CASCADE', async () => {
+			const { knex, emitted } = makeCompilingKnex('cockroachdb');
+
+			const helper = new SchemaHelperCockroachDb(knex);
+
+			await helper.dropUniqueIfExists(knex, COLLECTION, FIELD);
+
+			expect(emitted).toEqual([
+				'drop index if exists "articles"@"articles_slug_unique" cascade',
+			]);
+		});
+
+		it('drops an index via DROP INDEX IF EXISTS', async () => {
+			const { knex, emitted } = makeCompilingKnex('cockroachdb');
+
+			const helper = new SchemaHelperCockroachDb(knex);
+
+			await helper.dropIndexIfExists(knex, COLLECTION, FIELD);
+
+			expect(emitted).toEqual([
+				'drop index if exists "articles_slug_index"',
+			]);
 		});
 	});
 
@@ -90,46 +143,54 @@ describe('dropUniqueIfExists / dropIndexIfExists', () => {
 	});
 
 	describe('mssql', () => {
-		it('inherits the base DROP CONSTRAINT IF EXISTS for uniques', async () => {
-			const { knex, raw } = makeKnex();
+		it('drops the unique index with the required ON <table> clause', async () => {
+			const { knex, emitted } = makeCompilingKnex('mssql');
+
 			const helper = new SchemaHelperMSSQL(knex);
-			const name = helper.generateIndexName('unique', COLLECTION, FIELD);
 
 			await helper.dropUniqueIfExists(knex, COLLECTION, FIELD);
 
-			expect(raw).toHaveBeenCalledWith('ALTER TABLE ?? DROP CONSTRAINT IF EXISTS ??', [COLLECTION, name]);
+			expect(emitted).toEqual([
+				'DROP INDEX IF EXISTS [articles_slug_unique] ON [articles]',
+			]);
 		});
 
 		it('drops an index with the required ON <table> clause', async () => {
-			const { knex, raw } = makeKnex();
+			const { knex, emitted } = makeCompilingKnex('mssql');
+
 			const helper = new SchemaHelperMSSQL(knex);
-			const name = helper.generateIndexName('index', COLLECTION, FIELD);
 
 			await helper.dropIndexIfExists(knex, COLLECTION, FIELD);
 
-			expect(raw).toHaveBeenCalledWith('DROP INDEX IF EXISTS ?? ON ??', [name, COLLECTION]);
+			expect(emitted).toEqual([
+				'DROP INDEX IF EXISTS [articles_slug_index] ON [articles]',
+			]);
 		});
 	});
 
 	describe('sqlite', () => {
 		it('drops the backing index for a unique (no DROP CONSTRAINT)', async () => {
-			const { knex, raw } = makeKnex();
+			const { knex, emitted } = makeCompilingKnex('sqlite3');
+
 			const helper = new SchemaHelperSQLite(knex);
-			const name = helper.generateIndexName('unique', COLLECTION, FIELD);
 
 			await helper.dropUniqueIfExists(knex, COLLECTION, FIELD);
 
-			expect(raw).toHaveBeenCalledWith('DROP INDEX IF EXISTS ??', [name]);
+			expect(emitted).toEqual([
+				'drop index if exists `articles_slug_unique`',
+			]);
 		});
 
-		it('inherits the base DROP INDEX IF EXISTS', async () => {
-			const { knex, raw } = makeKnex();
+		it('drops an index via DROP INDEX IF EXISTS', async () => {
+			const { knex, emitted } = makeCompilingKnex('sqlite3');
+
 			const helper = new SchemaHelperSQLite(knex);
-			const name = helper.generateIndexName('index', COLLECTION, FIELD);
 
 			await helper.dropIndexIfExists(knex, COLLECTION, FIELD);
 
-			expect(raw).toHaveBeenCalledWith('DROP INDEX IF EXISTS ??', [name]);
+			expect(emitted).toEqual([
+				'drop index if exists `articles_slug_index`',
+			]);
 		});
 	});
 

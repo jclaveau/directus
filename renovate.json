@@ -10,8 +10,8 @@
 	"labels": [":robot: Dependency", "Run Blackbox"],
 	"dependencyDashboard": true,
 	"forkProcessing": "enabled",
-	"baseBranches": ["v11.10.1-prepare"],
-	"constraints": { "node": "22", "pnpm": ">=10 <11" },
+	"baseBranches": ["v11.10.1-hhh-dev"],
+	"constraints": { "node": "24", "pnpm": ">=12 <13" },
 	"constraintsFiltering": "strict",
 	"enabledManagers": ["npm", "github-actions"],
 	"vulnerabilityAlerts": {
@@ -26,13 +26,13 @@
 		{
 			"groupName": "all non-major dependencies",
 			"description": "exclude minors with potential breaking changes",
-			"matchPackageNames": ["typescript", "esbuild"],
+			"matchPackageNames": ["typescript"],
 			"matchUpdateTypes": ["minor"],
 			"enabled": false
 		},
 		{
 			"groupName": null,
-			"matchPackageNames": ["typescript", "esbuild"],
+			"matchPackageNames": ["typescript"],
 			"matchUpdateTypes": ["minor"],
 			"enabled": true
 		},
@@ -42,7 +42,7 @@
 			"rangeStrategy": "update-lockfile"
 		},
 		{
-			"description": "hold - knex >=3.2 double-wraps directus_row_number, 500 on o2m/m2m/m2a sort - https://github.com/knex/knex/issues/6392",
+			"description": "hold - knex is the jclaveau/knex fork pinned by commit in pnpm-workspace.yaml catalog; bump the sha by hand",
 			"matchPackageNames": ["knex"],
 			"enabled": false
 		},

@@ -351,10 +351,70 @@ export default typescriptEslint.config(
 		},
 	},
 
+	// With `CACHE_REDIS_DB` set, the response cache and the scoped-cache index live
+	// in a database of their own. A scoped-cache call on the shared client reads or
+	// writes database 0, where no fill, purge or flush looks: a purge then misses
+	// the sets it names and serves the entries they index stale. Every Redis
+	// import here is static, so the syntax rule the sharp guard needs is not.
+	{
+		files: ['api/src/scoped-cache/**/*.ts'],
+		ignores: ['**/*.test.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: gatheredPackages.paths,
+					patterns: [
+						...gatheredPackages.patterns,
+						{
+							group: ['**/redis/index.js'],
+							importNames: ['useRedis'],
+							message: 'Use useCacheRedis(): the scoped-cache index lives in the cache database.',
+						},
+						{
+							group: ['**/redis/lib/use-redis.js'],
+							message: 'Use useCacheRedis(): the scoped-cache index lives in the cache database.',
+						},
+					],
+				},
+			],
+		},
+	},
+
 	// The two modules that gather them are the only place allowed to reach the package
 	{
 		files: ['**/lodash-es-used.ts', '**/date-fns-used.ts'],
 		rules: { 'no-restricted-imports': 'off' },
+	},
+
+	// get-port draws from one range every blackbox worker shares, so two of them
+	// can be handed the same port, and the loser's tests then run against the
+	// winner's instance. freePortOfWorker draws from the worker's own slice.
+	// no-restricted-imports only sees a static import, so the dynamic one needs
+	// the syntax rule below.
+	{
+		files: ['tests/blackbox/**/*.ts'],
+		ignores: ['tests/blackbox/utils/free-port-of-worker.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{
+							name: 'get-port',
+							message: "Import { freePortOfWorker } from '@utils/free-port-of-worker'.",
+						},
+					],
+				},
+			],
+			'no-restricted-syntax': [
+				'error',
+				{
+					selector: "ImportExpression[source.value='get-port']",
+					message: "Import { freePortOfWorker } from '@utils/free-port-of-worker'.",
+				},
+			],
+		},
 	},
 
 	// Test files

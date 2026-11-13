@@ -1,4 +1,4 @@
-import { EventEmitter, on } from 'events';
+import { EventEmitter, on } from 'node:events';
 import { useBus } from '../../bus/index.js';
 import type { GraphQLService } from './index.js';
 import { getSchema } from '../../utils/get-schema.js';
@@ -6,6 +6,7 @@ import type { GraphQLResolveInfo, SelectionNode } from 'graphql';
 import { getPayload } from '../../websocket/utils/items.js';
 import type { Subscription } from '../../websocket/types.js';
 import type { WebSocketEvent } from '../../websocket/messages.js';
+import { executingService } from './schema-cache.js';
 import { getQuery } from './schema/parse-query.js';
 
 const messages = createPubSub(new EventEmitter());
@@ -18,8 +19,14 @@ export function bindPubSub() {
 	});
 }
 
-export function createSubscriptionGenerator(gql: GraphQLService, event: string) {
-	return async function* (_x: unknown, _y: unknown, _z: unknown, request: GraphQLResolveInfo) {
+export function createSubscriptionGenerator(
+	resolverService: GraphQLService,
+	event: string,
+) {
+	const generateEvents = async function* (
+		gql: GraphQLService,
+		request: GraphQLResolveInfo,
+	) {
 		const fields = await parseFields(gql, request);
 		const args = parseArguments(request);
 
@@ -81,6 +88,12 @@ export function createSubscriptionGenerator(gql: GraphQLService, event: string) 
 				}
 			}
 		}
+	};
+
+	// A generator runs on each `next()`, outside the execution that subscribed,
+	// so it keeps the service that execution runs as.
+	return (_x: unknown, _y: unknown, _z: unknown, request: GraphQLResolveInfo) => {
+		return generateEvents(executingService.getStore() ?? resolverService, request);
 	};
 }
 

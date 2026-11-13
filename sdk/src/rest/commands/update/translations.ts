@@ -1,5 +1,9 @@
 import type { DirectusTranslation } from '../../../schema/translation.js';
-import type { ApplyQueryFields, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import { throwIfEmpty } from '../../utils/index.js';
 import type { RestCommand } from '../../types.js';
 
@@ -18,7 +22,7 @@ export type UpdateTranslationOutput<
  * @throws Will throw if keys is empty
  */
 export const updateTranslations =
-	<Schema, const TQuery extends Query<Schema, DirectusTranslation<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusTranslation<Schema>>>(
 		keys: DirectusTranslation<Schema>['id'][],
 		item: Partial<DirectusTranslation<Schema>>,
 		query?: TQuery,
@@ -41,7 +45,7 @@ export const updateTranslations =
  * @returns Returns the translation objects for the updated translations.
  */
 export const updateTranslationsBatch =
-	<Schema, const TQuery extends Query<Schema, DirectusTranslation<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusTranslation<Schema>>>(
 		items: Partial<DirectusTranslation<Schema>>[],
 		query?: TQuery,
 	): RestCommand<UpdateTranslationOutput<Schema, TQuery>[], Schema> =>
@@ -61,7 +65,7 @@ export const updateTranslationsBatch =
  * @throws Will throw if key is empty
  */
 export const updateTranslation =
-	<Schema, const TQuery extends Query<Schema, DirectusTranslation<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusTranslation<Schema>>>(
 		key: DirectusTranslation<Schema>['id'],
 		item: Partial<DirectusTranslation<Schema>>,
 		query?: TQuery,

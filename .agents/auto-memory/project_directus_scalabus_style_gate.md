@@ -6,10 +6,10 @@ metadata:
   type: project
 ---
 
-A second, scalabus-only eslint layer enforces jean's planner code-style on NEW lines only, alongside
+A second, scalabus-only eslint layer enforces jean's own code-style on NEW lines only, alongside
 directus's own `eslint.config.js`. Built #205 (2026-06-30). Files:
 
-- **`eslint.style.config.js`** (root, INERT — eslint auto-loads only `eslint.config.js`) — jean's planner
+- **`eslint.style.config.js`** (root, INERT — eslint auto-loads only `eslint.config.js`) — jean's own
   config ([[feedback_adopt_jeans_proven_configs]]) + `eslint-rules/` (his `custom-array-element-newline` +
   a new `arrow-multiline-block`). **Commented out** (prettier still owns / whole-file-churn): `indent`, `semi`,
   `quotes`, `space-unary-ops`. **On**: max-len(code:90, comments:110, `ignoreStrings` OFF + `ignorePattern`

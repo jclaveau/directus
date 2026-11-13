@@ -36,7 +36,7 @@ jobs:
 
       - name: Get changed files
         id: changed-files
-        uses: tj-actions/changed-files@v46
+        uses: tj-actions/changed-files@v47
 
       - name: Prepare
         uses: ./.github/actions/prepare
@@ -55,7 +55,7 @@ jobs:
 
       - name: Get changed files
         id: changed-files
-        uses: tj-actions/changed-files@v46
+        uses: tj-actions/changed-files@v47
 
       - name: Prepare
         uses: ./.github/actions/prepare
@@ -112,7 +112,7 @@ jobs:
               pnpm --filter @directus/app test:coverage --passWithNoTests
               ;;
             rest)
-              pnpm --recursive --filter '!tests-blackbox' --filter '!@directus/api' --filter '!@directus/app' test:coverage --passWithNoTests
+              pnpm --recursive --workspace-concurrency=1 --filter '!tests-blackbox' --filter '!@directus/api' --filter '!@directus/app' test:coverage --passWithNoTests
               ;;
           esac
 

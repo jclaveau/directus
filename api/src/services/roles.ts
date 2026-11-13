@@ -1,14 +1,25 @@
 import { InvalidPayloadError } from '@directus/errors';
-import type { AbstractServiceOptions, Item, MutationOptions, PrimaryKey } from '@directus/types';
+import type {
+	AbstractServiceOptions,
+	ActionEventParams,
+	Item,
+	MutationOptions,
+	PrimaryKey,
+	UpdateGroup,
+} from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
-import { clearSystemCache } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache.js';
-import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
-import { transaction } from '../utils/transaction.js';
-import { ItemsService } from './items.js';
+import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
+import {
+	clearCachesThenFireActions,
+} from '../utils/clear-caches-then-fire-actions.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
+import { emitActionEvents, ItemsService } from './items.js';
 import { AccessService } from './access.js';
 import { PresetsService } from './presets.js';
 import { UsersService } from './users.js';
+
+const DESCENDANT_PARENT_REASON =
+	'A role cannot have a parent that is already a descendant of itself';
 
 export class RolesService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
@@ -19,36 +30,54 @@ export class RolesService extends ItemsService {
 	// users, as the role of a user is actually updated in the UsersService on the user, which will make sure to
 	// initiate a user integrity check if necessary. Same goes for role nesting check as well as cache clearing.
 
-	override async updateMany(
-		keys: PrimaryKey[],
-		data: Partial<Item>,
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
-		if ('parent' in data) {
-			// If the parent of a role changed we need to make a full integrity check.
-			// Anything related to policies will be checked in the AccessService, where the policies are attached to roles
-			opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
-			opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
+		const parentGroups = groups.filter(({ data }) => 'parent' in data);
 
-			await this.validateRoleNesting(keys as string[], data['parent']);
+		if (parentGroups.length > 0) {
+			await this.validateRoleNesting(parentGroups);
 		}
 
-		const result = await super.updateMany(keys, data, opts);
+		return await super.updateGroups(groups, opts);
+	}
 
+	protected override requiredIntegrityChecks(
+		groups: UpdateGroup<Item>[],
+	): UserIntegrityCheckFlag {
+		// If the parent of a role changed we need to make a full integrity check.
+		// Anything related to policies will be checked in the AccessService, where
+		// the policies are attached to roles
+		return groups.some(({ data }) => 'parent' in data)
+			? UserIntegrityCheckFlag.All
+			: UserIntegrityCheckFlag.None;
+	}
+
+	protected override async applyUpdateSideEffects(
+		groups: UpdateGroup<Item>[],
+	): Promise<void> {
 		// Only clear the permissions cache if the parent role has changed
 		// If anything policies related has changed, the cache will be cleared in the AccessService as well
-		if ('parent' in data) {
+		if (groups.some(({ data }) => 'parent' in data)) {
 			await this.clearCaches();
 		}
-
-		return result;
 	}
 
 	override async deleteMany(keys: PrimaryKey[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
-		await transaction(this.knex, async (trx) => {
+		const heldActionEvents: ActionEventParams[] = [];
+
+		const holdingOpts: MutationOptions = {
+			...opts,
+			bypassEmitAction: opts.bypassEmitAction ?? ((actionEvent) => {
+				heldActionEvents.push(actionEvent);
+			}),
+		};
+
+		await transactionHoldingActions(this.knex, heldActionEvents, async (trx) => {
 			const options: AbstractServiceOptions = {
 				knex: trx,
 				accountability: this.accountability,
@@ -63,18 +92,16 @@ export class RolesService extends ItemsService {
 
 			// Delete permissions/presets for this role, suspend all remaining users in role
 
-			await accessService.deleteByQuery(
-				{
-					filter: { role: { _in: keys } },
-				},
-				{ ...opts, bypassLimits: true },
+			await accessService.deleteRoleAccess(
+				keys,
+				{ ...holdingOpts, bypassLimits: true },
 			);
 
 			await presetsService.deleteByQuery(
 				{
 					filter: { role: { _in: keys } },
 				},
-				{ ...opts, bypassLimits: true },
+				{ ...holdingOpts, bypassLimits: true },
 			);
 
 			await usersService.updateByQuery(
@@ -85,7 +112,7 @@ export class RolesService extends ItemsService {
 					status: 'suspended',
 					role: null,
 				},
-				{ ...opts, bypassLimits: true },
+				{ ...holdingOpts, bypassLimits: true },
 			);
 
 			// If the about to be deleted roles are the parent of other roles set those parents to null
@@ -95,35 +122,90 @@ export class RolesService extends ItemsService {
 					filter: { parent: { _in: keys } },
 				},
 				{ parent: null },
+				{ bypassEmitAction: holdingOpts.bypassEmitAction },
 			);
 
-			await rolesItemsService.deleteMany(keys, opts);
+			await rolesItemsService.deleteMany(keys, holdingOpts);
 		});
 
 		// Since nested roles could be updated, clear caches
-		await this.clearCaches();
+		await clearCachesThenFireActions(
+			() => this.clearCaches(),
+			() => emitActionEvents(heldActionEvents, opts),
+			false,
+		);
 
 		return keys;
 	}
 
-	private async validateRoleNesting(ids: string[], parent: string) {
-		if (ids.includes(parent)) {
-			throw new InvalidPayloadError({ reason: 'A role cannot be a parent of itself' });
+	// A batch can close a loop no single row closes (A under B, B under A), so a
+	// climb reads the parent the batch is about to write before the stored one.
+	private async validateRoleNesting(parentGroups: UpdateGroup<Item>[]) {
+		// Postgres matches a uuid whatever its casing, so the check compares ids
+		// lower-cased.
+		const normalizeRoleId = (roleId: unknown) => {
+			if (!roleId) {
+				return null;
+			}
+
+			return String(roleId).toLowerCase();
+		};
+
+		const parentsInBatch = new Map<string, string | null>();
+
+		for (const { data, keys } of parentGroups) {
+			for (const key of keys) {
+				parentsInBatch.set(
+					String(key).toLowerCase(),
+					normalizeRoleId(data['parent']),
+				);
+			}
 		}
 
-		const roles = await fetchRolesTree(parent, this.knex);
+		const storedParents = new Map<string, string | null>();
 
-		if (ids.some((id) => roles.includes(id))) {
-			// The role tree up from the parent already includes this role, so it would create a circular reference
-			throw new InvalidPayloadError({ reason: 'A role cannot have a parent that is already a descendant of itself' });
+		const readParent = async (roleId: string) => {
+			if (parentsInBatch.has(roleId)) {
+				return parentsInBatch.get(roleId) ?? null;
+			}
+
+			if (!storedParents.has(roleId)) {
+				const role = await this.knex
+					.select('parent')
+					.from('directus_roles')
+					.where({ id: roleId })
+					.first();
+
+				storedParents.set(roleId, normalizeRoleId(role?.parent));
+			}
+
+			return storedParents.get(roleId) ?? null;
+		};
+
+		for (const [roleId, parentId] of parentsInBatch) {
+			if (parentId === roleId) {
+				throw new InvalidPayloadError({
+					reason: 'A role cannot be a parent of itself',
+				});
+			}
+
+			const climbedRoles = new Set<string>();
+			let ancestorId = parentId;
+
+			// A loop above the role that does not pass through it is another row's
+			// to refuse, so the climb stops there.
+			while (ancestorId && !climbedRoles.has(ancestorId)) {
+				if (ancestorId === roleId) {
+					throw new InvalidPayloadError({ reason: DESCENDANT_PARENT_REASON });
+				}
+
+				climbedRoles.add(ancestorId);
+				ancestorId = await readParent(ancestorId);
+			}
 		}
 	}
 
 	private async clearCaches(opts?: MutationOptions) {
-		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-
-		if (this.cache && opts?.autoPurgeCache !== false) {
-			await flushResponseCache(this.cache);
-		}
+		await clearCachesAfterCommit(this.knex, this.cache, opts);
 	}
 }

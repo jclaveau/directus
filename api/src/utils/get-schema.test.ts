@@ -9,7 +9,6 @@ import {
 	expect,
 	it,
 	vi,
-	type MockedFunction,
 } from 'vitest';
 
 const env: Record<string, any> = {
@@ -33,13 +32,20 @@ vi.mock('../../src/database/index', () => {
 // The non-bypass path reads/writes the in-memory schema cache and coordinates via lock+bus. Drive
 // each from the test so both the "cache hit" short-circuit and the "wait for another process" branch
 // are reachable.
-const memoryCache: { schema: any } = { schema: undefined };
+const memoryCache: { schema: any; generation: number } = {
+	schema: undefined,
+	generation: 0,
+};
 
-vi.mock('../cache.js', () => {
+// Freezes in place, as the real cache does.
+vi.mock('../cache.js', async () => {
+	const { freezeSchema } = await import('./freeze-schema.js');
+
 	return {
 		getMemorySchemaCache: () => memoryCache.schema,
+		getSchemaCacheGeneration: () => memoryCache.generation,
 		setMemorySchemaCache: (schema: any) => {
-			memoryCache.schema = schema;
+			memoryCache.schema = freezeSchema(schema);
 		},
 	};
 });
@@ -85,7 +91,7 @@ const readAll = vi.fn().mockResolvedValue([]);
 
 vi.mock('../services/relations.js', () => {
 	return {
-		RelationsService: vi.fn().mockImplementation(() => {
+		RelationsService: vi.fn().mockImplementation(function () {
 			return { readAll };
 		}),
 	};
@@ -116,11 +122,11 @@ function overviewFor(collection: string) {
 }
 
 describe('getDatabaseSchema (via getSchema bypassCache)', () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(() => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 	});
 
@@ -282,6 +288,41 @@ describe('getDatabaseSchema (via getSchema bypassCache)', () => {
 		expect(validation).toEqual({ _and: [] });
 	});
 
+	it('flags a field whose column is in a unique index', async () => {
+		overview.mockResolvedValue({
+			test: {
+				primary: 'id',
+				columns: {
+					id: { column_name: 'id', data_type: 'integer', is_nullable: false },
+					slug: {
+						column_name: 'slug',
+						data_type: 'varchar',
+						is_nullable: true,
+						in_unique_index: true,
+					},
+				},
+			},
+		});
+
+		tracker.on.select('directus_collections').response([]);
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 1,
+				collection: 'test',
+				field: 'slug',
+				special: null,
+				note: null,
+				validation: null,
+			},
+		]);
+
+		const { fields } = (await run()).collections['test']!;
+
+		expect(fields['id']!.inUniqueIndex).toBe(false);
+		expect(fields['slug']!.inUniqueIndex).toBe(true);
+	});
+
 	// A non-alias field row with no matching column is skipped (227-229): neither an alias
 	// special nor an existing column, so nothing is added.
 	it('skips a non-alias field row that has no matching column', async () => {
@@ -355,17 +396,18 @@ describe('getDatabaseSchema (via getSchema bypassCache)', () => {
 });
 
 describe('getSchema cached (non-bypass) path', () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(() => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 	});
 
 	beforeEach(() => {
 		env['CACHE_SCHEMA'] = true;
 		memoryCache.schema = undefined;
+		memoryCache.generation = 0;
 		overview.mockReset();
 		readAll.mockClear();
 		lockIncrement.mockReset();
@@ -378,6 +420,7 @@ describe('getSchema cached (non-bypass) path', () => {
 	afterEach(() => {
 		tracker.reset();
 		env['CACHE_SCHEMA'] = false;
+		env['CACHE_SCHEMA_FREEZE_ENABLED'] = false;
 	});
 
 	// A populated in-memory cache short-circuits the whole build (48-50).
@@ -403,7 +446,7 @@ describe('getSchema cached (non-bypass) path', () => {
 
 		expect(schema.collections['test']).toBeDefined();
 		// schema was written to the in-memory cache and the lock/bus were coordinated
-		expect(memoryCache.schema).toBe(schema);
+		expect(memoryCache.schema).toEqual(schema);
 		expect(busPublish).toHaveBeenCalledWith('schemaCache--done', { schema });
 		expect(lockDelete).toHaveBeenCalledWith('schemaCache--preparing');
 	});
@@ -413,7 +456,10 @@ describe('getSchema cached (non-bypass) path', () => {
 	it('waits for another process and resolves via the bus listener', async () => {
 		lockIncrement.mockResolvedValue(2);
 
-		const published = { collections: { fromBus: {} }, relations: [] };
+		const published = {
+			collections: { fromBus: { fields: {} } },
+			relations: [],
+		};
 
 		busSubscribe.mockImplementation(
 			async (_key: string, listener: (opts: { schema: any }) => void) => {
@@ -426,8 +472,129 @@ describe('getSchema cached (non-bypass) path', () => {
 
 		const schema = await getSchema({ database: db });
 
-		expect(schema).toBe(published);
+		expect(schema).toEqual(published);
 		expect(memoryCache.schema).toBe(published);
 		expect(overview).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		hands the request that built the schema a copy it can write to,
+		not the frozen one the cache keeps
+	`, async () => {
+		lockIncrement.mockResolvedValue(1);
+
+		overview.mockResolvedValue(overviewFor('test'));
+		tracker.on.select('directus_collections').response([]);
+		tracker.on.select('directus_fields').response([]);
+
+		const schema = await getSchema({ database: db });
+
+		expect(Object.isFrozen(memoryCache.schema)).toBe(true);
+		expect(Object.isFrozen(schema)).toBe(false);
+		expect(Object.isFrozen(schema.collections['test']!.fields['id'])).toBe(false);
+	});
+
+	it(oneLine`
+		hands a request waiting on the bus a copy it can write to,
+		not the frozen one the cache keeps
+	`, async () => {
+		lockIncrement.mockResolvedValue(2);
+
+		const published = {
+			collections: { fromBus: { fields: {} } },
+			relations: [],
+		};
+
+		busSubscribe.mockImplementation(
+			async (_key: string, listener: (opts: { schema: any }) => void) => {
+				listener({ schema: published });
+			},
+		);
+
+		busUnsubscribe.mockResolvedValue(undefined);
+
+		const schema = await getSchema({ database: db });
+
+		expect(Object.isFrozen(memoryCache.schema)).toBe(true);
+		expect(Object.isFrozen(schema)).toBe(false);
+		expect(Object.isFrozen(schema.collections['fromBus'])).toBe(false);
+	});
+
+	it(oneLine`
+		hands the request that built the schema the frozen cached one when
+		CACHE_SCHEMA_FREEZE_ENABLED is on, as a cache hit gets
+	`, async () => {
+		env['CACHE_SCHEMA_FREEZE_ENABLED'] = true;
+		lockIncrement.mockResolvedValue(1);
+
+		overview.mockResolvedValue(overviewFor('test'));
+		tracker.on.select('directus_collections').response([]);
+		tracker.on.select('directus_fields').response([]);
+
+		const schema = await getSchema({ database: db });
+
+		expect(schema).toBe(memoryCache.schema);
+		expect(Object.isFrozen(schema)).toBe(true);
+	});
+
+	it('rebuilds when a schema write clears the cache mid-build', async () => {
+		lockIncrement.mockResolvedValue(1);
+
+		overview
+			.mockImplementationOnce(async () => {
+				memoryCache.generation++;
+				return overviewFor('stale');
+			})
+			.mockResolvedValueOnce(overviewFor('fresh'));
+
+		tracker.on.select('directus_collections').response([]);
+		tracker.on.select('directus_fields').response([]);
+
+		const schema = await getSchema({ database: db });
+
+		expect(Object.keys(schema.collections)).toEqual(['fresh']);
+		expect(memoryCache.schema).toEqual(schema);
+		expect(busPublish).toHaveBeenCalledWith('schemaCache--done', { schema });
+	});
+
+	it('caches nothing and publishes null when every build is outdated', async () => {
+		lockIncrement.mockResolvedValue(1);
+
+		overview.mockImplementation(async () => {
+			memoryCache.generation++;
+			return overviewFor('stale');
+		});
+
+		tracker.on.select('directus_collections').response([]);
+		tracker.on.select('directus_fields').response([]);
+
+		const schema = await getSchema({ database: db });
+
+		expect(Object.keys(schema.collections)).toEqual(['stale']);
+		expect(overview).toHaveBeenCalledTimes(3);
+		expect(memoryCache.schema).toBeUndefined();
+		expect(busPublish).toHaveBeenCalledWith('schemaCache--done', { schema: null });
+	});
+
+	it(oneLine`
+		returns but does not cache a schema published after a local clear
+	`, async () => {
+		lockIncrement.mockResolvedValue(2);
+
+		const published = { collections: { fromBus: {} }, relations: [] };
+
+		busSubscribe.mockImplementation(
+			async (_key: string, listener: (opts: { schema: any }) => void) => {
+				memoryCache.generation++;
+				listener({ schema: published });
+			},
+		);
+
+		busUnsubscribe.mockResolvedValue(undefined);
+
+		const schema = await getSchema({ database: db });
+
+		expect(schema).toBe(published);
+		expect(memoryCache.schema).toBeUndefined();
 	});
 });

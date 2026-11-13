@@ -211,7 +211,7 @@ describe('the alterations shape decides whether anything changed', () => {
 			await writeChildren(vendor, parent.id, [{ name: 'kept' }]);
 
 			// The batch route echoes the rows updateMany reports, so an update it
-			// skips entirely comes back as an empty list rather than the parent.
+			// skips entirely still comes back as the parent it was sent.
 			const response = await request(getUrl(vendor))
 				.patch(`/items/${collectionParents}`)
 				.send({
@@ -221,7 +221,10 @@ describe('the alterations shape decides whether anything changed', () => {
 				.set('Authorization', AUTH);
 
 			expect(response.statusCode).toEqual(200);
-			expect(response.body.data).toEqual([]);
+
+			expect(response.body.data).toEqual([
+				expect.objectContaining({ id: parent.id, name: 'no-change' }),
+			]);
 
 			// Skipped, not applied: the child an empty array would have deselected
 			// is still attached.

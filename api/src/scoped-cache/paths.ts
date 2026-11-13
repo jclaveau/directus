@@ -32,7 +32,7 @@ import type {
 } from '@directus/types';
 import {
 	isPinnableScopeType,
-} from './tags.js';
+} from './pins.js';
 
 export type ScopedCacheM2oJoin = {
 	field: string;
@@ -44,7 +44,7 @@ export type ScopedCacheM2oJoin = {
  * Resolve a dotted path into the chain of M2O joins it crosses, from `collection`
  * down. Null on anything that is not an M2O — a to-many hop, an unknown field, or an
  * A2O, whose relation names no single related collection — and every caller then
- * degrades to the bare collection tag.
+ * degrades to the bare collection fingerprint.
  *
  * A row maps to exactly one parent across an M2O, so what such a join reaches is
  * fully determined by the rows already in hand. Shared, so the two sides that ask
@@ -82,9 +82,9 @@ export function resolveScopedCacheM2oJoinChainFromPath(
 }
 
 /**
- * Field paths to inject so a read's ownership ANCESTORS — the collections its
- * scope chain crosses toward the owner — come back as rows and pin by key, not
- * the bare tag a read that nested none of them (`fields: ['*']`) over-purges on.
+ * Field paths to inject so a read's ownership ANCESTORS — the collections its scope
+ * chain crosses toward the owner — come back as rows and pin by key, not the bare
+ * fingerprint a read that nested none of them (`fields: ['*']`) over-purges on.
  *
  * Walks the same flat-field M2O chain `composeScopedCachePaths` does: each
  * collection names its parent, so ownership composes hop by hop. A path per
@@ -150,8 +150,8 @@ export function scopedCacheOwnershipNestedPkPaths(
  * replaced at every hop, so the rows passed through on the way out are not returned.
  *
  * Null when the response cannot answer the path — a segment it never carried, or an
- * array where an M2O promised one row — so the caller falls back to the bare tag
- * rather than pin a set it only half read.
+ * array where an M2O promised one row — so the caller falls back to the bare
+ * fingerprint rather than pin a set it only half read.
  */
 export function m2oParentRowsAtPathEnd(
 	records: Item[],
@@ -194,14 +194,14 @@ export function m2oParentRowsAtPathEnd(
  *   operator other than `_eq`/`_in`, or a hop THROUGH it to a further
  *   collection, which reads the foreign key of every row that could be joined.
  *   A write to any of its rows can then change the result, so only the bare
- *   collection tag covers it.
+ *   collection fingerprint covers it.
  * - `independent` — a condition reaches it, and the read still depends on none of
  *   its rows. Only an M2O path terminating on the related primary key qualifies,
  *   and only behind an enforced foreign key: the condition is answered by the
  *   near row's own column, and every way the far row can disappear writes the
  *   near row too (`CASCADE`/`SET NULL`/`SET DEFAULT`), or is refused
- *   (`RESTRICT`/`NO ACTION`). The near collection's own tag then covers it, so
- *   this collection needs no tag at all — not even a bare one.
+ *   (`RESTRICT`/`NO ACTION`). The near collection's own pin then covers it, so
+ *   this collection needs no fingerprint at all — not even a bare one.
  * - `absent` — no condition reaches it, and it owes the filters nothing.
  */
 export type ScopedCacheFilterKeying =
@@ -217,7 +217,7 @@ const KEYING_ABSENT: ScopedCacheFilterKeying = { kind: 'absent' };
 // The keys of every keyed/independent part with the one field they all key by — or
 // 'conflict' when parts key DIFFERENT fields (their keys are not one slice axis, so
 // nothing pins the alias), or null when none keyed. `independent` carries its keys
-// too: it needs no tag of its own, but a sibling reading the same joined row does.
+// too: it needs no pin of its own, but a sibling reading the same joined row does.
 function keyedAxisAcross(
 	parts: ScopedCacheFilterKeying[],
 ): { field: string; keys: Set<unknown> } | 'conflict' | null {
@@ -264,7 +264,7 @@ function keyingOfEveryCondition(
 	}
 
 	// A sibling that DOES read the joined row pulls the alias back to needing a
-	// tag — pinned by the key if one was named, bare otherwise.
+	// fingerprint — pinned by the key if one was named, bare otherwise.
 	if (parts.some((part) => part.kind === 'unkeyed')) {
 		return axis === null
 			? KEYING_UNKEYED
@@ -304,7 +304,7 @@ function keyingOfAnyCondition(
 		return KEYING_UNKEYED;
 	}
 
-	// One branch needing a tag makes the whole disjunction need one; the keys the
+	// One branch needing a pin makes the whole disjunction need one; the keys the
 	// independent branches named are unioned in, since a row may arrive by either.
 	if (axis !== null && parts.some((part) => part.kind === 'keyed')) {
 		return { kind: 'keyed', field: axis.field, keys: axis.keys };
@@ -426,8 +426,8 @@ function nearRowAnswerKeys(
  * `resolveScopedCacheM2oJoinChainFromPath` accepts: what a hop reaches at its FAR
  * end is named by the key the condition
  * gives, whichever direction the relation runs. `filter/index.ts` joins O2M, M2M
- * and A2O the same way it joins M2O, and `_some`/`_none` push the same condition
- * into a subquery over the same one row.
+ * and A2O the same way it joins M2O. Each `_some`/`_none` is a subquery over a row
+ * of its own, so it walks at an alias of its own.
  */
 function scopedCacheFilterKeyingByAlias(
 	schema: SchemaOverview,
@@ -480,14 +480,15 @@ function scopedCacheFilterKeyingByAlias(
 			continue;
 		}
 
-		// Quantifiers over a to-many hop the caller already crossed: the condition
-		// inside still names one row of the same collection, at the same alias.
+		// Quantifiers over a to-many hop the caller already crossed: the conditions
+		// inside hold for one row of the same collection, which no sibling condition
+		// describes. The map grows on every walk, so its size names this one alone.
 		if ((key === '_some' || key === '_none') && isFilterNode(value)) {
 			parts.push(scopedCacheFilterKeyingByAlias(
 				schema,
 				collection,
 				value as Filter,
-				alias,
+				`${alias}.${key}:${collectionByAlias.size}`,
 				collectionByAlias,
 			));
 
@@ -521,7 +522,7 @@ function scopedCacheFilterKeyingByAlias(
 
 		// The scope is request text naming the table to join, so one naming no
 		// collection of this schema joins nothing — reporting it would put a
-		// collection that cannot exist in the response's tag header.
+		// collection that cannot exist in the response's tags header.
 		if (pathScope !== undefined && schema.collections[pathScope] === undefined) {
 			parts.push(new Map([[alias, KEYING_UNKEYED]]));
 			continue;
@@ -537,7 +538,7 @@ function scopedCacheFilterKeyingByAlias(
 		// A function key reads the related rows through a transform: `count`
 		// totals every one of them, so the value it is compared against is a
 		// cardinality rather than a key. The hop is joined all the same, so the
-		// collection is reported — wholesale, which is the bare tag.
+		// collection is reported — wholesale, which is the bare fingerprint.
 		if (relatedCollection !== null && functionName !== undefined) {
 			collectionByAlias.set(childAlias, relatedCollection);
 
@@ -551,7 +552,7 @@ function scopedCacheFilterKeyingByAlias(
 			// An M2O ending on the related primary key is answered by the near
 			// row's own foreign key column — the join only re-reads the value it
 			// already holds. Behind an enforced constraint the far row cannot
-			// vanish without writing the near row, so the near collection's tag
+			// vanish without writing the near row, so the near collection's pin
 			// covers it and this one needs none.
 			const nearRowKeys = nearRowAnswerKeys(
 				schema,
@@ -667,7 +668,7 @@ function scopePathKeying(
 
 		// A leaf under a named key is a node by now (`expandRelatedKeyFilters`
 		// wrapped it in `_eq`), and a path carrying on past a column fails the
-		// query before any tag is derived; a string handed straight to the
+		// query before any pin is derived; a string handed straight to the
 		// service would still walk here, `Object.keys` indexing its first
 		// character over and over until `segments` overflows.
 		if (!isFilterNode(next)) {
@@ -806,9 +807,9 @@ function isScopedCacheKeyableField(
  * describes rows by what they are NOT. A function key (`year(created_on)`)
  * reads the column through a transform, so it names nothing either.
  *
- * An empty `_in` matches no row and so depends on none, but it is reported
- * unkeyed rather than as an empty key set: pinning a collection to nothing would
- * drop its tag altogether, and a bare tag is the cheaper way to be right about a
+ * An empty `_in` matches no row and so depends on none, but it is reported unkeyed
+ * rather than as an empty key set: pinning a collection to nothing would drop its
+ * pin altogether, and a bare fingerprint is the cheaper way to be right about a
  * query that returns nothing.
  */
 function keyingOfColumnConditions(
@@ -855,9 +856,9 @@ function keyingOfColumnConditions(
  * union of what each path named. Each node folds its own aliases, since alias
  * `''` means a different collection in every one of them.
  *
- * Shared by the two sides that must agree on it — the tags a keyed collection
- * pins, and the collections that consequently need NOT fall back to the bare tag
- * — so neither can drift from the other's answer.
+ * Shared by the two sides that must agree on it — the keys a keyed collection pins,
+ * and the collections that consequently need NOT fall back to the bare fingerprint —
+ * so neither can drift from the other's answer.
  */
 export function scopedCacheFilterKeyingByCollection(
 	schema: SchemaOverview,
@@ -905,7 +906,10 @@ export function scopedCacheFilterKeyingByCollection(
 		}
 	};
 
+	// Rules an aggregate reads fold apart from the node's filter: conjoined with
+	// it, the filter's key would still answer for what they read past that key.
 	readKeyingOf(ast.name, ast.query, ast.cases);
+	readKeyingOf(ast.name, {}, ast.aggregateCases ?? []);
 
 	const readKeyingOfChildren = (children: AST['children']): void => {
 		for (const child of children) {
@@ -923,6 +927,7 @@ export function scopedCacheFilterKeyingByCollection(
 			if (child.type === 'a2o') {
 				for (const name of child.names) {
 					readKeyingOf(name, child.query[name] ?? {}, child.cases[name] ?? []);
+					readKeyingOf(name, {}, child.aggregateCases?.[name] ?? []);
 					readKeyingOfChildren(child.children[name] ?? []);
 				}
 
@@ -930,6 +935,7 @@ export function scopedCacheFilterKeyingByCollection(
 			}
 
 			readKeyingOf(child.name, child.query, child.cases);
+			readKeyingOf(child.name, {}, child.aggregateCases ?? []);
 			readKeyingOfChildren(child.children);
 		}
 	};
@@ -940,6 +946,81 @@ export function scopedCacheFilterKeyingByCollection(
 }
 
 /**
+ * The collection behind each function hop of a filter: `extractFieldsFromQuery`
+ * files `count(children)` as a field of its node, with no path to the rows it
+ * totals.
+ */
+export function scopedCacheFunctionHops(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	filter: Filter,
+): Map<string, CollectionKey> {
+	const collectionByAlias = new Map<string, CollectionKey>();
+
+	scopedCacheFilterKeyingByAlias(
+		schema,
+		collection,
+		expandRelatedKeyFilters(schema, collection, filter),
+		'',
+		collectionByAlias,
+	);
+
+	return new Map([...collectionByAlias].filter(([alias]) => alias.includes('(')));
+}
+
+/**
+ * The collections a read's root filter reaches through a `_some`/`_none` row and
+ * through another row besides. No conjunct's key or value bounds such a collection:
+ * each one describes its own row.
+ */
+export function scopedCacheCollectionsAcrossQuantifiers(
+	schema: SchemaOverview,
+	ast: AST,
+): Set<CollectionKey> {
+	const filter = joinFilterWithCases(ast.query.filter, ast.cases);
+
+	if (!filter) {
+		return new Set();
+	}
+
+	const collectionByAlias = new Map<string, CollectionKey>();
+
+	const keyingByAlias = scopedCacheFilterKeyingByAlias(
+		schema,
+		ast.name,
+		expandRelatedKeyFilters(schema, ast.name, filter),
+		'',
+		collectionByAlias,
+	);
+
+	const aliasesByCollection = new Map<CollectionKey, string[]>();
+
+	for (const alias of keyingByAlias.keys()) {
+		const aliasCollection = collectionByAlias.get(alias);
+
+		if (aliasCollection !== undefined) {
+			aliasesByCollection.set(aliasCollection, [
+				...(aliasesByCollection.get(aliasCollection) ?? []),
+				alias,
+			]);
+		}
+	}
+
+	const crossingCollections = new Set<CollectionKey>();
+
+	for (const [collection, aliases] of aliasesByCollection) {
+		if (
+			aliases.length > 1
+			&& aliases.some((alias) => /\._(some|none):/.test(alias))
+		) {
+			crossingCollections.add(collection);
+		}
+	}
+
+	return crossingCollections;
+}
+
+/**
  * Auto-derive multi-hop scope paths from LOCAL scope fields, so each collection
  * declares only its own column and the grand-owner path composes itself. A scope
  * field on `collection` that is an M2O to a collection which itself declares scope
@@ -947,7 +1028,7 @@ export function scopedCacheFilterKeyingByCollection(
  * own and, transitively, its derived. So `team` scoped by `owner_ref` + `member`
  * scoped by `team` yields `team.owner_ref`, no config naming another collection's
  * relation. Cycle-guarded (`visited`); the caller re-resolves each path (a to-many
- * hop drops to the bare tag).
+ * hop drops to the bare fingerprint).
  */
 export function composeScopedCachePaths(
 	schema: Pick<SchemaOverview, 'collections' | 'relations'>,

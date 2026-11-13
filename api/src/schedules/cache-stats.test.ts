@@ -6,7 +6,7 @@ import {
 	reapCacheAnomalies,
 	reapCacheDescriptors,
 	reapCacheEvents,
-	reapScopedCacheEntryTags,
+	reapScopedCacheEntryPins,
 	refreshCacheStatsFlag,
 	subscribeCacheStatsToggle,
 } from '../cache-events.js';
@@ -34,7 +34,7 @@ beforeEach(() => {
 	vi.mocked(reapCacheDescriptors).mockResolvedValue(0);
 	vi.mocked(reapCacheEvents).mockResolvedValue(0);
 	vi.mocked(reapCacheAnomalies).mockResolvedValue(0);
-	vi.mocked(reapScopedCacheEntryTags).mockResolvedValue(0);
+	vi.mocked(reapScopedCacheEntryPins).mockResolvedValue(0);
 });
 
 afterEach(() => {
@@ -145,14 +145,14 @@ describe('cache-stats schedule', () => {
 		expect(reapCacheAnomalies).toHaveBeenCalled();
 
 		// The order is the rule: a fact aging out is what orphans a descriptor,
-		// and a descriptor going is what orphans its entry tags. On two jobs at two
+		// and a descriptor going is what orphans its entry pins. On two jobs at two
 		// cadences each link waited for the next tick of the one behind it.
 		const order = (job: any) => vi.mocked(job).mock.invocationCallOrder[0]!;
 
 		expect(order(reapCacheEvents)).toBeLessThan(order(reapCacheDescriptors));
 
 		expect(order(reapCacheDescriptors))
-			.toBeLessThan(order(reapScopedCacheEntryTags));
+			.toBeLessThan(order(reapScopedCacheEntryPins));
 	});
 
 	it('registers one reap job, not two', async () => {
@@ -181,6 +181,6 @@ describe('cache-stats schedule', () => {
 		expect(reap).toBeDefined();
 
 		await expect(reap![2](new Date(0))).resolves.toBeUndefined();
-		expect(reapScopedCacheEntryTags).not.toHaveBeenCalled();
+		expect(reapScopedCacheEntryPins).not.toHaveBeenCalled();
 	});
 });

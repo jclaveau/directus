@@ -7,17 +7,20 @@ import { move, remove } from 'fs-extra';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import Queue from 'p-queue';
-import { join } from 'path';
-import type { ReadableStream } from 'stream/web';
+import { join } from 'node:path';
+import type { ReadableStream } from 'node:stream/web';
 import { extract } from 'tar';
 import { useLogger } from '../../../logger/index.js';
 import { getStorage } from '../../../storage/index.js';
-import { getExtensionsPath } from '../get-extensions-path.js';
+import {
+	getRegistryRootPath,
+	REGISTRY_STORAGE_ROOT,
+} from '../get-registry-root-path.js';
 
 const env = useEnv();
 
 export class InstallationManager {
-	extensionPath = getExtensionsPath();
+	extensionPath = getRegistryRootPath();
 
 	async install(versionId: string) {
 		const logger = useLogger();
@@ -74,7 +77,7 @@ export class InstallationManager {
 					const readStream = await tmpStorage.read(filepath);
 
 					const remotePath = join(
-						env['EXTENSIONS_PATH'] as string,
+						REGISTRY_STORAGE_ROOT,
 						'.registry',
 						versionId,
 						filepath.substring(extractedPath.length),
@@ -108,7 +111,7 @@ export class InstallationManager {
 
 			const queue = new Queue({ concurrency: 1000 });
 
-			const prefix = join(env['EXTENSIONS_PATH'] as string, '.registry', folder);
+			const prefix = join(REGISTRY_STORAGE_ROOT, '.registry', folder);
 
 			for await (const filepath of remoteDisk.list(prefix)) {
 				queue.add(() => remoteDisk.delete(filepath));

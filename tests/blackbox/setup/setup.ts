@@ -10,10 +10,14 @@ import config, { getUrl, paths } from '../common/config';
 import vendors from '../common/get-dbs-to-test';
 import { USER } from '../common/variables';
 import { awaitDatabaseConnection, awaitDirectusConnection } from '../utils/await-connection';
+import { timingsDir } from '../utils/record-timing';
 import global from './global';
 
 export async function setup() {
 	console.log(`👮‍♀️ Starting tests!\n`);
+
+	// A local re-run appends to the same files, so the record starts empty.
+	await fs.rm(timingsDir, { recursive: true, force: true });
 
 	await new Listr([
 		{

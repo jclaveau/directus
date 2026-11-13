@@ -65,6 +65,13 @@ test('Only the configured subsystems are exposed', () => {
 	expect(systemMcpToolGroups()).toEqual(['cache']);
 });
 
+test('The cache settings write is a subsystem a deployment can name', () => {
+	vi.mocked(useEnv)
+		.mockReturnValue({ SYSTEM_MCP_TOOLS: ['cache', 'cache_settings'] });
+
+	expect(systemMcpToolGroups()).toEqual(['cache', 'cache_settings']);
+});
+
 // "Servers MUST validate the Origin header on all incoming connections to
 // prevent DNS rebinding attacks" — the attack is a browser one, and a caller
 // that sends no Origin is not a browser.

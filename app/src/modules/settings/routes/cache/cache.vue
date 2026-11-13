@@ -8,8 +8,8 @@ import { useSettingsStore } from '@/stores/settings';
 import { useUserStore } from '@/stores/user';
 import { useRefreshInterval } from '@/composables/use-refresh-interval';
 import { useLocalStorage } from '@vueuse/core';
-import ApexCharts, { type ApexOptions } from 'apexcharts';
-import { computed, onMounted, onUnmounted, ref, watch, type Ref } from 'vue';
+import type { default as ApexCharts, ApexOptions } from 'apexcharts';
+import { computed, onMounted, ref, watch, type Ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { abbreviateNumber } from '@directus/utils';
 import type {
@@ -21,7 +21,10 @@ import type {
 } from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
 import CacheAuditPanel from './cache-audit-panel.vue';
+import CacheSettingsPanel from './cache-settings-panel.vue';
+import VChart from '@/components/v-chart.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
+import SidebarDetail from '@/views/private/components/sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
 import {
 	buildGroups,
@@ -209,8 +212,8 @@ const emptyState = computed(() => {
 const selectedEntry = ref<CacheEntry | null>(null);
 const cachedValue = ref<unknown>(null);
 const cachedValueExists = ref(false);
-const cachedTags = ref<string[] | null>(null);
-const cachedTagCounts = ref<Record<string, number>>({});
+const cachedPins = ref<string[] | null>(null);
+const cachedPinCounts = ref<Record<string, number>>({});
 const cachedTombstone = ref<number | null>(null);
 
 const cachedExpiry = ref<
@@ -497,6 +500,14 @@ const sections = computed(() => {
 // Totals track the filtered list, matching the endpoint count under a filter.
 const totalEntries = computed(() => searchedEntries.value.length);
 
+// Handed to the settings panel, which re-reads the settings on each bump.
+const settingsRefreshKey = ref(0);
+
+function refreshPage(): void {
+	settingsRefreshKey.value += 1;
+	void load();
+}
+
 async function load() {
 	const token = ++loadToken;
 	loading.value = true;
@@ -551,7 +562,7 @@ function anomalyLabel(reason: CacheAnomalyReason): string {
 		value_too_large: t('cache_anomaly_value_too_large', 'Not cached · too large'),
 		redis_error: t('cache_anomaly_redis_error', 'Redis error'),
 		stale_entry: t('cache_anomaly_stale_entry', 'Stale · audit replay differs'),
-		tag_drift: t('cache_anomaly_tag_drift', 'Tag drift · audit replay pinned else'),
+		pin_drift: t('cache_anomaly_pin_drift', 'Pin drift · audit replay pinned else'),
 	};
 
 	return labels[reason] ?? reason;
@@ -664,6 +675,7 @@ async function saveTtl() {
 const flushTargetOptions = [
 	{ text: t('cache_flush_response', 'Response'), value: 'response' },
 	{ text: t('cache_flush_system', 'System'), value: 'system' },
+	{ text: t('cache_flush_permissions', 'Permissions'), value: 'permissions' },
 	{ text: t('cache_flush_locks', 'Locks'), value: 'locks' },
 ];
 
@@ -783,10 +795,7 @@ const totalAnomalies = computed(() => {
 	return searchedAnomalies.value.reduce((sum, a) => sum + a.count, 0);
 });
 
-const chartEl = ref<HTMLElement | null>(null);
 let chart: ApexCharts | null = null;
-
-const latencyChartEl = ref<HTMLElement | null>(null);
 let latencyChart: ApexCharts | null = null;
 
 // Legend visibility persisted per chart, so a hidden/shown series survives a reload
@@ -1368,24 +1377,13 @@ function chartConfig(): ApexOptions {
 	};
 }
 
-function renderChart() {
-	if (!chartEl.value) {
-		return;
-	}
+const countsChartOptions = computed(() => {
+	return chartConfig();
+});
 
-	if (chart) {
-		void chart.updateOptions(chartConfig(), true, false).then(() => {
-			applyHiddenSeries(chart, countsHiddenSeries.value);
-		});
-
-		return;
-	}
-
-	chart = new ApexCharts(chartEl.value, chartConfig());
-
-	void chart.render().then(() => {
-		applyHiddenSeries(chart, countsHiddenSeries.value);
-	});
+function countsChartDrawn(drawnChart: ApexCharts) {
+	chart = drawnChart;
+	applyHiddenSeries(drawnChart, countsHiddenSeries.value);
 }
 
 type LatencyLine = {
@@ -1568,38 +1566,14 @@ function latencyChartConfig(): ApexOptions {
 	};
 }
 
-// Depend on chartEl too, not just the data: the chart's v-show container mounts a
-// tick after the route transition settles, so a data-only watcher fires while the
-// ref is still null. Re-firing when chartEl binds is what paints the first load.
-watch([timeseries, chartEl], renderChart, { deep: true, flush: 'post' });
+const latencyChartOptions = computed(() => {
+	return latencyChartConfig();
+});
 
-function renderLatencyChart() {
-	if (!latencyChartEl.value) {
-		return;
-	}
-
-	if (latencyChart) {
-		void latencyChart
-			.updateOptions(latencyChartConfig(), true, false)
-			.then(() => {
-				applyHiddenSeries(latencyChart, latencyHiddenSeries.value);
-			});
-
-		return;
-	}
-
-	latencyChart = new ApexCharts(latencyChartEl.value, latencyChartConfig());
-
-	void latencyChart.render().then(() => {
-		applyHiddenSeries(latencyChart, latencyHiddenSeries.value);
-	});
+function latencyChartDrawn(drawnChart: ApexCharts) {
+	latencyChart = drawnChart;
+	applyHiddenSeries(drawnChart, latencyHiddenSeries.value);
 }
-
-watch(
-	[timeseries, latencyChartEl],
-	renderLatencyChart,
-	{ deep: true, flush: 'post' },
-);
 
 function toggle(path: string) {
 	expanded.value[path] = !expanded.value[path];
@@ -1821,8 +1795,8 @@ async function openEntry(entry: CacheEntry) {
 	now.value = Date.now(); // fresh clock so absentReason's expired-vs-evicted verdict is current
 	cachedValue.value = null;
 	cachedValueExists.value = false;
-	cachedTags.value = null;
-	cachedTagCounts.value = {};
+	cachedPins.value = null;
+	cachedPinCounts.value = {};
 	cachedExpiry.value = null;
 	cachedSizes.value = null;
 	cachedTombstone.value = null;
@@ -1842,8 +1816,8 @@ async function openEntry(entry: CacheEntry) {
 		const data = response.data.data;
 		cachedValueExists.value = data.exists;
 		cachedValue.value = data.value;
-		cachedTags.value = data.tags;
-		cachedTagCounts.value = data.tagCounts ?? {};
+		cachedPins.value = data.pins;
+		cachedPinCounts.value = data.pinCounts ?? {};
 		cachedExpiry.value = data.expiry;
 		cachedSizes.value = data.sizes;
 		cachedTombstone.value = data.tombstone;
@@ -1870,17 +1844,10 @@ onMounted(() => {
 	void load();
 	void loadStatsState();
 });
-
-onUnmounted(() => {
-	chart?.destroy();
-	chart = null;
-	latencyChart?.destroy();
-	latencyChart = null;
-});
 </script>
 
 <template>
-	<private-view :title="t('cache', 'Cache')">
+	<private-view :title="t('cache', 'Cache')" :sidebar-width="720">
 		<template #headline>
 			<v-breadcrumb :items="[{ name: t('settings'), to: '/settings' }]" />
 		</template>
@@ -1938,10 +1905,14 @@ onUnmounted(() => {
 		</template>
 
 		<template #sidebar>
+			<sidebar-detail icon="tune" :title="t('cache_settings', 'Cache settings')">
+				<cache-settings-panel :refresh-key="settingsRefreshKey" @changed="load" />
+			</sidebar-detail>
+
 			<auto-refresh
 				v-model="refreshInterval"
 				:intervals="[null, 1, 3, 5, 10, 30, 60, 300]"
-				@refresh="load"
+				@refresh="refreshPage"
 			/>
 		</template>
 
@@ -2013,7 +1984,11 @@ onUnmounted(() => {
 						</span>
 					</div>
 				</div>
-				<div ref="chartEl" class="chart" />
+				<v-chart
+					class="chart"
+					:options="countsChartOptions"
+					@drawn="countsChartDrawn"
+				/>
 			</div>
 
 			<div v-show="hasLatency" class="timeseries">
@@ -2065,10 +2040,14 @@ onUnmounted(() => {
 						</span>
 					</div>
 				</div>
-				<div ref="latencyChartEl" class="chart" />
+				<v-chart
+					class="chart"
+					:options="latencyChartOptions"
+					@drawn="latencyChartDrawn"
+				/>
 			</div>
 
-			<div style="display: flex; justify-content:space-between;">
+			<div class="summary-row">
 				<div class="summary">
 					<div class="metric">
 						<span class="value">{{ abbreviateNumber(groups.length) }}</span>
@@ -2080,14 +2059,13 @@ onUnmounted(() => {
 					</div>
 				</div>
 
-				<div style="display: flex; align-items: center; gap: 16px 32px;">
+				<div class="cache-toolbar">
 					<v-input
 						v-model="ttlDraft"
 						class="ttl-input"
 						small
 						inline
 						:placeholder="ttlPlaceholder"
-						style="width: 100px;"
 						@keydown.enter="saveTtl"
 					>
 						<template #append>
@@ -2512,19 +2490,19 @@ onUnmounted(() => {
 						</div>
 					</div>
 
-					<div class="value-head tags-head">
-						{{ t('scoped_cache_tags', 'Scoped cache tags') }}
+					<div class="value-head pins-head">
+						{{ t('scoped_cache_pins', 'Scoped cache pins') }}
 					</div>
-					<div v-if="cachedTags && cachedTags.length" class="tags">
-						<span v-for="tag in cachedTags" :key="tag" class="tag">
-							{{ tag }}
-							<template v-if="cachedTagCounts[tag]">
-								({{ cachedTagCounts[tag] }})
+					<div v-if="cachedPins && cachedPins.length" class="pins">
+						<span v-for="pin in cachedPins" :key="pin" class="pin">
+							{{ pin }}
+							<template v-if="cachedPinCounts[pin]">
+								({{ cachedPinCounts[pin] }})
 							</template>
 						</span>
 					</div>
 					<div v-else class="value-note">
-						{{ t('no_scoped_cache_tags', 'None (needs CACHE_TAGS_HEADER)') }}
+						{{ t('no_scoped_cache_pins', 'None (needs CACHE_TAGS_HEADER)') }}
 					</div>
 				</div>
 
@@ -2559,13 +2537,15 @@ onUnmounted(() => {
 	margin-block-end: 24px;
 }
 
-/* A dedicated row under the metrics, left-aligned — body content pushed to the far
-   right hides behind the auto-refresh sidebar, so keep these on the left. */
+.summary-row {
+	display: flex;
+	justify-content: space-between;
+}
+
 .cache-toolbar {
 	display: flex;
 	align-items: center;
-	gap: 20px;
-	margin-block-end: 24px;
+	gap: 16px 32px;
 }
 
 /* The flush select + button read as one control, set apart from the TTL field. */
@@ -3035,13 +3015,13 @@ table.entries .entry-row {
 	margin-block-end: 24px;
 }
 
-.tags {
+.pins {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 8px;
 }
 
-.tag {
+.pin {
 	padding: 2px 8px;
 	background-color: var(--theme--background-subdued);
 	border-radius: var(--theme--border-radius);
@@ -3049,7 +3029,7 @@ table.entries .entry-row {
 	font-size: 12px;
 }
 
-.tags-head {
+.pins-head {
 	margin-block-start: 16px;
 }
 
@@ -3166,7 +3146,7 @@ table.entries .entry-row {
 /* Scoped under .cache-toolbar to out-specify v-input's own `inline-size: max-content`
    (which, with the 20px inner input, otherwise collapses to the icons' width). */
 .cache-toolbar .ttl-input {
-	inline-size: 240px;
+	inline-size: 100px;
 }
 
 .flush-select {

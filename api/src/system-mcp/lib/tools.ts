@@ -182,7 +182,7 @@ const FINDINGS = {
 	type: 'array',
 	description:
 		'One per entry that was not fresh: its verdict and reason, the request '
-		+ 'that filled it (method, url, query, user, collection), the tags it was '
+		+ 'that filled it (method, url, query, user, collection), the pins it was '
 		+ 'filled under against the ones the replay pinned, the JSON pointers '
 		+ 'where the stored body and the fresh one differ, and the purges that '
 		+ 'covered it since the fill. The bodies themselves are not answered.',
@@ -207,6 +207,34 @@ const SCHEDULE_PROPERTIES = {
 	nextRunAt: {
 		type: ['number', 'null'],
 		description: 'When the rule next fires, as a Unix millisecond timestamp.',
+	},
+} as const;
+
+/** What reading and writing the cache settings answer. */
+const CACHE_SETTINGS_OUTPUT = {
+	type: 'object',
+	properties: {
+		key: {
+			type: 'string',
+			description: 'The settings column the cache settings are stored in.',
+		},
+		sharedSettings: {
+			type: ['object', 'null'],
+			description: 'The fields the cache settings set, or null for none. '
+				+ 'Carries `setBy`, `setAt` and `setFrom` beside them: who wrote '
+				+ 'them, when, and through "admin" or "mcp".',
+		},
+		setByEmail: {
+			type: ['string', 'null'],
+			description: 'The address behind `setBy`, or null for none.',
+		},
+		resolved: {
+			type: 'object',
+			description: 'Every field as this node reads it: `value`, '
+				+ '`source` — "settings", or "env" for the environment variable '
+				+ 'it overrides — and `fallback`, what clearing the field would '
+				+ 'leave it on.',
+		},
 	},
 } as const;
 
@@ -664,7 +692,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			title: 'Read one cache entry',
 			description:
 				'The live state of a single response-cache entry: whether its value '
-				+ 'is still held, its scoped-cache tags, when it was written and when '
+				+ 'is still held, its scoped-cache pins, when it was written and when '
 				+ 'it expires, its size raw and compressed, any tombstone, when the '
 				+ 'audit last replayed it and when it was last known to answer what '
 				+ 'the database does, and the purges that covered it since it was '
@@ -690,14 +718,14 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 						type: 'boolean',
 						description: 'Whether the value itself is still held.',
 					},
-					tags: {
+					pins: {
 						type: ['array', 'null'],
-						description: 'Scoped-cache tags, where that sidecar was written.',
+						description: 'Scoped-cache pins, where that sidecar was written.',
 						items: { type: 'string' },
 					},
-					tagCounts: {
+					pinCounts: {
 						type: 'object',
-						description: 'How many entries each of those tags covers.',
+						description: 'How many entries each of those pins covers.',
 					},
 					expiry: {
 						type: ['object', 'null'],
@@ -766,8 +794,8 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				// still hands the body to an administrator who asks for it.
 				return {
 					exists: entry.exists,
-					tags: entry.tags,
-					tagCounts: entry.tagCounts,
+					pins: entry.pins,
+					pinCounts: entry.pinCounts,
 					expiry: entry.expiry,
 					sizes: entry.sizes,
 					tombstone: entry.tombstone,
@@ -883,6 +911,92 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			run: async (_args, context) => utils(context).getCacheStatsState(),
 		}),
 		defineSystemMcpTool({
+			name: 'read_cache_settings',
+			group: 'cache',
+			title: 'Read the cache settings',
+			description:
+				'The cache settings every node reads live, and what each field '
+				+ 'resolves to with where it comes from: the setting, or the '
+				+ 'environment variable it overrides. Read it before changing any of '
+				+ 'them.',
+			inputSchema: { type: 'object', properties: {} },
+			outputSchema: CACHE_SETTINGS_OUTPUT,
+			annotations: READ_ONLY,
+			run: async (_args, context) => utils(context).readCacheSettings(),
+		}),
+		defineSystemMcpTool({
+			name: 'write_cache_settings',
+			group: 'cache_settings',
+			title: 'Change the cache settings',
+			description:
+				'Lay fields over the cache settings, which every node picks up at '
+				+ 'once — no redeploy. Pass a field as null to give it back to its '
+				+ 'environment variable or default, and `clear: true` alone to drop '
+				+ 'them all. A value outside its rule is refused. Switching `response` '
+				+ 'on where CACHE_RESPONSE, else CACHE_ENABLED, is off first clears the '
+				+ 'response cache, since nodes that held none purged nothing while it '
+				+ 'was off. A write is stamped `setFrom: "mcp"` with its user and time.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					settings: {
+						type: 'object',
+						description: 'The fields to set: response (over CACHE_RESPONSE, '
+							+ 'else CACHE_ENABLED), '
+							+ 'value_max_size (false or a size such as "2mb", over '
+							+ 'CACHE_VALUE_MAX_SIZE), stats_max_bytes (false or a size, '
+							+ 'over CACHE_STATS_MAX_BYTES), audit_limit (an integer from '
+							+ '0, over CACHE_AUDIT_LIMIT), audit_max_duration (a duration '
+							+ 'such as "10m" up to "24h", over CACHE_AUDIT_MAX_DURATION), '
+							+ 'scoped_index_scan_count (an integer from 1 to 100000, over '
+							+ 'CACHE_SCOPED_INDEX_SCAN_COUNT), scoped_index_ttl_factor (a '
+							+ 'number from 1 to 100, over CACHE_SCOPED_INDEX_TTL_FACTOR), '
+							+ 'scoped_max_pins_per_collection (an integer from 0 to 100000, '
+							+ 'over CACHE_SCOPED_MAX_PINS_PER_COLLECTION), '
+							+ 'scoped_purge_retry_max_fingerprints (an integer from 0 to '
+							+ '100000, over CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS). A '
+							+ 'null value clears that field.',
+					},
+					clear: {
+						type: 'boolean',
+						description: 'Drop the whole cache settings, so every field '
+							+ 'comes from its fallback again.',
+					},
+				},
+			},
+			outputSchema: CACHE_SETTINGS_OUTPUT,
+			annotations: CHANGES_CONFIG,
+			run: async (args, context) => {
+				const utilsService = utils(context);
+				const settingsPatch = args['settings'];
+
+				if (args['clear'] === true) {
+					if (settingsPatch !== undefined) {
+						throw new InvalidPayloadError({
+							reason: '`clear` and `settings` cannot be sent together',
+						});
+					}
+
+					return utilsService.clearCacheSettings();
+				}
+
+				if (
+					typeof settingsPatch !== 'object'
+					|| settingsPatch === null
+					|| Array.isArray(settingsPatch)
+				) {
+					throw new InvalidPayloadError({
+						reason: '`settings` has to be an object of cache settings',
+					});
+				}
+
+				return utilsService.updateCacheSettings(
+					settingsPatch as Record<string, unknown>,
+					'mcp',
+				);
+			},
+		}),
+		defineSystemMcpTool({
 			name: 'run_cache_audit',
 			group: 'cache_audit',
 			title: 'Audit the cache against the database',
@@ -890,8 +1004,8 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				'Replay every live response-cache entry through the running app, as '
 				+ 'the user it was filled for, and compare the stored body with what '
 				+ 'the database answers now. Each entry comes back fresh, stale (a '
-				+ 'missed invalidation), tag_drift (same body, different scoped-cache '
-				+ 'tags — one write from stale), raced, time_varying, expired or '
+				+ 'missed invalidation), pin_drift (same body, different scoped-cache '
+				+ 'pins — one write from stale), raced, time_varying, expired or '
 				+ 'unreplayable. Entries are taken least recently verified first (an '
 				+ 'audit, or a fill where that came later), and '
 				+ 'a run with a `limit` stops there while the next resumes behind '
@@ -922,7 +1036,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					},
 					purge: {
 						type: 'boolean',
-						description: 'Evict the stale and tag-drifted entries once '
+						description: 'Evict the stale and pin-drifted entries once '
 							+ 'reported. Off by default.',
 					},
 					ignore: {
@@ -974,7 +1088,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			title: 'Read one cache audit run',
 			description:
 				'One audit run with a page of the findings it stored: which entries '
-				+ 'were stale or drifted, the request that filled each, its tags '
+				+ 'were stale or drifted, the request that filled each, its pins '
 				+ 'against the replay\'s, where the bodies differed, and which purges '
 				+ 'covered it since the fill. Takes the `id` from the run listing; '
 				+ '`findingsTotal` says how many there are, `offset` walks them, '

@@ -10,7 +10,7 @@ import type { AbstractServiceOptions, Accountability, LoginResult, SchemaOvervie
 import jwt from 'jsonwebtoken';
 import type { Knex } from 'knex';
 import type { StringValue } from 'ms';
-import { performance } from 'perf_hooks';
+import { performance } from 'node:perf_hooks';
 import { getAuthProvider } from '../auth.js';
 import { DEFAULT_AUTH_PROVIDER } from '../constants.js';
 import getDatabase from '../database/index.js';
@@ -21,13 +21,14 @@ import {
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { RateLimiterRes, createRateLimiter } from '../rate-limiter.js';
-import { scopedCachePurgeEnabled } from '../scoped-cache.js';
+import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
 import type { DirectusTokenPayload, Session, User } from '../types/index.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';
 import { clone, cloneDeep } from '../utils/lodash-es-used.js';
 import { stall } from '../utils/stall.js';
 import { ActivityService } from './activity.js';
+import { ItemsService } from './items.js';
 import { SettingsService } from './settings.js';
 import { TFAService } from './tfa.js';
 
@@ -162,7 +163,16 @@ export class AuthenticationService {
 				// Only a spent budget reaches the else below now — a Redis outage falls
 				// back to a limiter that refuses nothing. See `rate-limiter.ts`.
 				if (error instanceof RateLimiterRes && error.remainingPoints === 0) {
-					await this.knex('directus_users').update({ status: 'suspended' }).where({ id: user.id });
+					// Not UsersService: it would refuse suspending the last admin.
+					await new ItemsService('directus_users', {
+						knex: this.knex,
+						schema: this.schema,
+					}).updateOne(
+						user.id,
+						{ status: 'suspended' },
+						{ emitEvents: false },
+					);
+
 					user.status = 'suspended';
 
 					// This means that new attempts after the user has been re-activated will be accepted

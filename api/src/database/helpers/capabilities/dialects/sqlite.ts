@@ -24,6 +24,10 @@ export class CapabilitiesHelperSqlite extends CapabilitiesHelperDefault {
 		return this.preservesOrderCache;
 	}
 
+	override supportsRowLocks(): boolean {
+		return false;
+	}
+
 	/**
 	 * SQLite batchInsert workaround (https://github.com/knex/knex/issues/332):
 	 *

@@ -1,6 +1,6 @@
-import { promises as fs } from 'fs';
-import os from 'os';
-import path from 'path';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { loadSnapshotFile } from './load-snapshot.js';
 

@@ -1,5 +1,10 @@
 import type { DirectusFolder } from '../../../schema/folder.js';
-import type { ApplyQueryFields, NestedPartial, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	NestedPartial,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import { throwIfEmpty } from '../../utils/index.js';
 import type { RestCommand } from '../../types.js';
 
@@ -18,7 +23,7 @@ export type UpdateFolderOutput<
  * @throws Will throw if keys is empty
  */
 export const updateFolders =
-	<Schema, const TQuery extends Query<Schema, DirectusFolder<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusFolder<Schema>>>(
 		keys: DirectusFolder<Schema>['id'][],
 		item: Partial<DirectusFolder<Schema>>,
 		query?: TQuery,
@@ -41,7 +46,7 @@ export const updateFolders =
  * @returns Returns the folder objects of the folders that were updated.
  */
 export const updateFoldersBatch =
-	<Schema, const TQuery extends Query<Schema, DirectusFolder<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusFolder<Schema>>>(
 		items: NestedPartial<DirectusFolder<Schema>>[],
 		query?: TQuery,
 	): RestCommand<UpdateFolderOutput<Schema, TQuery>[], Schema> =>
@@ -61,7 +66,7 @@ export const updateFoldersBatch =
  * @throws Will throw if key is empty
  */
 export const updateFolder =
-	<Schema, const TQuery extends Query<Schema, DirectusFolder<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusFolder<Schema>>>(
 		key: DirectusFolder<Schema>['id'],
 		item: Partial<DirectusFolder<Schema>>,
 		query?: TQuery,

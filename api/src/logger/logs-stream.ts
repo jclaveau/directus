@@ -1,5 +1,5 @@
 import type { Bus } from '@directus/memory';
-import { Writable } from 'stream';
+import { Writable } from 'node:stream';
 import { useBus } from '../bus/index.js';
 import { nodeId } from '../utils/node-id.js';
 

@@ -50,14 +50,23 @@ export class ItemsHandler {
 			const query = await sanitizeQuery(message?.query ?? {}, schema, accountability);
 
 			if (Array.isArray(message.data)) {
-				const keys = await service.createMany(message.data, { allowFilterCancel: true });
+				const keys = await service.createMany(message.data, {
+					allowFilterCancel: true,
+					mutationBatching: message.mutationBatching,
+					nestedUpdates: message.nestedUpdates,
+				});
 
 				result = await service.readMany(
 					keys.filter((key): key is PrimaryKey => key !== null),
 					query,
 				);
 			} else {
-				const key = await service.createOne(message.data, { allowFilterCancel: true });
+				const key = await service.createOne(message.data, {
+					allowFilterCancel: true,
+					mutationBatching: message.mutationBatching,
+					nestedUpdates: message.nestedUpdates,
+				});
+
 				// A filter hook may cancel the create (null key); there is then no item to read back.
 				result = key !== null ? await service.readOne(key, query) : null;
 			}
@@ -83,10 +92,20 @@ export class ItemsHandler {
 			const query = await sanitizeQuery(message.query ?? {}, schema, accountability);
 
 			if (message.id) {
-				const key = await service.updateOne(message.id, message.data, { allowFilterCancel: true });
+				const key = await service.updateOne(message.id, message.data, {
+					allowFilterCancel: true,
+					mutationBatching: message.mutationBatching,
+					nestedUpdates: message.nestedUpdates,
+				});
+
 				result = await service.readOne(key);
 			} else if (message.ids) {
-				const keys = await service.updateMany(message.ids, message.data, { allowFilterCancel: true });
+				const keys = await service.updateMany(message.ids, message.data, {
+					allowFilterCancel: true,
+					mutationBatching: message.mutationBatching,
+					nestedUpdates: message.nestedUpdates,
+				});
+
 				meta = await metaService.getMetaForQuery(message.collection, query);
 
 				result = await service.readMany(
@@ -94,14 +113,27 @@ export class ItemsHandler {
 					query,
 				);
 			} else if (isSingleton) {
-				await service.upsertSingleton(message.data);
+				await service.upsertSingleton(message.data, {
+					mutationBatching: message.mutationBatching,
+					nestedUpdates: message.nestedUpdates,
+				});
+
 				result = await service.readSingleton(query);
 			} else if (Array.isArray(message.data)) {
-				const keys = await service.updateBatch(message.data);
+				const keys = await service.updateBatch(message.data, {
+					mutationBatching: message.mutationBatching,
+					nestedUpdates: message.nestedUpdates,
+				});
+
 				meta = await metaService.getMetaForQuery(message.collection, query);
 				result = await service.readMany(keys, query);
 			} else {
-				const keys = await service.updateByQuery(query, message.data, { allowFilterCancel: true });
+				const keys = await service.updateByQuery(query, message.data, {
+					allowFilterCancel: true,
+					mutationBatching: message.mutationBatching,
+					nestedUpdates: message.nestedUpdates,
+				});
+
 				meta = await metaService.getMetaForQuery(message.collection, query);
 				result = await service.readMany(keys, query);
 			}

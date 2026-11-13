@@ -10,7 +10,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { redisCommand } from '@utils/redis-command';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import knex from 'knex';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
@@ -24,10 +24,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // reconnect or a restart.
 //
 // The failure here is a WRONGTYPE, which is the one that needs no outage to
-// reproduce: the collection's bare tag key is overwritten with a string, so the
-// sweep's SUNION over it is refused while every other command keeps working. The
-// entry stays indexed under its intact value slice, which is what lets the retry
-// finish the job once the bad key is gone.
+// reproduce: the bare bucket of the collection's fingerprint index is overwritten
+// with a string, so the purge's SSCAN over it is refused while every other command
+// keeps working. The entry stays indexed under its intact value slice, which is
+// what lets the retry finish the job once the bad key is gone.
 
 const NOTE = 'retry_timer_note';
 const PENDING = 'directus_scoped_cache_pending_purges';
@@ -41,7 +41,8 @@ describe(oneLine`
 	describe.each(vendors)('%s', (vendor) => {
 		const env = cloneDeep(config.envs);
 		const namespace = `directus-retry-timer-${vendor}`;
-		const noteTagKey = `${namespace}:scoped-cache-index:tag:${NOTE}`;
+		// The bucket every write to the collection reads, whichever row it wrote.
+		const noteIndexKey = `${namespace}:scoped-cache-index:fingerprint:${NOTE}:`;
 		env[vendor]['CACHE_ENABLED'] = 'true';
 		env[vendor]['CACHE_STATUS_HEADER'] = cacheStatusHeader;
 		env[vendor]['CACHE_AUTO_PURGE'] = 'true';
@@ -74,7 +75,7 @@ describe(oneLine`
 				item: [{ slot: 'a', label: 'v1' }],
 			});
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
@@ -88,7 +89,7 @@ describe(oneLine`
 		afterAll(async () => {
 			instance?.kill();
 
-			await redisCommand(REDIS_PORT, ['DEL', noteTagKey])
+			await redisCommand(REDIS_PORT, ['DEL', noteIndexKey])
 				.catch(() => '');
 
 			await ownRows().delete();
@@ -99,13 +100,11 @@ describe(oneLine`
 
 		// Every process on this database shares the table, so nothing here may take
 		// it wholesale: a sibling's in-flight record deleted from under it drains
-		// nothing and still lets that spec's "the purge ran" MISS pass. Both shapes a
-		// failure over this collection records name it — `collection` mode in the
-		// column, tags mode in the label — and no other spec writes either.
+		// nothing and still lets that spec's "the purge ran" MISS pass. Every row a
+		// failure over this collection records names it in its column, and no other
+		// spec writes one.
 		function ownRows() {
-			return db(PENDING)
-				.where({ collection: NOTE })
-				.orWhere('scoped_cache_tag', 'like', `${NOTE}%`);
+			return db(PENDING).where({ collection: NOTE });
 		}
 
 		function readSlotA() {
@@ -133,11 +132,11 @@ describe(oneLine`
 			expect(cached.headers[cacheStatusHeader]).toBe('HIT');
 			expect(cached.body.data[0].label).toBe('v1');
 
-			// The refusal: a SET over the collection's bare tag leaves a string where
+			// The refusal: a SET over the collection's bare pin leaves a string where
 			// the sweep expects a set. Every other command still works, and the
 			// connection is never dropped — so nothing will emit `ready`.
 			expect(
-				await redisCommand(REDIS_PORT, ['SET', noteTagKey, 'x']),
+				await redisCommand(REDIS_PORT, ['SET', noteIndexKey, 'x']),
 			).toBe('+OK');
 
 			const write = await request(url)
@@ -149,7 +148,7 @@ describe(oneLine`
 			expect(write.status).toBe(200);
 
 			const recorded = await ownRows()
-				.select('mode', 'collection', 'scoped_cache_tag');
+				.select('mode', 'collection', 'scoped_cache_fingerprints');
 
 			expect(recorded.length).toBeGreaterThan(0);
 
@@ -159,51 +158,94 @@ describe(oneLine`
 			expect(stale.headers[cacheStatusHeader]).toBe('HIT');
 			expect(stale.body.data[0].label).toBe('v1');
 
-			expect(await redisCommand(REDIS_PORT, ['DEL', noteTagKey]))
+			expect(await redisCommand(REDIS_PORT, ['DEL', noteIndexKey]))
 				.toBe(':1');
+
+			// The retry drops the entry, then deletes its record in a second
+			// statement, so a read can see the MISS while the record is still there.
+			// Holding the record's rows opens that window for as long as the hold
+			// lasts, rather than the few milliseconds a run happens to land in.
+			// sqlite has no row lock, and its transaction would stall the instance.
+			const recordHold = vendor === 'sqlite3'
+				? null
+				: await db.transaction();
+
+			await recordHold?.(PENDING)
+				.where({ collection: NOTE })
+				.forUpdate()
+				.select('id');
 
 			// The timer is the only thing that can fire now: the link never dropped,
 			// so no `ready` is coming, and nothing else writes to this collection.
-			let served = stale;
+			// Released whatever happens in between: a hold left open keeps its lock,
+			// and the cleanup's delete of these rows would wait on it.
+			try {
+				let served = stale;
 
-			for (let attempt = 0; attempt < 20; attempt++) {
-				await new Promise((resolve) => setTimeout(resolve, 1000));
+				for (let attempt = 0; attempt < 20; attempt++) {
+					await new Promise((resolve) => setTimeout(resolve, 1000));
 
-				served = await readSlotA();
-				const pending = (await ownRows().select('id')).length;
+					served = await readSlotA();
+					const pending = (await ownRows().select('id')).length;
 
-				// The two failures this can end in are indistinguishable from the
-				// header alone: a drain that never ran, and one that cleared the record
-				// without dropping the entry. The record count separates them.
-				// eslint-disable-next-line no-console
-				console.info(oneLine`
-					[retry-timer] ${attempt} ${served.headers[cacheStatusHeader]}
-					pending=${pending}
-				`);
+					// The two failures this can end in are indistinguishable from the
+					// header alone: a drain that never ran, and one that cleared the
+					// record without dropping the entry. The record count separates them.
+					// eslint-disable-next-line no-console
+					console.info(oneLine`
+						[retry-timer] ${attempt} ${served.headers[cacheStatusHeader]}
+						pending=${pending}
+					`);
 
-				if (served.headers[cacheStatusHeader] === 'MISS') {
-					break;
+					if (served.headers[cacheStatusHeader] === 'MISS') {
+						break;
+					}
+
+					// Every process on this database drains the same table and the
+					// shard runs several, so a sibling instance can finish these records
+					// against ITS namespace — dropping nothing here and leaving nothing
+					// to retry. A record that went without the purge it names is written
+					// again.
+					if (pending === 0) {
+						await db(PENDING).insert(recorded.map((row) => {
+							return {
+								...row,
+								// pg reads the json column back parsed, and would write an
+								// array back as a Postgres array literal.
+								scoped_cache_fingerprints: JSON.stringify(
+									row.scoped_cache_fingerprints,
+								),
+								failed_at: new Date(),
+								attempts: 0,
+								last_error: 'reseeded after a sibling took the record',
+							};
+						}));
+					}
 				}
 
-				// Every process on this database drains the same table and the shard
-				// runs several, so a sibling instance can finish these records against
-				// ITS namespace — dropping nothing here and leaving nothing to retry.
-				// A record that went without the purge it names is written again.
-				if (pending === 0) {
-					await db(PENDING).insert(recorded.map((row) => {
-						return {
-							...row,
-							failed_at: new Date(),
-							attempts: 0,
-							last_error: 'reseeded after a sibling took the record',
-						};
-					}));
-				}
+				expect(served.headers[cacheStatusHeader]).toBe('MISS');
+				expect(served.body.data[0].label).toBe('v2');
+
+				// Held past the MISS, for the retry's delete to find the rows locked.
+				// Briefly: every instance's retry clears the whole table, so a
+				// sibling's delete waits on this hold too, its own records with it.
+				await new Promise((resolve) => setTimeout(resolve, 500));
+			}
+			finally {
+				// The hold only read, so a failed release loses nothing, and must
+				// not take the place of the assertion that failed before it.
+				await recordHold?.commit().catch(() => undefined);
 			}
 
-			expect(served.headers[cacheStatusHeader]).toBe('MISS');
-			expect(served.body.data[0].label).toBe('v2');
-			expect(await ownRows().select('id')).toEqual([]);
+			// The record goes in the retry's next statement, after the MISS above.
+			let pendingRows = await ownRows().select('id');
+
+			for (let attempt = 0; attempt < 20 && pendingRows.length > 0; attempt++) {
+				await new Promise((resolve) => setTimeout(resolve, 500));
+				pendingRows = await ownRows().select('id');
+			}
+
+			expect(pendingRows).toEqual([]);
 		}, 60_000);
 	});
 });

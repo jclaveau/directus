@@ -1,17 +1,18 @@
-import config, { getUrl, paths } from '@common/config';
+import config, { getNoCacheUrl, getUrl, paths } from '@common/config';
 import {
 	CreateCollections,
 	CreateFieldM2O,
 	CreateFieldO2M,
 	CreateItem,
 	DeleteCollection,
+	DeleteField,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -90,12 +91,18 @@ describe(oneLine`
 
 			featuredCommentId = comments[0].id;
 
-			await request(getUrl(vendor))
+			// On the no-cache instance: the cache server can still hold a schema from
+			// before `featured_comment` existed, and an update keeps only the fields its
+			// schema knows, so it drops the value and still answers 200.
+			const featured = await request(getNoCacheUrl(vendor))
 				.patch(`/items/${ARTICLE}/${readArticleId}`)
 				.send({ featured_comment: featuredCommentId })
-				.set('Authorization', auth);
+				.set('Authorization', auth)
+				.expect(200);
 
-			const port = await getPort();
+			expect(featured.body.data.featured_comment).toBe(featuredCommentId);
+
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
@@ -109,8 +116,14 @@ describe(oneLine`
 		afterAll(async () => {
 			instance.kill();
 
-			await DeleteCollection(vendor, { collection: ARTICLE });
+			// Article and comment reference each other, so one FK goes first.
+			await DeleteField(vendor, {
+				collection: ARTICLE,
+				field: 'featured_comment',
+			});
+
 			await DeleteCollection(vendor, { collection: COMMENT });
+			await DeleteCollection(vendor, { collection: ARTICLE });
 		});
 
 		function readArticle() {
@@ -148,7 +161,10 @@ describe(oneLine`
 		`, async () => {
 			await clearCache();
 
-			expect((await readArticle()).headers[cacheStatusHeader]).toBe('MISS');
+			const before = await readArticle();
+
+			expect(before.headers[cacheStatusHeader]).toBe('MISS');
+			expect(before.body.data.featured_comment.body).toBe('featured');
 			expect((await readArticle()).headers[cacheStatusHeader]).toBe('HIT');
 
 			await updateFeaturedComment('featured, edited');

@@ -52,7 +52,7 @@ describe('MailService', () => {
 	const mockServiceOptions: AbstractServiceOptions = {
 		schema: {} as any,
 		accountability: null,
-		knex: vi.mocked(knex({ client: MockClient })),
+		knex: knex({ client: MockClient }),
 	};
 
 	beforeEach(() => {

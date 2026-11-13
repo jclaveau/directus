@@ -4,19 +4,20 @@ import {
 	CreateFieldM2O,
 	CreateItem,
 	DeleteCollection,
+	DeleteField,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// RED until fixed. `readTags` bares the root when it appears at more than one
-// field-map path, then reaches it again with an empty `rootScopedCacheTags`, falls
+// RED until fixed. `readPins` bares the root when it appears at more than one
+// field-map path, then reaches it again with an empty `rootScopedCachePins`, falls
 // through to `pushAncestorSliceOrBare` and takes the slice of an ancestor the
 // filter keyed — undoing the guard it just applied. The ancestor has to be KEYED
 // rather than answered by the near row's own fk column, so the filter reaches ORG
@@ -134,7 +135,7 @@ describe(oneLine`
 				}],
 			});
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
@@ -148,6 +149,8 @@ describe(oneLine`
 		afterAll(async () => {
 			instance?.kill();
 
+			// Directus drops the table before the self-FK, then fails on it.
+			await DeleteField(vendor, { collection: NODE, field: 'parent' });
 			await DeleteCollection(vendor, { collection: NODE });
 			await DeleteCollection(vendor, { collection: OWNER });
 			await DeleteCollection(vendor, { collection: ORG });
@@ -182,7 +185,7 @@ describe(oneLine`
 			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
 			expect(warm.body.data[0].parent.label).toBe('parent-v1');
 
-			// PRIMARY (RED until fixed): the root carries its bare tag, never the
+			// PRIMARY (RED until fixed): the root carries its bare pin, never the
 			// `owner.org=<read org>` slice its nested parent sits outside of.
 			expect(warm.headers[cacheTagsHeader]).toEqual(
 				`${NODE}, ${OWNER}:org=${readOrgId}`,

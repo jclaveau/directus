@@ -16,6 +16,12 @@ export const PROCESSES_REPORT_CHANNEL = 'processes:report';
 export interface ProcessesQueryMessage {
 	requestId: string;
 	details: ProcessDetail[];
+	/**
+	 * Set by the fill pause after a deploy, which reads only each process's node
+	 * and build: a node leaves out the supervisor's list and its capacity. A node
+	 * of a build older than the field ignores it and answers in full.
+	 */
+	nodeBuildOnly?: boolean;
 }
 
 /** What one process answers with about itself. */
@@ -29,6 +35,12 @@ export interface ReportedProcess {
 	env: ResolvedEnvVariable[] | null;
 	/** What this process is scaling, `null` from every process that scales nothing. */
 	autoscale: AutoscaleNodeState | null;
+	/**
+	 * The core build this process runs (`resolveCoreBuildId`). Absent from a
+	 * process of a build older than the field, which is how the fill pause after
+	 * a deploy tells a node of the build before (`onlyThisBuildAnswers`).
+	 */
+	coreBuildId?: string;
 }
 
 export interface ProcessesReportMessage {

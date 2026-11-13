@@ -36,6 +36,36 @@ function redisBackedCacheStore(cache: Keyv): RedisBackedCacheStore | null {
 }
 
 /**
+ * The key Redis holds a cache entry under, which carries BOTH namespaces: `Keyv`
+ * prefixes its own before handing the key down, and `KeyvRedis` prefixes the
+ * store's on top of that. Building it from one of the two names a key nothing
+ * ever wrote, and every command on it then answers as if the entry were gone.
+ */
+function rawCacheKey(
+	cache: Keyv,
+	store: RedisBackedCacheStore,
+	key: string,
+): string {
+	return store.createKeyPrefix(`${cache.namespace}:${key}`, store.namespace);
+}
+
+/**
+ * How to name a cache entry to Redis directly, or null for a store that is not
+ * Redis: the memory one holds its entries where no Redis command reaches.
+ */
+export function cacheEntryRawKeyOf(
+	cache: Keyv,
+): ((key: string) => string) | null {
+	const store = redisBackedCacheStore(cache);
+
+	if (store === null) {
+		return null;
+	}
+
+	return (key) => rawCacheKey(cache, store, key);
+}
+
+/**
  * Delete cache entries and report how many of them were actually there.
  *
  * A scoped purge over a slice with 200 entries used to send 200 deletes, one per
@@ -43,11 +73,6 @@ function redisBackedCacheStore(cache: Keyv): RedisBackedCacheStore | null {
  * the mutation touched. Against redis they go as one UNLINK per 500 keys, whose
  * reply is the exact number removed — better evidence than the per-key boolean it
  * replaces, which had to read "no answer" as "it was there".
- *
- * The raw key carries BOTH namespaces: `Keyv` prefixes its own before handing the
- * key down, and `KeyvRedis` prefixes the store's on top of that. Building it from
- * one of the two names a key nothing ever wrote, and UNLINK then reports 0 without
- * failing — a purge that deletes nothing and says so quietly.
  */
 export async function dropCacheEntries(
 	cache: Keyv,
@@ -77,9 +102,7 @@ export async function dropCacheEntries(
 		return wasDeleted.filter((deleted) => deleted !== false).length;
 	}
 
-	const rawKeys = keys.map((key) => {
-		return store.createKeyPrefix(`${cache.namespace}:${key}`, store.namespace);
-	});
+	const rawKeys = keys.map((key) => rawCacheKey(cache, store, key));
 
 	let dropped = 0;
 

@@ -6,11 +6,12 @@ import { TEST_USERS, USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { sleep } from '@utils/sleep';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import knex, { Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { WebSocket } from 'ws';
 
 const authenticationTimeoutSeconds = 1;
 const slightDelay = 100;
@@ -43,7 +44,7 @@ function describeAuthScenarios(
 			for (const vendor of vendors) {
 				databases.set(vendor, knex(config.knexConfig[vendor]));
 
-				const newServerPort = await getPort();
+				const newServerPort = await freePortOfWorker();
 
 				env[vendor]['WEBSOCKETS_REST_AUTH'] = authMethod;
 				env[vendor]['WEBSOCKETS_REST_AUTH_TIMEOUT'] = String(authenticationTimeoutSeconds);
@@ -355,8 +356,6 @@ export function describeAuthPings(authMethod: WebSocketAuthMethod): void {
 							error = err;
 						}
 
-						ws.conn.close();
-
 						// Assert
 						switch (authMethod) {
 							case 'public':
@@ -370,10 +369,16 @@ export function describeAuthPings(authMethod: WebSocketAuthMethod): void {
 
 								break;
 							case 'handshake':
+								// The refusal is an AUTH_FAILED message then a close, and the
+								// read catches the message or the close, whichever lands first.
+								await ws.waitForState(WebSocket.CLOSED);
+								break;
 							case 'strict':
 								expect(error).toBeDefined();
 								break;
 						}
+
+						ws.conn.close();
 					});
 				});
 			});

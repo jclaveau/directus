@@ -1,19 +1,19 @@
 ---
 name: project_scalabus_publish_plan
 description:
-  PARKED plan — publish the directus fork as @scalabus/* to GitHub Packages npm to speed up the hiphiphip planner
+  PARKED plan — publish the directus fork as @scalabus/* to GitHub Packages npm to speed up a consumer's
   install; locked decisions on registry, rename mechanism, versioning, sequencing
 metadata:
   author: Jean Claveau
   type: project
 ---
 
-PARKED 2026-06-24 ("park for now"). Full plan: `~/.claude/plans/keep-the-upstream-xxx-prs-drifting-volcano.md`.
+PARKED 2026-06-24 ("park for now").
 
-**Why:** planner (`/home/jean/dev/Hippocast/dev/planner-caddy-ios`) depends on the fork via
+**Why:** a consumer depends on the fork via
 `github:jclaveau/directus#<branch>&path:<subdir>`. pnpm's `&path:` downloads the **whole ~5800-file monorepo
 tarball from codeload once per resolved peer-combo (273 lockfile entries)** → slow install. `-dist` branch already
-commits build artifacts, so it's NOT compile-on-install — purely the repeated full-repo fetch. `.pnpmfile.cjs:6`
+commits build artifacts, so it's NOT compile-on-install — purely the repeated full-repo fetch. The consumer's `.pnpmfile.cjs`
 already has the TODO ("pnpm pack + commit tgz").
 
 **Locked decisions:**
@@ -34,7 +34,7 @@ already has the TODO ("pnpm pack + commit tgz").
   hybrid → wants pure own semver.)
 - **Sequencing** = quick `.tgz` win FIRST (pnpm pack the needed set: `directus`, `@directus/{api,errors,sdk,
   extensions-sdk}` + transitive `@directus/*`; consume as `file:` tgz → kills codeload), THEN the GH-Packages pipeline.
-- **Planner consumption**: keep its `@directus/*` imports unchanged via aliases
-  `"@directus/sdk": "npm:@scalabus/sdk@^1.0.0"`; no planner source edits.
+- **Consumer consumption**: keep its `@directus/*` imports unchanged via aliases
+  `"@directus/sdk": "npm:@scalabus/sdk@^1.0.0"`; no consumer source edits.
 
-Final goal: faster planner install. Related: [[project_directus_fork_integration_branches]].
+Final goal: faster consumer install. Related: [[project_directus_fork_integration_branches]].

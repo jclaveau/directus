@@ -2,7 +2,6 @@ import { SchemaBuilder } from '@directus/schema-builder';
 import type { Knex } from 'knex';
 import knex from 'knex';
 import { createTracker, MockClient, Tracker } from 'knex-mock-client';
-import type { MockedFunction } from 'vitest';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SpecificationService } from './index.js';
 import type { Accountability } from '@directus/types';
@@ -11,11 +10,11 @@ import type { RequestBodyObject } from 'openapi3-ts/oas30';
 class Client_PG extends MockClient {}
 
 describe('Integration Tests', () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(async () => {
-		db = vi.mocked(knex.default({ client: Client_PG }));
+		db = knex.default({ client: Client_PG });
 		tracker = createTracker(db);
 	});
 

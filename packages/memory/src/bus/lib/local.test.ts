@@ -108,3 +108,15 @@ describe('unsubscribe', () => {
 		expect(handlers[0]).toBe(existingHandler);
 	});
 });
+
+describe('onResubscribe', () => {
+	test('Never calls back, having no connection to lose', async () => {
+		const resubscribed = vi.fn();
+
+		bus.onResubscribe(resubscribed);
+		await bus.subscribe('mock-channel', vi.fn());
+		await bus.publish('mock-channel', 'payload');
+
+		expect(resubscribed).not.toHaveBeenCalled();
+	});
+});

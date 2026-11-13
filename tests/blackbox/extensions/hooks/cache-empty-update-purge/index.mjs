@@ -1,0 +1,34 @@
+// Declares a purge for slot=a, then empties the update payload (returns {}). B#4:
+// updateMany's changedFields===0 early return then drops the declared purge.
+
+import { mapUpdateRows } from '@directus/utils';
+
+const COLLECTION = 'test_b4_scoped';
+
+export default function registerHooks({ filter }, { services }) {
+	filter(`${COLLECTION}.items.update`, (groups, _meta, context) => {
+		return mapUpdateRows(groups, async (payload) => {
+			if (payload.slot !== '__drop__') {
+				return payload;
+			}
+
+			const service = new services.ItemsService(COLLECTION, {
+				schema: context.schema,
+				accountability: context.accountability,
+				knex: context.transaction,
+			});
+
+			const result = await service.readByQuery(
+				{ filter: { slot: { _eq: 'a' } }, fields: ['id'], limit: 1 },
+				{ emitEvents: false },
+			);
+
+			context.scopedCache?.purgeBy(
+				result.getMeta?.()?.scopedCacheFingerprints ?? [],
+			);
+
+			// Empty payload — not null — so it is a no-op update, not a filter cancel.
+			return {};
+		});
+	});
+}

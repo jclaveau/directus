@@ -1,6 +1,8 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { useEnv } from '@directus/env';
+import { InvalidPayloadError } from '@directus/errors';
 import {
+	assertUsableCacheFields,
 	assertUsableSharedSettings,
 	initSharedSettingsGuard,
 } from './settings-guard.js';
@@ -84,6 +86,36 @@ test.each([
 		.toThrowError(`'autoscale_settings' has to be an object of settings`);
 });
 
+test('lets the cache layer switch the response cache off', () => {
+	expect(checking({ cache_settings: { response: false } })).not.toThrow();
+});
+
+test('lets the cache layer hand response back to the environment', () => {
+	expect(checking({ cache_settings: { response: null } })).not.toThrow();
+});
+
+// The service writes the layer stamped, and through this same guard.
+test('lets the cache layer carry the stamp of its write', () => {
+	expect(checking({
+		cache_settings: {
+			response: false,
+			setBy: 'admin-id',
+			setAt: '2026-09-30T08:00:00.000Z',
+			setFrom: 'admin',
+		},
+	})).not.toThrow();
+});
+
+test('refuses a field the cache layer does not have', () => {
+	expect(checking({ cache_settings: { ttl: '1h' } }))
+		.toThrowError(`'cache_settings.ttl' is not a cache setting`);
+});
+
+test('refuses a response the mirror would read as unset', () => {
+	expect(checking({ cache_settings: { response: 'false' } }))
+		.toThrowError(`'cache_settings.response' has to be true, false or null`);
+});
+
 // A JSON column comes back as a string on sqlite, and a write may hand one
 // over the same way; it is the document inside that the loop runs on.
 test('reads a document handed over as text', () => {
@@ -103,11 +135,136 @@ test('checks the create as well as the update', async () => {
 	expect(vi.mocked(emitter.onFilter).mock.calls.map(([event]) => event))
 		.toEqual(['settings.create', 'settings.update']);
 
-	const write = { autoscale_settings: { enabled: 'TRUE' } };
+	expect(() => {
+		return vi.mocked(emitter.onFilter).mock.calls[0]![1](
+			[{ data: { autoscale_settings: { enabled: 'TRUE' } } }],
+			{} as never,
+			{} as never,
+		);
+	}).toThrowError(`'enabled' has to be a boolean`);
 
-	for (const [, check] of vi.mocked(emitter.onFilter).mock.calls) {
-		expect(() => {
-			return check(write, {} as never, {} as never);
-		}).toThrowError(`'enabled' has to be a boolean`);
-	}
+	expect(() => {
+		return vi.mocked(emitter.onFilter).mock.calls[1]![1](
+			[{ data: { autoscale_settings: { enabled: 'TRUE' } }, keys: [1] }],
+			{} as never,
+			{} as never,
+		);
+	}).toThrowError(`'enabled' has to be a boolean`);
+});
+
+// Flow filters re-register on every flows reload, so they land after this one;
+// registering it to run last lets the check see what they changed.
+test('checks the write after every other filter of it', async () => {
+	const { default: emitter } = await import('../../emitter.js');
+
+	await initSharedSettingsGuard();
+
+	expect(emitter.onFilter).toHaveBeenCalledTimes(2);
+
+	expect(emitter.onFilter).toHaveBeenNthCalledWith(
+		1,
+		'settings.create',
+		expect.any(Function),
+		{ runsLast: true },
+	);
+
+	expect(emitter.onFilter).toHaveBeenNthCalledWith(
+		2,
+		'settings.update',
+		expect.any(Function),
+		{ runsLast: true },
+	);
+});
+
+// A filter registered ahead of this one can cancel the whole write by answering
+// null, which the next filter receives as its payload.
+test('passes a write an earlier filter cancelled through', async () => {
+	const { default: emitter } = await import('../../emitter.js');
+
+	await initSharedSettingsGuard();
+
+	expect(vi.mocked(emitter.onFilter).mock.calls[0]![1](
+		null,
+		{} as never,
+		{} as never,
+	)).toBeNull();
+
+	expect(vi.mocked(emitter.onFilter).mock.calls[1]![1](
+		null,
+		{} as never,
+		{} as never,
+	)).toBeNull();
+});
+
+test.each([
+	['30s'],
+	[''],
+	[null],
+])('lets the cache_ttl %j through', (cacheTtl) => {
+	expect(() => assertUsableCacheFields({ cache_ttl: cacheTtl })).not.toThrow();
+});
+
+test.each([
+	['abc', 'Invalid cache_ttl "abc" — expected a positive duration like "30s", '
+		+ '"5m", "1h"'],
+	['30x', 'Invalid cache_ttl "30x" — expected a positive duration like "30s", '
+		+ '"5m", "1h"'],
+	['-5m', 'Invalid cache_ttl "-5m" — expected a positive duration like "30s", '
+		+ '"5m", "1h"'],
+	['0', 'Invalid cache_ttl "0" — expected a positive duration like "30s", '
+		+ '"5m", "1h"'],
+])('refuses the cache_ttl %j', (cacheTtl, reason) => {
+	expect(() => assertUsableCacheFields({ cache_ttl: cacheTtl }))
+		.toThrowError(new InvalidPayloadError({ reason }));
+});
+
+test.each([
+	['0 3 * * *'],
+	[''],
+	[null],
+])('lets the cache_audit_schedule %j through', (auditRule) => {
+	expect(() => assertUsableCacheFields({ cache_audit_schedule: auditRule }))
+		.not.toThrow();
+});
+
+test.each([
+	['hourly', 'Invalid cache_audit_schedule "hourly" — expected a cron rule '
+		+ 'like "0 3 * * *"'],
+	['60 * * * *', 'Invalid cache_audit_schedule "60 * * * *" — expected a cron '
+		+ 'rule like "0 3 * * *"'],
+	['99 99 * * *', 'Invalid cache_audit_schedule "99 99 * * *" — expected a '
+		+ 'cron rule like "0 3 * * *"'],
+])('refuses the cache_audit_schedule %j', (auditRule, reason) => {
+	expect(() => assertUsableCacheFields({ cache_audit_schedule: auditRule }))
+		.toThrowError(new InvalidPayloadError({ reason }));
+});
+
+// After the flow filters, so a flow writing a TTL nothing can run is refused
+// too, which a check in the settings service ran too early to see.
+test('checks the cache fields a write carries once its filters ran', async () => {
+	const { default: emitter } = await import('../../emitter.js');
+
+	await initSharedSettingsGuard();
+
+	expect(() => {
+		return vi.mocked(emitter.onFilter).mock.calls[1]![1](
+			[{ data: { cache_ttl: 'abc' }, keys: [1] }],
+			{} as never,
+			{} as never,
+		);
+	}).toThrowError(new InvalidPayloadError({
+		reason: 'Invalid cache_ttl "abc" — expected a positive duration like '
+			+ '"30s", "5m", "1h"',
+	}));
+
+	expect(() => {
+		return vi.mocked(emitter.onFilter).mock.calls[0]![1](
+			[{ data: { cache_audit_schedule: 'hourly' } }],
+			{} as never,
+			{} as never,
+		);
+	}).toThrowError(new InvalidPayloadError({
+		reason: 'Invalid cache_audit_schedule "hourly" — expected a cron rule '
+			+ 'like "0 3 * * *"',
+	}));
 });

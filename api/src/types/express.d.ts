@@ -6,7 +6,7 @@ import {
 	Accountability,
 	Query,
 	SchemaOverview,
-	ScopedCacheTag,
+	ScopedCacheFingerprint,
 } from '@directus/types';
 
 export {};
@@ -24,7 +24,7 @@ declare global {
 		}
 
 		export interface Locals {
-			scopedCacheTags?: ScopedCacheTag[] | undefined;
+			scopedCacheFingerprints?: readonly ScopedCacheFingerprint[] | undefined;
 		}
 	}
 }

@@ -9,7 +9,7 @@ import {
 export const SCOPED_CACHE_INJECTED_PREFIX = '__scoped_cache_';
 
 /**
- * An ownership ancestor's key path, nested into a read for its tags alone.
+ * An ownership ancestor's key path, nested into a read for its pins alone.
  *
  * The first hop the caller does not nest past is aliased: run-ast merges a
  * nested row under the node's key, overwriting whatever column bore that name.

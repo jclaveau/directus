@@ -2,6 +2,7 @@
 import VChip from '@/components/v-chip.vue';
 import VProgressCircular from '@/components/v-progress-circular.vue';
 import { useExtensionsStore } from '@/stores/extensions';
+import { useServerStore } from '@/stores/server';
 import { unexpectedError } from '@/utils/unexpected-error';
 import { APP_OR_HYBRID_EXTENSION_TYPES } from '@directus/constants';
 import { ApiOutput, ExtensionType } from '@directus/types';
@@ -15,6 +16,7 @@ const props = withDefaults(
 	defineProps<{
 		extension: ApiOutput;
 		children?: ApiOutput[];
+		entryOfCodeBundle?: boolean;
 	}>(),
 	{
 		children: () => [],
@@ -23,6 +25,7 @@ const props = withDefaults(
 
 const { t } = useI18n();
 const extensionsStore = useExtensionsStore();
+const serverStore = useServerStore();
 
 const loading = ref(false);
 
@@ -61,6 +64,10 @@ const isPartialAllowed = computed(() => {
 const isPartiallyEnabled = computed(() => {
 	if (props.extension.schema?.type !== 'bundle') return false;
 
+	if (!props.extension.meta.enabled) {
+		return false;
+	}
+
 	const enabledExtensionCount = props.children.filter((extension) => extension.meta.enabled);
 	return enabledExtensionCount.length !== 0 && enabledExtensionCount.length !== props.children.length;
 });
@@ -85,7 +92,12 @@ const requestHandler = (requestCallback: () => Promise<any>) => async () => {
 	}
 };
 
-const toggleState = requestHandler(() => extensionsStore.toggleState(props.extension.id));
+const toggleState = requestHandler(() => {
+	return props.entryOfCodeBundle
+		? extensionsStore.toggleEntryState(props.extension)
+		: extensionsStore.toggleState(props.extension.id);
+});
+
 const uninstall = requestHandler(() => extensionsStore.uninstall(props.extension.id));
 const reinstall = requestHandler(() => extensionsStore.reinstall(props.extension.id));
 const remove = requestHandler(() => extensionsStore.remove(props.extension.id));
@@ -102,7 +114,11 @@ function isAppExtension(type?: ExtensionType) {
 		<v-list-item-content>
 			<span class="meta" :class="{ disabled }">
 				<router-link
-					v-if="extension.meta.source === 'registry' && !extension.bundle"
+					v-if="
+						extension.meta.source === 'registry'
+							&& !extension.bundle
+							&& serverStore.info.extensions?.marketplace
+					"
 					v-tooltip="t('open_in_marketplace')"
 					class="marketplace-link"
 					:to="`/settings/marketplace/extension/${extension.id}`"
@@ -139,7 +155,15 @@ function isAppExtension(type?: ExtensionType) {
 	</v-list-item>
 
 	<v-list v-if="children.length > 0" class="nested" :class="{ partial: isPartialAllowed }">
-		<extension-item v-for="item in children" :key="item.id" :extension="item" />
+		<extension-item
+			v-for="item in children"
+			:key="item.id"
+			:extension="item"
+			:entry-of-code-bundle="
+				extension.schema?.type === 'bundle'
+					&& extension.schema.entriesFrom === 'code'
+			"
+		/>
 	</v-list>
 </template>
 

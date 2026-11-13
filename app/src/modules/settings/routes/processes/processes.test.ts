@@ -553,14 +553,15 @@ describe('the cpu and memory charts', () => {
 		await canvases[0]!.trigger('pointerleave');
 		await flushPromises();
 
-		expect(apex.updateOptions).toHaveBeenCalledTimes(8);
+		// Only the chart that waited catches up; the other two already had.
+		expect(apex.updateOptions).toHaveBeenCalledTimes(6);
 
 		// Nothing waited this time, so leaving asks for no redraw of its own.
 		await canvases[1]!.trigger('pointerenter');
 		await canvases[1]!.trigger('pointerleave');
 		await flushPromises();
 
-		expect(apex.updateOptions).toHaveBeenCalledTimes(8);
+		expect(apex.updateOptions).toHaveBeenCalledTimes(6);
 	});
 
 	// ApexCharts attaches outside Vue's tree, so nothing else would clean it up.

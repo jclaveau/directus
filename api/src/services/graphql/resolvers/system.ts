@@ -40,6 +40,8 @@ export function injectSystemResolvers(
 	{ CreateCollectionTypes, ReadCollectionTypes, UpdateCollectionTypes }: CollectionTypes,
 	schema: Schema,
 ): SchemaComposer<any> {
+	const earlierQueryFields = new Set(schemaComposer.Query.getFieldNames());
+
 	globalResolvers(gql, schemaComposer);
 
 	const ServerInfo = schemaComposer.createObjectTC({
@@ -545,6 +547,26 @@ export function injectSystemResolvers(
 					await service.inviteUser(args['email'], args['role'], args['invite_url'] || null);
 					return true;
 				},
+			},
+		});
+	}
+
+	// These roots call their services directly instead of `gql.read()`, so their
+	// read meta reaches the request's aggregate only through here. One left out
+	// files the cached response without its fingerprints, and a write to what it
+	// read never purges it.
+	for (const fieldName of schemaComposer.Query.getFieldNames()) {
+		const systemResolve = schemaComposer.Query.getField(fieldName).resolve;
+
+		if (earlierQueryFields.has(fieldName) || systemResolve === undefined) {
+			continue;
+		}
+
+		schemaComposer.Query.extendField(fieldName, {
+			resolve: async (...resolveArgs) => {
+				const systemResult = await systemResolve(...resolveArgs);
+				gql.foldReadMeta(systemResult);
+				return systemResult;
 			},
 		});
 	}

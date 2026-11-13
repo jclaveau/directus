@@ -1,4 +1,6 @@
 import type { EventContext } from '@directus/types';
+import knex from 'knex';
+import { MockClient, createTracker } from 'knex-mock-client';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { useEnv } from '@directus/env';
 import {
@@ -92,6 +94,7 @@ test('reads nothing through a connection missing a variable', async () => {
 	await expect(readAllSharedSettings()).resolves.toEqual({
 		autoscale_settings: null,
 		supervisor_settings: null,
+		cache_settings: null,
 	});
 
 	// Said, because the pool then scales on the environment chain alone and
@@ -117,6 +120,7 @@ test('answers nothing where the deployment names no database', async () => {
 	await expect(readAllSharedSettings()).resolves.toEqual({
 		autoscale_settings: null,
 		supervisor_settings: null,
+		cache_settings: null,
 	});
 
 	expect(first).not.toHaveBeenCalled();
@@ -124,12 +128,13 @@ test('answers nothing where the deployment names no database', async () => {
 
 // A page reads both, and a value it shows could have come from either, so they
 // are taken in one statement rather than a row at a time.
-test('reads both columns in a single statement', async () => {
+test('reads every column in a single statement', async () => {
 	const { default: getDatabase } = await import('../../database/index.js');
 
 	first.mockResolvedValue({
 		[SHARED_SETTINGS_COLUMNS.autoscale]: { maxWorkers: 8 },
 		[SHARED_SETTINGS_COLUMNS.supervisor]: JSON.stringify({ listenTimeout: 20 }),
+		[SHARED_SETTINGS_COLUMNS.cache]: { response: false },
 	});
 
 	const select = vi.fn(() => ({ from: () => ({ first }) }));
@@ -138,9 +143,92 @@ test('reads both columns in a single statement', async () => {
 	await expect(readAllSharedSettings()).resolves.toEqual({
 		autoscale_settings: { maxWorkers: 8 },
 		supervisor_settings: { listenTimeout: 20 },
+		cache_settings: { response: false },
 	});
 
 	expect(select).toHaveBeenCalledTimes(1);
+});
+
+// The cache page's write reads the row it lays a patch over; unlocked, two
+// writers read the same row and the later drops the earlier's field.
+test('locks the row it reads through a transaction', async () => {
+	const { default: getDatabase } = await import('../../database/index.js');
+	const pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+	const settingsTracker = createTracker(pgDatabase);
+
+	settingsTracker.on.select('directus_settings')
+		.response({ [SHARED_SETTINGS_COLUMNS.cache]: { audit_limit: 40 } });
+
+	vi.mocked(getDatabase).mockReturnValue(pgDatabase);
+
+	await expect(pgDatabase.transaction((openTransaction) => {
+		return readSharedSettings(SHARED_SETTINGS_COLUMNS.cache, openTransaction);
+	})).resolves.toEqual({ audit_limit: 40 });
+
+	expect(settingsTracker.history.select[0]!.sql).toBe(
+		'select "cache_settings" from "directus_settings" limit $1 for update',
+	);
+});
+
+// Before its migration the cache column does not exist, and the autoscale
+// page reading beside it must not fail with it.
+test('reads the autoscale pair where the cache column is missing', async () => {
+	const { default: getDatabase } = await import('../../database/index.js');
+
+	vi.mocked(getDatabase).mockReturnValue({
+		select: (selectedColumns: string | string[]) => {
+			return {
+				from: () => {
+					return {
+						first: async () => {
+							if ([selectedColumns].flat().includes(SHARED_SETTINGS_COLUMNS.cache)) {
+								throw new Error('column "cache_settings" does not exist');
+							}
+
+							return {
+								[SHARED_SETTINGS_COLUMNS.autoscale]: { maxWorkers: 8 },
+								[SHARED_SETTINGS_COLUMNS.supervisor]: { listenTimeout: 20 },
+							};
+						},
+					};
+				},
+			};
+		},
+		schema: { hasColumn: async () => false },
+	} as never);
+
+	await expect(readAllSharedSettings()).resolves.toMatchObject({
+		autoscale_settings: { maxWorkers: 8 },
+		supervisor_settings: { listenTimeout: 20 },
+	});
+});
+
+// A dropped connection is not a missing column: reading the pair alone would
+// report the cache setting as never stored.
+test('rethrows a failed read while the cache column exists', async () => {
+	const { default: getDatabase } = await import('../../database/index.js');
+
+	vi.mocked(getDatabase).mockReturnValue({
+		select: (selectedColumns: string | string[]) => {
+			return {
+				from: () => {
+					return {
+						first: async () => {
+							if ([selectedColumns].flat().includes(SHARED_SETTINGS_COLUMNS.cache)) {
+								throw new Error('Connection terminated unexpectedly');
+							}
+
+							return { [SHARED_SETTINGS_COLUMNS.autoscale]: { maxWorkers: 8 } };
+						},
+					};
+				},
+			};
+		},
+		schema: { hasColumn: async () => true },
+	} as never);
+
+	await expect(readAllSharedSettings())
+		.rejects.toThrow('Connection terminated unexpectedly');
 });
 
 test('reads the column the way Postgres answers it', async () => {
@@ -243,10 +331,13 @@ test('announces a write to either column, and nothing else', async () => {
 	// and reads neither: what it announces is that a column moved.
 	const context = {} as EventContext;
 
-	written({ payload: { project_name: 'planner' } }, context);
+	written({ payload: [{ project_name: 'planner' }] }, context);
 	expect(publish).not.toHaveBeenCalled();
 
-	written({ payload: { supervisor_settings: { listenTimeout: 20_000 } } }, context);
+	written(
+		{ payload: [{ supervisor_settings: { listenTimeout: 20_000 } }] },
+		context,
+	);
 
 	expect(publish).toHaveBeenCalledWith(
 		'sharedSettingsChanged',
@@ -266,11 +357,15 @@ test('announces the create as well as the update', async () => {
 	expect(vi.mocked(emitter.onAction).mock.calls.map(([event]) => event))
 		.toEqual(['settings.create', 'settings.update']);
 
-	const written = { payload: { autoscale_settings: { maxWorkers: 8 } } };
+	vi.mocked(emitter.onAction).mock.calls[0]![1](
+		{ payload: [{ autoscale_settings: { maxWorkers: 8 } }] },
+		{} as EventContext,
+	);
 
-	for (const [, announce] of vi.mocked(emitter.onAction).mock.calls) {
-		announce(written, {} as EventContext);
-	}
+	vi.mocked(emitter.onAction).mock.calls[1]![1](
+		{ payload: [{ data: { autoscale_settings: { maxWorkers: 8 } }, keys: [1] }] },
+		{} as EventContext,
+	);
 
 	expect(publish).toHaveBeenCalledTimes(2);
 
@@ -309,7 +404,7 @@ test('outlives a bus it cannot announce on', async () => {
 	const [, written] = vi.mocked(emitter.onAction).mock.calls[0]!;
 
 	written(
-		{ payload: { autoscale_settings: { maxWorkers: 8 } } },
+		{ payload: [{ autoscale_settings: { maxWorkers: 8 } }] },
 		{} as EventContext,
 	);
 

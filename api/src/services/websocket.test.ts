@@ -13,7 +13,6 @@ vi.mock('@directus/env', () => ({
 	useEnv: vi.fn().mockReturnValue({
 		WEBSOCKETS_ENABLED: true,
 		WEBSOCKETS_REST_ENABLED: true,
-		EXTENSIONS_PATH: './extensions',
 		EMAIL_TEMPLATES_PATH: './templates',
 	}),
 }));

@@ -58,19 +58,52 @@ function toCount(value: unknown): number | undefined {
 }
 
 /**
+ * The same address with its database replaced.
+ *
+ * Written into the URL rather than passed beside it: ioredis and node-redis both
+ * let a database in the URL override the option, each under its own condition
+ * (ioredis on `/0`, node-redis on anything else).
+ */
+export function withRedisDatabase(url: string, database: number): string {
+	const address = new URL(url);
+	address.pathname = `/${database}`;
+
+	return address.toString();
+}
+
+/**
  * Create a new Redis instance based on the global env configuration
  *
+ * @param database - selects this database instead of the configured one
  * @returns New Redis instance based on global configuration
  */
-export const createRedis = () => {
+export const createRedis = (database?: number) => {
 	const env = useEnv();
 	const options: RedisOptions = { retryStrategy: retryStrategyFromEnv() };
+	const url = env['REDIS'] as string | undefined;
 
-	const redis = env['REDIS']
-		? new Redis(env['REDIS'] as string, options)
-		: new Redis({ ...getConfigFromEnv('REDIS'), ...options });
+	let redis: Redis;
 
-	warnOncePerConnectionOutage(redis, 'redis');
+	if (url) {
+		const address = database === undefined
+			? url
+			: withRedisDatabase(url, database);
+
+		redis = new Redis(address, options);
+	}
+	else {
+		redis = new Redis({
+			...getConfigFromEnv('REDIS'),
+			...options,
+			...(database !== undefined && { db: database }),
+		});
+	}
+
+	const connectionLabel = database === undefined
+		? 'redis'
+		: 'cache-redis';
+
+	warnOncePerConnectionOutage(redis, connectionLabel);
 
 	return redis;
 };

@@ -1,5 +1,5 @@
 ---
-name: directus_issue498_cache_audit
+name: project_directus_issue498_cache_audit
 description: Issue #498 cache audit (replay every live entry against the database) — settled design points, history tables + live schedule + MCP group + cache-page panel (PR #499), the traps each surface hit, the two defects only a hand-run smoke caught
 metadata:
   author: Jean Claveau
@@ -54,7 +54,7 @@ Issue jclaveau/directus#498 on branch `v11.10.1-feat/cache-audit`, based on
   job, REST audit routes 404 (`RouteNotFoundError`, like an unmounted
   `/system-mcp`), `cache_audit` MCP group dropped, CLI refuses before boot,
   `runCacheAudit` throws 503 as the last net; the node still relays a settings
-  write over the bus. Prod: bo on, api services off. Still no overlap guard,
+  write over the bus. A prod consumer: its back-office service on, its API services off. Still no overlap guard,
   no wall cap, REST/MCP run synchronous (proxy timeout on prod size).
 - `system-mcp.test.ts` pins the exact tool list and all-readOnly → a group
   with acting tools needs its own bb instance (`SYSTEM_MCP_TOOLS=cache,cache_audit`).
@@ -266,7 +266,7 @@ unit, acceptance/Playwright, CodeQL) as of head `ef1588fd73`.
   looked up in `directus_users`, returns an admin accountability; the
   middleware short-circuits on a changed accountability so no cache is
   touched on the way to the audit). Enabled per node by
-  `CACHE_AUDIT_IDENTITY_TOKEN` env. Same shape as the api-guard hook.
+  `CACHE_AUDIT_IDENTITY_TOKEN` env.
 - An "anonymous read first" probe was invalid, not refuting: the cache-key
   builder calls `fetchPoliciesIpAccess` per accountability, and the public
   one had never been looked up on that node → its own cold key

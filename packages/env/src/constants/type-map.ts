@@ -45,6 +45,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	'DB_(CONNECTION_.+_)?POOL__.+_MILLIS': 'number',
 
 	CACHE_ENABLED: 'boolean',
+	CACHE_RESPONSE: 'boolean',
 	CACHE_COMPRESSION_ENABLED: 'boolean',
 	CACHE_KEY_HASH_ENABLED: 'boolean',
 	CACHE_TTL: 'string',
@@ -53,9 +54,17 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	CACHE_AUTO_PURGE: 'boolean',
 	CACHE_AUTO_PURGE_MODE: 'string',
 	CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 'number',
+	CACHE_SCOPED_MAX_QUERY_CASES: 'number',
+	CACHE_SCOPED_INDEX_SCAN_COUNT: 'number',
+	CACHE_SCOPED_INDEX_TTL_FACTOR: 'number',
 	CACHE_SCOPED_PURGE_RETRY_INTERVAL: 'string',
+	CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS: 'number',
+	CACHE_SCOPED_EPOCH_TTL: 'string',
+	CACHE_SCOPED_INDEX_REAP_SCHEDULE: 'string',
+	CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: 'string',
 	CACHE_SCHEMA: 'boolean',
 	CACHE_STORE: 'string',
+	CACHE_REDIS_DB: 'number',
 	CACHE_SKIP_ALLOWED: 'boolean',
 	CACHE_AUTO_FLUSH_ON_DEPLOY: 'boolean',
 	CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT: 'string',
@@ -78,6 +87,9 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	CACHE_TAGS_HEADER: 'string',
 	CACHE_TAGS_HEADER_MAX_SIZE: 'string',
 	CACHE_PURGED_TAGS_HEADER: 'string',
+	QUERY_AUDIT_HEADER: 'string',
+	QUERY_AUDIT_LEVEL: 'string',
+	QUERY_AUDIT_HEADER_MAX_SIZE: 'string',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'array',
 	CACHE_VARY_CONTENT_TYPES: 'array',
 	CACHE_VARY_REQUEST_HEADERS: 'array',
@@ -107,6 +119,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	GRAPHQL_QUERY_TOKEN_LIMIT: 'number',
 
 	MAX_BATCH_MUTATION: 'number',
+	DEFAULT_MUTATION_BATCHING: 'string',
 
 	SERVER_SHUTDOWN_TIMEOUT: 'number',
 
@@ -160,6 +173,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER: 'number',
 	PM2_AUTOSCALE_WARMUP_SECONDS: 'number',
 	PM2_AUTOSCALE_DRILL_ENABLED: 'boolean',
+	PM2_POOL_HEALTH_REFRESH: 'string',
 
 	SHARED_SETTINGS_POLL_SECONDS: 'number',
 
@@ -229,9 +243,9 @@ export const TYPE_MAP: Record<string, EnvType> = {
 
 	PACKAGE_FILE_LOCATION: 'string',
 
-	EXTENSIONS_PATH: 'string',
 	EXTENSIONS_MUST_LOAD: 'boolean',
 	EXTENSIONS_AUTO_RELOAD: 'boolean',
+	EXTENSIONS_AUTO_MIGRATE: 'boolean',
 	EXTENSIONS_SANDBOX_MEMORY: 'number',
 	EXTENSIONS_SANDBOX_TIMEOUT: 'number',
 

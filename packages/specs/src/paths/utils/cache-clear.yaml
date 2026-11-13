@@ -1,9 +1,49 @@
 post:
   summary: Clear Cache
-  description: Resets both the data and schema cache of Directus.
+  description: >
+    Clear the chosen parts of the cache on every node: `response` (the
+    response cache and its scoped-cache index), `system` (the system cache,
+    the schema and the permissions), `permissions` (the resolved policies
+    and permissions alone, the schema stays loaded) and `locks` (the build
+    fingerprint among them, so the next boot flushes again). Each target is
+    its own `targets` parameter: `?targets=system&targets=permissions`; a
+    comma-joined value is refused. Admin only.
   operationId: clear-cache
+  parameters:
+    - name: targets
+      in: query
+      required: false
+      description: The parts to clear; `response` when absent.
+      style: form
+      explode: true
+      schema:
+        type: array
+        items:
+          type: string
+          enum:
+            - response
+            - system
+            - permissions
+            - locks
+        default:
+          - response
+    - name: system
+      in: query
+      required: false
+      deprecated: true
+      description: Adds `system` to the targets. Use `targets=system`.
+      schema:
+        type: boolean
   responses:
     '200':
       description: Successful request
+    '400':
+      description: A target is not one of the four
+    '403':
+      description: The user is not an admin
+    '503':
+      description: >
+        Redis refused part of the clear; the message says which part. The
+        other targets were cleared.
   tags:
     - Utilities

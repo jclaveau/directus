@@ -1,5 +1,11 @@
-import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
-import type { AbstractServiceOptions, Item, MutationOptions, PrimaryKey } from '@directus/types';
+import { InvalidPayloadError } from '@directus/errors';
+import type {
+	AbstractServiceOptions,
+	Item,
+	MutationOptions,
+	PrimaryKey,
+	UpdateGroup,
+} from '@directus/types';
 import { ItemsService } from './items.js';
 
 export class RevisionsService extends ItemsService {
@@ -9,8 +15,6 @@ export class RevisionsService extends ItemsService {
 
 	async revert(pk: PrimaryKey): Promise<void> {
 		const revision = await super.readOne(pk);
-
-		if (!revision) throw new ForbiddenError();
 
 		if (!revision['data']) throw new InvalidPayloadError({ reason: `Revision doesn't contain data to revert to` });
 
@@ -39,19 +43,14 @@ export class RevisionsService extends ItemsService {
 		return opts;
 	}
 
-	override async createOne(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
-		return super.createOne(data, this.setDefaultOptions(opts));
-	}
-
 	override async createMany(data: Partial<Item>[], opts?: MutationOptions): Promise<PrimaryKey[]> {
 		return super.createMany(data, this.setDefaultOptions(opts));
 	}
 
-	override async updateOne(key: PrimaryKey, data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
-		return super.updateOne(key, data, this.setDefaultOptions(opts));
-	}
-
-	override async updateMany(keys: PrimaryKey[], data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey[]> {
-		return super.updateMany(keys, data, this.setDefaultOptions(opts));
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
+		return super.updateGroups(groups, this.setDefaultOptions(opts));
 	}
 }

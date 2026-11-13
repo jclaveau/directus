@@ -19,16 +19,20 @@ import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { clearSystemCache, getCache, getCacheValue, setCacheValue } from '../cache.js';
 import { withMeta } from '../utils/read-meta.js';
+import { flushResponseCache } from '../scoped-cache/index.js';
 import type { Helpers } from '../database/helpers/index.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase, { getSchemaInspector } from '../database/index.js';
-import emitter from '../emitter.js';
 import { fetchAllowedFieldMap } from '../permissions/modules/fetch-allowed-field-map/fetch-allowed-field-map.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { getDefaultIndexName } from '../utils/get-default-index-name.js';
-import { getSchema } from '../utils/get-schema.js';
-import { transaction } from '../utils/transaction.js';
+import {
+	clearCachesThenFireActions,
+	fireNestedActionEvents,
+} from '../utils/clear-caches-then-fire-actions.js';
+import { shouldClearCache } from '../utils/should-clear-cache.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { ItemsService } from './items.js';
 
 const env = useEnv();
@@ -39,6 +43,7 @@ export class RelationsService {
 	accountability: Accountability | null;
 	schema: SchemaOverview;
 	relationsItemService: ItemsService<RelationMeta>;
+	cache: Keyv<any> | null;
 	systemCache: Keyv<any>;
 	schemaCache: Keyv<any>;
 	helpers: Helpers;
@@ -58,6 +63,7 @@ export class RelationsService {
 		});
 
 		const cache = getCache();
+		this.cache = cache.cache;
 		this.systemCache = cache.systemCache;
 		this.schemaCache = cache.localSchemaCache;
 		this.helpers = getHelpers(this.knex);
@@ -134,7 +140,7 @@ export class RelationsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(allowed, {
-			scopedCacheTags: [{ collection: 'directus_relations' }],
+			scopedCacheFingerprints: [{ collection: 'directus_relations' }],
 		});
 	}
 
@@ -196,7 +202,7 @@ export class RelationsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(results[0]!, {
-			scopedCacheTags: [{ collection: 'directus_relations' }],
+			scopedCacheFingerprints: [{ collection: 'directus_relations' }],
 		});
 	}
 
@@ -259,6 +265,8 @@ export class RelationsService {
 
 		const nestedActionEvents: ActionEventParams[] = [];
 
+		let mutationFailed = false;
+
 		try {
 			const metaRow = {
 				...(relation.meta || {}),
@@ -267,9 +275,9 @@ export class RelationsService {
 				one_collection: relation.related_collection || null,
 			};
 
-			await transaction(this.knex, async (trx) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
 				if (relation.related_collection) {
-					await trx.schema.alterTable(relation.collection!, async (table) => {
+					await trx.schema.alterTable(relation.collection!, (table) => {
 						this.alterType(table, relation, fieldSchema.nullable);
 
 						const constraintName: string = getDefaultIndexName('foreign', relation.collection!, relation.field!);
@@ -303,23 +311,28 @@ export class RelationsService {
 						opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
 				});
 			});
-		} finally {
-			if (runPostColumnChange) {
-				await this.helpers.schema.postColumnChange();
-			}
 
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
+			// The scoped index is split by a path walked through relations, so a
+			// relation change can move it, and a purge would then read buckets no fill
+			// was filed in. The nested `directus_relations` write only purges its own.
+			// After the transaction rather than in the `finally`: a change that rolled
+			// back moved nothing.
+			if (shouldClearCache(this.cache, opts)) {
+				await flushResponseCache(this.cache);
 			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+				runPostColumnChange,
+			);
 		}
 	}
 
@@ -331,7 +344,7 @@ export class RelationsService {
 	async updateOne(
 		collection: string,
 		field: string,
-		relation: Partial<Relation>,
+		relationPayload: Partial<Relation>,
 		opts?: MutationOptions,
 	): Promise<void> {
 		if (this.accountability && this.accountability.admin !== true) {
@@ -362,15 +375,32 @@ export class RelationsService {
 			});
 		}
 
+		// The FK is re-created off these and the payload's `schema`.
+		const relation: Partial<Relation> = {
+			...relationPayload,
+			collection,
+			field,
+			related_collection: existingRelation.related_collection,
+		};
+
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
 		this.helpers.schema.preRelationChange(relation);
 
 		const nestedActionEvents: ActionEventParams[] = [];
 
+		let mutationFailed = false;
+
 		try {
-			await transaction(this.knex, async (trx) => {
-				if (existingRelation.related_collection) {
-					await trx.schema.alterTable(collection, async (table) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
+				// A payload without `schema` leaves the FK as it is: re-creating it
+				// would drop its on_delete and on_update.
+				if (
+					existingRelation.related_collection
+					&& relationPayload.schema !== undefined
+				) {
+					// Synchronous: knex drops a rejected callback, so a throw would leave
+					// the queued drop running alone and the FK lost.
+					await trx.schema.alterTable(collection, (table) => {
 						let constraintName: string = getDefaultIndexName('foreign', collection, field);
 
 						// If the FK already exists in the DB, drop it first
@@ -379,7 +409,6 @@ export class RelationsService {
 							table.dropForeign(field, constraintName);
 
 							constraintName = this.helpers.schema.constraintName(constraintName);
-							existingRelation.schema.constraint_name = constraintName;
 						}
 
 						this.alterType(table, relation, fieldSchema.nullable);
@@ -392,12 +421,17 @@ export class RelationsService {
 								}`,
 							);
 
-						if (relation.schema?.on_delete) {
-							builder.onDelete(relation.schema.on_delete);
+						// The payload's `schema` may name one action: the other keeps the
+						// key's stored one rather than the dialect default.
+						const keptSchema = relation.schema
+							&& { ...existingRelation.schema, ...relation.schema };
+
+						if (keptSchema?.on_delete) {
+							builder.onDelete(keptSchema.on_delete);
 						}
 
-						if (relation.schema?.on_update) {
-							builder.onUpdate(relation.schema.on_update);
+						if (keptSchema?.on_update) {
+							builder.onUpdate(keptSchema.on_update);
 						}
 					});
 				}
@@ -432,23 +466,23 @@ export class RelationsService {
 					}
 				}
 			});
-		} finally {
-			if (runPostColumnChange) {
-				await this.helpers.schema.postColumnChange();
-			}
 
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
+			if (shouldClearCache(this.cache, opts)) {
+				await flushResponseCache(this.cache);
 			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+				runPostColumnChange,
+			);
 		}
 	}
 
@@ -483,8 +517,10 @@ export class RelationsService {
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
 		const nestedActionEvents: ActionEventParams[] = [];
 
+		let mutationFailed = false;
+
 		try {
-			await transaction(this.knex, async (trx) => {
+			await transactionHoldingActions(this.knex, nestedActionEvents, async (trx) => {
 				const existingConstraints = await this.foreignKeys();
 				const constraintNames = existingConstraints.map((key) => key.constraint_name);
 
@@ -520,23 +556,23 @@ export class RelationsService {
 					nestedActionEvents.push(actionEvent);
 				}
 			});
-		} finally {
-			if (runPostColumnChange) {
-				await this.helpers.schema.postColumnChange();
-			}
 
-			if (opts?.autoPurgeSystemCache !== false) {
-				await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
+			if (shouldClearCache(this.cache, opts)) {
+				await flushResponseCache(this.cache);
 			}
+		}
+		catch (mutationError) {
+			mutationFailed = true;
 
-			if (opts?.emitEvents !== false && nestedActionEvents.length > 0) {
-				const updatedSchema = await getSchema();
-
-				for (const nestedActionEvent of nestedActionEvents) {
-					nestedActionEvent.context.schema = updatedSchema;
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			throw mutationError;
+		}
+		finally {
+			await this.clearCachesThenFireNestedActions(
+				nestedActionEvents,
+				mutationFailed,
+				opts,
+				runPostColumnChange,
+			);
 		}
 	}
 
@@ -671,5 +707,26 @@ export class RelationsService {
 
 			alterField.alter();
 		}
+	}
+
+	private async clearCachesThenFireNestedActions(
+		nestedActionEvents: ActionEventParams[],
+		mutationFailed: boolean,
+		opts: MutationOptions | undefined,
+		runPostColumnChange: boolean,
+	): Promise<void> {
+		await clearCachesThenFireActions(
+			async () => {
+				if (runPostColumnChange) {
+					await this.helpers.schema.postColumnChange();
+				}
+
+				if (opts?.autoPurgeSystemCache !== false) {
+					await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
+				}
+			},
+			() => fireNestedActionEvents(nestedActionEvents, opts),
+			mutationFailed,
+		);
 	}
 }

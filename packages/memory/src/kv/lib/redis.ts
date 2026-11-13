@@ -11,6 +11,8 @@ import {
 import type { ExtendedRedis, KvConfigRedis } from '../index.js';
 import type { Kv } from '../types/class.js';
 
+const CLEAR_SCAN_COUNT = 1000;
+
 export const SET_MAX_SCRIPT = `
   local key = KEYS[1]
   local value = tonumber(ARGV[1])
@@ -99,8 +101,11 @@ export class KvRedis implements Kv {
 	}
 
 	async clear() {
+		// MATCH filters after the walk, so every call pays for COUNT keys of the
+		// whole database: ioredis's default of 10 is 100x the round trips.
 		const keysStream = this.redis.scanStream({
 			match: withNamespace('*', this.namespace),
+			count: CLEAR_SCAN_COUNT,
 		});
 
 		const pipeline = this.redis.pipeline();

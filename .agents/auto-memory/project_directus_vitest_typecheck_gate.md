@@ -21,6 +21,12 @@ cd api && ./node_modules/.bin/vitest run                    # + runtime, what CI
 - `Type Errors` = the `*.test-d.ts` assertions. `Errors` = everything `tsc` found in
   what those files reach. The second is the one that gates.
 
+**A type error can surface only as an "Unhandled error" in CI** while the summary
+still says `Type Errors  no errors` and all tests pass (PR #678: a type predicate
+`isFunctionColumnOptions` no longer matched after an option became required;
+5570 tests green, job red). Never report "typecheck clean" from the summary line —
+grep the job log for `Unhandled` / `error TS`.
+
 **Scope is much narrower than a project check.** Measured on api:
 
 | | |

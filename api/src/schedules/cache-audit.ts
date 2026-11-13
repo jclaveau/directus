@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import type { Item, UpdateGroup } from '@directus/types';
 import { CronExpressionParser } from 'cron-parser';
 import { useBus } from '../bus/index.js';
 import { isCacheAuditInFlight, runCacheAudit } from '../cache-audit-runs.js';
@@ -13,7 +14,7 @@ import {
 /**
  * A recurring cache audit over real traffic — dev and preview only, since a run
  * costs one uncached read per live entry. Each run lands in the audit history
- * and its `stale_entry`/`tag_drift` findings on the cache dashboard as
+ * and its `stale_entry`/`pin_drift` findings on the cache dashboard as
  * anomalies, so a missed invalidation shows up without anyone reading a log.
  *
  * The rule is `directus_settings.cache_audit_schedule` when set, else
@@ -111,10 +112,10 @@ async function runOnce(): Promise<void> {
 		const report = await runCacheAudit('cron');
 
 		const summary = `${report.scanned} entries in ${report.durationMs}ms: `
-			+ `${report.counts.stale} stale, ${report.counts.tag_drift} drifted, `
+			+ `${report.counts.stale} stale, ${report.counts.pin_drift} drifted, `
 			+ `${report.counts.unreplayable} unreplayable`;
 
-		if (report.counts.stale > 0 || report.counts.tag_drift > 0) {
+		if (report.counts.stale > 0 || report.counts.pin_drift > 0) {
 			logger.warn(`[cache-audit] ${summary}`);
 		}
 		else {
@@ -192,14 +193,28 @@ export default async function schedule(): Promise<boolean> {
 	// the service (a config import, a seed) still reaches every node.
 	const { default: emitter } = await import('../emitter.js');
 
-	emitter.onAction('settings.update', ({ payload }) => {
-		if (!payload || 'cache_audit_schedule' in payload === false) {
+	const announceRuleOf = (writtenRows: Partial<Item>[]) => {
+		const ruleRow = writtenRows.findLast((writtenRow) => {
+			return 'cache_audit_schedule' in writtenRow;
+		});
+
+		if (!ruleRow) {
 			return;
 		}
 
 		useBus().publish<CacheAuditScheduleChange>(SCHEDULE_CHANGED_CHANNEL, {
-			rule: normaliseRule(payload['cache_audit_schedule']),
+			rule: normaliseRule(ruleRow['cache_audit_schedule']),
 		});
+	};
+
+	// The create as well as the update: a deployment nobody has saved a setting
+	// on yet has no singleton row, and the first write to it makes one.
+	emitter.onAction('settings.create', ({ payload }) => {
+		announceRuleOf(payload as Partial<Item>[]);
+	});
+
+	emitter.onAction('settings.update', ({ payload }) => {
+		announceRuleOf((payload as UpdateGroup[]).map(({ data }) => data));
 	});
 
 	return applyCacheAuditSchedule();

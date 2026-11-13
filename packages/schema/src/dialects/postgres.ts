@@ -102,7 +102,7 @@ export default class Postgres implements SchemaInspector {
 
 		const bindings = this.explodedSchema.map(() => '?').join(',');
 
-		const [columnsResult, primaryKeysResult] = await Promise.all([
+		const [columnsResult, primaryKeysResult, uniqueIndexResult] = await Promise.all([
 			// Only select columns from BASE TABLEs to exclude views (Postgres views
 			// cannot have primary keys so they cannot be used)
 			this.knex.raw(
@@ -143,6 +143,29 @@ export default class Postgres implements SchemaInspector {
           AND indisprimary
           AND indnatts = 1
 			 AND relkind != 'S'
+      `,
+				this.explodedSchema,
+			),
+
+			// a unique index a foreign key can name: an update writing its column
+			// locks the row FOR UPDATE. Its INCLUDE columns are flagged too, where
+			// Postgres would not; a unique index of one partition only is not
+			// flagged on the partitioned table
+			this.knex.raw(
+				`
+        SELECT DISTINCT c.relname AS table_name
+          , a.attname AS column_name
+        FROM pg_index i
+        JOIN pg_class c ON c.oid = i.indrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_attribute a
+          ON a.attrelid = c.oid AND a.attnum = ANY (i.indkey)
+        WHERE i.indisunique
+          AND NOT i.indisprimary
+          AND i.indpred IS NULL
+          AND i.indexprs IS NULL
+          AND c.relkind IN ('r', 'p')
+          AND n.nspname IN (${bindings})
       `,
 				this.explodedSchema,
 			),
@@ -206,6 +229,33 @@ export default class Postgres implements SchemaInspector {
 			} else {
 				/* eslint-disable-next-line no-console */
 				console.error(`Could not set primary key "${column_name}" for unknown table "${table_name}"`);
+			}
+		}
+
+		for (const { table_name, column_name } of uniqueIndexResult.rows) {
+			const uniqueTable = overview[table_name];
+			const uniqueColumn = uniqueTable?.columns[column_name];
+
+			if (uniqueColumn) {
+				uniqueColumn.in_unique_index = true;
+			}
+			// information_schema.columns hides a column the user holds no
+			// privilege on, pg_index does not
+			else if (uniqueTable) {
+				/* eslint-disable-next-line no-console */
+				console.error(
+					`Could not flag unique column ${JSON.stringify(column_name)}`
+					+ ` of table ${JSON.stringify(table_name)}:`
+					+ ' information_schema.columns lists only the columns'
+					+ ' the user holds a privilege on',
+				);
+			}
+			else {
+				/* eslint-disable-next-line no-console */
+				console.error(
+					`Could not flag unique column "${column_name}"`
+					+ ` of unknown table "${table_name}"`,
+				);
 			}
 		}
 
@@ -443,6 +493,9 @@ export default class Postgres implements SchemaInspector {
 		 `,
 				bindings,
 			),
+			// The auto-increment is read off pg_depend: pg_get_serial_sequence looks
+			// the table up by name in the current catalog, so a table another
+			// connection dropped after this statement's snapshot fails it (42P01).
 			knex.raw<{ rows: Constraint[] }>(
 				`
 			SELECT
@@ -453,7 +506,16 @@ export default class Postgres implements SchemaInspector {
 			  frel.relname AS foreign_key_table,
 			  fatt.attname AS foreign_key_column,
 			  CASE
-				 WHEN con.contype = 'p' THEN pg_get_serial_sequence(att.attrelid::regclass::text, att.attname) != ''
+				 WHEN con.contype = 'p' THEN EXISTS (
+				   SELECT 1
+				   FROM pg_depend dep
+				   JOIN pg_class seq ON seq.oid = dep.objid AND seq.relkind = 'S'
+				   WHERE dep.classid = 'pg_class'::regclass
+				     AND dep.refclassid = 'pg_class'::regclass
+				     AND dep.refobjid = att.attrelid
+				     AND dep.refobjsubid = att.attnum
+				     AND dep.deptype IN ('a', 'i')
+				 )
 				 ELSE NULL
 			  END AS has_auto_increment
 			FROM

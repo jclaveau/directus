@@ -5,7 +5,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -65,7 +65,7 @@ describe(oneLine`
 				}),
 			});
 
-			// Independent seeds → one round-trip. Capture the order PKs to update later.
+			// Independent seeds → one round-trip. Snapshot the order PKs to update later.
 			const [orders] = await Promise.all([
 				CreateItem(vendor, {
 					collection: ORDER,
@@ -87,7 +87,7 @@ describe(oneLine`
 				(order: { id: number }) => order.id,
 			);
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
@@ -202,7 +202,7 @@ describe(oneLine`
 			expect(warmGlobex.headers[cacheStatusHeader]).toBe('HIT');
 
 			// Array body → updateBatch: each row forks an autoPurgeCache-off child, so a
-			// purgeBy lands only via a shared collector threaded through the batch.
+			// purgeBy lands only via shared declarations threaded through the batch.
 			await request(url)
 				.patch(`/items/${ORDER}`)
 				.send([

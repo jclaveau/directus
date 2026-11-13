@@ -25,7 +25,11 @@ vi.mock('./processes-config.js', () => {
 	};
 });
 
-import { buildProcessesTree, collectProcesses } from './collect-processes.js';
+import {
+	buildProcessesTree,
+	collectProcessReports,
+	collectProcesses,
+} from './collect-processes.js';
 
 function reply(
 	overrides: Partial<ProcessesReportMessage> = {},
@@ -352,4 +356,16 @@ test('A caller asking for nothing gets the configured halves', async () => {
 	});
 
 	expect(report.details).toEqual(['stats', 'env']);
+});
+
+test('The fill pause asks the nodes for their node and build alone', async () => {
+	answerWith((requestId) => [reply({ requestId })]);
+
+	await collectProcessReports([], { nodeBuildOnly: true });
+
+	expect(bus.publish).toHaveBeenCalledWith('processes:query', {
+		requestId: expect.any(String),
+		details: [],
+		nodeBuildOnly: true,
+	});
 });
