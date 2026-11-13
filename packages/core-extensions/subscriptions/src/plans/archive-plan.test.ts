@@ -34,7 +34,7 @@ beforeEach(async () => {
 		policy: 'policy-1',
 		amount: 990,
 		currency: 'EUR',
-		interval: 'month',
+		interval: '{"months":1}',
 	});
 
 	await database('subscription_plan_references')
@@ -112,7 +112,7 @@ describe('archivePlan', () => {
 			policy: 'policy-1',
 			amount: 9900,
 			currency: 'EUR',
-			interval: 'year',
+			interval: '{"years":1}',
 		});
 
 		await database('subscription_plan_references')

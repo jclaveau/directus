@@ -37,7 +37,7 @@ beforeEach(async () => {
 		policy: 'policy-1',
 		amount: 990,
 		currency: 'EUR',
-		interval: 'month',
+		interval: '{"months":1}',
 	});
 
 	await database('subscription_plan_references')

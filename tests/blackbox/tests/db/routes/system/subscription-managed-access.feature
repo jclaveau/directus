@@ -24,8 +24,8 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | id | subscriber | provider | provider_customer_id |
       | 1  | 1          | mollie   | cst_subscribed       |
     And the rows of subscription_plans:
-      | id | code | name | policy        | amount | currency | interval | status |
-      | 1  | pro  | Pro  | <plan_policy> | 1000   | EUR      | month    | active |
+      | id | code | name | policy        | amount | currency | interval     | status |
+      | 1  | pro  | Pro  | <plan_policy> | 1000   | EUR      | {"months":1} | active |
     And the rows of subscription_plan_references:
       | plan | provider | reference |
       | 1    | mollie   | pro-plan  |
@@ -130,9 +130,9 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | id | subscriber | provider | provider_customer_id |
       | 10 | 10         | mollie   | cst_direct           |
     And the rows of subscription_plans:
-      | id | code   | name   | policy          | amount | currency | interval | status   |
-      | 10 | direct | Direct | <direct_policy> | 1000   | EUR      | month    | active   |
-      | 11 | gone   | Gone   | <direct_policy> | 1000   | EUR      | month    | archived |
+      | id | code   | name   | policy          | amount | currency | interval     | status   |
+      | 10 | direct | Direct | <direct_policy> | 1000   | EUR      | {"months":1} | active   |
+      | 11 | gone   | Gone   | <direct_policy> | 1000   | EUR      | {"months":1} | archived |
     And the rows of subscription_plan_references:
       | id | plan | provider | reference   |
       | 10 | 10   | mollie   | direct-plan |

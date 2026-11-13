@@ -39,8 +39,11 @@ const PLAN_FIELDS = [
 		interface: 'select-dropdown',
 		options: JSON.stringify({
 			choices: [
-				{ text: 'Month', value: 'month' },
-				{ text: 'Year', value: 'year' },
+				{ text: 'Weekly', value: '{"weeks":1}' },
+				{ text: 'Monthly', value: '{"months":1}' },
+				{ text: 'Quarterly', value: '{"months":3}' },
+				{ text: 'Half-yearly', value: '{"months":6}' },
+				{ text: 'Yearly', value: '{"years":1}' },
 			],
 		}),
 	},

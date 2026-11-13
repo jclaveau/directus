@@ -48,7 +48,7 @@ describe('cancelOwnSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscriptions').insert([
@@ -134,7 +134,7 @@ describe('cancelOwnSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscriptions').insert({
@@ -281,7 +281,7 @@ describe('cancelOwnSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscriptions').insert([
@@ -328,7 +328,7 @@ describe('cancelOwnSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscriptions').insert({

@@ -37,7 +37,7 @@ describe('refusePlanDelete', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await expect(refusePlanDelete([1], database)).rejects.toThrow(
@@ -70,7 +70,7 @@ describe('refusePlanStatusUpdate', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 			status: 'archived',
 		});
 
@@ -89,7 +89,7 @@ describe('refusePlanStatusUpdate', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 			status: 'archived',
 		});
 
@@ -106,7 +106,7 @@ describe('refusePlanStatusUpdate', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await expect(refusePlanStatusUpdate(
@@ -126,7 +126,7 @@ describe('refuseUsedReferenceUpdate', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscription_plan_references').insert([
