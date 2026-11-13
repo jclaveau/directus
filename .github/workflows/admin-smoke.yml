@@ -1,0 +1,64 @@
+name: Admin smoke
+
+# Opens the built admin in a real browser and signs in, on every commit. The build
+# and the unit tests never run the emitted bundle, so a chunk the browser can't
+# parse once shipped a blank admin to Planner with every check green.
+# `push` only, every branch, for the reason check.yml gives.
+on:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  admin-smoke:
+    name: Admin smoke
+    # Playwright ships no chromium for ubuntu 26.04, which ubuntu-latest now is.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      DB_CLIENT: sqlite3
+      DB_FILENAME: /tmp/admin-smoke.db
+      KEY: admin-smoke
+      SECRET: admin-smoke
+      ADMIN_EMAIL: admin@example.com
+      # Throwaway localhost-only instance: a fixed password lets the spec sign in.
+      ADMIN_PASSWORD: admin-smoke-password
+      WEBSOCKETS_ENABLED: 'false'
+      LOG_LEVEL: warn
+      PORT: '8055'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+
+      - name: Bootstrap + start Directus
+        run: |
+          node directus/cli.js bootstrap
+          node directus/cli.js start > /tmp/directus.log 2>&1 &
+
+          for _ in $(seq 1 60); do
+            curl -sf http://localhost:8055/server/health >/dev/null 2>&1 && break
+            sleep 2
+          done
+          curl -sf http://localhost:8055/server/health >/dev/null || { cat /tmp/directus.log; exit 1; }
+
+      - name: Install Playwright chromium
+        run: pnpm --filter tests-acceptance exec playwright install --with-deps chromium
+
+      - name: Open the admin and sign in
+        env:
+          BASE_URL: http://localhost:8055
+        run: pnpm --filter tests-acceptance exec playwright test admin-smoke.spec.ts
+
+      - name: Directus log on failure
+        if: failure()
+        run: cat /tmp/directus.log
