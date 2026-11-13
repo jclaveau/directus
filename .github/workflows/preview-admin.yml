@@ -276,7 +276,7 @@ jobs:
           # is routed through pgbouncer and the page has a pool with live clients on
           # it rather than three idle ones. Applied before the server starts, since
           # the grant is read through the permissions cache.
-          PG=$(docker ps --filter ancestor=postgres:16-alpine -q | head -1)
+          PG=${{ job.services.postgres.id }}
           docker exec "$PG" psql -U directus -d directus -c \
             "UPDATE directus_policies SET db_connections='premium' WHERE admin_access = true;"
 
@@ -478,7 +478,7 @@ jobs:
         run: |
           # coarse_scope needs a scoped field on sub_items — set it in the DB (the API
           # doesn't whitelist the fork column); node clears the schema cache below.
-          PG=$(docker ps --filter ancestor=postgres:16-alpine -q | head -1)
+          PG=${{ job.services.postgres.id }}
           docker exec "$PG" psql -U directus -d directus -c \
             "UPDATE directus_collections SET scoped_cache_fields='[\"user_created\"]' WHERE collection='sub_items';"
 
@@ -560,12 +560,12 @@ jobs:
           # stays alive, so its stdout keeps flowing in the Actions UI).
           tail -F /tmp/directus.log 2>/dev/null | sed 's/^/[directus] /' &
 
-          REDIS=$(docker ps --filter ancestor=valkey/valkey:9.1.2-alpine -q | head -1)
+          REDIS=${{ job.services.redis.id }}
           if [ -n "$REDIS" ]; then
             ( docker exec "$REDIS" redis-cli monitor 2>&1 | sed 's/^/[redis] /' ) &
           fi
 
-          PG=$(docker ps --filter ancestor=postgres:16-alpine -q | head -1)
+          PG=${{ job.services.postgres.id }}
           if [ -n "$PG" ]; then
             docker exec "$PG" psql -U directus -d directus \
               -c "ALTER SYSTEM SET log_statement='all';" \
