@@ -350,6 +350,10 @@ jobs:
             jq '.dependencies["@scalabus/subscriptions"] = "0.1.0"' \
               preview-extensions/package.json > /tmp/preview-extensions.json
             mv /tmp/preview-extensions.json preview-extensions/package.json
+            # The bootstrap above ran before the bundle was installed, so its
+            # tables are created here, the way production migrates a bundle.
+            PACKAGE_FILE_LOCATION="$PWD/preview-extensions" \
+              node directus/cli.js database migrate:latest
             echo "subscriptions bundle loaded"
           else
             echo "no subscriptions bundle in this ref: not loaded"
