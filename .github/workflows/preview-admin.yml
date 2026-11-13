@@ -176,7 +176,7 @@ jobs:
             -v /tmp/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro \
             -v /tmp/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro \
             --entrypoint /usr/bin/pgbouncer \
-            edoburu/pgbouncer@sha256:4c1ca296ef525f108f5d3552cc337c0c09587cf8dae7f0067fd93349e47dc1cd \
+            ghcr.io/jclaveau/pgbouncer:1.25.2 \
             /etc/pgbouncer/pgbouncer.ini
 
           for _ in $(seq 1 30); do
