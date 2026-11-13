@@ -450,6 +450,7 @@ async function deleteLeftoverWebhooks() {
 
 async function tryEventTypes(nextGenUrl) {
 	const eventTypeVerdicts = {};
+	const refusalDetails = {};
 
 	for (const candidateType of candidateEventTypes) {
 		let trialWebhook = null;
@@ -472,10 +473,11 @@ async function tryEventTypes(nextGenUrl) {
 				throw trialError;
 			}
 
-			const errorDetail = JSON.parse(trialError.responseText).detail;
+			// Only the status is compared: Mollie rewords its error details.
+			eventTypeVerdicts[candidateType] = String(trialError.httpStatus);
 
-			eventTypeVerdicts[candidateType] =
-				`${trialError.httpStatus} ${errorDetail}`;
+			refusalDetails[candidateType] =
+				JSON.parse(trialError.responseText).detail;
 		}
 
 		// Outside the catch: a failed delete stops the run, never reads as a
@@ -490,7 +492,41 @@ async function tryEventTypes(nextGenUrl) {
 		console.log(`  ${candidateType}: ${eventTypeVerdicts[candidateType]}`);
 	}
 
+	writeFileSync(
+		join(outputDirectory, 'event-type-refusals.json'),
+		`${JSON.stringify(refusalDetails, null, '\t')}\n`,
+	);
+
 	return eventTypeVerdicts;
+}
+
+// A run killed before its cleanup leaves a probe subscription billing the
+// test customer every month.
+async function cancelLeftoverSubscriptions() {
+	const customerList = await callMollie('GET', '/customers?limit=50');
+
+	for (const listedCustomer of customerList._embedded.customers) {
+		const customerPath = `/customers/${listedCustomer.id}/subscriptions`;
+		const subscriptionList = await callMollie('GET', customerPath);
+
+		for (const listedSubscription of subscriptionList._embedded.subscriptions) {
+			const isProbeSubscription = listedSubscription.status === 'active'
+				&& listedSubscription.description.startsWith('scalabus probe ');
+
+			if (!isProbeSubscription) {
+				continue;
+			}
+
+			if (listedSubscription.id === protectedSubscriptionId) {
+				throw new Error(
+					`refusing to touch ${JSON.stringify(protectedSubscriptionId)}`,
+				);
+			}
+
+			await callMollie('DELETE', `${customerPath}/${listedSubscription.id}`);
+			console.log(`  canceled leftover ${listedSubscription.id}`);
+		}
+	}
 }
 
 async function findMandateCustomer() {
@@ -693,6 +729,7 @@ try {
 
 	console.log('\n== next-gen event types');
 	await deleteLeftoverWebhooks();
+	await cancelLeftoverSubscriptions();
 	observedBehaviour.eventTypes = await tryEventTypes(nextGenUrl);
 
 	const acceptedEventTypes = Object.keys(observedBehaviour.eventTypes)
@@ -879,12 +916,6 @@ try {
 			},
 		},
 	);
-
-	if (probeSubscription.id === protectedSubscriptionId) {
-		throw new Error(
-			`refusing to touch ${JSON.stringify(protectedSubscriptionId)}`,
-		);
-	}
 
 	const subscriptionPath =
 		`/customers/${mandateCustomerId}/subscriptions/${probeSubscription.id}`;
