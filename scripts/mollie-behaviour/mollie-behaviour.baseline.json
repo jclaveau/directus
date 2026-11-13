@@ -1,0 +1,118 @@
+{
+	"eventTypes": {
+		"payment.paid": "accepted",
+		"payment.authorized": "accepted",
+		"payment.failed": "accepted",
+		"payment.canceled": "accepted",
+		"payment.expired": "accepted",
+		"payment.pending": "accepted",
+		"payment-link.paid": "accepted",
+		"sales-invoice.created": "accepted",
+		"sales-invoice.issued": "accepted",
+		"sales-invoice.canceled": "accepted",
+		"sales-invoice.paid": "accepted",
+		"balance-transaction.created": "accepted",
+		"payout.created": "422 Invalid event type: payout.created",
+		"payout.paid": "422 Invalid event type: payout.paid",
+		"payout.failed": "accepted",
+		"unmatched-credit-transfer.received": "accepted",
+		"unmatched-credit-transfer.matched": "accepted",
+		"unmatched-credit-transfer.returned": "accepted",
+		"unmatched-credit-transfer.expired": "accepted",
+		"refund.created": "422 Invalid event type: refund.created",
+		"refund.pending": "accepted",
+		"refund.processing": "accepted",
+		"refund.refunded": "accepted",
+		"refund.failed": "accepted",
+		"refund.canceled": "accepted",
+		"chargeback.received": "accepted",
+		"chargeback.reversed": "accepted",
+		"subscription.created": "422 Invalid event type: subscription.created",
+		"subscription.updated": "422 Invalid event type: subscription.updated",
+		"subscription.canceled": "422 Invalid event type: subscription.canceled",
+		"subscription.suspended": "422 Invalid event type: subscription.suspended",
+		"subscription.completed": "422 Invalid event type: subscription.completed",
+		"mandate.created": "422 Invalid event type: mandate.created",
+		"mandate.revoked": "422 Invalid event type: mandate.revoked",
+		"mandate.invalid": "422 Invalid event type: mandate.invalid",
+		"customer.created": "422 Invalid event type: customer.created",
+		"customer.updated": "422 Invalid event type: customer.updated",
+		"customer.deleted": "422 Invalid event type: customer.deleted"
+	},
+	"webhookCreation": [
+		"empty body; signature header"
+	],
+	"envelopes": [
+		"application/json; _embedded,_links,createdAt,entityId,id,resource,type; entity hook; Mollie HTTP client/1.0",
+		"application/json; _embedded,_links,createdAt,entityId,id,resource,type; entity payment; Mollie HTTP client/1.0"
+	],
+	"actions": {
+		"webhook ping": {
+			"status": null,
+			"classic": [],
+			"nextGen": [
+				"hook.ping; signature valid"
+			]
+		},
+		"one-off paid": {
+			"status": "paid",
+			"classic": [
+				"application/x-www-form-urlencoded; fields id; signature missing"
+			],
+			"nextGen": [
+				"payment.paid; signature valid"
+			]
+		},
+		"one-off failed": {
+			"status": "failed",
+			"classic": [
+				"application/x-www-form-urlencoded; fields id; signature missing"
+			],
+			"nextGen": [
+				"payment.failed; signature valid"
+			]
+		},
+		"one-off canceled": {
+			"status": "canceled",
+			"classic": [
+				"application/x-www-form-urlencoded; fields id; signature missing"
+			],
+			"nextGen": [
+				"payment.canceled; signature valid"
+			]
+		},
+		"one-off expired": {
+			"status": "expired",
+			"classic": [
+				"application/x-www-form-urlencoded; fields id; signature missing"
+			],
+			"nextGen": [
+				"payment.expired; signature valid"
+			]
+		},
+		"one-off open": {
+			"status": "open",
+			"classic": [],
+			"nextGen": []
+		},
+		"recurring payment": {
+			"status": "paid",
+			"classic": [
+				"application/x-www-form-urlencoded; fields id; signature missing"
+			],
+			"nextGen": [
+				"payment.paid; signature valid"
+			]
+		},
+		"refund of the recurring payment": {
+			"status": "pending",
+			"classic": [],
+			"nextGen": []
+		},
+		"subscription created then canceled": {
+			"status": null,
+			"classic": [],
+			"nextGen": []
+		}
+	}
+}
