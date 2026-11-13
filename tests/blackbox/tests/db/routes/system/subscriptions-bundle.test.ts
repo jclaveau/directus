@@ -285,7 +285,7 @@ describe.each(vendors)('%s', (vendor) => {
 				policy: seededPolicy,
 				amount: 1000,
 				currency: 'EUR',
-				interval: 'month',
+				interval: '{"months":1}',
 				status: ownPlan.plan_status,
 			});
 
