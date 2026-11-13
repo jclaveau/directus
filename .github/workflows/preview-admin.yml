@@ -30,11 +30,6 @@ on:
   pull_request_target:
     types: [labeled, synchronize, edited]
 
-# One live preview per PR: a new push cancels the PR's still-running preview.
-concurrency:
-  group: preview-admin-${{ github.event.pull_request.number || inputs.ref || github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
   # Post the preview link + throwaway credentials as a PR comment (pull_request_target runs).
@@ -56,6 +51,12 @@ jobs:
         contains(github.event.pull_request.body, '[x] 🔄 Re-run admin preview'))
     # Hard backstop; the idle watcher normally ends the job long before this.
     timeout-minutes: 180
+    # One live preview per PR: a new push cancels the PR's still-running preview.
+    # Job-level, so a skipped run (a description edit with the box unticked) never
+    # joins the group and cannot cancel the live one.
+    concurrency:
+      group: preview-admin-${{ github.event.pull_request.number || inputs.ref || github.ref }}
+      cancel-in-progress: true
     services:
       postgres:
         image: ghcr.io/jclaveau/postgres:16-alpine
