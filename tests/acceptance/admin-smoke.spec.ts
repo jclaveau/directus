@@ -5,7 +5,11 @@ import { expect, test } from '@playwright/test';
 // the admin shipped broken once with `SyntaxError: await is a reserved identifier`.
 
 const ADMIN_EMAIL = process.env['ADMIN_EMAIL'] ?? 'admin@example.com';
-const ADMIN_PASSWORD = process.env['ADMIN_PASSWORD'] ?? '';
+const ADMIN_PASSWORD = process.env['ADMIN_PASSWORD'];
+
+if (!ADMIN_PASSWORD) {
+	throw new Error('Set ADMIN_PASSWORD to the password Directus bootstrapped with');
+}
 
 test('opens the login page and signs in without a page error', async ({ page }) => {
 	const pageErrors: string[] = [];
