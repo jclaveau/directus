@@ -15,6 +15,9 @@
 //    created then canceled; each carries a classic webhookUrl <tunnel>/classic
 // 5. listens, then compares what reached which webhook with the baseline
 //
+// One run at a time per Mollie account: a run's start deletes every probe
+// webhook and cancels every probe subscription, another run's included.
+//
 // Usage:
 //   node scripts/mollie-behaviour/mollie-webhook-probe.mjs \
 //     [--listen-seconds 180] [--output-directory <dir>] [--update-baseline]
@@ -494,7 +497,7 @@ async function tryEventTypes(nextGenUrl) {
 
 	writeFileSync(
 		join(outputDirectory, 'event-type-refusals.json'),
-		`${JSON.stringify(refusalDetails, null, '\t')}\n`,
+		`${redactSecrets(JSON.stringify(refusalDetails, null, '\t'))}\n`,
 	);
 
 	return eventTypeVerdicts;
