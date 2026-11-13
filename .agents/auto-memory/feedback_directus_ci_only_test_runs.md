@@ -22,6 +22,13 @@ Types are covered there too: `api/vitest.config.ts` sets `typecheck.enabled`, an
 shard runs `vitest run --coverage`, so the `Type Errors` line is part of that job. A local
 `tsc -p api --noEmit` adds nothing CI does not already fail on.
 
+That job typechecks `api/src` AND every `*.test.ts`, and fails on a TypeCheckError even
+with all tests green (#614 `items.ts:2709` TS2322, #625 a test-file TS2353), while a local
+`vitest --changed` prints `Type Errors  no errors` over the same tree: a local run proves
+nothing about types. Typical misses CI catches: `mockReturnValue()` with no arg (emitAction
+resolves → `mockResolvedValue(undefined)`), `readByQuery` rows needing `as any` (getMeta
+rider). Push and read CI; don't reintroduce a local tsc gate for them.
+
 **How to apply:**
 - Commit, push, and read the verdict off the run — mechanics in
   [[project_directus_blackbox_run_and_logs]], and loop with a poll job or

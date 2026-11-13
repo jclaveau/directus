@@ -31,3 +31,6 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [Label events restart blackbox](../project_directus_blackbox_label_restart.md) — any PR label add/remove (dist-release…) restarts all 8 shards and cancels a running re-run via blackbox-<ref> concurrency; a cancelled re-run after a label = the label, not your edit; guard in blackbox-pr.yml `decide` (#574)
 - [A Gherkin cell can hold YAML](../reference_directus_gherkin_yaml_cells.md) — the fork's multiline notation dedents a cell as a block; measured widths for JSON vs YAML vs inline lists
 - [Directus bb Gherkin conventions](../feedback_directus_gherkin_bb_conventions.md) — witness = row touched-or-not by the action, markers column, YAML query cells, step text gives the why, bb scenario first then fix
+- [Blackbox DELETE semantics + cleanup helpers](../project_directus_blackbox_delete_semantics.md) — collection/field DELETE answers 403 (missing) / 204 (missing field), never 404; strict vs IfPresent helpers; FK drop order
+- [#617 schema-move lock PARKED](../project_directus_issue617_parked.md) — not a flake source; pick up only when a schema-wide assertion test exists
+- [bb scenario titles live in the .test.ts too](../reference_directus_bb_scenario_titles_in_test_file.md) — renaming a `Scenario:` without the sibling .test.ts title list fails the file "(0 test)" in CI only

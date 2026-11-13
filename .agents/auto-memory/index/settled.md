@@ -41,3 +41,8 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [PR #638 accepted exception](../project_directus_issue636_batch_to_db_layer.md) — ≥1e21 into int field: batch 22003 out-of-range vs per-group raw 22P02, accepted (A); keep ints out of BATCH_TEXT_FIELD_TYPES
 - [PR #707/#710 nestedUpdates rulings](../project_directus_pr707_pr710_nested_updates_settled.md) — cycle Tarjan, refuse/skip semantics, WS takes nestedUpdates, #708 filed; #710 apply keeps `updateOne(key, {})` on a linked child; do not re-raise
 - [PR #725 request store](../project_directus_pr725_request_store_settled.md) — store emptied on res close once finished (choices A, A), audit joins the open store, never a copy; earlier rulings listed; do not re-raise
+- [PR #611/#613 filter<Item> typing](../project_directus_pr611_pr613_filter_item_type.md) — create/update/delete filters take the item; CreateEntries/UpdateEntries exported; DeleteKey=PrimaryKey; TS limits #3/#4/#6 settled
+- [PR #694 action-hold ruling](../project_directus_pr694_action_hold_ruling.md) — actions never fire for a rolled-back mutation (jean, 2026-11-07); audited early-emit sites
+- [PR #698 autoreview state](../project_directus_pr698_autoreview_state.md) — MERGED 0bb994cabd: answerOnce + success after busboy close; predating mid-body-error points reported only
+- [Predating #614 review points](../project_directus_predating_review_points.md) — 9 + C2 + D4 fixed test-first in #625, MERGED into #614; follow-up #633
+- [Schema diff mixed relation (closed, watch)](../project_directus_schema_diff_mixed_relation.md) — validate-diff picks the 400 message off `diff[0]` only; not-a-bug 2026-10-16, reopen option B if it surfaces

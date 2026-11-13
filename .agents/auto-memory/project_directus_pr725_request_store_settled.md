@@ -40,6 +40,36 @@ Stacked #731 MERGED 2026-11-12T22:03Z as 71eeee3845 ("go merge 731"): autoreview
 `upsertRunsOf` keeping only the last field's record kind (b1a4cd27af); jean ruled to obey
 `local/no-single-use-const` on PR-added consts only (a633dd63fe), older ones left as-is.
 
+**Origin, the header gap (2026-11-11):** a nested A2O/M2A create DOES purge the nested item's
+slices, but `x-scoped-cache-purged-tags` was built from the ROOT service's
+`scopedCachePurged` only (`middleware/respond.ts`, `controllers/items.ts`). A consumer
+turning two creates into one nested create saw its purge-header scenario go red; a stale-read
+probe (cached read MISS→HIT→MISS around the nested create) proved no stale data: header-only.
+So a tag missing from that header is not a stale-cache (HIGH) finding until a stale-read probe
+says so.
+
+Choices along the way: #9 → A, recording lives INSIDE `purgeScopedCache` (so
+`purgeForMutatedRows` and a version save are named; unawaited action-hook purges ending
+after respond stay unnamed). #10 → C, `ItemsService.scopedCachePurged` dropped and
+extensions get `scopedCache.readRequestPurges()` (async, waits for the commit promise
+`utils/transaction.ts` records; throws where no store is open; A would leave a silent
+`undefined` in JS extensions, B a field reading `[]` inside a transaction). #12 → B, a lone
+bare `{collection}` fingerprint is read as collection-wide (the safe reading), no
+`wholeCollection` field. #13 resolved by design talk: the list opens per HTTP request AFTER
+`app.before` ("before means before"), dies with the request's async chain. jean's "there is a
+per request store we already use for query counts, did you use it?" merged the two stores
+into this one; grep for an existing store before adding an AsyncLocalStorage.
+
+Gotchas: the bb expected purge lists were guesses and CI turned them red for real bugs
+(`purgeForMutatedRows` named only bare `{collection}`; an update named old==new slice twice),
+fixed in what `purgeScopedCache` RETURNS: write the expectation from what the code SHOULD
+answer, then let CI judge. A re-armed `node-schedule` timer inherits the store of the request
+that REGISTERED the job → `scheduleSynchronizedJob` arms under `requestStore.exit`. Every ws
+controller (`rest.ts`, `logs.ts`) opens `emptyRequestState()` per message. Pin the outer
+`scopedCachePurged` reference with `toBe`: a dropped list silently omits the header. A test
+mocking `purgeScopedCache` cannot assert the list (recording happens inside it). Predating ws
+`emitAction` not awaited → #726; websockets are IN scope, so ws findings are bugs.
+
 **Why:** retention bounded only by pool max / idle timeout / third-party sockets is not
 reliable; an empty object held is.
 **How to apply:** any new `requestStore.run(...)` inside an HTTP request must mutate the

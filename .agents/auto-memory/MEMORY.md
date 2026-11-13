@@ -19,7 +19,7 @@ line appended below.
 - [The admin preview is not a CI check](feedback_directus_ci_watch_skip_preview.md) — never wait on it, never mention it in a CI report
 - [New bb files are Gherkin](feedback_directus_blackbox_gherkin_standard.md) — `.feature` + step `.test.ts`
 
-## settled (39) — per-PR accepted exceptions; read before reviewing that PR
+## settled (44) — per-PR accepted exceptions; read before reviewing that PR
 `.agents/auto-memory/index/settled.md`
 
 - [PR #607 accepted exceptions](project_directus_pr607_accepted_exceptions.md) — context.transaction on mutation filters; non-PG → #610
@@ -41,7 +41,7 @@ line appended below.
 - [Cache layers fail differently](project_directus_cache_failure_semantics.md) — ioredis raises, Keyv swallows, bus fire-and-forget
 - [Cache tier switches](project_directus_cache_tier_switches.md) — only response+schema switchable
 
-## blackbox (29) — seeds, sharding, flakes, spawned instances
+## blackbox (32) — seeds, sharding, flakes, spawned instances
 `.agents/auto-memory/index/blackbox.md`
 
 - [Directus blackbox run + logs](project_directus_blackbox_run_and_logs.md) — bb runs on every code PR; the label is NOT required and cancels the run
@@ -49,7 +49,7 @@ line appended below.
 - [Isolate new blackbox fixtures](project_directus_bb_fixture_isolation.md) — `fields=*` splices every alias; new scenarios get own collections
 - [bb pins its own toolchain](reference_directus_blackbox_pins_own_toolchain.md) — CI resolved vitest 4.1.11; check the run log before relying on `expect.poll`
 
-## ci (30) — workflows, codecov, lint gates, bench, preview
+## ci (32) — workflows, codecov, lint gates, bench, preview
 `.agents/auto-memory/index/ci.md`
 
 - [Two eslint configs](project_directus_two_eslint_configs.md) — Lint vs Style (changes); run both before push
@@ -62,9 +62,10 @@ line appended below.
 - [knex-mock matches raw SQL](reference_directus_knex_mock_sql_matching.md) — register the narrower handler first
 - [useEnv mock needs vi.hoisted](reference_directus_useenv_mock_hoisted.md) — automock evals the real module first
 
-## api (41) — Directus core internals, env, errors, migrations, DB
+## api (46) — Directus core internals, env, errors, migrations, DB
 `.agents/auto-memory/index/api.md`
 
+- [IMPORTANT: default = raw SQL behaviour](feedback_directus_default_matches_dbms.md) — service queries/mutations behave like the equivalent raw SQL by default; stricter = opt-in option
 - [A bad env var fails the boot](feedback_directus_bad_env_var_fails_boot.md) — exit before listen naming the var; never fall back
 - [Env TYPE_MAP coverage](project_directus_env_type_map.md) — register every env var you touch
 - [Directus ForbiddenError conventions](project_directus_forbidden_error_conventions.md) — 403 for missing items, pre-access validation 400
