@@ -49,7 +49,7 @@ describe('syncSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscription_plan_references')
@@ -126,7 +126,7 @@ describe('syncSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscription_plan_references')
@@ -201,7 +201,7 @@ describe('syncSubscription', () => {
 				policy: 'policy-1',
 				amount: 990,
 				currency: 'EUR',
-				interval: 'month',
+				interval: '{"months":1}',
 			},
 			{
 				code: 'yearly',
@@ -209,7 +209,7 @@ describe('syncSubscription', () => {
 				policy: 'policy-2',
 				amount: 9900,
 				currency: 'EUR',
-				interval: 'year',
+				interval: '{"years":1}',
 			},
 		]);
 
@@ -282,7 +282,7 @@ describe('syncSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscription_plan_references')
@@ -347,7 +347,7 @@ describe('syncSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscription_plan_references')
@@ -404,7 +404,7 @@ describe('syncSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscription_plan_references')
@@ -450,7 +450,7 @@ describe('syncSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscription_plan_references')
@@ -526,7 +526,7 @@ describe('syncSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscription_plan_references')
@@ -603,7 +603,7 @@ describe('syncSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscription_plan_references')
@@ -691,7 +691,7 @@ describe('syncSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscription_plan_references')
@@ -750,7 +750,7 @@ describe('syncSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscription_plan_references')
@@ -962,7 +962,7 @@ describe('syncSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 			status: 'subscriptions-locked',
 		});
 
@@ -1014,7 +1014,7 @@ describe('syncSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscription_plan_references')
@@ -1092,7 +1092,7 @@ describe('syncSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscription_plan_references')
@@ -1148,7 +1148,7 @@ describe('syncSubscription', () => {
 			policy: 'policy-1',
 			amount: 990,
 			currency: 'EUR',
-			interval: 'month',
+			interval: '{"months":1}',
 		});
 
 		await database('subscription_plan_references')

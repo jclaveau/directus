@@ -59,8 +59,9 @@ export const createSubscriptionTables = defineMigration(
 				table.string('currency', 3)
 					.notNullable();
 
-				table.enu('interval', ['month', 'year'])
-					.notNullable();
+				table.string('interval', 32)
+					.notNullable()
+					.comment('date-fns Duration as JSON, e.g. {"months":1}');
 
 				table.enu('status', ['active', 'subscriptions-locked', 'archived'])
 					.notNullable()
