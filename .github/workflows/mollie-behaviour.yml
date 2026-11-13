@@ -1,0 +1,82 @@
+name: Mollie behaviour
+
+# Probes how Mollie (test mode) calls classic and next-gen webhooks and fails
+# when it differs from scripts/mollie-behaviour/mollie-behaviour.baseline.json.
+# Mollie's docs lag behind its API; this run is what the subscriptions bundle
+# trusts. Creates test-mode payments, a refund and a subscription on the test
+# account; never touches live mode.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mollie-behaviour
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARED_VERSION: 2026.6.0
+  CLOUDFLARED_SHA256: 08d27c4c5d3ed73ee3e98ef2ddceb4ad09fd4cfc28e243565a189538e8ccd706
+  PLAYWRIGHT_CORE_VERSION: 1.59.1
+
+jobs:
+  probe:
+    if: github.repository == 'jclaveau/directus'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Check the secrets' format
+        env:
+          SUBSCRIPTIONS_MOLLIE_API_KEY: ${{ secrets.SUBSCRIPTIONS_MOLLIE_API_KEY }}
+          MOLLIE_PROBE_ACCESS_TOKEN: ${{ secrets.MOLLIE_PROBE_ACCESS_TOKEN }}
+        run: |
+          [[ "$SUBSCRIPTIONS_MOLLIE_API_KEY" =~ ^test_[A-Za-z0-9]+$ ]] \
+            || { echo "::error::SUBSCRIPTIONS_MOLLIE_API_KEY is missing or not a test_ key"; exit 1; }
+          [[ "$MOLLIE_PROBE_ACCESS_TOKEN" =~ ^access_[A-Za-z0-9]+$ ]] \
+            || { echo "::error::MOLLIE_PROBE_ACCESS_TOKEN is missing or not an access_ token"; exit 1; }
+
+      - name: Install cloudflared
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/cloudflared" \
+            "https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-amd64"
+          echo "$CLOUDFLARED_SHA256  $RUNNER_TEMP/cloudflared" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/cloudflared"
+          echo "CLOUDFLARED_BIN=$RUNNER_TEMP/cloudflared" >> "$GITHUB_ENV"
+
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save --prefix "$RUNNER_TEMP/playwright" \
+            "playwright-core@$PLAYWRIGHT_CORE_VERSION"
+          "$RUNNER_TEMP/playwright/node_modules/.bin/playwright-core" \
+            install --with-deps chromium
+          echo "PLAYWRIGHT_CORE_PATH=$RUNNER_TEMP/playwright/node_modules/playwright-core/index.mjs" \
+            >> "$GITHUB_ENV"
+
+      - name: Probe Mollie
+        env:
+          SUBSCRIPTIONS_MOLLIE_API_KEY: ${{ secrets.SUBSCRIPTIONS_MOLLIE_API_KEY }}
+          MOLLIE_PROBE_ACCESS_TOKEN: ${{ secrets.MOLLIE_PROBE_ACCESS_TOKEN }}
+        run: |
+          node scripts/mollie-behaviour/mollie-webhook-probe.mjs \
+            --output-directory "$RUNNER_TEMP/mollie-behaviour"
+
+      - name: Upload the captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mollie-behaviour
+          path: ${{ runner.temp }}/mollie-behaviour
+          if-no-files-found: ignore
+          retention-days: 30
