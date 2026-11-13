@@ -373,16 +373,16 @@ Feature: A purge a hook declares reaches every read its slice could answer
       |                       |                |     - note          |
       |                       |                |     - zone          |
     And the declaration read the home pin sets and only the index sets it names:
-      | command  | index set                                              | matching | calls |
-      | scard    | fingerprint:declared_pin_slot:pin:zone.label=east      |          | 1     |
-      | scard    | fingerprint:declared_pin_slot:pin:zone.label=north     |          | 1     |
-      | scard    | fingerprint:declared_pin_slot:pin:zone.label=south     |          | 1     |
-      | smembers | fingerprint:declared_pin_slot:pin:zone.label=east      |          | 1     |
-      | smembers | fingerprint:declared_pin_slot:pin:zone.label=north     |          | 1     |
-      | smembers | fingerprint:declared_pin_slot:pin:zone.label=south     |          | 1     |
-      | sscan    | collection-index-keys:declared_pin_slot                | pin:*    | 1     |
-      | sscan    | fingerprint:declared_pin_slot:                         |          | 1     |
-      | sscan    | fingerprint:declared_pin_slot:owner=alpha              |          | 1     |
+      | command  | index set                                          | matching | calls |
+      | scard    | fingerprint:declared_pin_slot:pin:zone.label=east  |          | 1     |
+      | scard    | fingerprint:declared_pin_slot:pin:zone.label=north |          | 1     |
+      | scard    | fingerprint:declared_pin_slot:pin:zone.label=south |          | 1     |
+      | smembers | fingerprint:declared_pin_slot:pin:zone.label=east  |          | 1     |
+      | smembers | fingerprint:declared_pin_slot:pin:zone.label=north |          | 1     |
+      | smembers | fingerprint:declared_pin_slot:pin:zone.label=south |          | 1     |
+      | sscan    | collection-index-keys:declared_pin_slot            | pin:*    | 1     |
+      | sscan    | fingerprint:declared_pin_slot:                     |          | 1     |
+      | sscan    | fingerprint:declared_pin_slot:owner=alpha          |          | 1     |
     And the declaration sent these Redis commands:
       | command    | key                                         | calls | items |
       | EXISTS     | scoped-cache-index:fingerprint:             | 1     | 1     |+
@@ -453,7 +453,7 @@ Feature: A purge a hook declares reaches every read its slice could answer
       |   zone:        |                       |     - id        |
       |     label:     |                       |     - note      |
       |       north    |                       |     - zone      |
-    And the witness reads are purged, filed under the other home pins and pinning no owner:
+    And the witness reads are purged, under the other home pins and pinning no owner:
       | query         | response              | fingerprints    |
       | fields:       | - marker: other_owner | - pinnedScope:  |+
       |   - id        |   note: third         |     zone.label: |
@@ -479,7 +479,7 @@ Feature: A purge a hook declares reaches every read its slice could answer
       |               |                       |     - note     |
       |               |                       |     - owner    |
 
-  Scenario: a purge declared off the index path reads every set the collection owns in one script call
+  Scenario: a purge declared off the index path reads all the sets in one script call
     Given the zones:
       | marker     | label |
       | north_zone | north |

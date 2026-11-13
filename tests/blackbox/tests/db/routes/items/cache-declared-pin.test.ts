@@ -765,8 +765,8 @@ describe.each(vendors)('%s', (vendor) => {
 
 		scenario(
 			oneLine`
-				a purge declared off the index path reads every set the collection
-				owns in one script call
+				a purge declared off the index path reads all the sets in one script
+				call
 			`,
 			(steps) => {
 				const ids = new Map<string, number>();
