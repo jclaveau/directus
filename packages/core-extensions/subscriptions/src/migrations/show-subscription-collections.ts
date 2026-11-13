@@ -12,8 +12,43 @@ const CHILD_COLLECTIONS = [
 
 const QUEUE_COLLECTION = 'subscription_sync_queue';
 
+const PLAN_COLLECTION = 'subscription_plans';
+
+const PLAN_FIELDS = [
+	{ field: 'id', interface: 'input', readonly: true, hidden: true },
+	{
+		field: 'policy',
+		special: 'm2o',
+		interface: 'select-dropdown-m2o',
+		options: JSON.stringify({ template: '{{name}}' }),
+		display: 'related-values',
+		display_options: JSON.stringify({ template: '{{name}}' }),
+	},
+	{ field: 'amount', interface: 'input', note: 'VAT included' },
+	{
+		field: 'currency',
+		interface: 'select-dropdown',
+		options: JSON.stringify({
+			choices: ['EUR', 'USD', 'GBP', 'CHF'].map((currencyCode) => {
+				return { text: currencyCode, value: currencyCode };
+			}),
+		}),
+	},
+	{
+		field: 'interval',
+		interface: 'select-dropdown',
+		options: JSON.stringify({
+			choices: [
+				{ text: 'Month', value: 'month' },
+				{ text: 'Year', value: 'year' },
+			],
+		}),
+	},
+];
+
 /**
- * Shows the bundle's tables in the admin, under `subscriptions`. A
+ * Shows the bundle's tables in the admin, under `subscriptions`, and gives the
+ * plan form its dropdowns and an auto-generated id. A
  * `directus_collections` row makes a table part of `GET /schema/snapshot`, so a
  * `schema apply` of a snapshot made before this runs drops these tables too, not
  * only the sync queue (see create-parked-syncs-preset.ts, core guard #728).
@@ -46,9 +81,25 @@ export const showSubscriptionCollections = defineMigration(
 					group: PARENT_COLLECTION,
 					sort: CHILD_COLLECTIONS.length + 1,
 				});
+
+			await knex('directus_fields').insert(
+				PLAN_FIELDS.map((planField) => {
+					return {
+						collection: PLAN_COLLECTION,
+						readonly: false,
+						hidden: false,
+						...planField,
+					};
+				}),
+			);
 		},
 
 		async down(knex) {
+			await knex('directus_fields')
+				.where('collection', PLAN_COLLECTION)
+				.whereIn('field', PLAN_FIELDS.map(({ field }) => field))
+				.delete();
+
 			await knex('directus_collections')
 				.where('collection', QUEUE_COLLECTION)
 				.update({ group: null, sort: null });

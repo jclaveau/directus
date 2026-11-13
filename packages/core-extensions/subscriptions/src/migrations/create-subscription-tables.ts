@@ -52,9 +52,9 @@ export const createSubscriptionTables = defineMigration(
 					.references('id')
 					.inTable('directus_policies');
 
-				table.integer('amount')
+				table.decimal('amount', 10, 2)
 					.notNullable()
-					.comment('Cents, VAT included');
+					.comment('VAT included');
 
 				table.string('currency', 3)
 					.notNullable();
