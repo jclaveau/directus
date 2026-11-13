@@ -7,10 +7,14 @@ import {
 import {
 	createSubscriptionTables,
 } from './migrations/create-subscription-tables.js';
+import {
+	showSubscriptionCollections,
+} from './migrations/show-subscription-collections.js';
 
 export default defineBundleApi([
 	createSubscriptionTables,
 	createParkedSyncsPreset,
+	showSubscriptionCollections,
 	subscriptionsHook,
 	subscriptionsEndpoint,
 ]);
