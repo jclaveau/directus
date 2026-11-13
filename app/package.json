@@ -21,7 +21,7 @@
 		"dist"
 	],
 	"scripts": {
-		"build": "vite build",
+		"build": "vite build && node --experimental-vm-modules --no-warnings scripts/check-bundle-syntax.mjs",
 		"dev": "ROLLDOWN_WORKER_THREADS=1 vite",
 		"story:build": "poveste build && echo \"/*  /index.html  200\" >> .poveste/dist/_redirects",
 		"story:dev": "poveste dev",
