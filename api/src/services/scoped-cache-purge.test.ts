@@ -3598,12 +3598,13 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			a coarse (null) purge carrying a hook declaration reflects BOTH in the debug
-			header — the hook purge's result is unioned in, not dropped
+			a coarse (null) purge carrying a hook declaration runs the hook purge too,
+			under the same purge id
 		`, async () => {
 			// Re-read missing `student` → snapshot null → coarse purge; the hook also
 			// declares a foreign slice, so purgeScopedCache runs twice (coarse null +
-			// hook pins) and scopedCachePurged must union both.
+			// hook pins). Each records what it reached into the request's list itself
+			// (index.test.ts covers that list).
 			tracker.on.select('test').response([{ id: 1 }]);
 			tracker.on.update('test').response(1);
 
@@ -3664,11 +3665,6 @@ describe(oneLine`
 
 				expect(hookCall![4].scopedCachePurgeId)
 					.toBe(coarseCall![4].scopedCachePurgeId);
-
-				expect(updatingService.scopedCachePurged).toEqual([
-					{ collection: 'test' },
-					{ collection: 'authors', pinnedScope: { id: [5] } },
-				]);
 			}
 			finally {
 				emitter.offFilter('test.items.update', declareAuthorSlice);

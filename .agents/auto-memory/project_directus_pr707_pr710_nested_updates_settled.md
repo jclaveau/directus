@@ -1,0 +1,40 @@
+---
+name: project_directus_pr707_pr710_nested_updates_settled
+description: PR #707 (batch ordering + nestedUpdates) and its stacked follow-up #710 — jean's rulings on the autoreview choices; do not re-raise
+metadata:
+  type: project
+---
+
+jean's rulings, 2026-11-09. #710 is based on #707's branch (`nestedUpdates` only exists there).
+Both merged into v11.10.1-hhh-dev: #707 (9c563869dd), #710 on 2026-11-10 (9343d04fcd) at 95.9% autoreviewed, jean ruling the 32-line chunk size fix needed no second review.
+
+```
+#707
+4  cycle in a chunked batch      → A: Tarjan SCC, a cycle's rows written together after the rows it names
+5  same new key nested twice     → keep: refuse rejects the 2nd record, skip only names the row (documented)
+6  skip drops a record's subtree → A: documented, nothing created under a skipped record
+7  "fields besides the key"      → alias / O2M list counts (documented); an O2M child's key to its listed parent does not (fixed)
+8  WebSocket nestedUpdates       → A: create/update messages take it, like mutationBatching
+11 top-level O2M not walked      → B: filed #708 (predates the PR)
+#710
+1  apply + key-only update alteration on a linked child still calls updateOne(key, {}) and fires hooks
+                                 → A (2026-11-10, first ruled B): skipped under every mode, as a key-only
+                                   M2O record writes nothing; hooks/activity/date_updated no longer fire
+-  cycle split by a chunk boundary → A (2026-11-10): chunks cut between write groups only; a cycle
+                                   longer than a chunk gets one statement. NOT null-then-update
+                                   (breaks NOT NULL FKs, exposes a transient null); MariaDB → #610 pt 22.
+                                   Past Postgres' 65535 bind params → 400 naming the cycle's first
+                                   keys ("Rows 1, …, 10 and N more name each other in a cycle…").
+-  DB_BATCH_INSERT_CHUNK_SIZE < 1  → A (2026-11-10): refused in createMany with a plain Error
+                                   "DB_BATCH_INSERT_CHUNK_SIZE is 0, it must be 1 or more" (500),
+                                   as knex's batchInsert threw; not a boot check, not a silent 1.
+#716 choice 7: O2M list form, child already linked sent as { id } or { id, parent }
+                                → A (2026-11-10): left as is like the `update` alteration,
+                                   0 writes, 0 revisions, 0 counted mutations; the m2m
+                                   MAX_BATCH_MUTATION list-form blackbox creates 10 rows/food.
+                                   #716 merged 2026-11-10 as 96c10a0823 (closes #708).
+```
+
+**Why:** each was a behaviour choice put to jean as a gherkin block in the autoreview results comment.
+
+**How to apply:** don't re-raise these points in a later review of #707/#710 or of the nestedUpdates code; [[project_directus_pr607_accepted_exceptions]] has the same role for #607.

@@ -52,6 +52,7 @@ import { getService } from './utils/get-service.js';
 import { JobQueue } from './utils/job-queue.js';
 import { pick } from './utils/lodash-es-used.js';
 import { redactObject } from './utils/redact-object.js';
+import { joinRequestStore } from './utils/request-store.js';
 import { scheduleSynchronizedJob, validateCron } from './utils/schedule.js';
 
 let flowManager: FlowManager | undefined;
@@ -585,7 +586,19 @@ class FlowManager {
 		};
 	}
 
-	private async executeFlow(flow: Flow, data: unknown = null, context: Record<string, unknown> = {}): Promise<unknown> {
+	private executeFlow(
+		flow: Flow,
+		data: unknown = null,
+		context: Record<string, unknown> = {},
+	): Promise<unknown> {
+		return joinRequestStore(() => this.runFlowOperations(flow, data, context));
+	}
+
+	private async runFlowOperations(
+		flow: Flow,
+		data: unknown,
+		context: Record<string, unknown>,
+	): Promise<unknown> {
 		const database = (context['database'] as Knex) ?? getDatabase();
 		const schema = (context['schema'] as SchemaOverview) ?? (await getSchema({ database }));
 

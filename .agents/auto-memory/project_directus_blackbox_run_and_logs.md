@@ -88,3 +88,13 @@ block + the exact test file:name are there). ZIP is empty while the run is in-pr
 failure in an earlier setup step (Start database/services) = infra flake → rerun. bb runs inside the `Check`
 workflow (workflowName=`Check`); find its run id via `gh run list --branch <b> --json databaseId,workflowName,headSha` filtered by head sha; find the failing job id via `gh run view <run-id> --json jobs`.
 push+PR double-run means two `Check` runs per head — the one WITH the bb jobs is the `pull_request` one.
+
+**Server logs artifact (since ae171d4151, #574):** every process a suite spawns
+(own-instance suites included) is teed by `tests/blackbox/setup/server-log-tee.mjs`
+(NODE_OPTIONS `--import`, active when TEST_SAVE_LOGS set; CI = `debug`) into
+`server-logs/<command>-<CACHE_NAMESPACE>-<port>-<pid>.log`; uploaded as artifact
+`blackbox-server-logs-<vendor>-<shard>` (common: `blackbox-server-logs-common`) on
+every outcome, 30 days. Read it with `gh run download <run> -n <name>` before
+theorising. Fill-guard eviction logs `[scoped-cache] <key> evicted after its fill`
+at debug. The purge-counter bump has NO log line: unit-test logger mocks lack
+`debug` (fill-guard.test `useLogger: vi.fn()`), adding one breaks them.

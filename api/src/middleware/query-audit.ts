@@ -10,8 +10,8 @@ import {
 	emptyQueryAudit,
 	formatQueryAudit,
 	levelCarriesBindings,
-	queryAuditStore,
 } from '../database/query-audit.js';
+import { joinRequestStore, requestStore } from '../utils/request-store.js';
 
 /**
  * Dev-only: QUERY_AUDIT_HEADER names the header reporting the SQL this request
@@ -73,7 +73,10 @@ const auditRequestQueries: RequestHandler = (req, res, next) => {
 		return writeHead.apply(this, headArguments as any);
 	} as Response['writeHead'];
 
-	queryAuditStore.run(audit, next);
+	joinRequestStore(() => {
+		requestStore.getStore()!.queryAudit = audit;
+		next();
+	});
 };
 
 export default auditRequestQueries;

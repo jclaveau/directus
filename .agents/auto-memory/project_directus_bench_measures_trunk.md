@@ -1,28 +1,40 @@
 ---
 name: project_directus_bench_measures_trunk
-description: a red "Bench / cache" check on a PR measures the TRUNK sha, not the PR head — bench.yml fires on workflow_run of Check, so it runs in the default-branch context
+description: a PR's "Bench / *" status DOES measure the PR head — the Bench run's own headSha/headBranch fields show the trunk and are misleading; compare against the trunk tip's status before attributing
 metadata:
   author: Jean Claveau
   type: project
 ---
 
-`.github/workflows/bench.yml` triggers on `workflow_run: {workflows: [Check], types: [completed]}`.
-A `workflow_run` run executes in the DEFAULT-branch context, so every Bench run reports
-`headBranch: v11.10.1-hhh-dev` and `headSha: <trunk tip>` whatever PR made Check run.
+`.github/workflows/bench.yml` triggers on `workflow_run` of Check. The Bench RUN executes in
+the default-branch context, so `gh run list -w Bench` shows `headBranch: v11.10.1-hhh-dev`
+and `headSha: <trunk tip>` for every run. That field is NOT what was measured: the jobs
+check out `github.event.workflow_run.head_sha` (the pushed branch commit that made Check
+run) and post `Bench / *` statuses on that sha.
 
-Consequence: `gh pr checks <PR>` lists `Bench / cache` and `Bench / startup` among the PR's
-checks, but they measured the trunk. A red Bench there is NOT evidence about the branch.
+Corrected 2026-09-25: an earlier version of this note said a PR's red Bench measured the
+trunk. Wrong — PR #534's `KB sent per scoped fan fill 80.12 > 78` was the PR's own cost
+(trunk `d61427f078` measured 70.96 KB, same gate green). The 2026-09-23 "trunk has been
+red for hours" read was the same misattribution.
 
-Verify before attributing (2026-09-23, PR #534 — 8 Bench runs that day all on
-`514d416386`, the tip of `v11.10.1-hhh-dev`, failing the
-`KB sent per scoped fan fill 80.12 > 78` gate since hours before the push):
+Attribute a red Bench by comparing statuses, not run fields:
 
 ```sh
-gh run list -w Bench -L 12 --json databaseId,headSha,headBranch,conclusion,createdAt \
-  --jq '.[] | "\(.databaseId) \(.headSha[0:10]) \(.headBranch) \(.conclusion)"'
-git log --oneline -1 origin/v11.10.1-hhh-dev   # same sha → the red is the trunk's
+gh api repos/jclaveau/directus/commits/<pr-head>/statuses \
+  --jq '.[]|select(.context=="Bench / cache")|"\(.state) \(.description) \(.target_url)"'
+gh api repos/jclaveau/directus/commits/$(git rev-parse origin/v11.10.1-hhh-dev)/statuses \
+  --jq '.[]|select(.context=="Bench / cache")|"\(.state) \(.description) \(.target_url)"'
+# full gate table: gh run download <run-id> -p 'bench-cache-*' → cache.md
 ```
 
-To measure an actual ref, use the `workflow_dispatch` input (`ref`, `baseline`, `reps`).
+Only statuses on push-event Check runs exist (the job gates on `workflow_run.event == 'push'`).
+To measure an arbitrary ref, use the `workflow_dispatch` input (`ref`, `baseline`, `reps`).
+
+**Boot-refusal trap (2026-11-02, #667):** `workflow_run` uses the TRUNK's `bench.yml` but boots the PR's
+code. A PR that turns an env var into a boot refusal (`EXTENSIONS_PATH`) turns all 4 Bench checks red
+("Environment Variable is … Unset it") while the trunk file still sets it. Don't waive: land a tiny
+trunk PR dropping the var from `bench.yml` first (#669), merge trunk into the PR, Bench measures it.
+Interim proof: `gh workflow run bench.yml --ref <branch>` (own `bench.yml`; set `baseline` to the
+merge-base, else it compares the PR to its own previous commit). A rerun reuses the old `bench.yml`.
 
 See [[feedback_ci_attribute_via_base_sha]], [[project_directus_blackbox_flakes]].

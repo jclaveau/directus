@@ -303,6 +303,26 @@ export interface ScopedCacheExtensionHandle {
 		collection: string,
 		mutatedRows: Record<string, unknown>[],
 	): Promise<void>;
+	/**
+	 * The fingerprints every scoped-cache purge of the current request reached so
+	 * far, in order: its nested writes', its hooks' and `purgeForMutatedRows`'
+	 * included. `null` once one of them flushed the whole namespace.
+	 *
+	 * Waits first for the purges queued on the commit of a transaction the request
+	 * opened raw (`database.transaction()`) and that has settled; one still open
+	 * has purged nothing yet. A copy: later purges do not reach it.
+	 *
+	 * Read a fingerprint naming only its collection as collection-wide. It is
+	 * also what a purge that reached the bare reads alone answers (a raw write
+	 * naming no stored row), and nothing tells the two apart.
+	 *
+	 * A request is an HTTP request, a websocket message, a GraphQL websocket
+	 * operation, a schedule tick or a flow run with none of those around it.
+	 * Rejects where none runs (boot, a CLI command, middleware mounted on
+	 * `app.before` or `middlewares.before`, the `websocket.connect`, `.close`
+	 * and `.error` actions): there is no list to read there.
+	 */
+	readRequestPurges(): Promise<ScopedCacheFingerprint[] | null>;
 }
 
 /**

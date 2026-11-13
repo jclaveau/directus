@@ -11,6 +11,7 @@ import { bindPubSub } from '../../services/graphql/subscription.js';
 import { GraphQLService } from '../../services/index.js';
 import { getAddress } from '../../utils/get-address.js';
 import { pick } from '../../utils/lodash-es-used.js';
+import { emptyRequestState, requestStore } from '../../utils/request-store.js';
 import { getSchema } from '../../utils/get-schema.js';
 import { authenticateConnection } from '../authenticate.js';
 import { handleWebSocketError } from '../errors.js';
@@ -56,11 +57,17 @@ export class GraphQLSubscriptionController extends SocketController {
 			context: async (ctx) => {
 				return { service: await createClientService(ctx.extra.client) };
 			},
+			// Each operation is a request of its own: what it purges is named in its
+			// own store, as an HTTP request's is.
 			execute: (args) => {
-				return executingService.run(serviceOf(args), () => execute(args));
+				return requestStore.run(emptyRequestState(), () => {
+					return executingService.run(serviceOf(args), () => execute(args));
+				});
 			},
 			subscribe: (args) => {
-				return executingService.run(serviceOf(args), () => subscribe(args));
+				return requestStore.run(emptyRequestState(), () => {
+					return executingService.run(serviceOf(args), () => subscribe(args));
+				});
 			},
 		});
 

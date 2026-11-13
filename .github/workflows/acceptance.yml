@@ -25,7 +25,8 @@ concurrency:
 jobs:
   e2e:
     name: Acceptance tests
-    runs-on: ubuntu-latest
+    # Playwright ships no chromium for ubuntu 26.04, which ubuntu-latest now is.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
       postgres:

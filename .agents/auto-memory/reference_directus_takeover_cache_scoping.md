@@ -16,10 +16,13 @@ When a create filter hook "takes over" a row (returns an existing PK instead of 
 
 **The gate (items.ts `createMany`, ~L945):**
 ```
-takeoverUndeclared = someRowTakenOver && scopedCacheCollector.tags.length === 0;
-scopedCacheTags = takeoverUndeclared ? null /* coarse */ : snapshot(liveKeys); // ∪ declared
+takeoverUndeclared = someRowTakenOver
+	&& scopedCacheHookDeclarations.purgeFingerprints.length === declaredPurgesAtStart;
+scopedCacheSnapshot = takeoverUndeclared ? null /* coarse */ : snapshot(changedKeys);
 ```
-`purgeScopedCache(scopedCacheTags, collector)` unions the collector's declared tags. So:
+`this.scopedCache.purge(scopedCacheMutatedFingerprints(snapshot), scopedCacheHookDeclarations, …)`
+unions the hook's declared fingerprints. (Renamed in `949cbdb92e`: `ScopedCacheCollector` →
+`ScopedCacheHookDeclarations`, `.tags` → `.purgeFingerprints`; upsertMany compares to `0`.) So:
 - takeover + NO declaration → coarse null (safe — framework can't see the hook's footprint).
 - takeover + declaration → snapshot(new) ∪ declared (a read-only dedup declares its 1 unchanged slice; an upsert-move must declare old + new).
 - no takeover → snapshot(liveKeys) ∪ declared (unchanged from before).
@@ -28,4 +31,4 @@ Shipped on the `#292` addTag branch (`context.scopedCache.addTag` is the general
 
 Over-purge vs poison: a no-op dedup takeover purging its own (unchanged) slice is safe WASTE, not poison — `shouldClearCache` never gates on "did data change", so any create runs the purge. Poison only arises from UNDER-purge (the moved-from slice), which the coarse default prevents.
 
-**Takeover vs cancel — why only takeover gets a coarse net.** A takeover returns a **PK** → the framework KNOWS a row is involved → coarse-purge fallback. A cancel returns **null** → NO signal a slice was touched → the framework treats it as a pure cache no-op (the null slot drops out of `liveKeys`, so it never false-triggers `someRowTakenOver` and is never snapshotted). So a side-effecting cancel (a hook that writes out of band, then returns null) has **no coarse safety net** — it MUST declare via `purgeBy` or its slice leaks. Coarse-gating every cancel would tax the common validation-skip case. Create/update/delete cancel all honor a declared `purgeBy` (create always drained the collector post-loop; update/delete were fixed this session to drain on their early-return cancel branch — see [[project_directus_pr292_cache_hook_scopedcache]]). The unfixed leak (side-effecting cancel with NO declaration) is a documented deferred, not gated.
+**Takeover vs cancel — why only takeover gets a coarse net.** A takeover returns a **PK** → the framework KNOWS a row is involved → coarse-purge fallback. A cancel returns **null** → NO signal a slice was touched → the framework treats it as a pure cache no-op (the null slot drops out of `liveKeys`, so it never false-triggers `someRowTakenOver` and is never snapshotted). So a side-effecting cancel (a hook that writes out of band, then returns null) has **no coarse safety net** — it MUST declare via `purgeBy` or its slice leaks. Coarse-gating every cancel would tax the common validation-skip case. Create/update/delete cancel all honor a declared `purgeBy` (create always drained the hook declarations post-loop; update/delete were fixed this session to drain on their early-return cancel branch — see [[project_directus_pr292_cache_hook_scopedcache]]). The unfixed leak (side-effecting cancel with NO declaration) is a documented deferred, not gated.

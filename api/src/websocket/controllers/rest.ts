@@ -5,6 +5,7 @@ import type WebSocket from 'ws';
 import emitter from '../../emitter.js';
 import { useLogger } from '../../logger/index.js';
 import { getAddress } from '../../utils/get-address.js';
+import { emptyRequestState, requestStore } from '../../utils/request-store.js';
 import { WebSocketError, handleWebSocketError } from '../errors.js';
 import { auditMessageQueries, reportQueryAuditInReplies } from '../query-audit.js';
 import type { AuthenticationState, WebSocketClient } from '../types.js';
@@ -28,19 +29,23 @@ export class WebSocketController extends SocketController {
 	private bindEvents(client: WebSocketClient) {
 		reportQueryAuditInReplies(client);
 
-		client.on('parsed-message', async (message: WebSocketMessage) => {
-			await auditMessageQueries(client, message, async () => {
-				try {
-					message = WebSocketMessage.parse(
-						await emitter.emitFilter('websocket.message', message, { client }),
-					);
+		// Each message is a request of its own: what its handlers purge is named
+		// in its own store, as an HTTP request's is.
+		client.on('parsed-message', (message: WebSocketMessage) => {
+			return requestStore.run(emptyRequestState(), () => {
+				return auditMessageQueries(client, message, async () => {
+					try {
+						message = WebSocketMessage.parse(
+							await emitter.emitFilter('websocket.message', message, { client }),
+						);
 
-					emitter.emitAction('websocket.message', { message, client });
-				}
-				catch (error) {
-					handleWebSocketError(client, error, 'server');
-					return;
-				}
+						emitter.emitAction('websocket.message', { message, client });
+					}
+					catch (error) {
+						handleWebSocketError(client, error, 'server');
+						return;
+					}
+				});
 			});
 		});
 

@@ -6,6 +6,14 @@ metadata:
   type: project
 ---
 
+**2026-09-28 — DISABLED UNTIL NEEDED (jean's wording; never "parked") (jean: "comment mariadb and sqlite then close their
+ci-dialect- prs for now. we'll reopen them the day we need them").** #534 commit
+db23e8c2a8: full matrix in `blackbox.yml` = postgres only (old line commented), and
+`refresh-dialect-ci.yml` push trigger commented (manual only), because a force-push
+onto a closed PR's branch blocks GitHub's reopen. #332/#333 closed. The trigger lives
+on the trunk, so until #534 merges a trunk push still force-pushes the branches.
+Revive = restore both lines, then reopen the PR. Everything below is the design from before they were disabled.
+
 **Postgres is the only dialect gating a PR.** sqlite3 and maria are *deferred*: their
 failures are triaged after the merge, not before it.
 
