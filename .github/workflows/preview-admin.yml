@@ -146,7 +146,7 @@ jobs:
       # it can render: `free` starves at one server, `premium` carries the admin's
       # traffic, `default` is configured and never used. Host networking so it
       # reaches the postgres service on the runner's published port and Directus
-      # reaches it back on 6432. Digest-pinned to the same 1.25.2 the blackbox stack
+      # reaches it back on 6432. The GHCR mirror of the same 1.25.2 the blackbox stack
       # runs; its config is mounted because the image otherwise regenerates one from
       # env, which can only describe a single wildcard pool.
       - name: Start pgbouncer
