@@ -475,6 +475,22 @@ jobs:
           JS
           node /tmp/seed.mjs
 
+      - name: Seed the previewed ref's fixtures
+        # The link is already in the PR body: a broken fixture keeps the preview
+        # up, without its data, and marks this step failed.
+        continue-on-error: true
+        # A hung script ends like a failing one, not at the job's 180 min.
+        timeout-minutes: 5
+        run: |
+          # One script per feature the ref ships (e.g. the subscriptions bundle's
+          # plans and users), so a PR seeds what it adds without a change here.
+          # This job already runs the ref's code: its scripts add no trust.
+          shopt -s nullglob
+          for fixture_script in scripts/preview-admin/fixtures/*.mjs; do
+            echo "running $fixture_script"
+            node "$fixture_script"
+          done
+
       - name: Provoke + verify cache anomalies
         run: |
           # coarse_scope needs a scoped field on sub_items — set it in the DB (the API
