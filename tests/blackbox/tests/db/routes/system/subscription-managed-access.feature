@@ -118,8 +118,8 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
 
   Scenario: a request cannot write around the bundle
     Given the rows of directus_policies:
-      | id              | name          |
-      | <direct_policy> | Direct policy |
+      | id       | name          |
+      | <policy> | Direct policy |
     And the rows of directus_users:
       | id             | email               | token         |
       | <refused_user> | refused@example.com | refused-token |
@@ -130,9 +130,9 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | id | subscriber | provider | provider_customer_id |
       | 10 | 10         | mollie   | cst_direct           |
     And the rows of subscription_plans:
-      | id | code   | name   | policy          | amount | currency | interval     | status   |
-      | 10 | direct | Direct | <direct_policy> | 1000   | EUR      | {"months":1} | active   |
-      | 11 | gone   | Gone   | <direct_policy> | 1000   | EUR      | {"months":1} | archived |
+      | id | code   | name   | policy   | amount | currency | interval     | status   |
+      | 10 | direct | Direct | <policy> | 1000   | EUR      | {"months":1} | active   |
+      | 11 | gone   | Gone   | <policy> | 1000   | EUR      | {"months":1} | archived |
     And the rows of subscription_plan_references:
       | id | plan | provider | reference   |
       | 10 | 10   | mollie   | direct-plan |
