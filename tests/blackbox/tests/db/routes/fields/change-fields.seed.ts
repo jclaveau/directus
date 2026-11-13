@@ -1,4 +1,10 @@
-import { CreateCollection, CreateField, CreateFieldO2M, CreateItem, DeleteCollection } from '@common/functions';
+import {
+	CreateCollection,
+	CreateField,
+	CreateFieldO2M,
+	CreateItem,
+	DeleteCollectionIfPresent,
+} from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { SeedFunctions } from '@common/seed-functions';
 import type { PrimaryKeyType } from '@common/types';
@@ -92,8 +98,13 @@ export const seedDBStructure = () => {
 					const localCollectionStates = `${collectionStates}_${pkType}`;
 
 					// Delete existing collections
-					await DeleteCollection(vendor, { collection: localCollectionStates });
-					await DeleteCollection(vendor, { collection: localCollectionCountries });
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionStates,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionCountries,
+					});
 
 					// Create countries collection
 					await CreateCollection(vendor, {

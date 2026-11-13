@@ -9,7 +9,7 @@ metadata:
 Stated by jean 2026-06-26: **this fork (`jclaveau/directus`) will NOT submit PRs to upstream
 `directus/directus` anymore.**
 
-**Why:** the fork optimizes for its own (Hippocast/planner) needs, not upstream acceptance.
+**Why:** the fork optimizes for its own (and its consumers') needs, not upstream acceptance.
 
 **How to apply:**
 - Free to **diverge from upstream**. Editing `packages/types` (public `AbstractService`/SDK

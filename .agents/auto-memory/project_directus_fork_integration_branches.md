@@ -1,5 +1,5 @@
 ---
-name: directus-fork-integration-branches
+name: project_directus_fork_integration_branches
 description:
   jclaveau/directus branch model — pr-controle = default/trunk (fork CI), main = clean upstream base, hhh-main = derived
   integration auto-composed from the hhh-main-* copy stack; plus blackbox/e2e label-gating + mssql fork-runner
@@ -44,7 +44,7 @@ the re-derive/compose roster. See [[directus-linear-chain-leaf-pr]] (hhh-dev = p
 ## CURRENT topology (2026-06-16) — supersedes the "Branch model" block below
 
 The original "main = upstream + overlay" model was replaced by a **dedicated default branch** once the overlay outgrew
-one file (denylist, release-fork, .gitattributes, codecov, copy-stack hack). See [[directus-compose-copy-stack]] for the
+one file (denylist, release-fork, .gitattributes, codecov, copy-stack hack). See [[project_directus_compose_copy_stack]] for the
 full compose architecture.
 
 ```
@@ -131,9 +131,10 @@ or `actions/checkout` over SSH like the overlay edits do (line above). Same root
 
 ## Fork CI quirks
 
-- **blackbox + e2e are label-gated**: `blackbox-pr.yml` runs Blackbox only with the `Run Blackbox` label, E2E only with
-  `Run E2E`, on `synchronize`/`labeled`. A PR runs NEITHER by default — only Check/Changeset/CLA/agent-scan. Add the
-  label via REST (`gh api -X POST .../issues/<N>/labels`), not `gh pr edit` ([[gh-issue-view-quirk]]).
+- **blackbox runs on every code PR since 2026-08-05** (`Decide` job in `blackbox-pr.yml`, see
+  [[project_directus_blackbox_run_and_logs]]); `Run Blackbox` only forces it (docs-only diff) and added after a push
+  cancels the run in flight. E2E stays label-gated on `Run E2E`. Labels via REST (`gh api -X POST
+  .../issues/<N>/labels`), not `gh pr edit` ([[gh-issue-view-quirk]]).
 - **`blackbox-pr.yml` is `name: Check`** — so in `gh run list` the Blackbox run shows as **"Check"**, not "Blackbox". A
   push spawns TWO "Check" runs: the real one (Lint/Unit/Format/Stylelint jobs) AND this one (`Blackbox Tests / <db>`
   jobs, via `uses: ./.github/workflows/blackbox.yml`). Identify by listing each run's jobs, not by name.
@@ -146,4 +147,4 @@ or `actions/checkout` over SSH like the overlay edits do (line above). Same root
   Dropped mssql from `blackbox.yml`'s matrix. **pg + sqlite are the healthy batch-insert signal** (both green, ~1s;
   mssql inconclusive, not a logic bug).
 
-Related: [[directus-db-clients-and-returning-support]].
+Related: [[project_directus_db_clients]].

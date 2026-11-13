@@ -87,6 +87,9 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	CACHE_TAGS_HEADER: 'string',
 	CACHE_TAGS_HEADER_MAX_SIZE: 'string',
 	CACHE_PURGED_TAGS_HEADER: 'string',
+	QUERY_AUDIT_HEADER: 'string',
+	QUERY_AUDIT_LEVEL: 'string',
+	QUERY_AUDIT_HEADER_MAX_SIZE: 'string',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'array',
 	CACHE_VARY_CONTENT_TYPES: 'array',
 	CACHE_VARY_REQUEST_HEADERS: 'array',
@@ -116,6 +119,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	GRAPHQL_QUERY_TOKEN_LIMIT: 'number',
 
 	MAX_BATCH_MUTATION: 'number',
+	DEFAULT_MUTATION_BATCHING: 'string',
 
 	SERVER_SHUTDOWN_TIMEOUT: 'number',
 
@@ -239,9 +243,9 @@ export const TYPE_MAP: Record<string, EnvType> = {
 
 	PACKAGE_FILE_LOCATION: 'string',
 
-	EXTENSIONS_PATH: 'string',
 	EXTENSIONS_MUST_LOAD: 'boolean',
 	EXTENSIONS_AUTO_RELOAD: 'boolean',
+	EXTENSIONS_AUTO_MIGRATE: 'boolean',
 	EXTENSIONS_SANDBOX_MEMORY: 'number',
 	EXTENSIONS_SANDBOX_TIMEOUT: 'number',
 

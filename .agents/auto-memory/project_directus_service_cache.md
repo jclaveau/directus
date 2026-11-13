@@ -8,6 +8,8 @@ metadata:
   type: project
 ---
 
+**Not on hhh-dev: PR #207 closed unmerged**, `services/service-cache.ts` does not exist there. Kept for the design reasoning if read-through returns.
+
 Added a **service-level read-through cache** so any `readByQuery` caller (custom endpoint, hook, another service) caches — not only requests through the HTTP cache middleware. PR #207, branch `v11.10.1-feat/read-through-cache`, based on `fix/api-tsdown-externals` (which carries the scoped-cache feature; not in `main`).
 
 **Architecture:**
@@ -17,7 +19,7 @@ Added a **service-level read-through cache** so any `readByQuery` caller (custom
 
 **Guards (`resolveServiceCacheKey`, all must hold):** `opts.cache !== false` (per-call opt-out, default on) + `CACHE_ENABLED` + `isCacheTypeEnabled('service')` + `cache !== null` + `!knex.isTransaction` (uncommitted) + `!isSystemCollection` (**security: permission/policy/field reads stay fresh via the system cache**) + `permissionsCachable` (no `$NOW`) + under `CACHE_VALUE_MAX_SIZE`.
 
-**CACHE_TYPES config:** `CACHE_ENABLED` = master switch + the only thing that CREATES the Keyv store (`cache.ts:60`). New `CACHE_TYPES` array (default `'api,service'`) selects consumers: `api`=HTTP cache, `service`=read-through. Registered in all 3 env files: `defaults.ts`, `directus-variables.ts` (allowlist), `type-map.ts` (`'array'`). Gate helper `isCacheTypeEnabled` in its own util `utils/is-cache-type-enabled.ts` (NOT `cache.js` — else ~10 test files that mock `cache.js` would need to stub it).
+**CACHE_TYPES config:** `CACHE_ENABLED` gated this branch's Keyv store (`cache.ts:60` there); on hhh-dev it gates only the response tier, see [[project_directus_cache_tier_switches]]. New `CACHE_TYPES` array (default `'api,service'`) selects consumers: `api`=HTTP cache, `service`=read-through. Registered in all 3 env files: `defaults.ts`, `directus-variables.ts` (allowlist), `type-map.ts` (`'array'`). Gate helper `isCacheTypeEnabled` in its own util `utils/is-cache-type-enabled.ts` (NOT `cache.js` — else ~10 test files that mock `cache.js` would need to stub it).
 
 **BUG fixed on this branch — hit-path tag re-propagation (`fix(api/cache): re-propagate scope tags on a service-cache hit`):** the read-through HIT originally returned `withMeta(cached, { scopedCacheTags: [] })`. But an HTTP/GraphQL response shaped ON TOP of a service HIT is tagged in `respond.ts` from that meta — so an empty list left the HTTP entry under NO scope tags → a mutation purged the service key but not the HTTP entry → stale HTTP response until TTL (desyncs when a service HIT backs an HTTP MISS: multi-URL→same service key, or REST-warmed→GraphQL read). Fix: `writeServiceCache` stores a TTL-matched `${key}__tags` sibling; `readServiceCache` returns `{records, tags}`; the hit returns the stored tags. A hit whose `__tags` sibling is evicted → treated as a MISS (self-heals). **General gotcha for dual-write caches: when layer B derives its invalidation tags from layer A's read result, A's cache-HIT path must re-propagate the same tags it set — returning `[]` silently un-tags B.**
 

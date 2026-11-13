@@ -1,6 +1,6 @@
 import { API_EXTENSION_TYPES, APP_EXTENSION_TYPES, HYBRID_EXTENSION_TYPES } from '@directus/constants';
 import type { ExtensionType } from '@directus/types';
-import { isIn } from '@directus/utils';
+import { isIn } from '@directus/utils/array-helpers';
 import type { Language } from '../../types.js';
 import getPackageVersion from '../../utils/get-package-version.js';
 import getSdkVersion from '../../utils/get-sdk-version.js';

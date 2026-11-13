@@ -34,4 +34,4 @@ hhh-dev after the fact. The port was near-clean (cache.ts/items.ts auto-merged; 
 add/add conflict to merge with hhh-dev's `getRedisConnection` tests) precisely *because* hhh-dev already
 carried equivalent content — but the whole detour was avoidable by starting on hhh-dev. Result branch:
 `v11.10.1-hhh-dev_scoped-cache-value-tags`. Supersedes the "new feat = new `v11.10.1-feat/*` branch"
-guidance in [[directus-fork-integration-branches]].
+guidance in [[project_directus_fork_integration_branches]].

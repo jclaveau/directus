@@ -1,5 +1,10 @@
 import type { DirectusDashboard } from '../../../schema/dashboard.js';
-import type { ApplyQueryFields, NestedPartial, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	NestedPartial,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import { throwIfEmpty } from '../../utils/index.js';
 import type { RestCommand } from '../../types.js';
 
@@ -18,7 +23,7 @@ export type UpdateDashboardOutput<
  * @throws Will throw if keys is empty
  */
 export const updateDashboards =
-	<Schema, const TQuery extends Query<Schema, DirectusDashboard<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusDashboard<Schema>>>(
 		keys: DirectusDashboard<Schema>['id'][],
 		item: Partial<DirectusDashboard<Schema>>,
 		query?: TQuery,
@@ -41,7 +46,7 @@ export const updateDashboards =
  * @returns Returns the dashboard objects for the updated dashboards.
  */
 export const updateDashboardsBatch =
-	<Schema, const TQuery extends Query<Schema, DirectusDashboard<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusDashboard<Schema>>>(
 		items: NestedPartial<DirectusDashboard<Schema>>[],
 		query?: TQuery,
 	): RestCommand<UpdateDashboardOutput<Schema, TQuery>[], Schema> =>
@@ -61,7 +66,7 @@ export const updateDashboardsBatch =
  * @throws Will throw if key is empty
  */
 export const updateDashboard =
-	<Schema, const TQuery extends Query<Schema, DirectusDashboard<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusDashboard<Schema>>>(
 		key: DirectusDashboard<Schema>['id'],
 		item: Partial<DirectusDashboard<Schema>>,
 		query?: TQuery,

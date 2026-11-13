@@ -50,6 +50,10 @@ PUBLIC_URL="/"
 # The maximum number of items for batch mutations when creating, updating and deleting. ["Infinity"]
 # MAX_BATCH_MUTATION="Infinity"
 
+# How a batched write orders its statements: minimizeMutations,
+# preserveMutationOrder or disableBatching. ["preserveMutationOrder"]
+# DEFAULT_MUTATION_BATCHING="preserveMutationOrder"
+
 # Shared Redis server for things like caching, rate limiting, container synchronization, etc
 # REDIS="redis://@127.0.0.1:6379"
 
@@ -594,11 +598,12 @@ AUTH_PROVIDERS=""
 ####################################################################################################
 ### Extensions
 
-# Path to your local extensions folder ["./extensions"]
-EXTENSIONS_PATH="./extensions"
-
 # Automatically reload extensions when they have changed [false]
 EXTENSIONS_AUTO_RELOAD=false
+
+# Run the before-schema migrations of the bundles on the reload a change
+# triggers; needs EXTENSIONS_AUTO_RELOAD and a NODE_ENV other than production [false]
+EXTENSIONS_AUTO_MIGRATE=false
 
 ####################################################################################################
 ### Email

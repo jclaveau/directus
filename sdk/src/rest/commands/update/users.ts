@@ -1,4 +1,9 @@
-import type { ApplyQueryFields, NestedPartial, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	NestedPartial,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import type { RestCommand } from '../../types.js';
 import { throwIfEmpty } from '../../utils/index.js';
 import type { DirectusUser } from '../../../schema/user.js';
@@ -20,7 +25,7 @@ export type UpdateUserOutput<
  * @throws Will throw if keys is empty
  */
 export const updateUsers =
-	<Schema, const TQuery extends Query<Schema, DirectusUser<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusUser<Schema>>>(
 		keys: DirectusUser<Schema>['id'][],
 		item: Partial<DirectusUser<Schema>>,
 		query?: TQuery,
@@ -45,7 +50,7 @@ export const updateUsers =
  * @returns Returns the user objects for the updated users.
  */
 export const updateUsersBatch =
-	<Schema, const TQuery extends Query<Schema, DirectusUser<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusUser<Schema>>>(
 		items: NestedPartial<DirectusUser<Schema>>[],
 		query?: TQuery,
 	): RestCommand<UpdateUserOutput<Schema, TQuery>[], Schema> =>
@@ -67,7 +72,7 @@ export const updateUsersBatch =
  * @throws Will throw if key is empty
  */
 export const updateUser =
-	<Schema, const TQuery extends Query<Schema, DirectusUser<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusUser<Schema>>>(
 		key: DirectusUser<Schema>['id'],
 		item: Partial<DirectusUser<Schema>>,
 		query?: TQuery,
@@ -92,7 +97,7 @@ export const updateUser =
  * @returns Returns the updated user object for the authenticated user.
  */
 export const updateMe =
-	<Schema, const TQuery extends Query<Schema, DirectusUser<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusUser<Schema>>>(
 		item: Partial<DirectusUser<Schema>>,
 		query?: TQuery,
 	): RestCommand<UpdateUserOutput<Schema, TQuery>, Schema> =>

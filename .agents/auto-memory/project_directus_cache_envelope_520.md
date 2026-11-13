@@ -71,7 +71,7 @@ on deploy day.
 3. Raw snappy bytes instead of base64 (Keyv bypass, Buffer GET/SET on the
    response tier): −25% Redis memory (654 → 490 KB; prod 218 → ~165 MB).
 4. zstd over snappy: more Redis savings, costs API CPU — only if Redis RAM binds.
-Also: planner-side field narrowing.
+Also: consumer-side field narrowing.
 
 Related: [[project_directus_big_entry_hit_cost]], [[project_directus_keyv_raw_key_shape]],
 [[project_directus_blackbox_spawn_own_instance]], [[reference_directus_blackbox_supertest_query_encoding]].

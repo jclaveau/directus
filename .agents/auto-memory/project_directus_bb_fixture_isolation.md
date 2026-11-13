@@ -25,4 +25,19 @@ fixed it with no change to the existing cases.
   to someone else's file — check the sibling tests' `fields` before extending a fixture.
 - Teardown order: drop the junction/child before the collections it points at.
 
-Related: [[feedback_regression_test_avoid_fragile_shared_state]], [[project_directus_blackbox_single_file_locally]].
+Related: [[feedback_regression_test_avoid_fragile_shared_state]].
+
+## Rows accumulate across the scenarios of one feature file
+
+A Gherkin feature's scenarios are tests in one `describe`, and the collection is created
+in `beforeAll` — so the rows a scenario creates are still there for the next one. The
+fresh per-scenario `ids` map makes the file *look* isolated; it isn't.
+
+**Why:** on #534 the composite-tag feature's two `_or` scenarios read
+`_or: [{owner: omega}, {method: slow}]`. Every other scenario also writes `method: slow`
+or `spaced`, so the branch matched 18 rows instead of 1. The 13 scenarios pinning a
+scenario-unique owner passed and hid it for the whole file.
+
+**How to apply:** empty the collection in a `beforeEach` (GET `fields=id&limit=-1`, then
+one array-body DELETE) whenever more than one scenario reads the same collection. Check
+first that every read is filtered — a scenario reading unfiltered was relying on the heap.

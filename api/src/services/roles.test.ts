@@ -4,6 +4,10 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { clearSystemCache } from '../cache.js';
+import { getDatabaseClient } from '../database/index.js';
+import emitter from '../emitter.js';
+import { transaction } from '../utils/transaction.js';
 import { AccessService, ItemsService, PresetsService, RolesService, UsersService } from './index.js';
 
 vi.mock('../../src/database/index', () => ({
@@ -11,15 +15,33 @@ vi.mock('../../src/database/index', () => ({
 	getDatabaseClient: vi.fn().mockReturnValue('postgres'),
 }));
 
+vi.mock('../cache.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../cache.js')>(),
+		clearSystemCache: vi.fn(),
+	};
+});
+
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
 		c.field('id').uuid().primary();
 	})
+	.collection('directus_roles', (c) => {
+		c.field('id').uuid()
+			.primary();
+
+		c.field('name').string();
+		c.field('parent').uuid();
+	})
 	.build();
+
+// Taken before the updateMany tests replace them on the prototypes.
+const validateRoleNesting = (RolesService.prototype as any).validateRoleNesting;
+const itemsUpdateGroups = ItemsService.prototype.updateGroups;
 
 describe('Integration Tests', () => {
 	const db = knex.default({ client: MockClient });
-	createTracker(db);
+	const tracker = createTracker(db);
 
 	describe('Services / Roles', () => {
 		const service = new RolesService({
@@ -29,10 +51,14 @@ describe('Integration Tests', () => {
 
 		afterEach(() => {
 			vi.clearAllMocks();
+			// A test writing its groups one by one runs off postgres, since this
+			// MockClient has no dialect to compile their batch with.
+			vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 		});
 
 		describe('updateMany', () => {
-			vi.spyOn(ItemsService.prototype, 'updateMany').mockResolvedValue(['role-id-1']);
+			const superUpdateGroupsSpy = vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue(['role-id-1']);
 
 			const validateRoleNestingSpy = vi
 				.spyOn(RolesService.prototype as any, 'validateRoleNesting')
@@ -47,11 +73,19 @@ describe('Integration Tests', () => {
 			});
 
 			it('should request all user integrity checks if parent is changed', async () => {
-				const opts: MutationOptions = {};
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_roles').response(1);
 
-				await service.updateMany(['role-id-3'], { parent: 'parent-role-id-1' }, opts);
+				const onRequireUserIntegrityCheck = vi.fn();
 
-				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.All);
+				await service.updateMany(
+					['5a1c9e20-3b4d-4c6e-8f70-000000000003'],
+					{ parent: '5a1c9e20-3b4d-4c6e-8f70-000000000103' },
+					{ onRequireUserIntegrityCheck },
+				);
+
+				expect(onRequireUserIntegrityCheck)
+					.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
 			});
 
 			it('should validate role nesting if parent is changed', async () => {
@@ -63,19 +97,96 @@ describe('Integration Tests', () => {
 			});
 
 			it('should clear caches if parent is changed', async () => {
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_roles').response(1);
+
 				const clearCacheSpy = vi.spyOn(RolesService.prototype as any, 'clearCaches');
 
-				await service.updateMany(['role-id-5'], { parent: 'parent-role-id-3' });
+				await service.updateMany(
+					['5a1c9e20-3b4d-4c6e-8f70-000000000005'],
+					{ parent: '5a1c9e20-3b4d-4c6e-8f70-000000000105' },
+					{ onRequireUserIntegrityCheck: vi.fn() },
+				);
 
 				expect(clearCacheSpy).toHaveBeenCalled();
+			});
+
+			it('clears the caches when a roles.update hook reparents', async () => {
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_roles').response(1);
+
+				const clearCacheSpy = vi.spyOn(RolesService.prototype as any, 'clearCaches');
+				const onRequireUserIntegrityCheck = vi.fn();
+
+				const giveParent = () => {
+					return [{
+						data: {
+							name: 'Editors',
+							parent: '5a1c9e20-3b4d-4c6e-8f70-000000000111',
+						},
+						keys: ['5a1c9e20-3b4d-4c6e-8f70-000000000011'],
+					}];
+				};
+
+				emitter.onFilter('roles.update', giveParent);
+
+				try {
+					await service.updateMany(
+						['5a1c9e20-3b4d-4c6e-8f70-000000000011'],
+						{ name: 'Editors' },
+						{ onRequireUserIntegrityCheck },
+					);
+				}
+				finally {
+					emitter.offFilter('roles.update', giveParent);
+				}
+
+				expect(onRequireUserIntegrityCheck)
+					.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
+
+				expect(clearCacheSpy).toHaveBeenCalled();
+			});
+
+			it('validates the nesting of every row of a batch', async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_roles').response(1);
+
+				const onRequireUserIntegrityCheck = vi.fn();
+
+				await service.updateBatch([
+					{
+						id: '5a1c9e20-3b4d-4c6e-8f70-000000000009',
+						parent: '5a1c9e20-3b4d-4c6e-8f70-000000000104',
+					},
+					{
+						id: '5a1c9e20-3b4d-4c6e-8f70-000000000010',
+						parent: '5a1c9e20-3b4d-4c6e-8f70-000000000105',
+					},
+				], { onRequireUserIntegrityCheck });
+
+				expect(validateRoleNestingSpy).toHaveBeenCalledWith([
+					{
+						data: { parent: '5a1c9e20-3b4d-4c6e-8f70-000000000104' },
+						keys: ['5a1c9e20-3b4d-4c6e-8f70-000000000009'],
+					},
+					{
+						data: { parent: '5a1c9e20-3b4d-4c6e-8f70-000000000105' },
+						keys: ['5a1c9e20-3b4d-4c6e-8f70-000000000010'],
+					},
+				]);
+
+				expect(onRequireUserIntegrityCheck)
+					.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
 			});
 		});
 
 		describe('deleteMany', () => {
 			db.isTransaction = false;
 
-			const accessDeleteByQuerySpy = vi
-				.spyOn(AccessService.prototype, 'deleteByQuery')
+			const accessDeleteRoleAccessSpy = vi
+				.spyOn(AccessService.prototype, 'deleteRoleAccess')
 				.mockResolvedValue(['access-id-1']);
 
 			const presetsDeleteByQuerySpy = vi
@@ -91,14 +202,13 @@ describe('Integration Tests', () => {
 
 				await service.deleteMany(keys);
 
-				const opts: MutationOptions = { userIntegrityCheckFlags: UserIntegrityCheckFlag.All, bypassLimits: true };
+				const opts: MutationOptions = {
+					userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+					bypassLimits: true,
+					bypassEmitAction: expect.any(Function),
+				};
 
-				expect(accessDeleteByQuerySpy).toHaveBeenCalledWith(
-					{
-						filter: { role: { _in: keys } },
-					},
-					opts,
-				);
+				expect(accessDeleteRoleAccessSpy).toHaveBeenCalledWith(keys, opts);
 
 				expect(presetsDeleteByQuerySpy).toHaveBeenCalledWith(
 					{
@@ -130,9 +240,154 @@ describe('Integration Tests', () => {
 						filter: { parent: { _in: keys } },
 					},
 					{ parent: null },
+					{ bypassEmitAction: expect.any(Function) },
 				);
 
-				expect(itemsDeleteManySpy).toHaveBeenCalledWith(keys, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
+				expect(itemsDeleteManySpy).toHaveBeenCalledWith(keys, {
+					userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+					bypassEmitAction: expect.any(Function),
+				});
+			});
+
+			it('fires no action of a delete that rolled back', async () => {
+				const emitActionSpy = vi
+					.spyOn(emitter, 'emitAction')
+					.mockResolvedValue(undefined);
+
+				accessDeleteRoleAccessSpy.mockImplementationOnce(async (_keys, opts) => {
+					const actionEvent = {
+						event: 'access.delete',
+						meta: {},
+						context: {},
+					} as any;
+
+					if (opts?.bypassEmitAction) {
+						opts.bypassEmitAction(actionEvent);
+					}
+					else {
+						await emitter.emitAction('access.delete', {}, {} as any);
+					}
+
+					return ['access-id-1'];
+				});
+
+				itemsDeleteManySpy.mockRejectedValueOnce(new Error('role refused'));
+
+				await expect(service.deleteMany(['role-id-10']))
+					.rejects.toEqual(new Error('role refused'));
+
+				expect(emitActionSpy).not.toHaveBeenCalled();
+			});
+
+			it('hands its cascade to the bypassEmitAction of the caller', async () => {
+				const emitActionSpy = vi
+					.spyOn(emitter, 'emitAction')
+					.mockResolvedValue(undefined);
+
+				const accessEvent = {
+					event: 'access.delete',
+					meta: {},
+					context: {},
+				} as any;
+
+				accessDeleteRoleAccessSpy.mockImplementationOnce(async (_keys, opts) => {
+					opts!.bypassEmitAction!(accessEvent);
+
+					return ['access-id-1'];
+				});
+
+				const bypassEmitAction = vi.fn();
+
+				await service.deleteMany(['role-id-11'], { bypassEmitAction });
+
+				expect(bypassEmitAction).toHaveBeenCalledExactlyOnceWith(accessEvent);
+				expect(emitActionSpy).not.toHaveBeenCalled();
+			});
+
+			it('fires the actions of its cascade once it committed', async () => {
+				const database = knex.default({ client: MockClient });
+				const databaseTracker = createTracker(database);
+				const emittedActions: unknown[] = [];
+
+				vi.spyOn(emitter, 'emitAction').mockImplementation(async (event) => {
+					emittedActions.push([
+						event,
+						databaseTracker.history.transactions.map((trx) => trx.state),
+					]);
+				});
+
+				accessDeleteRoleAccessSpy.mockImplementationOnce(async (_keys, opts) => {
+					const actionEvent = {
+						event: 'access.delete',
+						meta: {},
+						context: {},
+					} as any;
+
+					if (opts?.bypassEmitAction) {
+						opts.bypassEmitAction(actionEvent);
+					}
+					else {
+						await emitter.emitAction('access.delete', {}, {} as any);
+					}
+
+					return ['access-id-1'];
+				});
+
+				await new RolesService({ knex: database, schema })
+					.deleteMany(['role-id-11']);
+
+				expect(emittedActions).toEqual([['access.delete', ['committed']]]);
+			});
+
+			it(
+				'fires the actions of its cascade when clearing the caches fails',
+				async () => {
+					const emitActionSpy = vi
+						.spyOn(emitter, 'emitAction')
+						.mockResolvedValue(undefined);
+
+					const accessEvent = {
+						event: 'access.delete',
+						meta: {},
+						context: {},
+					} as any;
+
+					accessDeleteRoleAccessSpy.mockImplementationOnce(async (_keys, opts) => {
+						opts!.bypassEmitAction!(accessEvent);
+
+						return ['access-id-1'];
+					});
+
+					vi.mocked(clearSystemCache)
+						.mockRejectedValueOnce(new Error('cache store refused'));
+
+					await expect(service.deleteMany(['role-id-12']))
+						.rejects.toEqual(new Error('cache store refused'));
+
+					expect(emitActionSpy).toHaveBeenCalledExactlyOnceWith(
+						'access.delete',
+						{},
+						{},
+					);
+				},
+			);
+
+			it('clears the caches once the parent transaction has committed', async () => {
+				const database = knex.default({ client: MockClient });
+				const databaseTracker = createTracker(database);
+				const transactionStates: string[][] = [];
+
+				vi.mocked(clearSystemCache).mockImplementationOnce(async () => {
+					transactionStates.push(
+						databaseTracker.history.transactions.map((trx) => trx.state),
+					);
+				});
+
+				await transaction(database, async (trx) => {
+					await new RolesService({ knex: trx, schema }).deleteMany(['role-id-9']);
+				});
+
+				expect(transactionStates).toEqual([['committed']]);
 			});
 
 			it('should clear caches', async () => {
@@ -141,6 +396,73 @@ describe('Integration Tests', () => {
 				await service.deleteMany(['role-id-8']);
 
 				expect(clearCacheSpy).toHaveBeenCalled();
+			});
+		});
+
+		describe('validateRoleNesting', () => {
+			afterEach(() => {
+				tracker.reset();
+			});
+
+			it('refuses a role made its own parent', async () => {
+				await expect(validateRoleNesting.call(service, [
+					{ data: { parent: 'role-a' }, keys: ['role-a'] },
+				])).rejects.toThrow('A role cannot be a parent of itself');
+			});
+
+			it('refuses a parent stored below the role', async () => {
+				tracker.on.select('directus_roles')
+					.responseOnce({ parent: 'role-a' });
+
+				await expect(validateRoleNesting.call(service, [
+					{ data: { parent: 'role-b' }, keys: ['role-a'] },
+				])).rejects.toThrow('already a descendant of itself');
+			});
+
+			it('refuses two rows of a batch putting roles under each other', async () => {
+				tracker.on.select('directus_roles').response({ parent: null });
+
+				await expect(validateRoleNesting.call(service, [
+					{ data: { parent: 'role-b' }, keys: ['role-a'] },
+					{ data: { parent: 'role-a' }, keys: ['role-b'] },
+				])).rejects.toThrow('already a descendant of itself');
+			});
+
+			it('accepts a batch freeing the child the role moves under', async () => {
+				tracker.on.select('directus_roles').response({ parent: 'role-a' });
+
+				await expect(validateRoleNesting.call(service, [
+					{ data: { parent: 'role-b' }, keys: ['role-a'] },
+					{ data: { parent: null }, keys: ['role-b'] },
+				])).resolves.toBe(undefined);
+			});
+
+			it('stops at a stored loop the role is not part of', async () => {
+				tracker.on.select('directus_roles').responseOnce({ parent: 'role-c' });
+				tracker.on.select('directus_roles').responseOnce({ parent: 'role-b' });
+
+				await expect(validateRoleNesting.call(service, [
+					{ data: { parent: 'role-b' }, keys: ['role-a'] },
+				])).resolves.toBe(undefined);
+
+				expect(tracker.history.select).toHaveLength(2);
+			});
+
+			it('refuses a role made its own parent in another casing', async () => {
+				tracker.on.select('directus_roles').response({ parent: null });
+
+				await expect(validateRoleNesting.call(service, [
+					{ data: { parent: 'ROLE-A' }, keys: ['role-a'] },
+				])).rejects.toThrow('A role cannot be a parent of itself');
+			});
+
+			it('refuses a batch loop naming one role in two casings', async () => {
+				tracker.on.select('directus_roles').response({ parent: null });
+
+				await expect(validateRoleNesting.call(service, [
+					{ data: { parent: 'ROLE-B' }, keys: ['role-a'] },
+					{ data: { parent: 'role-a' }, keys: ['role-b'] },
+				])).rejects.toThrow('already a descendant of itself');
 			});
 		});
 	});

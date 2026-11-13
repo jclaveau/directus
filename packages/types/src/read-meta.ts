@@ -226,14 +226,26 @@ export interface ScopedCachePurgeHandle {
 	 * the entries bound to BOTH, where two pins would purge every entry bound to
 	 * either. What a read returns is already in this shape, so a hook purging what
 	 * a lookup read hands `result.getMeta().scopedCacheFingerprints` over whole.
+	 *
+	 * `forKey`: the row of the event's collection a take-over wrote, whose
+	 * slices these are. A take-over is purged narrow only when Directus read the
+	 * row before the hook ran (an update of a row the caller sent) or a hook
+	 * declared its slices for its key here, in a fingerprint of that collection
+	 * pinning every one of its scope fields (`scoped_cache_fields`, else the
+	 * primary key); any other take-over purges the collection whole, whatever
+	 * else was declared. Outside production a declaration leaving a scope field
+	 * out throws here instead, naming each one it misses.
 	 */
-	purgeBy(fingerprints: ScopedCacheFingerprintInput): void;
+	purgeBy(
+		fingerprints: ScopedCacheFingerprintInput,
+		options?: { forKey?: PrimaryKey },
+	): void;
 	/**
 	 * This create was swallowed into a row the payload never named AND nothing was
 	 * written, so no entry can have gone stale and the take-over needs no purge —
 	 * neither the coarse fallback nor a slice. Only for a genuinely inert write: a
-	 * take-over that MOVED the row must declare its slices with `purgeBy` instead,
-	 * or the old slice serves stale.
+	 * take-over that MOVED the row must declare its slices with `purgeBy` and
+	 * `forKey` instead, or the old slice serves stale.
 	 *
 	 * TODO Silent dedup belongs in the service, not in each consumer's hook. If
 	 * scalabus ever grows a first-class "create resolves to an existing row"
@@ -291,6 +303,26 @@ export interface ScopedCacheExtensionHandle {
 		collection: string,
 		mutatedRows: Record<string, unknown>[],
 	): Promise<void>;
+	/**
+	 * The fingerprints every scoped-cache purge of the current request reached so
+	 * far, in order: its nested writes', its hooks' and `purgeForMutatedRows`'
+	 * included. `null` once one of them flushed the whole namespace.
+	 *
+	 * Waits first for the purges queued on the commit of a transaction the request
+	 * opened raw (`database.transaction()`) and that has settled; one still open
+	 * has purged nothing yet. A copy: later purges do not reach it.
+	 *
+	 * Read a fingerprint naming only its collection as collection-wide. It is
+	 * also what a purge that reached the bare reads alone answers (a raw write
+	 * naming no stored row), and nothing tells the two apart.
+	 *
+	 * A request is an HTTP request, a websocket message, a GraphQL websocket
+	 * operation, a schedule tick or a flow run with none of those around it.
+	 * Rejects where none runs (boot, a CLI command, middleware mounted on
+	 * `app.before` or `middlewares.before`, the `websocket.connect`, `.close`
+	 * and `.error` actions): there is no list to read there.
+	 */
+	readRequestPurges(): Promise<ScopedCacheFingerprint[] | null>;
 }
 
 /**
@@ -301,7 +333,8 @@ export interface ScopedCacheExtensionHandle {
  */
 export interface ScopedCacheHookDeclarations {
 	scope: ScopedCacheScopeHandle;
-	purge: ScopedCachePurgeHandle;
+	/** The purge handle of a mutation of `collection`, its skips recorded under it. */
+	purgeHandleFor(collection: string): ScopedCachePurgeHandle;
 	/**
 	 * What a read hook declared through `scopeTo`, one query case per declared
 	 * fingerprint: its axes, typed off the schema, kept together. Not canonicalized
@@ -329,8 +362,16 @@ export interface ScopedCacheHookDeclarations {
 	 * purge must be judged on the earlier value, the only one that shows it moved.
 	 */
 	epochs: Record<string, string | null>;
-	/** Keys a `skipPurgeFor` declared inert, as strings so `7` and `'7'` agree. */
-	purgeSkippedKeys: Set<string>;
+	/**
+	 * Keys a `skipPurgeFor` declared inert, per collection of the handle it was
+	 * called on, as strings so `7` and `'7'` agree.
+	 */
+	purgeSkippedKeys: Map<string, Set<string>>;
+	/**
+	 * Keys a `purgeBy` declared slices for through `forKey`, per collection of
+	 * the handle it was called on, as strings so `7` and `'7'` agree.
+	 */
+	purgeDeclaredKeys: Map<string, Set<string>>;
 	/**
 	 * Keys a create-filter take-over returned instead of inserting, as
 	 * `collection:key` so a shared parent's children can't collide on `1`.

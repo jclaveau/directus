@@ -8,6 +8,51 @@ export type Item = Record<string, any>;
 
 export type PrimaryKey = string | number;
 
+/**
+ * One change applied to a set of rows. `updateGroups` takes a list of these, and the
+ * `items.update` event carries that same list, so a hook sees every row a single
+ * update touches instead of one firing per row.
+ */
+export type UpdateGroup<GroupItem = any> = {
+	data: Partial<GroupItem>;
+	keys: PrimaryKey[];
+};
+
+/**
+ * What the grouped `items.update` filter receives and answers: a change for
+ * Directus to write (`{ data, keys }`), or a row a hook wrote itself (`{ key }`),
+ * whose key the update answers with and Directus does not write.
+ */
+export type UpdateEntry<EntryItem = any> =
+	| UpdateGroup<EntryItem>
+	| { key: PrimaryKey };
+
+/**
+ * One row of a create, as the grouped `items.create` filter receives it (`{ data }`)
+ * and answers it, position for position: insert it (`{ data }`), answer it with a
+ * stored row instead (`{ key }`), answer it with the row of an earlier position of
+ * the same create (`{ sameRowAs }`), or cancel it (`null`).
+ */
+export type CreateEntry<EntryItem = any> =
+	| { data: Partial<EntryItem> }
+	| { key: PrimaryKey }
+	| { sameRowAs: number };
+
+/** The rows of one create, position for position, a cancelled row as `null`. */
+export type CreateEntries<EntryItem = any> = (CreateEntry<EntryItem> | null)[];
+
+/** The changes and taken-over rows of one update. */
+export type UpdateEntries<EntryItem = any> = UpdateEntry<EntryItem>[];
+
+/**
+ * One key of a delete. A key arrives as the request spelled it (`"5"` from
+ * `DELETE /items/<collection>/5`) and may be a uuid, so the item does not type it.
+ */
+export type DeleteKey = PrimaryKey;
+
+/** The keys of one delete. */
+export type DeleteKeys = DeleteKey[];
+
 export type Alterations<T extends Item = Item, K extends keyof T | undefined = undefined> = {
 	create: Partial<T>[];
 	update: (K extends keyof T ? Partial<T> & Pick<T, K> : Partial<T>)[];
@@ -44,11 +89,32 @@ export type QueryOptions = {
 	skipScopedCacheEpochs?: boolean;
 };
 
+export const RepeatedPkAnswers = ['refuse', 'lastWins'] as const;
+
+export type RepeatedPkAnswer = (typeof RepeatedPkAnswers)[number];
+
+export const MutationBatchingModes = [
+	'minimizeMutations',
+	'preserveMutationOrder',
+	'disableBatching',
+] as const;
+
+export type MutationBatchingMode = (typeof MutationBatchingModes)[number];
+
+export const NestedUpdateAnswers = ['apply', 'refuse', 'skip'] as const;
+
+export type NestedUpdateAnswer = (typeof NestedUpdateAnswers)[number];
+
 export type MutationOptions = {
 	/**
-	 * Callback function that's fired whenever a revision is made in the mutation
+	 * Callback function that's fired whenever a revision is made in the mutation,
+	 * with the key of the revision and the key of the item it revises. `upsertMany`
+	 * also passes the index of the payload the item was written from, none for a
+	 * row a hook added
 	 */
-	onRevisionCreate?: ((pk: PrimaryKey) => void) | undefined;
+	onRevisionCreate?:
+		| ((pk: PrimaryKey, item: PrimaryKey, payloadIndex?: number) => void)
+		| undefined;
 
 	/**
 	 * Flag to disable the auto purging of the cache. Is ignored when CACHE_AUTO_PURGE isn't enabled.
@@ -72,6 +138,8 @@ export type MutationOptions = {
 
 	/**
 	 * Allow disabling the emitting of hooks. Useful if a custom hook is fired (like files.upload)
+	 * The actions of the activity and revision rows the mutation writes still fire;
+	 * #696 tracks filtering them.
 	 */
 	emitEvents?: boolean | undefined;
 
@@ -94,6 +162,14 @@ export type MutationOptions = {
 	bypassLimits?: boolean | undefined;
 
 	/**
+	 * `true` refuses a create or update naming one existing o2m child for several
+	 * rows, with a 400. Off by default: each row takes the child in turn and the
+	 * last one keeps it, as the database would; a unique index refuses it there.
+	 * Refused under `disableBatching`, where each row is written on its own.
+	 */
+	refuseChildJoiningSeveralRows?: boolean | undefined;
+
+	/**
 	 * To keep track of mutation limits
 	 */
 	mutationTracker?: MutationTracker | undefined;
@@ -104,10 +180,123 @@ export type MutationOptions = {
 	preMutationError?: DirectusError | undefined;
 
 	/**
+	 * The validation error to throw right before the mutation of a row, by the
+	 * row's primary key as a string; thrown only if that row is still written
+	 * once the filter hooks ran
+	 */
+	preMutationErrorsByKey?: Map<string, DirectusError> | undefined;
+
+	/**
+	 * The keys a delete takes were resolved from a query, not named by the
+	 * caller: a key another delete took meanwhile is skipped, not a 404.
+	 */
+	keysFromQuery?: boolean | undefined;
+
+	/**
+	 * A role delete takes the role's access rows along, those an extension manages
+	 * included, as the database's cascade does for a deleted user or policy.
+	 */
+	deletesManagedAccess?: boolean | undefined;
+
+	/**
+	 * An update refuses with a 404 a key no row holds, told off the UPDATE's
+	 * count: the filter hooks run before it, and the rollback undoes what they
+	 * wrote through the transaction. On a transaction the caller passed, that
+	 * rollback is the caller's: one committing after the 404 keeps their writes,
+	 * a related row created on the way included. Set by updateOne for an admin.
+	 * It is not gated on accountability: a non-admin caller setting it learns
+	 * whether a key it cannot read is held. A postgres `DO INSTEAD` rule on the
+	 * table answers with its own statement's count, which the check trusts as
+	 * the UPDATE's.
+	 */
+	refuseMissingKeys?: boolean | undefined;
+
+	/**
+	 * An update refuses with a 400 a row an `items.update` filter hook adds to
+	 * the keys it was sent. updateOne, whose caller names one row, defaults it
+	 * to `true`; upsertMany, which takes the rows a hook adds, passes `false`.
+	 */
+	refuseHookAddedRows?: boolean | undefined;
+
+	/**
+	 * The `nested` path of each payload of an upsertMany, by payload index. The
+	 * payloads are written per path, so a record failing validation is named at
+	 * the field nesting it.
+	 */
+	nestedOfPayloads?: string[][] | undefined;
+
+	/**
 	 * Allow a filter hook to cancel the mutation by returning null. When set, the mutation
 	 * resolves to null instead of throwing; otherwise a nulling filter is an InvalidPayloadError.
 	 */
 	allowFilterCancel?: boolean | undefined;
+
+	/**
+	 * What an update does with a row it is sent more than once. `refuse`, the
+	 * default, refuses the update before any hook runs, and refuses a hook
+	 * answering with a row twice; a row sent twice in one change is written
+	 * once. `lastWins` writes every change in the order sent. Left unset, the
+	 * refusal does not name the option; passing `refuse` names it, for a caller
+	 * that can pass `lastWins`.
+	 */
+	onRepeatedPk?: RepeatedPkAnswer | undefined;
+
+	/**
+	 * How the caller spells passing `onRepeatedPk` as `lastWins`, which the
+	 * refusal of a repeated row names when `onRepeatedPk` is `refuse`:
+	 * `onRepeatedPk=lastWins` when unset.
+	 */
+	lastWinsSpelling?: string | undefined;
+
+	/**
+	 * How a write batches its statements, passed down to its nested writes.
+	 * Left unset, `DEFAULT_MUTATION_BATCHING` decides, `preserveMutationOrder`
+	 * by default.
+	 *
+	 * ```
+	 * upsertMany([U1, C2, U3, C4])     U = key found, C = new row
+	 *
+	 * minimizeMutations      update U1,U3 · insert C2,C4, each with its
+	 *                        filters before it and its actions after it
+	 * preserveMutationOrder  update U1 · insert C2 · update U3 · insert C4,
+	 *                        each with its filters; actions at the end of
+	 *                        the run
+	 * disableBatching        per payload: filter · write · action
+	 * ```
+	 *
+	 * A run ends before a key it already holds, or around a payload nesting
+	 * rows. `disableBatching` also creates one row at a time in `createMany`,
+	 * firing the actions once the transaction commits, and writes one group at
+	 * a time in `updateGroups`.
+	 */
+	mutationBatching?: MutationBatchingMode | undefined;
+
+	/**
+	 * What a nested record carrying an existing row's key and more fields does:
+	 *
+	 * ```
+	 * { id: 1, parent: { id: 2, name: 'nested' } }    row 2 exists
+	 * apply   row 2 updated to name nested, then row 1 created (the default)
+	 * refuse  400, nothing written
+	 * skip    row 1 created naming row 2, row 2 left as it is
+	 * ```
+	 *
+	 * It holds at every depth, for M2O and A2O records, O2M lists and O2M
+	 * `update` alterations. A nested record naming no existing row is created
+	 * whatever the answer, unless an earlier record of the request created it:
+	 * a second record of that key is refused under `refuse`, and only names the
+	 * row under `skip`.
+	 *
+	 * Any field besides the key counts, an alias or an O2M list included; an
+	 * O2M child's key to the parent it is listed under does not. `skip` leaves
+	 * the whole record, the records it nests included:
+	 *
+	 * ```
+	 * { id: 1, parent: { id: 2, name: 'n', parent: { name: 'new' } } }
+	 * skip    row 1 created naming row 2; row 'new' not created
+	 * ```
+	 */
+	nestedUpdates?: NestedUpdateAnswer | undefined;
 
 	/**
 	 * Shared scoped-cache hook declarations injected by a batch/upsert parent so

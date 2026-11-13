@@ -1,8 +1,11 @@
+import { useEnv } from '@directus/env';
 import { defineCache, type CacheConfig } from '@directus/memory';
 import { redisConfigAvailable, useRedis } from '../redis/index.js';
 
 const localOnly = redisConfigAvailable() === false;
 
+// Named after the deployment, like the bus and the lock: a peer deployment on
+// the same Redis clearing its permissions would otherwise empty these too.
 const config: CacheConfig = localOnly
 	? {
 			type: 'local',
@@ -11,7 +14,7 @@ const config: CacheConfig = localOnly
 	: {
 			type: 'multi',
 			redis: {
-				namespace: 'permissions',
+				namespace: `${useEnv()['CACHE_NAMESPACE']}:permissions`,
 				redis: useRedis(),
 			},
 			local: {

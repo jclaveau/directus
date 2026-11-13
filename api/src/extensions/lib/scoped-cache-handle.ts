@@ -19,6 +19,10 @@ import {
 	scopedCacheCollectionPinsFromRows,
 	type ScopedCacheSnapshot,
 } from '../../scoped-cache/index.js';
+import {
+	readRequestScopedCachePurges,
+	recordScopedCachePurged,
+} from '../../scoped-cache/purged-record.js';
 
 /**
  * Build the `context.scopedCache` handle for a register-type extension's
@@ -33,6 +37,7 @@ export function createScopedCacheExtensionHandle(
 	getSchema: ApiExtensionContext['getSchema'],
 ): ScopedCacheExtensionHandle {
 	return {
+		readRequestPurges: readRequestScopedCachePurges,
 		async purgeForMutatedRows(collection, mutatedRows) {
 			const { cache } = getCache();
 
@@ -46,6 +51,7 @@ export function createScopedCacheExtensionHandle(
 			// off.)
 			if (!scopedCachePurgeEnabled()) {
 				await cache.clear();
+				recordScopedCachePurged(null);
 				return;
 			}
 

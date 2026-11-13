@@ -13,6 +13,7 @@ export const DEFAULTS = {
 	QUERYSTRING_MAX_PARSE_DEPTH: 10,
 	QUERY_LIMIT_DEFAULT: 100,
 	MAX_BATCH_MUTATION: Infinity,
+	DEFAULT_MUTATION_BATCHING: 'preserveMutationOrder',
 	ROBOTS_TXT: 'User-agent: *\nDisallow: /',
 
 	TEMP_PATH: './node_modules/.directus',
@@ -119,6 +120,11 @@ export const DEFAULTS = {
 	// carries one pin per row and answers with both tag headers. `0` or an
 	// unparseable size emits every pin.
 	CACHE_TAGS_HEADER_MAX_SIZE: '4kb',
+	QUERY_AUDIT_LEVEL: 'counts',
+	// Runs are grouped, then bound values and statements dropped past it, largest
+	// entries first:
+	// node's fetch refuses a response past 16kb of headers in total.
+	QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
 	CACHE_SKIP_ALLOWED: false,
 	// Opt-in: the cache page + its telemetry writes are off unless explicitly
 	// enabled (and only work with CACHE_STORE=redis). When on, growth is bounded
@@ -143,9 +149,9 @@ export const DEFAULTS = {
 	AUTH_DISABLE_DEFAULT: false,
 
 	PACKAGE_FILE_LOCATION: '.',
-	EXTENSIONS_PATH: './extensions',
 	EXTENSIONS_MUST_LOAD: false,
 	EXTENSIONS_AUTO_RELOAD: false,
+	EXTENSIONS_AUTO_MIGRATE: false,
 	EXTENSIONS_SANDBOX_MEMORY: 100,
 	EXTENSIONS_SANDBOX_TIMEOUT: 1000,
 	EXTENSIONS_ROLLDOWN: false,

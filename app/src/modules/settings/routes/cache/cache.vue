@@ -675,6 +675,7 @@ async function saveTtl() {
 const flushTargetOptions = [
 	{ text: t('cache_flush_response', 'Response'), value: 'response' },
 	{ text: t('cache_flush_system', 'System'), value: 'system' },
+	{ text: t('cache_flush_permissions', 'Permissions'), value: 'permissions' },
 	{ text: t('cache_flush_locks', 'Locks'), value: 'locks' },
 ];
 

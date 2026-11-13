@@ -1,4 +1,6 @@
 import { useEnv } from '@directus/env';
+import { oneLine } from '@directus/utils';
+import { useLogger } from '../logger/index.js';
 import {
 	redisConfigAvailable,
 } from '../redis/index.js';
@@ -45,5 +47,21 @@ export function scopedCacheIndexStoreAvailable(): boolean {
 export function assertScopedCacheStoreSupported(): void {
 	if (scopedCachePurgeEnabled()) {
 		useScopedCacheStore().assertStoreSupported();
+	}
+}
+
+// Deprecated (#644): the full purge goes once the scoped one covers every write.
+export function warnFullPurgeDeprecated(): void {
+	if (
+		env['CACHE_ENABLED'] &&
+		env['CACHE_AUTO_PURGE'] &&
+		!scopedCachePurgeEnabled()
+	) {
+		useLogger().warn(oneLine`
+			[scoped-cache] The full cache purge is deprecated and will be removed
+			once the scoped purge covers every write (#644): CACHE_AUTO_PURGE flushes
+			the whole response cache on every mutation here. Set
+			CACHE_AUTO_PURGE_MODE=scoped with CACHE_STORE=redis.
+		`);
 	}
 }

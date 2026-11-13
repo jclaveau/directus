@@ -47,6 +47,7 @@ import {
 	resolveScopedCacheM2oJoinChainFromPath,
 	releaseStrandedScopedCacheSweeps,
 	retryPendingScopedCachePurges,
+	scopedCacheCollectionsAcrossQuantifiers,
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheCollectionsWithoutGuard,
@@ -61,6 +62,10 @@ import {
 	scopedCachePinKey,
 	startScopedCachePurgeRecovery,
 } from './index.js';
+import {
+	scopedCacheAggregateRuleFields,
+	scopedCacheViewFieldsBeyondFieldMap,
+} from './read-pins.js';
 import { printableScopedCachePin } from '../utils/printable-scoped-cache-pins.js';
 import {
 	flushCacheRedisDatabase,
@@ -71,6 +76,7 @@ import {
 import emitter from '../emitter.js';
 import { getCache } from '../cache.js';
 import { requestScopedCacheIndexReap } from './reap-requests.js';
+import { requestStore } from '../utils/request-store.js';
 import { recordScopedCacheBuild } from '../cache-build-identity.js';
 import { useLogger } from '../logger/index.js';
 import { withMeta } from '../utils/read-meta.js';
@@ -599,17 +605,161 @@ describe('createScopedCacheHookDeclarations', () => {
 		})
 		.build();
 
-	it('records a key whose purge a hook skipped, without adding a pin', () => {
-		const { purge, scopeQueryCases, purgeSkippedKeys } =
+	it(oneLine`
+		records a key whose purge a hook skipped under the collection of its handle,
+		without adding a pin
+	`, () => {
+		const { purgeHandleFor, scopeQueryCases, purgeSkippedKeys } =
 			createScopedCacheHookDeclarations(emptySchema);
 
-		purge.skipPurgeFor(7);
+		purgeHandleFor('notes').skipPurgeFor(7);
+		purgeHandleFor('authors').skipPurgeFor(8);
 
-		expect([...purgeSkippedKeys]).toEqual(['7']);
+		expect(purgeSkippedKeys).toEqual(new Map([
+			['notes', new Set(['7'])],
+			['authors', new Set(['8'])],
+		]));
 
-		// Declaring nothing to purge must not read as declaring a purge: the
-		// takeover check keys on the declaration count.
+		// Declaring nothing to purge must not read as declaring a purge.
 		expect(scopeQueryCases).toEqual([]);
+	});
+
+	it(oneLine`
+		records the row a purgeBy names under the collection of its handle, and only
+		when a fingerprint of that collection declares it
+	`, () => {
+		const { purgeHandleFor, purgeDeclaredKeys } =
+			createScopedCacheHookDeclarations(emptySchema);
+
+		purgeHandleFor('articles').purgeBy([
+			{ collection: 'authors', pinnedScope: { id: [5] } },
+			{ collection: 'articles', pinnedScope: { id: [6] } },
+		], { forKey: 7 });
+
+		purgeHandleFor('articles').purgeBy({
+			collection: 'books',
+			pinnedScope: { id: [8] },
+		}, { forKey: 9 });
+
+		purgeHandleFor('articles').purgeBy({
+			collection: 'books',
+			pinnedScope: { id: [10] },
+		});
+
+		expect(purgeDeclaredKeys).toEqual(new Map([
+			['articles', new Set(['7'])],
+		]));
+	});
+
+	describe('a forKey declaration on a collection scoped by two fields', () => {
+		afterEach(() => {
+			vi.unstubAllEnvs();
+		});
+
+		it('records the row when the declaration pins both', () => {
+			const teamSchema = new SchemaBuilder()
+				.collection('lessons', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+					c.field('team').string();
+				})
+				.build();
+
+			teamSchema.collections['lessons']!.scopedCacheFields = ['student', 'team'];
+
+			const { purgeHandleFor, purgeDeclaredKeys } =
+				createScopedCacheHookDeclarations(teamSchema);
+
+			purgeHandleFor('lessons').purgeBy({
+				collection: 'lessons',
+				pinnedScope: { student: ['A'], team: ['red'] },
+			}, { forKey: 2 });
+
+			expect(purgeDeclaredKeys).toEqual(new Map([
+				['lessons', new Set(['2'])],
+			]));
+		});
+
+		it(oneLine`
+			in production, leaves the row undeclared when the declaration pins one, so
+			its takeover purges coarse
+		`, () => {
+			vi.stubEnv('NODE_ENV', 'production');
+
+			const teamSchema = new SchemaBuilder()
+				.collection('lessons', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+					c.field('team').string();
+				})
+				.build();
+
+			teamSchema.collections['lessons']!.scopedCacheFields = ['student', 'team'];
+
+			const { purgeHandleFor, purgeDeclaredKeys } =
+				createScopedCacheHookDeclarations(teamSchema);
+
+			purgeHandleFor('lessons').purgeBy({
+				collection: 'lessons',
+				pinnedScope: { student: ['A'] },
+			}, { forKey: 2 });
+
+			expect(purgeDeclaredKeys).toEqual(new Map());
+		});
+
+		it('outside production, refuses a declaration that pins one', () => {
+			vi.stubEnv('NODE_ENV', 'test');
+
+			const teamSchema = new SchemaBuilder()
+				.collection('lessons', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+					c.field('team').string();
+				})
+				.build();
+
+			teamSchema.collections['lessons']!.scopedCacheFields = ['student', 'team'];
+
+			const { purgeHandleFor } = createScopedCacheHookDeclarations(teamSchema);
+
+			expect(() => {
+				purgeHandleFor('lessons').purgeBy({
+					collection: 'lessons',
+					pinnedScope: { student: ['A'] },
+				}, { forKey: 2 });
+			}).toThrow(new Error(oneLine`
+				purgeBy forKey 2 on "lessons" must pin every scope field: missing
+				"team"
+			`));
+		});
+
+		it(oneLine`
+			outside production, names every scope field a declaration leaves out
+		`, () => {
+			vi.stubEnv('NODE_ENV', 'test');
+
+			const teamSchema = new SchemaBuilder()
+				.collection('lessons', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+					c.field('team').string();
+				})
+				.build();
+
+			teamSchema.collections['lessons']!.scopedCacheFields = ['student', 'team'];
+
+			const { purgeHandleFor } = createScopedCacheHookDeclarations(teamSchema);
+
+			expect(() => {
+				purgeHandleFor('lessons').purgeBy({
+					collection: 'lessons',
+					pinnedScope: { id: [2] },
+				}, { forKey: 2 });
+			}).toThrow(new Error(oneLine`
+				purgeBy forKey 2 on "lessons" must pin every scope field: missing
+				"student", "team"
+			`));
+		});
 	});
 
 	it(oneLine`
@@ -672,21 +822,23 @@ describe('createScopedCacheHookDeclarations', () => {
 	});
 
 	it('keys skipped purges as strings, so a numeric and a string id agree', () => {
-		const { purge, purgeSkippedKeys } =
+		const { purgeHandleFor, purgeSkippedKeys } =
 			createScopedCacheHookDeclarations(emptySchema);
 
-		purge.skipPurgeFor(7);
-		purge.skipPurgeFor('7');
+		purgeHandleFor('notes').skipPurgeFor(7);
+		purgeHandleFor('notes').skipPurgeFor('7');
 
-		expect([...purgeSkippedKeys]).toEqual(['7']);
+		expect(purgeSkippedKeys).toEqual(new Map([['notes', new Set(['7'])]]));
 	});
 
 	it('scopeTo and purgeBy fill sinks of their own', () => {
-		const { scope, purge, scopeQueryCases, purgeFingerprints } =
+		const { scope, purgeHandleFor, scopeQueryCases, purgeFingerprints } =
 			createScopedCacheHookDeclarations(emptySchema);
 
+		const purgeHandle = purgeHandleFor('articles');
+
 		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
-		purge.purgeBy({ collection: 'articles', pinnedScope: { author: [5] } });
+		purgeHandle.purgeBy({ collection: 'articles', pinnedScope: { author: [5] } });
 
 		// The same slice through both handles, and it lands twice: the read side is
 		// composed with the read's own query cases before it becomes a fingerprint,
@@ -705,10 +857,10 @@ describe('createScopedCacheHookDeclarations', () => {
 		takes a fingerprint batch, dropping the viewFields a read's own carries: they
 		say which columns a read depends on, and no purge reads them
 	`, () => {
-		const { purge, purgeFingerprints } =
+		const { purgeHandleFor, purgeFingerprints } =
 			createScopedCacheHookDeclarations(emptySchema);
 
-		purge.purgeBy([
+		purgeHandleFor('articles').purgeBy([
 			{
 				collection: 'articles',
 				pinnedScope: { author: [5] },
@@ -734,7 +886,7 @@ describe('createScopedCacheHookDeclarations', () => {
 		reads a pre-fingerprint pin as the slice it names, not as the bare
 		collection — which would purge only the reads pinning nothing
 	`, () => {
-		const { scope, purge, scopeQueryCases, purgeFingerprints } =
+		const { scope, purgeHandleFor, scopeQueryCases, purgeFingerprints } =
 			createScopedCacheHookDeclarations(emptySchema);
 
 		const legacyPin = {
@@ -744,7 +896,7 @@ describe('createScopedCacheHookDeclarations', () => {
 		} as ScopedCacheDeclaredFingerprint;
 
 		scope.scopeTo(legacyPin);
-		purge.purgeBy(legacyPin);
+		purgeHandleFor('articles').purgeBy(legacyPin);
 
 		expect(scopeQueryCases).toEqual([
 			[{ collection: 'articles', field: 'author', value: 5 }],
@@ -814,12 +966,14 @@ describe('createScopedCacheHookDeclarations', () => {
 	`, () => {
 		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
 
-		const { scope, purge, scopeQueryCases, purgeFingerprints } =
+		const { scope, purgeHandleFor, scopeQueryCases, purgeFingerprints } =
 			createScopedCacheHookDeclarations(notesSchema);
+
+		const purgeHandle = purgeHandleFor('articles');
 
 		scope.scopeTo({ collection: 'notes', pinnedScope: { id: [upper] } });
 		// The spelling the driver hands the purge side for the very same row.
-		purge.purgeBy({ collection: 'notes', pinnedScope: { id: [upper] } });
+		purgeHandle.purgeBy({ collection: 'notes', pinnedScope: { id: [upper] } });
 
 		expect(scopeQueryCases).toEqual([
 			[{ collection: 'notes', field: 'id', value: upper, type: 'uuid' }],
@@ -868,11 +1022,11 @@ describe('createScopedCacheHookDeclarations', () => {
 	});
 
 	it('leaves a plain scopeTo / purgeBy out of the manuallyPurged set', () => {
-		const { scope, purge, manuallyPurgedKeys } =
+		const { scope, purgeHandleFor, manuallyPurgedKeys } =
 			createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
-		purge.purgeBy({ collection: 'authors' });
+		purgeHandleFor('articles').purgeBy({ collection: 'authors' });
 
 		expect(manuallyPurgedKeys.size).toBe(0);
 	});
@@ -2895,6 +3049,154 @@ describe('a purge that fails after its mutation committed', () => {
 	});
 });
 
+describe('the request\'s purged list', () => {
+	const cache = { clear: vi.fn(), delete: vi.fn().mockResolvedValue(true) };
+
+	beforeEach(() => {
+		vi.mocked(useRedis).mockReturnValue({
+			smembers: vi.fn().mockResolvedValue([]),
+			scan: vi.fn().mockResolvedValue(['0', []]),
+			sscan: vi.fn().mockResolvedValue(['0', []]),
+			mget: vi.fn().mockResolvedValue(['1', '1']),
+			srem: vi.fn(),
+			eval: vi.fn().mockResolvedValue([]),
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: vi.fn(),
+		} as any);
+
+		vi.mocked(emitter.emitFilter).mockImplementation(async (_e, pins) => pins);
+		cache.clear.mockResolvedValue(undefined);
+	});
+
+	it(oneLine`
+		names the slices a purge reached, its collection's bare fingerprint
+		included
+	`, async () => {
+		const purgedRecord = { purged: [], queuedPurges: [] };
+
+		await requestStore.run({ scopedCachePurged: purgedRecord }, () => {
+			return purgeScopedCache(cache as any, 'rounds', [
+				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+			]);
+		});
+
+		expect(purgedRecord).toEqual({
+			purged: [
+				scopedCacheFingerprintOf('rounds', []),
+				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+			],
+			queuedPurges: [],
+		});
+	});
+
+	it('names a slice its old and new rows share once', async () => {
+		const purgedRecord = { purged: [], queuedPurges: [] };
+
+		await requestStore.run({ scopedCachePurged: purgedRecord }, () => {
+			return purgeScopedCache(cache as any, 'rounds', [
+				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+			]);
+		});
+
+		expect(purgedRecord).toEqual({
+			purged: [
+				scopedCacheFingerprintOf('rounds', []),
+				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+			],
+			queuedPurges: [],
+		});
+	});
+
+	it('names the slices of the rows a row-driven purge was handed', async () => {
+		const purgedRecord = { purged: [], queuedPurges: [] };
+
+		await requestStore.run({ scopedCachePurged: purgedRecord }, () => {
+			return purgeScopedCache(cache as any, 'rounds', [], null, {
+				rowFingerprints: [
+					scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+				],
+			});
+		});
+
+		expect(purgedRecord).toEqual({
+			purged: [
+				scopedCacheFingerprintOf('rounds', []),
+				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+			],
+			queuedPurges: [],
+		});
+	});
+
+	it('names the collection a collection-wide purge reached', async () => {
+		const purgedRecord = { purged: [], queuedPurges: [] };
+
+		await requestStore.run({ scopedCachePurged: purgedRecord }, () => {
+			return purgeScopedCache(cache as any, 'articles', null);
+		});
+
+		expect(purgedRecord).toEqual({
+			purged: [{ collection: 'articles' }],
+			queuedPurges: [],
+		});
+	});
+
+	it(oneLine`
+		names the bare fingerprint a row-driven purge dropped though a cache.purge
+		filter took it out
+	`, async () => {
+		vi.mocked(emitter.emitFilter).mockResolvedValue([]);
+
+		const purgedRecord = { purged: [], queuedPurges: [] };
+
+		await requestStore.run({ scopedCachePurged: purgedRecord }, () => {
+			return purgeScopedCache(cache as any, 'rounds', [], null, {
+				rowFingerprints: [
+					scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+				],
+			});
+		});
+
+		expect(purgedRecord).toEqual({
+			purged: [
+				scopedCacheFingerprintOf('rounds', [{ field: 'id', value: 7 }]),
+				scopedCacheFingerprintOf('rounds', []),
+			],
+			queuedPurges: [],
+		});
+	});
+
+	it(oneLine`
+		becomes a whole-namespace flush when the response cache is flushed
+	`, async () => {
+		const purgedRecord = {
+			purged: [{ collection: 'rounds' }],
+			queuedPurges: [],
+		};
+
+		await requestStore.run({ scopedCachePurged: purgedRecord }, () => {
+			return flushResponseCache(cache as any);
+		});
+
+		expect(purgedRecord).toEqual({ purged: null, queuedPurges: [] });
+	});
+
+	it('becomes a whole-namespace flush when scoped mode is off', async () => {
+		env['CACHE_AUTO_PURGE_MODE'] = 'all';
+
+		const purgedRecord = {
+			purged: [{ collection: 'rounds' }],
+			queuedPurges: [],
+		};
+
+		await requestStore.run({ scopedCachePurged: purgedRecord }, () => {
+			return purgeScopedCache(cache as any, 'articles', []);
+		});
+
+		expect(purgedRecord).toEqual({ purged: null, queuedPurges: [] });
+	});
+});
+
 describe('scopedCachePinsFromM2oParents', () => {
 	// owner <- owned_item <- owned_sub_item, each child naming its parent, so a read
 	// rooted at the sub-item reaches both ancestors through M2O hops only.
@@ -3319,6 +3621,281 @@ describe('resolveScopedCacheM2oJoinChainFromPath', () => {
 	});
 });
 
+describe('scopedCacheViewFieldsBeyondFieldMap', () => {
+	const schema = new SchemaBuilder()
+		.collection('owner', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+		})
+		.collection('owned_item', (c) => {
+			c.field('id').id();
+			c.field('owner').m2o('owner');
+		})
+		.build();
+
+	it('reads the columns the root aggregate cases go through', () => {
+		expect(
+			scopedCacheViewFieldsBeyondFieldMap(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				aggregateCases: [{ owner: { name: { _eq: 'alice' } } }],
+				children: [],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['', { collection: 'owned_item', fields: new Set(['owner']) }],
+			['owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads the columns the aggregate cases of an m2o node go through', () => {
+		expect(
+			scopedCacheViewFieldsBeyondFieldMap(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'm2o',
+						name: 'owner',
+						fieldKey: 'owner',
+						children: [],
+						query: {},
+						cases: [],
+						aggregateCases: [{ name: { _eq: 'alice' } }],
+						whenCase: [],
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads the columns the aggregate cases of an a2o node go through', () => {
+		expect(
+			scopedCacheViewFieldsBeyondFieldMap(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'a2o',
+						names: ['owner'],
+						fieldKey: 'item',
+						children: { owner: [] },
+						query: {},
+						cases: { owner: [] },
+						aggregateCases: { owner: [{ name: { _eq: 'alice' } }] },
+						whenCase: [],
+						relation: { meta: {} },
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['item:owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+});
+
+describe('scopedCacheAggregateRuleFields', () => {
+	const schema = new SchemaBuilder()
+		.collection('owner', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('boss').m2o('owner');
+			c.field('items').o2m('owned_item', 'owner');
+		})
+		.collection('owned_item', (c) => {
+			c.field('id').id();
+			c.field('owner').m2o('owner');
+		})
+		.build();
+
+	it('reads the aggregate rules of the root, not its row cases', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [{ id: { _eq: 1 } }],
+				aggregateCases: [{ owner: { name: { _eq: 'alice' } } }],
+				children: [],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['', { collection: 'owned_item', fields: new Set(['owner']) }],
+			['owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads nothing of a nested node with row cases only', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+					{
+						type: 'm2o',
+						name: 'owner',
+						fieldKey: 'owner',
+						children: [],
+						query: {},
+						cases: [{ name: { _eq: 'alice' } }],
+						whenCase: [],
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map());
+	});
+
+	it('reads the aggregate rules of an m2o node', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'm2o',
+						name: 'owner',
+						fieldKey: 'owner',
+						children: [],
+						query: {},
+						cases: [],
+						aggregateCases: [{ name: { _eq: 'alice' } }],
+						whenCase: [],
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads the aggregate rules of each collection of an a2o node', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'a2o',
+						names: ['owner'],
+						fieldKey: 'item',
+						children: { owner: [] },
+						query: {},
+						cases: { owner: [] },
+						aggregateCases: { owner: [{ name: { _eq: 'alice' } }] },
+						whenCase: [],
+						relation: { meta: {} },
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['item:owner', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads the aggregate rules of a node below an m2o', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'm2o',
+						name: 'owner',
+						fieldKey: 'owner',
+						children: [
+							{
+								type: 'm2o',
+								name: 'owner',
+								fieldKey: 'boss',
+								children: [],
+								query: {},
+								cases: [],
+								aggregateCases: [{ name: { _eq: 'alice' } }],
+								whenCase: [],
+							},
+						],
+						query: {},
+						cases: [],
+						whenCase: [],
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['owner.boss', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('reads the aggregate rules of a node below an a2o', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [
+					{
+						type: 'a2o',
+						names: ['owner'],
+						fieldKey: 'item',
+						children: {
+							owner: [
+								{
+									type: 'm2o',
+									name: 'owner',
+									fieldKey: 'boss',
+									children: [],
+									query: {},
+									cases: [],
+									aggregateCases: [{ name: { _eq: 'alice' } }],
+									whenCase: [],
+								},
+							],
+						},
+						query: {},
+						cases: { owner: [] },
+						whenCase: [],
+						relation: { meta: {} },
+					},
+				],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['item:owner.boss', { collection: 'owner', fields: new Set(['name']) }],
+		]));
+	});
+
+	it('names the rows a function of a rule reads through a relation', () => {
+		expect(
+			scopedCacheAggregateRuleFields(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				aggregateCases: [{ owner: { 'count(items)': { _gt: 1 } } }],
+				children: [],
+			} as unknown as AST).read,
+		).toEqual(new Map([
+			['', { collection: 'owned_item', fields: new Set(['owner']) }],
+			['owner', { collection: 'owner', fields: new Set(['items']) }],
+			['owner.count(items)', { collection: 'owned_item', fields: new Set() }],
+		]));
+	});
+});
+
 describe('scopedCacheCollectionsBeyondNestedRows', () => {
 	const schema = new SchemaBuilder()
 		.collection('company', (c) => {
@@ -3375,6 +3952,85 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 			],
 		} as AST;
 	}
+
+	it('names a collection only the root aggregate cases reach', () => {
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				{
+					...astOf({}),
+					aggregateCases: [{ owner: { name: { _eq: 'alice' } } }],
+				},
+			),
+		]).toContain('owner');
+	});
+
+	it('names a collection only the aggregate cases of an m2o node reach', () => {
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({}, {
+					aggregateCases: [{ company: { name: { _eq: 'acme' } } }],
+				}),
+			),
+		]).toContain('company');
+	});
+
+	it('names a collection only the aggregate cases of an o2m node reach', () => {
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				{
+					type: 'root',
+					name: 'company',
+					query: {},
+					cases: [],
+					children: [
+						{
+							type: 'o2m',
+							name: 'owner',
+							fieldKey: 'owners',
+							children: [],
+							query: {},
+							cases: [],
+							aggregateCases: [{ company: { name: { _eq: 'acme' } } }],
+							whenCase: [],
+							relation: { collection: 'owner', field: 'company' },
+						},
+					],
+				} as unknown as AST,
+			),
+		]).toContain('company');
+	});
+
+	it('names a collection only the aggregate cases of an a2o node reach', () => {
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				{
+					type: 'root',
+					name: 'owned_item',
+					query: {},
+					cases: [],
+					children: [
+						{
+							type: 'a2o',
+							names: ['owner'],
+							fieldKey: 'item',
+							children: { owner: [] },
+							query: {},
+							cases: { owner: [] },
+							aggregateCases: {
+								owner: [{ company: { name: { _eq: 'acme' } } }],
+							},
+							whenCase: [],
+							relation: {},
+						},
+					],
+				} as unknown as AST,
+			),
+		]).toContain('company');
+	});
 
 	it('names a collection the root query filters on', () => {
 		// Renaming a row this read never nested moves its item INTO the filtered
@@ -3919,6 +4575,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		})
 		.collection('owned_sub_item', (c) => {
 			c.field('id').id();
+			c.field('label').string();
 			c.field('owned_item').m2o('owned_item');
 		})
 		.collection('category', (c) => {
@@ -3968,6 +4625,62 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		expect(keyingOf({
 			filter: { owner: { company: { id: { _eq: 3 } } } },
 		}).get('owner')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('keys the M2O again when an aggregate rule reads past its key', () => {
+		expect(scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query: { filter: { owner: { id: { _eq: 7 } } } },
+			cases: [],
+			aggregateCases: [{ owner: { name: { _eq: 'alice' } } }],
+			children: [],
+		} as unknown as AST).get('owner')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('reports the to-many a count in an aggregate rule totals', () => {
+		expect(scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query: {},
+			cases: [],
+			aggregateCases: [{ 'count(owned_sub_items)': { _gt: 0 } }],
+			children: [],
+		} as unknown as AST).get('owned_sub_item')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('reads the aggregate rule of a nested node', () => {
+		expect(scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query: {},
+			cases: [],
+			children: [{
+				type: 'o2m',
+				name: 'owned_sub_item',
+				query: { filter: { owned_item: { id: { _eq: 7 } } } },
+				cases: [],
+				aggregateCases: [{ owned_item: { label: { _eq: 'x' } } }],
+				children: [],
+			}],
+		} as unknown as AST).get('owned_item')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('reads the aggregate rule of each collection of an A2O', () => {
+		expect(scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query: {},
+			cases: [],
+			children: [{
+				type: 'a2o',
+				names: ['owner'],
+				query: { owner: { filter: { company: { id: { _eq: 3 } } } } },
+				cases: { owner: [] },
+				aggregateCases: { owner: [{ company: { name: { _eq: 'x' } } }] },
+				children: { owner: [] },
+			}],
+		} as unknown as AST).get('company')).toEqual({ kind: 'unkeyed' });
 	});
 
 	it('keys the M2O again once the relation carries no constraint', () => {
@@ -4212,6 +4925,106 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 			filter: { owned_sub_items: { _none: { id: { _eq: 7 } } } },
 		}).get('owned_sub_item'))
 			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7]) });
+	});
+
+	it('keeps a key inside one quantifier beside its other conditions', () => {
+		expect(keyingOf({
+			filter: {
+				owned_sub_items: {
+					_some: { _and: [{ id: { _eq: 7 } }, { label: { _eq: 'open' } }] },
+				},
+			} as unknown as Filter,
+		}).get('owned_sub_item'))
+			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7]) });
+	});
+
+	it('keys no row through two quantifiers, each on a row of its own', () => {
+		expect(keyingOf({
+			filter: {
+				_and: [
+					{ owned_sub_items: { _some: { id: { _eq: 7 } } } },
+					{ owned_sub_items: { _some: { label: { _eq: 'open' } } } },
+				],
+			},
+		}).get('owned_sub_item')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('unions the keys of two quantifiers, each on a row of its own', () => {
+		expect(keyingOf({
+			filter: {
+				_and: [
+					{ owned_sub_items: { _some: { id: { _eq: 7 } } } },
+					{ owned_sub_items: { _none: { id: { _eq: 8 } } } },
+				],
+			},
+		}).get('owned_sub_item'))
+			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7, 8]) });
+	});
+
+	describe('scopedCacheCollectionsAcrossQuantifiers', () => {
+		function crossedBy(filter: Filter) {
+			return scopedCacheCollectionsAcrossQuantifiers(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: { filter },
+				cases: [],
+				children: [],
+			} as unknown as AST);
+		}
+
+		it('names a collection two quantifiers reach', () => {
+			expect(crossedBy({
+				_and: [
+					{ owned_sub_items: { _some: { id: { _eq: 7 } } } },
+					{ owned_sub_items: { _none: { label: { _eq: 'open' } } } },
+				],
+			})).toEqual(new Set(['owned_sub_item']));
+		});
+
+		it('names a collection a quantifier and a bare path reach', () => {
+			expect(crossedBy({
+				_and: [
+					{ owned_sub_items: { _some: { id: { _eq: 7 } } } },
+					{ owned_sub_items: { label: { _eq: 'open' } } },
+				],
+			})).toEqual(new Set(['owned_sub_item']));
+		});
+
+		it('names nothing for one quantifier over two conditions', () => {
+			expect(crossedBy({
+				owned_sub_items: {
+					_some: { id: { _eq: 7 }, label: { _eq: 'open' } },
+				},
+			} as unknown as Filter)).toEqual(new Set());
+		});
+
+		it('names nothing for two conditions on one row, no quantifier', () => {
+			expect(crossedBy({
+				_and: [
+					{ owned_sub_items: { id: { _eq: 7 } } },
+					{ owned_sub_items: { label: { _eq: 'open' } } },
+				],
+			})).toEqual(new Set());
+		});
+
+		it('names nothing for two paths to one collection, no quantifier', () => {
+			expect(crossedBy({
+				_and: [
+					{ owner: { name: { _eq: 'open' } } },
+					{ owned_sub_items: { owned_item: { owner: { name: { _eq: 'shut' } } } } },
+				],
+			})).toEqual(new Set());
+		});
+
+		it('names nothing with no filter', () => {
+			expect(scopedCacheCollectionsAcrossQuantifiers(schema, {
+				type: 'root',
+				name: 'owned_item',
+				query: {},
+				cases: [],
+				children: [],
+			} as unknown as AST)).toEqual(new Set());
+		});
 	});
 
 	it('keys the far side of an M2M and leaves its junction unkeyed', () => {
@@ -5496,6 +6309,37 @@ describe('the canonical scope value', () => {
 			expect(isPinnableScopeType(type)).toBe(true);
 		},
 	);
+});
+
+describe('ScopedCacheReadPlan.collectionsToGuard', () => {
+	it('names a collection only the aggregate cases reach', () => {
+		expect(new ScopedCacheReadPlan(
+			'article',
+			new SchemaBuilder()
+				.collection('author', (c) => {
+					c.field('id').id();
+					c.field('status').string();
+				})
+				.collection('article', (c) => {
+					c.field('id').id();
+					c.field('category').string();
+					c.field('salary').integer();
+					c.field('author').m2o('author');
+				})
+				.build(),
+			{
+				type: 'root',
+				name: 'article',
+				query: { aggregate: { sum: ['salary'] }, group: ['category'] },
+				cases: [{}],
+				aggregateCases: [{ author: { status: { _eq: 'live' } } }],
+				children: [
+					{ type: 'field', name: 'category', fieldKey: 'category', whenCase: [] },
+				],
+			} as unknown as AST,
+			[],
+		).collectionsToGuard()).toContain('author');
+	});
 });
 
 // The view a fingerprint narrows to: a write rewriting none of these fields is

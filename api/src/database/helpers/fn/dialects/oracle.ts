@@ -43,7 +43,7 @@ export class FnHelperOracle extends FnHelper {
 		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'SS')`, [table, column]);
 	}
 
-	count(table: string, column: string, options?: FnHelperOptions): Knex.Raw<any> {
+	count(table: string, column: string, options: FnHelperOptions): Knex.Raw<any> {
 		const collectionName = options?.originalCollectionName || table;
 		const type = this.schema.collections?.[collectionName]?.fields?.[column]?.type ?? 'unknown';
 

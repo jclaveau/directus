@@ -1,4 +1,4 @@
-import { ForbiddenError } from '@directus/errors';
+import { ForbiddenError, InvalidQueryError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import type { Response } from 'express';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
@@ -90,6 +90,7 @@ function makeReq(overrides: any = {}) {
 	return {
 		params: { collection: 'articles', pk: '1' },
 		body: {},
+		query: {},
 		sanitizedQuery: {},
 		accountability: null,
 		schema: {},
@@ -160,6 +161,68 @@ describe('items controller', () => {
 			const next = vi.fn();
 			await handler()(req, { locals: {} } as unknown as Response, next);
 			expect(next).toHaveBeenCalledWith();
+		});
+
+		test('passes mutationBatching to the create', async () => {
+			createMany.mockResolvedValueOnce([1]);
+			readMany.mockResolvedValueOnce([{ id: 1 }]);
+
+			await handler()(makeReq({
+				body: [{ a: 1 }],
+				query: { mutationBatching: 'preserveMutationOrder' },
+			}), { locals: {} } as any, vi.fn());
+
+			expect(createMany).toHaveBeenCalledWith([{ a: 1 }], {
+				allowFilterCancel: true,
+				mutationBatching: 'preserveMutationOrder',
+			});
+		});
+
+		test('refuses an unknown mutationBatching before creating', async () => {
+			const refusal = await nextError(handler(), makeReq({
+				body: [{ a: 1 }],
+				query: { mutationBatching: 'batchEverything' },
+			}));
+
+			expect(refusal).toBeInstanceOf(InvalidQueryError);
+
+			expect(refusal.message).toEqual(oneLine`
+				Invalid query. "mutationBatching" must be one of minimizeMutations,
+				preserveMutationOrder, disableBatching.
+			`);
+
+			expect(createMany).not.toHaveBeenCalled();
+		});
+
+		test('refuses an unknown nestedUpdates before creating', async () => {
+			const refusal = await nextError(handler(), makeReq({
+				body: [{ a: 1 }],
+				query: { nestedUpdates: 'ignore' },
+			}));
+
+			expect(refusal).toBeInstanceOf(InvalidQueryError);
+			expect(refusal.status).toBe(400);
+
+			expect(refusal.message).toEqual(
+				'Invalid query. "nestedUpdates" must be one of apply, refuse, skip.',
+			);
+
+			expect(createMany).not.toHaveBeenCalled();
+		});
+
+		test('passes nestedUpdates to the create', async () => {
+			createMany.mockResolvedValueOnce([1]);
+			readMany.mockResolvedValueOnce([{ id: 1 }]);
+
+			await handler()(makeReq({
+				body: [{ a: 1 }],
+				query: { nestedUpdates: 'refuse' },
+			}), { locals: {} } as any, vi.fn());
+
+			expect(createMany).toHaveBeenCalledWith([{ a: 1 }], {
+				allowFilterCancel: true,
+				nestedUpdates: 'refuse',
+			});
 		});
 
 		test('non-Forbidden read error rethrows', async () => {
@@ -295,9 +358,61 @@ describe('items controller', () => {
 			const res = { locals: {} } as any;
 			const next = vi.fn();
 			await handler()(req, res, next);
-			expect(upsertSingleton).toHaveBeenCalledWith({ a: 1 });
+
+			expect(upsertSingleton)
+				.toHaveBeenCalledWith({ a: 1 }, { mutationBatching: undefined });
+
 			expect(res.locals['payload']).toEqual({ data: { id: 1 } });
 			expect(next).toHaveBeenCalledOnce();
+		});
+
+		test('passes mutationBatching to the singleton upsert', async () => {
+			upsertSingleton.mockResolvedValueOnce(undefined);
+			readSingleton.mockResolvedValueOnce({ id: 1 });
+
+			await handler()(makeReq({
+				singleton: true,
+				body: { a: 1 },
+				query: { mutationBatching: 'preserveMutationOrder' },
+			}), { locals: {} } as any, vi.fn());
+
+			expect(upsertSingleton).toHaveBeenCalledWith(
+				{ a: 1 },
+				{ mutationBatching: 'preserveMutationOrder' },
+			);
+		});
+
+		test('passes nestedUpdates to the singleton upsert', async () => {
+			upsertSingleton.mockResolvedValueOnce(undefined);
+			readSingleton.mockResolvedValueOnce({ id: 1 });
+
+			await handler()(makeReq({
+				singleton: true,
+				body: { a: 1 },
+				query: { nestedUpdates: 'skip' },
+			}), { locals: {} } as any, vi.fn());
+
+			expect(upsertSingleton).toHaveBeenCalledWith(
+				{ a: 1 },
+				{ nestedUpdates: 'skip' },
+			);
+		});
+
+		test('refuses an unknown mutationBatching on a singleton', async () => {
+			const refusal = await nextError(handler(), makeReq({
+				singleton: true,
+				body: { a: 1 },
+				query: { mutationBatching: 'batchEverything' },
+			}));
+
+			expect(refusal).toBeInstanceOf(InvalidQueryError);
+
+			expect(refusal.message).toEqual(oneLine`
+				Invalid query. "mutationBatching" must be one of minimizeMutations,
+				preserveMutationOrder, disableBatching.
+			`);
+
+			expect(upsertSingleton).not.toHaveBeenCalled();
 		});
 
 		test('updateBatch for array body', async () => {
@@ -311,13 +426,83 @@ describe('items controller', () => {
 			expect(res.locals['payload']).toEqual({ data: [{ id: 1 }] });
 		});
 
+		test('passes onRepeatedPk to the update', async () => {
+			updateBatch.mockResolvedValueOnce([1]);
+			readMany.mockResolvedValueOnce([{ id: 1 }]);
+
+			const batchRequest = makeReq({
+				body: [{ id: 1 }],
+				query: { onRepeatedPk: 'lastWins' },
+			});
+
+			await handler()(batchRequest, { locals: {} } as any, vi.fn());
+
+			expect(updateBatch).toHaveBeenCalledWith([{ id: 1 }], {
+				allowFilterCancel: true,
+				onRepeatedPk: 'lastWins',
+			});
+		});
+
+		test('refuses an unknown onRepeatedPk before updating', async () => {
+			const batchRequest = makeReq({
+				body: [{ id: 1 }],
+				query: { onRepeatedPk: 'merge' },
+			});
+
+			const refusal = await nextError(handler(), batchRequest);
+
+			expect(refusal).toBeInstanceOf(InvalidQueryError);
+
+			expect(refusal.message).toEqual(
+				'Invalid query. "onRepeatedPk" must be one of refuse, lastWins.',
+			);
+
+			expect(updateBatch).not.toHaveBeenCalled();
+		});
+
+		test('passes mutationBatching to the update', async () => {
+			updateBatch.mockResolvedValueOnce([1]);
+			readMany.mockResolvedValueOnce([{ id: 1 }]);
+
+			await handler()(makeReq({
+				body: [{ id: 1 }],
+				query: { mutationBatching: 'disableBatching' },
+			}), { locals: {} } as any, vi.fn());
+
+			expect(updateBatch).toHaveBeenCalledWith([{ id: 1 }], {
+				allowFilterCancel: true,
+				onRepeatedPk: 'refuse',
+				mutationBatching: 'disableBatching',
+			});
+		});
+
+		test('passes nestedUpdates to the update', async () => {
+			updateBatch.mockResolvedValueOnce([1]);
+			readMany.mockResolvedValueOnce([{ id: 1 }]);
+
+			await handler()(makeReq({
+				body: [{ id: 1 }],
+				query: { nestedUpdates: 'skip' },
+			}), { locals: {} } as any, vi.fn());
+
+			expect(updateBatch).toHaveBeenCalledWith([{ id: 1 }], {
+				allowFilterCancel: true,
+				onRepeatedPk: 'refuse',
+				nestedUpdates: 'skip',
+			});
+		});
+
 		test('updateMany via body.keys', async () => {
 			updateMany.mockResolvedValueOnce([2]);
 			readMany.mockResolvedValueOnce([{ id: 2 }]);
 			const req = makeReq({ body: { keys: [2], data: { x: 1 } } });
 			const res = { locals: {} } as any;
 			await handler()(req, res, vi.fn());
-			expect(updateMany).toHaveBeenCalledWith([2], { x: 1 }, { allowFilterCancel: true });
+
+			expect(updateMany).toHaveBeenCalledWith([2], { x: 1 }, {
+				allowFilterCancel: true,
+				onRepeatedPk: 'refuse',
+			});
 		});
 
 		test('updateByQuery default branch', async () => {
@@ -359,6 +544,36 @@ describe('items controller', () => {
 		test('throws RouteNotFoundError for singletons', async () => {
 			const req = makeReq({ singleton: true });
 			expect(await nextError(handler(), req)).toBeInstanceOf(Error);
+		});
+
+		test('passes mutationBatching to the update', async () => {
+			updateOne.mockResolvedValueOnce('1');
+			readOne.mockResolvedValueOnce({ id: 1 });
+
+			await handler()(makeReq({
+				body: { x: 1 },
+				query: { mutationBatching: 'disableBatching' },
+			}), { locals: {} } as any, vi.fn());
+
+			expect(updateOne).toHaveBeenCalledWith('1', { x: 1 }, {
+				allowFilterCancel: true,
+				mutationBatching: 'disableBatching',
+			});
+		});
+
+		test('passes nestedUpdates to the update', async () => {
+			updateOne.mockResolvedValueOnce('1');
+			readOne.mockResolvedValueOnce({ id: 1 });
+
+			await handler()(makeReq({
+				body: { x: 1 },
+				query: { nestedUpdates: 'refuse' },
+			}), { locals: {} } as any, vi.fn());
+
+			expect(updateOne).toHaveBeenCalledWith('1', { x: 1 }, {
+				allowFilterCancel: true,
+				nestedUpdates: 'refuse',
+			});
 		});
 
 		test('updateOne + readOne returns payload', async () => {

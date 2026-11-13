@@ -13,7 +13,7 @@ import { ROLE, USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import knex, { type Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
@@ -195,7 +195,7 @@ describe('The cache audit replays live entries against the database', () => {
 
 			appUserId = appUser.id;
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
@@ -1244,9 +1244,19 @@ describe('The cache audit replays live entries against the database', () => {
 			// A stale entry nothing has flagged yet, for the schedule to find.
 			await clearCache();
 			await warm(() => readOwner('globex'));
+			await warm(() => readCollection(HOLD));
+			// Both in the queue, so the scheduled run replays them in one page.
+			await auditSettled({}, 2);
 
 			await db(ROWS).where({ owner: 'globex' })
 				.update({ amount: '13' });
+
+			// The HOLD replay answers 6s late: the run records its counts that
+			// long after the globex replay raised its anomaly.
+			await request(url)
+				.patch(`/items/${HOLD_FLAG}/${holdFlagId}`)
+				.send({ armed: 'yes' })
+				.set('Authorization', auth);
 
 			const before = Date.now();
 
@@ -1254,6 +1264,15 @@ describe('The cache audit replays live entries against the database', () => {
 				.patch('/utils/cache/audit/schedule')
 				.send({ rule: '* * * * * *' })
 				.set('Authorization', auth);
+
+			// Cleared however the test ends: a rule left in the settings keeps
+			// this node auditing, and every node booted after reads it.
+			onTestFinished(async () => {
+				await request(url)
+					.patch('/utils/cache/audit/schedule')
+					.send({ rule: null })
+					.set('Authorization', auth);
+			});
 
 			expect(scheduled.statusCode).toBe(200);
 
@@ -1274,21 +1293,32 @@ describe('The cache audit replays live entries against the database', () => {
 			expect(settings.body.data.cache_audit_schedule).toBe('* * * * * *');
 
 			// Nothing calls the endpoint: the node's own schedule, taken off the
-			// bus, replays the entry and lands its finding.
+			// bus, replays the entry and records the run. Waited on by its row:
+			// the anomaly drains on its own tick, before the run has ended.
+			let cronRun: any;
+
+			for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
+				cronRun = await db('directus_cache_audits')
+					.where({ trigger: 'cron' })
+					.where('started_at', '>', new Date(before))
+					.whereNotNull('finished_at')
+					.first();
+
+				if (cronRun) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+			}
+
+			expect(cronRun?.stale).toBe(1);
+
 			const flagged = await anomaly(
 				'stale_entry',
 				`/items/${ROWS}?filter[owner][_eq]=globex`,
 			);
 
 			expect(flagged).toBeDefined();
-
-			const cronRun = await db('directus_cache_audits')
-				.where({ trigger: 'cron' })
-				.where('started_at', '>', new Date(before))
-				.where('stale', '>', 0)
-				.first();
-
-			expect(cronRun).toBeDefined();
 
 			const cleared = await request(url)
 				.patch('/utils/cache/audit/schedule')
@@ -1385,7 +1415,7 @@ describe('The cache audit replays live entries against the database', () => {
 			const cutOffLog: string[] = [];
 
 			beforeAll(async () => {
-				const proxyPort = await getPort();
+				const proxyPort = await freePortOfWorker();
 				proxy = createRedisProxy(6108, proxyPort);
 				await proxy.open();
 
@@ -1403,7 +1433,7 @@ describe('The cache audit replays live entries against the database', () => {
 				cutOffEnv[vendor]['CACHE_SCHEMA'] = 'false';
 				cutOffEnv[vendor]['CACHE_AUDIT_IDENTITY_TOKEN'] = USER.ADMIN.TOKEN;
 
-				const cutOffPort = await getPort();
+				const cutOffPort = await freePortOfWorker();
 				cutOffEnv[vendor].PORT = String(cutOffPort);
 
 				cutOff = spawn('node', [paths.cli, 'start'], {

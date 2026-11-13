@@ -747,8 +747,8 @@ catalogs:
       specifier: 5.6.0
       version: 5.6.0
     knex:
-      specifier: 3.1.0
-      version: 3.1.0
+      specifier: git+https://github.com/jclaveau/knex.git#8c59616dba2f69e4a8003b857d2aa1b56333f745
+      version: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745
     knex-mock-client:
       specifier: 3.0.2
       version: 3.0.2
@@ -1332,7 +1332,7 @@ importers:
         version: 5.6.0
       knex:
         specifier: 'catalog:'
-        version: 3.1.0(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
+        version: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
       ldapjs:
         specifier: 'catalog:'
         version: 3.0.7
@@ -1594,7 +1594,7 @@ importers:
         version: 7.2.0
       knex-mock-client:
         specifier: 'catalog:'
-        version: 3.0.2(knex@3.1.0(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)))
+        version: 3.0.2(knex@https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)))
       rolldown-plugin-istanbul:
         specifier: 'catalog:'
         version: https://codeload.github.com/jclaveau/rolldown-plugin-istanbul/tar.gz/29c826380f1b9b87de352a8e9c85bc8e56345e0b(rolldown@1.2.10)(rollup@4.62.3)(supports-color@10.2.2)
@@ -2234,7 +2234,7 @@ importers:
         version: 4.1.11(vitest@4.1.11)
       knex:
         specifier: 'catalog:'
-        version: 3.1.0(mysql2@3.22.5(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
+        version: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.22.5(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
       pino:
         specifier: 'catalog:'
         version: 10.3.1
@@ -2344,6 +2344,9 @@ importers:
       rolldown:
         specifier: 'catalog:'
         version: 1.2.10
+      rolldown-plugin-istanbul:
+        specifier: 'catalog:'
+        version: https://codeload.github.com/jclaveau/rolldown-plugin-istanbul/tar.gz/29c826380f1b9b87de352a8e9c85bc8e56345e0b(rolldown@1.2.10)(rollup@4.62.3)(supports-color@10.2.2)
       rollup-plugin-styler:
         specifier: 'catalog:'
         version: 2.0.0(rollup@4.62.3)(typescript@5.8.3)
@@ -2503,7 +2506,7 @@ importers:
     dependencies:
       knex:
         specifier: 'catalog:'
-        version: 3.1.0(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
+        version: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
     devDependencies:
       '@directus/tsconfig':
         specifier: 'catalog:'
@@ -2884,6 +2887,9 @@ importers:
       '@vitejs/plugin-vue':
         specifier: 'catalog:'
         version: 6.0.9(vite@8.3.0(@types/node@26.0.0)(jiti@2.7.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(yaml@2.9.0))(vue@3.5.40(typescript@5.8.3))
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 4.1.11(vitest@4.1.11)
       pinia:
         specifier: 'catalog:'
         version: 2.3.1(typescript@5.8.3)(vue@3.5.40(typescript@5.8.3))
@@ -2965,7 +2971,7 @@ importers:
         version: 1.0.5
       knex:
         specifier: 'catalog:'
-        version: 3.1.0(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
+        version: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
       typescript:
         specifier: 'catalog:'
         version: 5.8.3
@@ -3157,10 +3163,26 @@ importers:
         version: 1.59.1
 
   tests/blackbox:
+    dependencies:
+      blackbox-extensions:
+        specifier: link:./extensions
+        version: link:extensions
+      code-entries-probe:
+        specifier: link:./extensions/code-entries-probe
+        version: link:extensions/code-entries-probe
+      extension-settings-probe:
+        specifier: link:./extensions/extension-settings-probe
+        version: link:extensions/extension-settings-probe
     devDependencies:
       '@directus/env':
         specifier: workspace:*
         version: link:../../packages/env
+      '@directus/errors':
+        specifier: workspace:*
+        version: link:../../packages/errors
+      '@directus/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
       '@directus/tsconfig':
         specifier: 'catalog:'
         version: 4.0.0
@@ -3194,6 +3216,9 @@ importers:
       axios:
         specifier: 1.18.1
         version: 1.18.1(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
+      express:
+        specifier: 'catalog:'
+        version: 4.22.2(supports-color@10.2.2)
       get-port:
         specifier: 7.2.0
         version: 7.2.0
@@ -3225,8 +3250,8 @@ importers:
         specifier: 2.3.0
         version: 2.3.0
       knex:
-        specifier: 3.1.0
-        version: 3.1.0(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
+        specifier: 'catalog:'
+        version: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
       listr2:
         specifier: 10.1.2
         version: 10.1.2
@@ -9842,24 +9867,30 @@ packages:
 
   knex-mock-client@3.0.2:
     resolution: {integrity: sha512-g3y60FBFrOTWMScndtgTAFlqPvdcKeO+hAu8qWfahBMRI9Y1EmP/8Ie01UMd1S377HUb2xCInHDIb68KcppzEg==}
+    version: 3.0.2
     engines: {node: '>=16'}
     peerDependencies:
       knex: '>=2.0.0'
 
-  knex@3.1.0:
-    resolution: {integrity: sha512-GLoII6hR0c4ti243gMs5/1Rb3B+AjwMOfjYm97pu0FOQa7JH56hgBxYf5WK2525ceSbBY1cjeZ9yk99GPMB6Kw==}
+  knex@https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745:
+    resolution: {gitHosted: true, integrity: sha512-JZ1BdJwj3d6cpz4hfrCGlLA6EkGWuLKMB64jjVY5EcKJyK152lJ4Vpv76XJEKA0BU8IWEJDEMGuP0C4M7Bju1g==, tarball: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745}
+    version: 3.3.0
     engines: {node: '>=16'}
     hasBin: true
     peerDependencies:
       better-sqlite3: '*'
+      mariadb: '*'
       mysql: '*'
       mysql2: '*'
       pg: '*'
       pg-native: '*'
+      pg-query-stream: ^4.14.0
       sqlite3: '*'
       tedious: '*'
     peerDependenciesMeta:
       better-sqlite3:
+        optional: true
+      mariadb:
         optional: true
       mysql:
         optional: true
@@ -9868,6 +9899,8 @@ packages:
       pg:
         optional: true
       pg-native:
+        optional: true
+      pg-query-stream:
         optional: true
       sqlite3:
         optional: true
@@ -12606,8 +12639,8 @@ packages:
     resolution: {integrity: sha512-MFO/QzvtAOmJbkhOaCTvbGcFN9L9b+JunIsDwaKljSOdcLMea3NJ1k9Usz/rjdfSXTq4dfzfeS7W4p4YOAAHeA==}
     engines: {node: '>=18'}
 
-  tarn@3.0.2:
-    resolution: {integrity: sha512-51LAVKUSZSVfI05vjPESNc5vwqqZpbXCsU+/+wxlOrUjk2SnFTt97v9ZgQrD4YmxYW1Px6w2KjaDitCfkvgxMQ==}
+  tarn@3.1.2:
+    resolution: {integrity: sha512-3RTvqKZcK/17jnJ8rMKFXbyNogywTs1z0gVPPwFsJGX46rkmUHOdIaSQ/aVO1rS7nH+soiXiWk7rvUXxndm8Dg==}
     engines: {node: '>=8.0.0'}
 
   tdigest@0.1.2:
@@ -15886,7 +15919,7 @@ snapshots:
       debug: 4.3.7(supports-color@10.2.2)
       eventemitter2: 6.4.9
       extrareqp2: 1.0.0(debug@4.3.7(supports-color@10.2.2))
-      ws: 8.21.0
+      ws: 8.21.1
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -21141,12 +21174,12 @@ snapshots:
 
   kind-of@6.0.3: {}
 
-  knex-mock-client@3.0.2(knex@3.1.0(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))):
+  knex-mock-client@3.0.2(knex@https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))):
     dependencies:
-      knex: 3.1.0(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
+      knex: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
       lodash.clonedeep: 4.5.0
 
-  knex@3.1.0(mysql2@3.22.5(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)):
+  knex@https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.22.5(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)):
     dependencies:
       colorette: 2.0.19
       commander: 10.0.1
@@ -21160,7 +21193,7 @@ snapshots:
       pg-connection-string: 2.6.2
       rechoir: 0.8.0
       resolve-from: 5.0.0
-      tarn: 3.0.2
+      tarn: 3.1.2
       tildify: 2.0.0
     optionalDependencies:
       mysql2: 3.22.5(@types/node@22.20.1)
@@ -21170,7 +21203,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  knex@3.1.0(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)):
+  knex@https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)):
     dependencies:
       colorette: 2.0.19
       commander: 10.0.1
@@ -21184,7 +21217,7 @@ snapshots:
       pg-connection-string: 2.6.2
       rechoir: 0.8.0
       resolve-from: 5.0.0
-      tarn: 3.0.2
+      tarn: 3.1.2
       tildify: 2.0.0
     optionalDependencies:
       mysql2: 3.22.5(@types/node@26.0.0)
@@ -21194,7 +21227,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  knex@3.1.0(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)):
+  knex@https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)):
     dependencies:
       colorette: 2.0.19
       commander: 10.0.1
@@ -21208,7 +21241,7 @@ snapshots:
       pg-connection-string: 2.6.2
       rechoir: 0.8.0
       resolve-from: 5.0.0
-      tarn: 3.0.2
+      tarn: 3.1.2
       tildify: 2.0.0
     optionalDependencies:
       mysql2: 3.23.1(@types/node@22.20.1)
@@ -24448,7 +24481,7 @@ snapshots:
       minizlib: 3.1.0
       yallist: 5.0.0
 
-  tarn@3.0.2: {}
+  tarn@3.1.2: {}
 
   tdigest@0.1.2:
     dependencies:

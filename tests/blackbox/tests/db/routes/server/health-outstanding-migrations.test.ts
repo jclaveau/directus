@@ -2,8 +2,9 @@ import config, { paths, type Env } from '@common/config';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { writeExtensionPackage } from '@utils/write-extension-package';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,7 +13,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 /**
- * A migration file the database has never recorded, staged in an extensions path
+ * A migration file the database has never recorded, staged in a MIGRATIONS_PATH
  * of this instance's own so no other instance in the run can see it. That is what
  * the boot guard is meant to notice, and the only way to reach it from outside:
  * the watch stops as soon as it reads a clean database, so a correctly migrated
@@ -46,7 +47,9 @@ describe('/server', () => {
 			);
 
 			const env = cloneDeep(config.envs) as { [vendor: string]: Env };
-			env[vendor]['EXTENSIONS_PATH'] = directory;
+			env[vendor]['MIGRATIONS_PATH'] = join(directory, 'migrations');
+			await writeExtensionPackage(directory);
+			env[vendor]['PACKAGE_FILE_LOCATION'] = directory;
 			env[vendor]['MIGRATIONS_WAIT_INTERVAL'] = '100ms';
 			env[vendor]['MIGRATIONS_WAIT_TIMEOUT'] = '2s';
 
@@ -62,7 +65,7 @@ describe('/server', () => {
 			env[vendor]['CACHE_STATS_ENABLED'] = 'true';
 			env[vendor]['CACHE_STATS_DRAIN_SCHEDULE'] = '* * * * * *';
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			directories[vendor] = directory;

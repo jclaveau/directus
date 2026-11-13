@@ -1,9 +1,16 @@
 import { useEnv } from '@directus/env';
-import type { AbstractServiceOptions, MutationOptions, Notification, PrimaryKey } from '@directus/types';
+import type {
+	AbstractServiceOptions,
+	Notification,
+	WrittenEventContext,
+} from '@directus/types';
+import type { Knex } from 'knex';
+import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { md } from '../utils/md.js';
+import { queueAfterCommit } from '../utils/transaction.js';
 import { Url } from '../utils/url.js';
 import { ItemsService } from './items.js';
 import { MailService } from './mail/index.js';
@@ -17,23 +24,15 @@ export class NotificationsService extends ItemsService<Notification> {
 		super('directus_notifications', options);
 	}
 
-	override async createMany(data: Partial<Notification>[], opts?: MutationOptions): Promise<PrimaryKey[]> {
-		const primaryKeys = await super.createMany(data, opts);
-
-		for (const notification of data) {
-			await this.sendEmail(notification);
-		}
-
-		return primaryKeys;
-	}
-
 	async sendEmail(data: Partial<Notification>) {
 		if (data.recipient) {
 			const usersService = new UsersService({ schema: this.schema, knex: this.knex });
 
-			const user = await usersService.readOne(data.recipient, {
-				fields: ['id', 'email', 'email_notifications', 'role'],
-			});
+			// A recipient sent as an M2O object (`{ id }`) reaches here as sent
+			const user = await usersService.readOne(
+				(data.recipient as any).id ?? data.recipient,
+				{ fields: ['id', 'email', 'email_notifications', 'role'] },
+			);
 
 			if (user['email'] && user['email_notifications'] === true) {
 				const manageUserAccountUrl = new Url(env['PUBLIC_URL'] as string)
@@ -73,4 +72,43 @@ export class NotificationsService extends ItemsService<Notification> {
 			}
 		}
 	}
+}
+
+/**
+ * Email the notifications a create wrote, as written, once the transaction they
+ * were written in commits: none for a row a filter hook cancelled, took over or
+ * pointed at another, none for a row rolled back with a caller's transaction
+ * (a filter flow's), none for a create with `emitEvents: false`. A savepoint
+ * rolled back inside a transaction that then commits still emails its rows:
+ * `queueAfterCommit` keeps a savepoint's tasks.
+ */
+export function initNotificationEmails(): void {
+	emitter.onFilter<Partial<Notification>[], void>(
+		'notifications.created',
+		async (writtenNotifications, _meta, context) => {
+			const { transaction, schema, accountability } = context as WrittenEventContext;
+
+			const sendEmails = async (database: Knex) => {
+				const notificationsService = new NotificationsService({
+					schema,
+					knex: database,
+					accountability,
+				});
+
+				for (const notification of writtenNotifications) {
+					// One recipient's failure must not cost the later ones their email
+					try {
+						await notificationsService.sendEmail(notification);
+					}
+					catch (error) {
+						logger.error(error, `Could not send notification via mail`);
+					}
+				}
+			};
+
+			if (!queueAfterCommit(transaction, sendEmails)) {
+				await sendEmails(transaction);
+			}
+		},
+	);
 }

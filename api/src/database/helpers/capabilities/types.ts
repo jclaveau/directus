@@ -1,4 +1,4 @@
-import type { FieldOverview } from '@directus/types';
+import type { FieldOverview, Type } from '@directus/types';
 import { DatabaseHelper } from '../types.js';
 
 export class CapabilitiesHelper extends DatabaseHelper {
@@ -32,6 +32,41 @@ export class CapabilitiesHelper extends DatabaseHelper {
 	 */
 	async preservesInsertOrderInReturning(): Promise<boolean> {
 		return false;
+	}
+
+	/**
+	 * Whether `knex.batchUpdate(…, { mode: 'json' })` can write an update batch,
+	 * one statement for every row of a run. Default `false`: `ItemsService`
+	 * writes the groups one by one.
+	 */
+	supportsJsonBatchUpdate(): boolean {
+		return false;
+	}
+
+	/**
+	 * Whether `SELECT … FOR UPDATE` locks the rows it reads until the
+	 * transaction ends. SQLite has no row locks: a transaction writing holds the
+	 * whole database.
+	 */
+	supportsRowLocks(): boolean {
+		return true;
+	}
+
+	/**
+	 * Whether a row read before its update takes `FOR NO KEY UPDATE`: it stops a
+	 * delete or another write of the row, not a foreign key naming it, until
+	 * the update changes a unique column.
+	 */
+	supportsNoKeyUpdateLock(): boolean {
+		return false;
+	}
+
+	/**
+	 * The field types a json batch row stores as a bound update value would.
+	 * Empty where `supportsJsonBatchUpdate` is false.
+	 */
+	jsonBatchUpdateTypes(): ReadonlySet<Type> {
+		return new Set();
 	}
 
 	/**

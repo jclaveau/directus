@@ -101,6 +101,15 @@ down to the bare `collection:&`), never truncate a pair's value list. A dropped
 pair over-purges; a truncated value list leaves the read pinned to values it no
 longer names and never purges them -> stale.
 
+**Settled 2026-09-29 (do NOT re-raise):**
+- **R6 deviates on purpose.** `pinCounts` counts per pin label, as a dry run of
+  the declared-pin purge (`purgeBy` / `cache.purge`), not per entry fingerprint.
+  **Why:** an entry purges nothing, so the ruled count would only list the
+  sort/limit variants of its own query case. It is NOT the reach of a row write.
+- **R5 is not ported.** The coverage join is still on pin labels; tracked in #566.
+- **The legacy double-write is gone.** Migration `20260911A` dropped the `tag:` /
+  `slices:` layout.
+
 Related: [[project_directus_scoped_cache_tag_derivation]],
 [[project_directus_scoped_cache_pin_soundness]],
 [[project_directus_pr402_accepted_exceptions]],

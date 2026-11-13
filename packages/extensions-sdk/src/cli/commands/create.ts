@@ -8,7 +8,7 @@ import type {
 	HybridExtensionType,
 } from '@directus/types';
 import { BUNDLE_EXTENSION_TYPES, EXTENSION_TYPES, HYBRID_EXTENSION_TYPES } from '@directus/constants';
-import { isIn } from '@directus/utils';
+import { isIn } from '@directus/utils/array-helpers';
 import chalk from 'chalk';
 import { execa } from 'execa';
 import fse from 'fs-extra';

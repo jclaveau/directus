@@ -67,6 +67,7 @@ export type Info = {
 	version?: string;
 	extensions?: {
 		limit: number | null;
+		marketplace: boolean;
 	};
 	uploads?: {
 		chunkSize: number;

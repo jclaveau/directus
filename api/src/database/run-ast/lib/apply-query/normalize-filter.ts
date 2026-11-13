@@ -29,6 +29,14 @@ export function normalizeFilter(filter: Filter): Filter {
 			continue;
 		}
 
+		// A quantifier's conditions hold against one related row: its content is
+		// a filter of its own, which the _some/_none subquery applies whole.
+		// Splitting it gave each condition a quantifier of its own.
+		if (key === '_some' || key === '_none') {
+			parts.push({ [key]: normalizeFilter(value as Filter) } as Filter);
+			continue;
+		}
+
 		const val = value as Record<string, any>;
 		const childKeys = Object.keys(val);
 		const relKeys = childKeys.filter((k) => !k.startsWith('_') || k === '_none' || k === '_some');

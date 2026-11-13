@@ -2,7 +2,9 @@ import type { Filter, Permission, Query, SchemaOverview } from '@directus/types'
 import type { Knex } from 'knex';
 import type { AliasMap } from '../../../utils/get-column-path.js';
 import { DatabaseHelper } from '../types.js';
-import { generateAlias } from '../../run-ast/lib/apply-query/index.js';
+import type {
+	AliasGenerator,
+} from '../../run-ast/lib/apply-query/create-alias-generator.js';
 import { applyFilter } from '../../run-ast/lib/apply-query/filter/index.js';
 
 export type FnHelperOptions = {
@@ -15,6 +17,7 @@ export type FnHelperOptions = {
 				permissions: Permission[];
 		  }
 		| undefined;
+	generateAlias: AliasGenerator;
 };
 
 export abstract class FnHelper extends DatabaseHelper {
@@ -34,9 +37,13 @@ export abstract class FnHelper extends DatabaseHelper {
 	abstract hour(table: string, column: string, options?: FnHelperOptions): Knex.Raw;
 	abstract minute(table: string, column: string, options?: FnHelperOptions): Knex.Raw;
 	abstract second(table: string, column: string, options?: FnHelperOptions): Knex.Raw;
-	abstract count(table: string, column: string, options?: FnHelperOptions): Knex.Raw;
+	abstract count(table: string, column: string, options: FnHelperOptions): Knex.Raw;
 
-	protected _relationalCount(table: string, column: string, options?: FnHelperOptions): Knex.Raw {
+	protected _relationalCount(
+		table: string,
+		column: string,
+		options: FnHelperOptions,
+	): Knex.Raw {
 		const collectionName = options?.originalCollectionName || table;
 
 		const relation = this.schema.relations.find(
@@ -50,7 +57,7 @@ export abstract class FnHelper extends DatabaseHelper {
 		}
 
 		// generate a unique alias for the relation collection, to prevent collisions in self referencing relations
-		const alias = generateAlias();
+		const alias = options.generateAlias();
 
 		let countQuery = this.knex
 			.count('*')
@@ -75,6 +82,7 @@ export abstract class FnHelper extends DatabaseHelper {
 				aliasMap,
 				options.relationalCountOptions.cases,
 				options.relationalCountOptions.permissions,
+				options.generateAlias,
 			).query;
 		}
 

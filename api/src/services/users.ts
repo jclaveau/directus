@@ -2,10 +2,12 @@ import { useEnv } from '@directus/env';
 import { ForbiddenError, InvalidPayloadError, RecordNotUniqueError } from '@directus/errors';
 import type {
 	AbstractServiceOptions,
+	ActionEventParams,
 	Item,
 	MutationOptions,
 	PrimaryKey,
 	RegisterUserInput,
+	UpdateGroup,
 	User,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
@@ -15,17 +17,18 @@ import Joi from 'joi';
 import jwt from 'jsonwebtoken';
 import type { StringValue } from 'ms';
 import { performance } from 'node:perf_hooks';
-import { clearSystemCache } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache/index.js';
+import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
 import getDatabase from '../database/index.js';
+import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
 import { getSecret } from '../utils/get-secret.js';
 import isUrlAllowed from '../utils/is-url-allowed.js';
 import { verifyJWT } from '../utils/jwt.js';
-import { isEmpty } from '../utils/lodash-es-used.js';
+import { chunk, isEmpty } from '../utils/lodash-es-used.js';
 import { stall } from '../utils/stall.js';
+import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { Url } from '../utils/url.js';
 import { ItemsService } from './items.js';
 import { MailService } from './mail/index.js';
@@ -33,6 +36,9 @@ import { SettingsService } from './settings.js';
 
 const env = useEnv();
 const logger = useLogger();
+
+// Bounds the bind parameters of one update and the rows one cache snapshot holds.
+const UNLINK_CHUNK_SIZE = 10_000;
 
 export class UsersService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
@@ -47,7 +53,10 @@ export class UsersService extends ItemsService {
 	 * User email has to be unique case-insensitive. This is an additional check to make sure that
 	 * the email is unique regardless of casing
 	 */
-	private async checkUniqueEmails(emails: string[], excludeKey?: PrimaryKey): Promise<void> {
+	private async checkUniqueEmails(
+		emails: string[],
+		excludeKeys: PrimaryKey[] = [],
+	): Promise<void> {
 		emails = emails.map((email) => email.toLowerCase());
 
 		const duplicates = emails.filter((value, index, array) => array.indexOf(value) !== index);
@@ -65,8 +74,8 @@ export class UsersService extends ItemsService {
 			.from('directus_users')
 			.whereRaw(`LOWER(??) IN (${emails.map(() => '?')})`, ['email', ...emails]);
 
-		if (excludeKey) {
-			query.whereNot('id', excludeKey);
+		if (excludeKeys.length > 0) {
+			query.whereNotIn('id', excludeKeys);
 		}
 
 		const results = await query;
@@ -183,39 +192,17 @@ export class UsersService extends ItemsService {
 	}
 
 	/**
-	 * Create a new user
-	 */
-	override async createOne(data: Partial<Item>, opts: MutationOptions = {}): Promise<PrimaryKey> {
-		try {
-			if ('email' in data && data['email'] !== undefined) {
-				this.validateEmail(data['email']);
-				await this.checkUniqueEmails([data['email']]);
-			}
-
-			if ('password' in data) {
-				await this.checkPasswordPolicy([data['password']]);
-			}
-		} catch (err: any) {
-			opts.preMutationError = err;
-		}
-
-		if (!('status' in data) || data['status'] === 'active') {
-			// Creating a user only requires checking user limits if the user is active, no need to care about the role
-			opts.userIntegrityCheckFlags =
-				(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None) | UserIntegrityCheckFlag.UserLimits;
-
-			opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
-		}
-
-		return await super.createOne(data, opts);
-	}
-
-	/**
 	 * Create multiple new users
 	 */
 	override async createMany(data: Partial<Item>[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
-		const emails = data.map((payload) => payload['email']).filter((email) => email);
-		const passwords = data.map((payload) => payload['password']).filter((password) => password);
+		const emails = data
+			.filter((payload) => payload['email'] !== undefined)
+			.map((payload) => payload['email']);
+
+		const passwords = data
+			.filter((payload) => 'password' in payload && payload['password'] !== null)
+			.map((payload) => payload['password']);
+
 		const someActive = data.some((payload) => !('status' in payload) || payload['status'] === 'active');
 
 		try {
@@ -251,86 +238,129 @@ export class UsersService extends ItemsService {
 	}
 
 	/**
-	 * Update many users by primary key
+	 * Update users in groups, each group one change applied to the keys it names.
+	 * Every update entrypoint funnels through here.
 	 */
-	override async updateMany(
-		keys: PrimaryKey[],
-		data: Partial<Item>,
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
-		try {
-			if (data['email']) {
-				if (keys.length > 1) {
-					throw new RecordNotUniqueError({
-						collection: 'directus_users',
-						field: 'email',
-						value: data['email'],
+		const claimedEmails = new Set<string>();
+
+		// A user the batch gives a new email frees its old one; claimedEmails
+		// still refuses two rows claiming one.
+		const rewrittenEmailKeys = groups
+			.filter(({ data }) => {
+				return Boolean(data['email']);
+			})
+			.flatMap(({ keys }) => {
+				return keys;
+			});
+
+		for (const { data, keys } of groups) {
+			try {
+				if (data['email']) {
+					const lowerEmail = String(data['email']).toLowerCase();
+
+					// One email can belong to one user only, across every group.
+					if (keys.length > 1 || claimedEmails.has(lowerEmail)) {
+						throw new RecordNotUniqueError({
+							collection: 'directus_users',
+							field: 'email',
+							value: data['email'],
+						});
+					}
+
+					claimedEmails.add(lowerEmail);
+					this.validateEmail(data['email']);
+					await this.checkUniqueEmails([data['email']], rewrittenEmailKeys);
+				}
+
+				if (data['password']) {
+					await this.checkPasswordPolicy([data['password']]);
+				}
+
+				if (data['tfa_secret'] !== undefined) {
+					throw new InvalidPayloadError({
+						reason: `You can't change the "tfa_secret" value manually`,
 					});
 				}
 
-				this.validateEmail(data['email']);
-				await this.checkUniqueEmails([data['email']], keys[0]);
-			}
+				if (data['provider'] !== undefined) {
+					if (this.accountability && this.accountability.admin !== true) {
+						throw new InvalidPayloadError({
+							reason: `You can't change the "provider" value manually`,
+						});
+					}
 
-			if (data['password']) {
-				await this.checkPasswordPolicy([data['password']]);
-			}
-
-			if (data['tfa_secret'] !== undefined) {
-				throw new InvalidPayloadError({ reason: `You can't change the "tfa_secret" value manually` });
-			}
-
-			if (data['provider'] !== undefined) {
-				if (this.accountability && this.accountability.admin !== true) {
-					throw new InvalidPayloadError({ reason: `You can't change the "provider" value manually` });
+					data['auth_data'] = null;
 				}
 
-				data['auth_data'] = null;
-			}
+				if (data['external_identifier'] !== undefined) {
+					if (this.accountability && this.accountability.admin !== true) {
+						throw new InvalidPayloadError({
+							reason: `You can't change the "external_identifier" value manually`,
+						});
+					}
 
-			if (data['external_identifier'] !== undefined) {
-				if (this.accountability && this.accountability.admin !== true) {
-					throw new InvalidPayloadError({ reason: `You can't change the "external_identifier" value manually` });
+					data['auth_data'] = null;
 				}
-
-				data['auth_data'] = null;
 			}
-		} catch (err: any) {
-			opts.preMutationError = err;
-		}
+			catch (err: any) {
+				opts.preMutationErrorsByKey ??= new Map();
 
-		if ('role' in data) {
-			opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
-		}
-
-		if ('status' in data) {
-			if (data['status'] === 'active') {
-				// User are being activated, no need to check if there are enough admins
-				opts.userIntegrityCheckFlags =
-					(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None) | UserIntegrityCheckFlag.UserLimits;
-			} else {
-				opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
+				for (const key of keys) {
+					if (!opts.preMutationErrorsByKey.has(String(key))) {
+						opts.preMutationErrorsByKey.set(String(key), err);
+					}
+				}
 			}
 		}
 
-		if (opts.userIntegrityCheckFlags) {
-			opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
+		return await super.updateGroups(groups, opts);
+	}
+
+	protected override requiredIntegrityChecks(
+		groups: UpdateGroup<Item>[],
+	): UserIntegrityCheckFlag {
+		let integrityCheckFlags = UserIntegrityCheckFlag.None;
+
+		for (const { data } of groups) {
+			if ('role' in data) {
+				integrityCheckFlags |= UserIntegrityCheckFlag.All;
+			}
+
+			if ('status' in data) {
+				if (data['status'] === 'active') {
+					// User are being activated, no need to check if there are enough admins
+					integrityCheckFlags |= UserIntegrityCheckFlag.UserLimits;
+				}
+				else {
+					integrityCheckFlags |= UserIntegrityCheckFlag.All;
+				}
+			}
 		}
 
-		const result = await super.updateMany(keys, data, opts);
+		return integrityCheckFlags;
+	}
 
-		if (data['status'] !== undefined && data['status'] !== 'active') {
-			await this.clearUserSessions(keys);
-		} else if (data['password'] !== undefined || data['email'] !== undefined) {
-			await this.clearUserSessions(keys, this.accountability?.session);
+	protected override async applyUpdateSideEffects(
+		groups: UpdateGroup<Item>[],
+		opts: MutationOptions,
+	): Promise<void> {
+		for (const { data, keys } of groups) {
+			if (data['status'] !== undefined && data['status'] !== 'active') {
+				await this.clearUserSessions(keys);
+			}
+			else if (data['password'] !== undefined || data['email'] !== undefined) {
+				await this.clearUserSessions(keys, this.accountability?.session);
+			}
 		}
 
 		// Only clear the caches if the role has been updated
-		if ('role' in data) {
+		if (groups.some(({ data }) => 'role' in data)) {
 			await this.clearCaches(opts);
 		}
-
-		return result;
 	}
 
 	/**
@@ -347,12 +377,74 @@ export class UsersService extends ItemsService {
 			}
 		}
 
-		// Manual constraint, see https://github.com/directus/directus/pull/19912
-		await this.knex('directus_comments').update({ user_updated: null }).whereIn('user_updated', keys);
-		await this.knex('directus_notifications').update({ sender: null }).whereIn('sender', keys);
-		await this.knex('directus_versions').update({ user_updated: null }).whereIn('user_updated', keys);
+		opts.mutationTracker ??= this.createMutationTracker();
 
-		await super.deleteMany(keys, opts);
+		// Held until the delete's transaction ends: a hook fired inside it would read
+		// the users still there, or wait on the rows it locks. Inside a caller's
+		// transaction that is the caller's `bypassEmitAction`, or this call's end.
+		const heldActionEvents: ActionEventParams[] = [];
+
+		// Manual constraint, see https://github.com/directus/directus/pull/19912
+		const userReferences = [
+			['directus_comments', 'user_updated'],
+			['directus_notifications', 'sender'],
+			['directus_versions', 'user_updated'],
+		] as const;
+
+		// In the delete's transaction: a delete refused there rolls it back.
+		await transactionHoldingActions(this.knex, heldActionEvents, async (trx) => {
+			// Through ItemsService so the cache purges the nulled rows, without the
+			// hooks, activity and revisions the raw update never had.
+			if (!opts.preMutationError) {
+				for (const [collection, userField] of userReferences) {
+					const itemsService = new ItemsService(collection, {
+						knex: trx,
+						schema: this.schema,
+					});
+
+					const unlinkedKeys = await itemsService.getKeysByQuery(
+						{
+							filter: { [userField]: { _in: keys } },
+							limit: -1,
+						},
+						{ emitEvents: false },
+					);
+
+					for (const keyChunk of chunk(unlinkedKeys, UNLINK_CHUNK_SIZE)) {
+						await itemsService.updateMany(
+							keyChunk,
+							{ [userField]: null },
+							{ emitEvents: false },
+						);
+					}
+				}
+			}
+
+			await new ItemsService('directus_users', {
+				knex: trx,
+				schema: this.schema,
+				accountability: this.accountability,
+				nested: this.nested,
+			}).deleteMany(keys, {
+				...opts,
+				bypassEmitAction: opts.bypassEmitAction ?? ((actionEvent) => {
+					heldActionEvents.push(actionEvent);
+				}),
+			});
+		}, opts.mutationTracker.snapshot());
+
+		const emitting = Promise.all(heldActionEvents.map((actionEvent) => {
+			return emitter.emitAction(
+				actionEvent.event,
+				actionEvent.meta,
+				actionEvent.context,
+			);
+		}));
+
+		if (opts.awaitActionHooks !== false) {
+			await emitting;
+		}
+
 		await this.clearUserSessions(keys);
 
 		return keys;
@@ -387,6 +479,9 @@ export class UsersService extends ItemsService {
 				// For known users update role if changed
 			} else if (user.status === 'invited' && user.role !== role) {
 				await this.updateOne(user.id, { role }, opts);
+			}
+			else if (opts.preMutationError) {
+				throw opts.preMutationError;
 			}
 
 			// Send invite for new and already invited users
@@ -664,10 +759,6 @@ export class UsersService extends ItemsService {
 	}
 
 	private async clearCaches(opts?: MutationOptions) {
-		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-
-		if (this.cache && opts?.autoPurgeCache !== false) {
-			await flushResponseCache(this.cache);
-		}
+		await clearCachesAfterCommit(this.knex, this.cache, opts);
 	}
 }

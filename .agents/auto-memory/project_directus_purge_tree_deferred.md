@@ -1,5 +1,5 @@
 ---
-name: directus-purge-tree-deferred
+name: project_directus_purge_tree_deferred
 description: Filtering the SLOWEST PURGES needs its own tree keyed by collection/scope — the endpoint tree can't host it; deferred out of PR #353
 metadata:
   author: Jean Claveau

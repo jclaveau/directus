@@ -22,7 +22,12 @@ export function getExtensionDefinition(manifest: ExtensionManifest, meta: { path
 				app: extensionOptions.path.app,
 				api: extensionOptions.path.api,
 			},
-			entries: extensionOptions.entries.map((entry) => pick(entry, 'name', 'type')),
+			entries: (extensionOptions.entries ?? []).map(
+				(entry) => pick(entry, 'name', 'type'),
+			),
+			...(extensionOptions.entries === undefined
+				? { entriesFrom: 'code' as const }
+				: {}),
 			host: extensionOptions.host,
 			local,
 		};

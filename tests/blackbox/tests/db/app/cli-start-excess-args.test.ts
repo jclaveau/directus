@@ -3,7 +3,7 @@ import vendors from '@common/get-dbs-to-test';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import { createRequire } from 'module';
 import { tmpdir } from 'os';
@@ -33,7 +33,7 @@ describe('CLI start boots under pm2-runtime cluster mode', () => {
 		const promises = [];
 
 		for (const vendor of vendors) {
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			const pm2Home = mkdtempSync(join(tmpdir(), `pm2-${vendor}-`));

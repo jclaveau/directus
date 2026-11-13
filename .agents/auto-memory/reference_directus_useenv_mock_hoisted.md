@@ -1,5 +1,5 @@
 ---
-name: directus_useenv_mock_hoisted
+name: reference_directus_useenv_mock_hoisted
 description: vitest mocking pattern for @directus/env's useEnv() in api unit tests — vi.hoisted factory, not automock
 metadata:
   author: Jean Claveau

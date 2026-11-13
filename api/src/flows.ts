@@ -1,18 +1,32 @@
 import { Action } from '@directus/constants';
 import { useEnv } from '@directus/env';
-import { ForbiddenError } from '@directus/errors';
+import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { isSystemCollection } from '@directus/system-data';
 import type {
 	Accountability,
 	ActionHandler,
+	CreateEntries,
+	EventContext,
 	FilterHandler,
 	Flow,
+	Item,
 	Operation,
 	PrimaryKey,
 	SchemaOverview,
 	OperationHandler,
+	UpdateEntries,
+	UpdateGroup,
 } from '@directus/types';
-import { applyOptionsData, deepMap, getRedactedString, isValidJSON, parseJSON, toArray } from '@directus/utils';
+import {
+	applyOptionsData,
+	deepMap,
+	getRedactedString,
+	isValidJSON,
+	mapCreateRows,
+	oneLine,
+	parseJSON,
+	toArray,
+} from '@directus/utils';
 import type { Knex } from 'knex';
 import { get } from 'micromustache';
 import { useBus } from './bus/index.js';
@@ -35,6 +49,7 @@ import { getService } from './utils/get-service.js';
 import { JobQueue } from './utils/job-queue.js';
 import { pick } from './utils/lodash-es-used.js';
 import { redactObject } from './utils/redact-object.js';
+import { joinRequestStore } from './utils/request-store.js';
 import { scheduleSynchronizedJob, validateCron } from './utils/schedule.js';
 
 let flowManager: FlowManager | undefined;
@@ -58,6 +73,66 @@ const TRIGGER_KEY = '$trigger';
 const ACCOUNTABILITY_KEY = '$accountability';
 const LAST_KEY = '$last';
 const ENV_KEY = '$env';
+
+/**
+ * An event an event flow listens on, and the base event name its `$trigger`
+ * carries. ItemsService emits a create and an update grouped; a service writing
+ * with `emitEvents: false` emits the bare event itself with one row
+ * (FieldsService), so the same name carries both shapes and the handler tells
+ * them apart by the payload.
+ */
+type FlowEventRoute = {
+	eventName: string;
+	triggerEvent: string;
+	payloadShape: 'row' | 'update-groups' | 'create-entries';
+};
+
+function flowEventRoutes(flowOptions: Record<string, any>): FlowEventRoute[] {
+	if (!flowOptions['scope']) {
+		return [];
+	}
+
+	return toArray(flowOptions['scope']).flatMap((scope: string): FlowEventRoute[] => {
+		if (!['items.create', 'items.update', 'items.delete'].includes(scope)) {
+			return [{ eventName: scope, triggerEvent: scope, payloadShape: 'row' }];
+		}
+
+		if (!flowOptions['collections']) {
+			return [];
+		}
+
+		return toArray(flowOptions['collections']).flatMap((collection: string) => {
+			return collectionEventRoutes(scope, collection);
+		});
+	});
+}
+
+function collectionEventRoutes(
+	scope: string,
+	collection: string,
+): FlowEventRoute[] {
+	const triggerEvent = isSystemCollection(collection)
+		? `${collection.substring(9)}.${scope.split('.')[1]}`
+		: `${collection}.${scope}`;
+
+	if (scope === 'items.update') {
+		return [{
+			eventName: triggerEvent,
+			triggerEvent,
+			payloadShape: 'update-groups',
+		}];
+	}
+
+	if (scope === 'items.delete') {
+		return [{ eventName: triggerEvent, triggerEvent, payloadShape: 'row' }];
+	}
+
+	return [{
+		eventName: triggerEvent,
+		triggerEvent,
+		payloadShape: 'create-entries',
+	}];
+}
 
 interface FlowMessage {
 	type: 'reload';
@@ -163,61 +238,30 @@ class FlowManager {
 
 		for (const flow of flowTrees) {
 			if (flow.trigger === 'event') {
-				let events: string[] = [];
-
-				if (flow.options?.['scope']) {
-					events = toArray(flow.options['scope'])
-						.map((scope: string) => {
-							if (['items.create', 'items.update', 'items.delete'].includes(scope)) {
-								if (!flow.options?.['collections']) return [];
-
-								return toArray(flow.options['collections']).map((collection: string) => {
-									if (isSystemCollection(collection)) {
-										const action = scope.split('.')[1];
-										return collection.substring(9) + '.' + action;
-									}
-
-									return `${collection}.${scope}`;
-								});
-							}
-
-							return scope;
-						})
-						.flat();
-				}
-
 				if (flow.options['type'] === 'filter') {
-					const handler: FilterHandler = (payload, meta, context) =>
-						this.executeFlow(
-							flow,
-							{ payload, ...meta },
-							{
-								accountability: context['accountability'],
-								database: context['database'],
-								getSchema: context['schema'] ? () => context['schema'] : getSchema,
-							},
-						);
-
-					events.forEach((event) => emitter.onFilter(event, handler));
-
-					this.triggerHandlers.push({
-						id: flow.id,
-						events: events.map((event) => ({ type: 'filter', name: event, handler })),
+					const handlers = flowEventRoutes(flow.options).map((route) => {
+						return {
+							type: 'filter' as const,
+							name: route.eventName,
+							handler: this.filterFlowHandler(flow, route),
+						};
 					});
+
+					handlers.forEach(({ name, handler }) => emitter.onFilter(name, handler));
+
+					this.triggerHandlers.push({ id: flow.id, events: handlers });
 				} else if (flow.options['type'] === 'action') {
-					const handler: ActionHandler = (meta, context) =>
-						this.executeFlow(flow, meta, {
-							accountability: context['accountability'],
-							database: getDatabase(),
-							getSchema: context['schema'] ? () => context['schema'] : getSchema,
-						});
-
-					events.forEach((event) => emitter.onAction(event, handler));
-
-					this.triggerHandlers.push({
-						id: flow.id,
-						events: events.map((event) => ({ type: 'action', name: event, handler })),
+					const handlers = flowEventRoutes(flow.options).map((route) => {
+						return {
+							type: 'action' as const,
+							name: route.eventName,
+							handler: this.actionFlowHandler(flow, route),
+						};
 					});
+
+					handlers.forEach(({ name, handler }) => emitter.onAction(name, handler));
+
+					this.triggerHandlers.push({ id: flow.id, events: handlers });
 				}
 			} else if (flow.trigger === 'schedule') {
 				if (validateCron(flow.options['cron'])) {
@@ -382,7 +426,176 @@ class FlowManager {
 		this.isLoaded = false;
 	}
 
-	private async executeFlow(flow: Flow, data: unknown = null, context: Record<string, unknown> = {}): Promise<unknown> {
+	/**
+	 * One run per created row or update group, its trigger shaped like the single
+	 * write the flow was written for; a returned value replaces that row's or
+	 * group's data. A created row's flow can also answer it as a hook does: a
+	 * key takes the row over, null cancels it.
+	 */
+	private filterFlowHandler(flow: Flow, route: FlowEventRoute): FilterHandler {
+		const runFlow: FilterHandler = (payload, meta, context) => {
+			return this.executeFlow(
+				flow,
+				{ payload, ...meta, event: route.triggerEvent },
+				{
+					accountability: context['accountability'],
+					transaction: 'transaction' in context
+						? context.transaction
+						: undefined,
+					database: context['database'],
+					getSchema: context['schema']
+						? () => context['schema']
+						: getSchema,
+				},
+			);
+		};
+
+		if (route.payloadShape === 'row') {
+			return runFlow;
+		}
+
+		return async (payload, meta, context) => {
+			// An earlier filter cancelled the whole call: there is no row to run for.
+			if (payload === null) {
+				return payload;
+			}
+
+			if (!Array.isArray(payload)) {
+				return runFlow(payload, meta, context);
+			}
+
+			if (route.payloadShape === 'create-entries') {
+				const createEntries = payload as CreateEntries;
+
+				return mapCreateRows(createEntries, async (data, index) => {
+					const originalEntry = createEntries[index] as { data: Item };
+
+					const rowAfterFlow = await runFlow(
+						data,
+						{ ...meta, originalPayload: originalEntry.data },
+						context,
+					);
+
+					return rowAfterFlow === undefined
+						? data
+						: rowAfterFlow as Partial<Item> | PrimaryKey | null;
+				});
+			}
+
+			const groupsAfterFlow: UpdateEntries = [];
+
+			for (const group of payload as UpdateEntries) {
+				if (!('data' in group)) {
+					groupsAfterFlow.push(group);
+					continue;
+				}
+
+				const dataAfterFlow = await runFlow(
+					group.data,
+					{ ...meta, keys: group.keys, originalPayload: group.data },
+					context,
+				);
+
+				if (dataAfterFlow === null) {
+					throw new InvalidPayloadError({
+						reason: oneLine`
+							A flow on "${route.triggerEvent}" returned null for rows
+							${group.keys.join(', ')}; an update flow returns the change to
+							write, or nothing to keep the change sent
+						`,
+					});
+				}
+
+				if (typeof dataAfterFlow === 'string' || typeof dataAfterFlow === 'number') {
+					throw new InvalidPayloadError({
+						reason: oneLine`
+							A flow on "${route.triggerEvent}" returned the key ${dataAfterFlow}
+							for rows ${group.keys.join(', ')}; an update flow returns the
+							change to write, or nothing to keep the change sent
+						`,
+					});
+				}
+
+				groupsAfterFlow.push({
+					data: dataAfterFlow === undefined
+						? group.data
+						: dataAfterFlow as UpdateGroup['data'],
+					keys: group.keys,
+				});
+			}
+
+			return groupsAfterFlow;
+		};
+	}
+
+	private actionFlowHandler(flow: Flow, route: FlowEventRoute): ActionHandler {
+		const runFlow = (meta: Record<string, any>, context: EventContext) => {
+			return this.executeFlow(flow, { ...meta, event: route.triggerEvent }, {
+				accountability: context['accountability'],
+				database: getDatabase(),
+				getSchema: context['schema']
+					? () => context['schema']
+					: getSchema,
+			});
+		};
+
+		if (route.payloadShape === 'row') {
+			return runFlow;
+		}
+
+		return async (meta, context) => {
+			if (!Array.isArray(meta['payload'])) {
+				await runFlow(meta, context);
+				return;
+			}
+
+			const runMetas = route.payloadShape === 'create-entries'
+				? (meta['payload'] as Partial<Item>[]).map((row, index) => {
+					return {
+						payload: row,
+						key: meta['keys'][index],
+						collection: meta['collection'],
+					};
+				})
+				: (meta['payload'] as UpdateGroup[]).map((group) => {
+					return {
+						payload: group.data,
+						keys: group.keys,
+						collection: meta['collection'],
+					};
+				});
+
+			// A row or group whose run throws leaves the others to run.
+			for (const runMeta of runMetas) {
+				try {
+					await runFlow(runMeta, context);
+				}
+				catch (error) {
+					const logger = useLogger();
+
+					logger.warn(
+						`An error was thrown while executing action "${meta['event']}"`,
+					);
+
+					logger.warn(error);
+				}
+			}
+		};
+	}
+
+	private executeFlow(
+		flow: Flow,
+		data: unknown = null,
+		context: Record<string, unknown> = {},
+	): Promise<unknown> {
+		return joinRequestStore(() => this.runFlowOperations(flow, data, context));
+	}
+
+	private async runFlowOperations(
+		flow: Flow,
+		data: unknown,
+		context: Record<string, unknown>,
+	): Promise<unknown> {
 		const database = (context['database'] as Knex) ?? getDatabase();
 		const schema = (context['schema'] as SchemaOverview) ?? (await getSchema({ database }));
 

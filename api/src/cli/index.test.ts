@@ -69,9 +69,14 @@ describe('createCli', () => {
 		[['security', 'key:generate'], keyGenerate, []],
 		[['security', 'secret:generate'], secretGenerate, []],
 		[['database', 'install'], dbInstall, []],
-		[['database', 'migrate:latest'], dbMigrate, ['latest']],
-		[['database', 'migrate:up'], dbMigrate, ['up']],
-		[['database', 'migrate:down'], dbMigrate, ['down']],
+		[['database', 'migrate:latest'], dbMigrate, ['latest', {}]],
+		[
+			['database', 'migrate:latest', '--phase', 'before-schema'],
+			dbMigrate,
+			['latest', { phase: 'before-schema' }],
+		],
+		[['database', 'migrate:up'], dbMigrate, ['up', {}]],
+		[['database', 'migrate:down'], dbMigrate, ['down', {}]],
 		[['cache', 'flush'], cacheFlush, []],
 		[['cache', 'audit'], cacheAudit, [{}]],
 		[

@@ -90,6 +90,7 @@ extension_missing: Missing
 extension_reload_required: Page Reload Required
 extension_reload_required_copy: A page reload is required to see the changes after enabling or disabling app extensions.
 extension_reload_now: Reload now
+extension_app_chunk_stale_copy: The extensions were rebuilt on the server. Reload to run the new version.
 published_relative: Published {relativeTime}
 compatible_with_your_project: Compatible with your Project
 compatible_with_your_project_copy:
@@ -388,6 +389,7 @@ this_will_auto_setup_fields_relations: This will automatically setup all require
 click_here: Click here
 to_manually_setup_translations: to manually setup translations.
 manage: Manage
+managed_by_extension: Managed by {extension}
 click_to_manage_translated_fields: >-
   There are no translated fields yet. Click here to create them. | There is one translated field. Click here to manage
   it. | There are {count} translated fields. Click here to manage them.
@@ -1277,12 +1279,12 @@ no_extensions: No Extensions
 no_extensions_copy: No extensions have been installed yet.
 install_extension: Install Extension
 uninstall_locked: Cannot uninstall extensions that weren't installed through the Marketplace
+marketplace_production_locked: The Marketplace is disabled in production, where extensions change only with a deploy
 uninstall: Uninstall
 installed: Installed
 reinstall: Reinstall
 open_in_marketplace: Open in Marketplace
 source_registry: Marketplace
-source_local: Local
 source_module: Node Module
 collection: Collection
 collections: Collections
@@ -1302,6 +1304,7 @@ directus_collection:
   directus_cache_stats_scoped_purge_pins: Pins each purge named, for attribution (telemetry)
   directus_cache_audits: Cache audit runs, one row per replay of the live cache against the database
   directus_cache_audit_findings: The entries a cache audit found stale, drifted or unreplayable
+  directus_scoped_cache_pending_purges: Scoped-cache purges a Redis outage held back, replayed once it is reachable again
   directus_collections: Additional collection configuration and metadata
   directus_comments: Comments for items
   directus_dashboards: Dashboards within the Insights module

@@ -1,5 +1,6 @@
 import config, { paths, type Env } from '@common/config';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
+import { writeExtensionPackage } from '@utils/write-extension-package';
 import { spawnSync } from 'child_process';
 import knex, { type Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
@@ -51,7 +52,8 @@ describe('database migrations', () => {
 			directories[vendor] = directory;
 
 			const env = cloneDeep(config.envs) as { [vendor: string]: Env };
-			env[vendor]['EXTENSIONS_PATH'] = directory;
+			await writeExtensionPackage(directory);
+			env[vendor]['PACKAGE_FILE_LOCATION'] = directory;
 			env[vendor]['MIGRATIONS_PATH'] = join(directory, 'migrations');
 			envs[vendor] = env;
 		}

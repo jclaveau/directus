@@ -43,7 +43,7 @@ export class FnHelperPostgres extends FnHelper {
 		return this.knex.raw(`EXTRACT(SECOND FROM ??.??${parseLocaltime(options?.type)})`, [table, column]);
 	}
 
-	count(table: string, column: string, options?: FnHelperOptions): Knex.Raw {
+	count(table: string, column: string, options: FnHelperOptions): Knex.Raw {
 		const collectionName = options?.originalCollectionName || table;
 		const type = this.schema.collections?.[collectionName]?.fields?.[column]?.type ?? 'unknown';
 

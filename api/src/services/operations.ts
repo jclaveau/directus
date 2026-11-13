@@ -1,4 +1,11 @@
-import type { AbstractServiceOptions, Item, MutationOptions, OperationRaw, PrimaryKey } from '@directus/types';
+import type {
+	AbstractServiceOptions,
+	Item,
+	MutationOptions,
+	OperationRaw,
+	PrimaryKey,
+	UpdateGroup,
+} from '@directus/types';
 import { getFlowManager } from '../flows.js';
 import { ItemsService } from './items.js';
 
@@ -16,8 +23,11 @@ export class OperationsService extends ItemsService<OperationRaw> {
 		return result;
 	}
 
-	override async updateMany(keys: PrimaryKey[], data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey[]> {
-		const result = await super.updateMany(keys, data, opts);
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
+		const result = await super.updateGroups(groups, opts);
 
 		const flowManager = getFlowManager();
 		await flowManager.reload();

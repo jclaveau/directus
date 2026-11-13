@@ -1,6 +1,6 @@
 import axios from 'axios';
 import fs from 'node:fs/promises';
-import { afterAll, beforeAll, expect, inject } from 'vitest';
+import { beforeAll, expect, inject } from 'vitest';
 import { USER } from '../common/variables';
 import { getReversedTestIndex } from './sequential-tests';
 import { recordTiming } from '../utils/record-timing';
@@ -13,8 +13,6 @@ declare module 'vitest' {
 }
 
 const serverUrl = process.env['serverUrl'];
-
-let testFilePath: string;
 
 // The gate blocks until the files it depends on report completion, which can
 // outlast every other file still queued behind it, so it gets its own timeout.
@@ -29,7 +27,7 @@ beforeAll(async () => {
 		throw 'Missing flow env variables';
 	}
 
-	testFilePath = testPath.split('blackbox')[1]!;
+	const testFilePath = testPath.split('blackbox')[1]!;
 
 	const testIndex = getReversedTestIndex(
 		testFilePath,
@@ -80,18 +78,3 @@ beforeAll(async () => {
 		waitedMs: Date.now() - gateOpenedAt,
 	});
 }, 600_000);
-
-afterAll(async () => {
-	if (!testFilePath) {
-		return;
-	}
-
-	await axios.post(`${serverUrl}/items/tests_flow_completed`, {
-		test_file_path: testFilePath,
-	}, {
-		headers: {
-			Authorization: `Bearer ${USER.TESTS_FLOW.TOKEN}`,
-			'Content-Type': 'application/json',
-		},
-	});
-});

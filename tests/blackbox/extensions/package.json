@@ -1,0 +1,25 @@
+{
+	"name": "blackbox-extensions",
+	"version": "0.0.0",
+	"private": true,
+	"directus:extension": {
+		"type": "bundle",
+		"path": {
+			"app": "app.mjs",
+			"api": "api.mjs"
+		},
+		"entries": [
+			{
+				"type": "hook",
+				"name": "blackbox-hooks",
+				"source": "hooks.mjs"
+			},
+			{
+				"type": "endpoint",
+				"name": "blackbox-endpoints",
+				"source": "endpoints.mjs"
+			}
+		],
+		"host": "^10.10.0"
+	}
+}

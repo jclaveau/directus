@@ -1,5 +1,5 @@
 ---
-name: directus-pr-title-naming
+name: project_directus_pr_title_naming
 description:
   jclaveau/directus PR TITLE prefix is FUNCTIONAL — `v11.10.1-feat: ` is the exact grep the
   compose workflow uses to select features into the integration branch; classify by
@@ -78,5 +78,5 @@ The #190 error chain (2026-06-23): `fork-feat:` (commit-only prefix, never a PR 
 composed) → finally `v11.10.1-feat:`. The tell I ignored: base = a `v11.10.1-feat/*` branch
 + kept open = composed = feat prefix.
 
-Related: [[directus-fork-integration-branches]], [[directus-compose-copy-stack]],
+Related: [[project_directus_fork_integration_branches]], [[project_directus_compose_copy_stack]],
 [[feedback_name_prs_fully]].

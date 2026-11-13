@@ -459,6 +459,10 @@ components:
       $ref: './parameters/export.yaml'
     Version:
       $ref: './parameters/version.yaml'
+    OnRepeatedPk:
+      $ref: './parameters/onRepeatedPk.yaml'
+    MutationBatching:
+      $ref: './parameters/mutationBatching.yaml'
   responses:
     NotFoundError:
       $ref: './responses/notFoundError.yaml'

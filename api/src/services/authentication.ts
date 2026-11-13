@@ -28,6 +28,7 @@ import { getSecret } from '../utils/get-secret.js';
 import { clone, cloneDeep } from '../utils/lodash-es-used.js';
 import { stall } from '../utils/stall.js';
 import { ActivityService } from './activity.js';
+import { ItemsService } from './items.js';
 import { SettingsService } from './settings.js';
 import { TFAService } from './tfa.js';
 
@@ -162,7 +163,16 @@ export class AuthenticationService {
 				// Only a spent budget reaches the else below now — a Redis outage falls
 				// back to a limiter that refuses nothing. See `rate-limiter.ts`.
 				if (error instanceof RateLimiterRes && error.remainingPoints === 0) {
-					await this.knex('directus_users').update({ status: 'suspended' }).where({ id: user.id });
+					// Not UsersService: it would refuse suspending the last admin.
+					await new ItemsService('directus_users', {
+						knex: this.knex,
+						schema: this.schema,
+					}).updateOne(
+						user.id,
+						{ status: 'suspended' },
+						{ emitEvents: false },
+					);
+
 					user.status = 'suspended';
 
 					// This means that new attempts after the user has been re-activated will be accepted

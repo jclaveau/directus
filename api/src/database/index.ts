@@ -3,17 +3,14 @@ import type { SchemaInspector } from '@directus/schema';
 import { createInspector } from '@directus/schema';
 import { isObject } from '@directus/utils/values';
 import type { DatabaseClient } from '@directus/types';
-import fse from 'fs-extra';
 import type { Knex } from 'knex';
 import knex from 'knex';
-import path, { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { getExtensionsPath } from '../extensions/lib/get-extensions-path.js';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
 import { isArray, merge, toArray } from '../utils/lodash-es-used.js';
 import { nodeId } from '../utils/node-id.js';
+import { trackTransactionsOf } from '../utils/transaction.js';
 import { validateEnv } from '../utils/validate-env.js';
 import {
 	assertConnectionNamesAreUnique,
@@ -24,6 +21,8 @@ import {
 	requiredConnectionFields,
 } from './connections.js';
 import { getHelpers } from './helpers/index.js';
+import { listMigrations, type ExtensionMigration } from './migrations/list.js';
+import { auditQueriesOf, queryAuditEnabled } from './query-audit.js';
 
 export {
 	getConnectionNameForAccountability,
@@ -39,8 +38,6 @@ type QueryInfo = Partial<Knex.Sql> & {
 
 let database: Knex | null = null;
 let inspector: SchemaInspector | null = null;
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default getDatabase;
 
@@ -178,7 +175,12 @@ export function constructDatabase(
 	}
 
 	const dbInstance = knex.default(knexConfig);
+	trackTransactionsOf(dbInstance);
 	validateDatabaseCharset(dbInstance);
+
+	if (queryAuditEnabled()) {
+		auditQueriesOf(dbInstance);
+	}
 
 	const times = new Map<string, number>();
 
@@ -300,28 +302,17 @@ export async function isInstalled(): Promise<boolean> {
  * is briefly unreachable while another service is mid-migration.
  */
 // eslint-disable-next-line local/no-single-caller-function -- 3 call sites
-export async function outstandingMigrations(): Promise<string[]> {
+export async function outstandingMigrations(
+	extensionMigrations: ExtensionMigration[] = [],
+): Promise<string[]> {
 	const logger = useLogger();
 
-	let requiredVersions: (string | undefined)[];
+	let requiredVersions: string[];
 
 	try {
-		let migrationFiles = await fse.readdir(path.join(__dirname, 'migrations'));
+		const listedMigrations = await listMigrations(extensionMigrations);
 
-		const customMigrationsPath = path.resolve(getExtensionsPath(), 'migrations');
-
-		let customMigrationFiles =
-			((await fse.pathExists(customMigrationsPath)) && (await fse.readdir(customMigrationsPath))) || [];
-
-		migrationFiles = migrationFiles.filter(
-			(file: string) => file.startsWith('run') === false && file.endsWith('.d.ts') === false,
-		);
-
-		customMigrationFiles = customMigrationFiles.filter((file: string) => file.endsWith('.js'));
-
-		migrationFiles.push(...customMigrationFiles);
-
-		requiredVersions = migrationFiles.map((filePath) => filePath.split('-')[0]);
+		requiredVersions = listedMigrations.map((migration) => migration.version);
 	}
 	catch (error: any) {
 		logger.error(`Database migrations cannot be found`);
@@ -337,7 +328,7 @@ export async function outstandingMigrations(): Promise<string[]> {
 
 	return requiredVersions.filter((version) => {
 		return completedVersions.includes(version) === false;
-	}) as string[];
+	});
 }
 
 /**
@@ -347,11 +338,13 @@ export async function outstandingMigrations(): Promise<string[]> {
  * precisely so that it can.
  */
 // eslint-disable-next-line local/no-single-caller-function -- also called by app.ts
-export async function outstandingMigrationsOrExit(): Promise<string[]> {
+export async function outstandingMigrationsOrExit(
+	extensionMigrations: ExtensionMigration[] = [],
+): Promise<string[]> {
 	const logger = useLogger();
 
 	try {
-		return await outstandingMigrations();
+		return await outstandingMigrations(extensionMigrations);
 	}
 	catch (error: any) {
 		logger.error(`Can't read the applied migrations from the database`);

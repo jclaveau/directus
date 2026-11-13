@@ -29,6 +29,8 @@ import {
 	scopedCachePinsFromKeyedFilters,
 	scopedCachePinsFromM2oParents,
 	scopedCachePinsFromO2mChildren,
+	scopedCacheAggregateRuleFields,
+	scopedCacheRootFilterFields,
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheFieldNamesByAliasedPath,
 	scopedCacheNestedRowBindings,
@@ -58,6 +60,9 @@ export class ScopedCacheReadPlan {
 	// What the view depends on beyond the field map: the cases, the searches and
 	// the A2O collection columns.
 	readonly viewFieldMap: FieldMap;
+	// The part of it the aggregate rules read: rows no filter of the read bounds.
+	readonly aggregateRuleFieldMap: FieldMap;
+	readonly rootFilterFieldMap: FieldMap;
 	readonly filterKeying: Map<CollectionKey, ScopedCacheFilterKeying>;
 	readonly keyedFilterPins: Map<CollectionKey, ScopedCacheCollectionPin[]>;
 	readonly beyondNestedRows: Set<CollectionKey>;
@@ -90,6 +95,14 @@ export class ScopedCacheReadPlan {
 
 		this.viewFieldMap = enabled
 			? scopedCacheViewFieldsBeyondFieldMap(schema, ast)
+			: NO_FIELD_MAP;
+
+		this.aggregateRuleFieldMap = enabled
+			? scopedCacheAggregateRuleFields(schema, ast)
+			: NO_FIELD_MAP;
+
+		this.rootFilterFieldMap = enabled
+			? scopedCacheRootFilterFields(schema, ast)
 			: NO_FIELD_MAP;
 
 		this.fieldNames = enabled

@@ -1,0 +1,82 @@
+import { useEnv } from '@directus/env';
+import { InvalidQueryError } from '@directus/errors';
+import { parse as parseBytesConfiguration } from 'bytes';
+import type { RequestHandler, Response } from 'express';
+import {
+	auditAskOf,
+	auditAskRefusalOf,
+	closeQueryAudit,
+	discardAuditedStatements,
+	emptyQueryAudit,
+	formatQueryAudit,
+	levelCarriesBindings,
+} from '../database/query-audit.js';
+import { joinRequestStore, requestStore } from '../utils/request-store.js';
+
+/**
+ * Dev-only: QUERY_AUDIT_HEADER names the header reporting the SQL this request
+ * ran, one entry per transaction. A request sends the same header to pick how
+ * much: `counts`, `statements`, `bindings` for each run's bound values, or
+ * `full` for every run in order; QUERY_AUDIT_LEVEL is the level of a request
+ * that sends none. A second word, `no-timings`, leaves out every `ms`, `db` and
+ * `wait`, so two runs of a request report the same header:
+ * `statements; no-timings`, or `no-timings` alone at QUERY_AUDIT_LEVEL.
+ *
+ * Bound values carry what the request read and wrote, so `bindings` and `full`
+ * report them to an admin alone: anyone else gets `statements`. Whether the
+ * request is an admin's is known once it has authenticated, after this
+ * middleware: until then the values are recorded on the ask, and dropped at
+ * flush for anyone else.
+ *
+ * Written when the headers flush rather than in `respond`, so an error response
+ * and a route that bypasses `respond` carry it too.
+ */
+const auditRequestQueries: RequestHandler = (req, res, next) => {
+	const env = useEnv();
+	const headerName = `${env['QUERY_AUDIT_HEADER']}`;
+	const auditAsk = auditAskOf(req.get(headerName), env['QUERY_AUDIT_LEVEL']);
+
+	if (auditAsk === undefined) {
+		return next(new InvalidQueryError({
+			reason: auditAskRefusalOf(headerName),
+		}));
+	}
+
+	const requestedLevel = auditAsk.level;
+
+	const audit = emptyQueryAudit(requestedLevel, () => {
+		return req.accountability === undefined || req.accountability.admin;
+	});
+
+	const writeHead = res.writeHead;
+
+	res.once('close', () => {
+		closeQueryAudit(audit);
+		discardAuditedStatements(audit);
+	});
+
+	res.writeHead = function (this: Response, ...headArguments: any[]) {
+		closeQueryAudit(audit);
+
+		this.setHeader(headerName, formatQueryAudit(audit, {
+			level: levelCarriesBindings(requestedLevel) && !req.accountability?.admin
+				? 'statements'
+				: requestedLevel,
+			maxSize: parseBytesConfiguration(
+				String(env['QUERY_AUDIT_HEADER_MAX_SIZE']),
+			) ?? 0,
+			timings: auditAsk.timings,
+		}));
+
+		discardAuditedStatements(audit);
+
+		return writeHead.apply(this, headArguments as any);
+	} as Response['writeHead'];
+
+	joinRequestStore(() => {
+		requestStore.getStore()!.queryAudit = audit;
+		next();
+	});
+};
+
+export default auditRequestQueries;

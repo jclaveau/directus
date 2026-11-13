@@ -6,6 +6,10 @@ import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import Redis from 'ioredis';
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import {
+	createExtensionPackage,
+	PURGE_EXTENSION_FOLDERS,
+} from './extension-package.js';
 import { summarise } from './measure.js';
 
 /**
@@ -41,6 +45,8 @@ import { summarise } from './measure.js';
  */
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+let extensionPackage: string;
 const adminToken = process.env['PERF_ADMIN_TOKEN'] ?? 'bench-admin-token';
 
 const redisUrl = process.env['PERF_REDIS'] ?? process.env['REDIS']
@@ -191,7 +197,7 @@ async function startInstance(cli: string, port: number): Promise<ChildProcess> {
 			SERVE_APP: 'false',
 			LOG_LEVEL: 'warn',
 			TELEMETRY: 'false',
-			EXTENSIONS_PATH: join(root, 'tests', 'perf', 'purge-extensions'),
+			PACKAGE_FILE_LOCATION: extensionPackage,
 			PORT: String(port),
 			PUBLIC_URL: baseOf(port),
 			REDIS: proxiedRedisUrl(),
@@ -717,6 +723,8 @@ function writeReport(results: ArmResult[]): string[] {
 }
 
 beforeAll(async () => {
+	extensionPackage = await createExtensionPackage(PURGE_EXTENSION_FOLDERS);
+
 	redis = new Redis(redisUrl, { lazyConnect: false });
 	delayProxy = await startDelayProxy(redisDelayMs);
 	proxyPort = (delayProxy.address() as { port: number }).port;

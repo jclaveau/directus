@@ -33,8 +33,10 @@ import {
 import {
 	composeScopedCachePaths,
 	resolveScopedCacheM2oJoinChainFromPath,
+	scopedCacheCollectionsAcrossQuantifiers,
 	type ScopedCacheM2oJoin,
 } from './paths.js';
+import { scopedCacheAstWithQuantifierCases } from './quantifier-cases.js';
 import { ScopedCacheReadPlan } from './read-plan.js';
 import {
 	scopedCachePurgeEnabled,
@@ -673,14 +675,46 @@ export class ItemScopedCacheService {
 	 * before
 	 * the query runs. The plan fills its own row-dependent half from inside it.
 	 */
-	planRead(
+	async planRead(
 		ast: AST,
 		injections: ScopedCacheOwnershipInjection[],
-	): ScopedCacheReadPlan {
+	): Promise<ScopedCacheReadPlan> {
+		let plannedAst = ast;
+
+		if (
+			this.accountability
+			&& !this.accountability.admin
+			&& scopedCachePurgeEnabled()
+		) {
+			// Imported here: both modules open the permissions cache on load.
+			const { fetchPermissions } = await import(
+				'../permissions/lib/fetch-permissions.js'
+			);
+
+			const { fetchPolicies } = await import(
+				'../permissions/lib/fetch-policies.js'
+			);
+
+			const context = { schema: this.schema, knex: this.knex };
+
+			plannedAst = scopedCacheAstWithQuantifierCases(
+				this.schema,
+				ast,
+				await fetchPermissions(
+					{
+						action: 'read',
+						accountability: this.accountability,
+						policies: await fetchPolicies(this.accountability, context),
+					},
+					context,
+				),
+			);
+		}
+
 		return new ScopedCacheReadPlan(
 			this.collection,
 			this.schema,
-			ast,
+			plannedAst,
 			injections,
 		);
 	}
@@ -720,9 +754,8 @@ export class ItemScopedCacheService {
 		} = {},
 	): Promise<ScopedCacheFingerprint[] | null> {
 		// A write nested in a transaction it did not open (a hook's own service, built
-		// on the parent's trx) purges once that transaction commits (#363). Its purged
-		// list is left out of the debug header, which reads only the request's own
-		// service. The purges queued on one trx for the same collection merge into one
+		// on the parent's trx) purges once that transaction commits (#363). The purges
+		// queued on one trx for the same collection merge into one
 		// (#594), unless their accountability differs: the `cache.purge` filter is
 		// handed one, and may resolve other slices for another.
 		const queuedAfterCommit = queueMergedAfterCommit(
@@ -947,6 +980,8 @@ export class ItemScopedCacheService {
 
 		const {
 			fieldMap,
+			aggregateRuleFieldMap,
+			rootFilterFieldMap,
 			filterKeying,
 			keyedFilterPins,
 			m2oParentPins,
@@ -968,7 +1003,12 @@ export class ItemScopedCacheService {
 		// the `<pk>._eq 1` filter never bounded.
 		const rootPaths = new Set<string>();
 
-		for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
+		for (const [path, entry] of [
+			...fieldMap.read,
+			...fieldMap.other,
+			...aggregateRuleFieldMap.read,
+			...rootFilterFieldMap.read,
+		]) {
 			if (entry.collection === this.collection) {
 				rootPaths.add(path);
 			}
@@ -1133,21 +1173,36 @@ export class ItemScopedCacheService {
 		// A filter that keyed the collection somewhere ELSE cannot stand in: its keys
 		// name rows reached by a hop this collection never takes, which is the
 		// wrong-scope-value stale hit `cache-ancestor-slice-wrong-value` forbids.
+		//
+		// Across two quantifiers no slice stands in either: the pinner's `_and` would
+		// take one conjunct's for the whole read, and each conjunct has its own row.
+		const collectionsAcrossQuantifiers = scopedCacheCollectionsAcrossQuantifiers(
+			this.schema,
+			ast,
+		);
+
 		const slicePinsFor = (collection: string): ScopedCacheCollectionPin[] => {
 			if (collection === this.collection) {
 				return [];
 			}
 
-			const paths = pathsTo(collection);
+			const paths = pathsTo(collection, [
+				fieldMap.read,
+				fieldMap.other,
+				aggregateRuleFieldMap.read,
+			]);
 
 			if (paths.length === 0 || paths.includes('')) {
 				return [];
 			}
 
 			const nestedRowsBounded =
-				m2oParentPins.has(collection) ||
-				o2mChildPins.has(collection) ||
-				pathsTo(collection, [fieldMap.other]).every(isToOnePath);
+				pathsTo(collection, [aggregateRuleFieldMap.read]).every(isToOnePath)
+				&& (
+					m2oParentPins.has(collection) ||
+					o2mChildPins.has(collection) ||
+					pathsTo(collection, [fieldMap.other]).every(isToOnePath)
+				);
 
 			const fieldTypes = this.schema.collections[collection]?.fields ?? {};
 
@@ -1190,7 +1245,7 @@ export class ItemScopedCacheService {
 					});
 				}
 
-				if (!nestedRowsBounded) {
+				if (!nestedRowsBounded || collectionsAcrossQuantifiers.has(collection)) {
 					continue;
 				}
 

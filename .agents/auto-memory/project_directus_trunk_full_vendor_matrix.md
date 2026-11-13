@@ -1,6 +1,6 @@
 ---
 name: project_directus_trunk_full_vendor_matrix
-description: A PR's blackbox is the postgres smoke set while a push to trunk runs sqlite3 + postgres + maria, so a green PR does not prove trunk green for anything dialect-sensitive
+description: A PR's blackbox is the postgres smoke set and a push to trunk runs no blackbox at all; sqlite3 and maria first see a change on the refreshed ci-dialect-* branches, so a green PR proves nothing dialect-sensitive
 metadata:
   author: Jean Claveau
   type: project
@@ -8,7 +8,7 @@ metadata:
 
 `blackbox.yml` picks the vendor matrix by event:
 
-- **PR** with `Run Blackbox` → `["postgres"]`.
+- **PR** (any code diff; `Run Blackbox` no longer needed) → `["postgres"]`.
 - **`Run Blackbox Full`** → `["sqlite3","postgres","maria"]`.
 - A **push to `v11.10.1-hhh-dev` does not run blackbox at all** — measured: that branch's
   last `blackbox-pr.yml` runs are `pull_request` events from June, all skipped. Trunk CI

@@ -16,7 +16,7 @@ import {
 import {
 	getInfoForPath,
 } from '../permissions/modules/process-ast/utils/get-info-for-path.js';
-import type { AST } from '../types/ast.js';
+import type { AST, M2ONode, O2MNode } from '../types/ast.js';
 import { parseFilterKey } from '../utils/parse-filter-key.js';
 import {
 	getRelationInfo,
@@ -35,6 +35,7 @@ import {
 	m2oParentRowsAtPathEnd,
 	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheFilterKeyingByCollection,
+	scopedCacheFunctionHops,
 	scopedCacheKeyedFieldType,
 } from './paths.js';
 import { SCOPED_CACHE_ANY_FIELD } from './fingerprint.js';
@@ -449,6 +450,14 @@ const SEARCHABLE_TYPES: readonly Type[] = [
 ];
 
 /**
+ * What decides a node's response: the rules bounding its rows, and the rules its
+ * aggregates read on top of them.
+ */
+function casesReadBy(node: AST | M2ONode | O2MNode): Filter[] {
+	return [...node.cases, ...node.aggregateCases ?? []];
+}
+
+/**
  * The fields a read depends on that `fieldMapFromAst` leaves out, filed the way
  * the field map files its own: per path, under the collection at that path.
  *
@@ -548,7 +557,10 @@ export function scopedCacheViewFieldsBeyondFieldMap(
 					addNodeFields(
 						relatedCollection,
 						child.query[relatedCollection] ?? {},
-						child.cases[relatedCollection] ?? [],
+						[
+							...child.cases[relatedCollection] ?? [],
+							...child.aggregateCases?.[relatedCollection] ?? [],
+						],
 						namedPath,
 					);
 
@@ -562,15 +574,112 @@ export function scopedCacheViewFieldsBeyondFieldMap(
 				continue;
 			}
 
-			addNodeFields(child.name, child.query, child.cases, childPath);
+			addNodeFields(child.name, child.query, casesReadBy(child), childPath);
 			addFieldsOf(child.name, child.children, childPath);
 		}
 	};
 
-	addNodeFields(ast.name, ast.query, ast.cases, []);
+	addNodeFields(ast.name, ast.query, casesReadBy(ast), []);
 	addFieldsOf(ast.name, ast.children, []);
 
 	return viewFieldMap;
+}
+
+function addFilterFields(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	filter: Filter,
+	fieldMap: FieldMap,
+	path: QueryPath,
+): void {
+	extractFieldsFromQuery(collection, { filter }, fieldMap, schema, path);
+
+	for (const [alias, hopCollection] of scopedCacheFunctionHops(
+		schema,
+		collection,
+		filter,
+	)) {
+		getInfoForPath(fieldMap, 'read', [...path, alias], hopCollection);
+	}
+}
+
+/**
+ * The fields the root's own filter and row cases read, function hops included: a
+ * hop back to the root reaches rows no key of the root bounds.
+ */
+export function scopedCacheRootFilterFields(
+	schema: SchemaOverview,
+	ast: AST,
+): FieldMap {
+	const rootFilterFields: FieldMap = { read: new Map(), other: new Map() };
+	const rootFilter = joinFilterWithCases(ast.query.filter, ast.cases);
+
+	if (rootFilter) {
+		addFilterFields(schema, ast.name, rootFilter, rootFilterFields, []);
+	}
+
+	return rootFilterFields;
+}
+
+/**
+ * The fields the aggregate rules of every node read, apart from its row cases.
+ * Those rules bound no row, so a filter's key or slice cannot answer for the
+ * rows they reach; a row case hopping out along a scope path can stay sliced.
+ */
+export function scopedCacheAggregateRuleFields(
+	schema: SchemaOverview,
+	ast: AST,
+): FieldMap {
+	const ruleFieldMap: FieldMap = { read: new Map(), other: new Map() };
+
+	const addRules = (
+		collection: CollectionKey,
+		rules: Filter[],
+		path: QueryPath,
+	): void => {
+		const rulesFilter = joinFilterWithCases(null, rules);
+
+		if (rulesFilter) {
+			addFilterFields(schema, collection, rulesFilter, ruleFieldMap, path);
+		}
+	};
+
+	const addRulesOf = (children: AST['children'], path: QueryPath): void => {
+		for (const child of children) {
+			if (child.type === 'field' || child.type === 'functionField') {
+				continue;
+			}
+
+			const childPath = [...path, child.fieldKey];
+
+			if (child.type === 'a2o') {
+				for (const relatedCollection of child.names) {
+					const namedPath = [
+						...path,
+						formatA2oKey(child.fieldKey, relatedCollection),
+					];
+
+					addRules(
+						relatedCollection,
+						child.aggregateCases?.[relatedCollection] ?? [],
+						namedPath,
+					);
+
+					addRulesOf(child.children[relatedCollection] ?? [], namedPath);
+				}
+
+				continue;
+			}
+
+			addRules(child.name, child.aggregateCases ?? [], childPath);
+			addRulesOf(child.children, childPath);
+		}
+	};
+
+	addRules(ast.name, ast.aggregateCases ?? [], []);
+	addRulesOf(ast.children, []);
+
+	return ruleFieldMap;
 }
 
 /**
@@ -808,7 +917,7 @@ export function scopedCacheCollectionsBeyondNestedRows(
 		}
 	};
 
-	addCollectionsQueriedBy(ast.name, ast.query, ast.cases);
+	addCollectionsQueriedBy(ast.name, ast.query, casesReadBy(ast));
 
 	// `whenCase` indexes the cases of the collection the node hangs OFF, which
 	// `injectCases` fills from the parent's `caseMap` — not the related
@@ -841,7 +950,11 @@ export function scopedCacheCollectionsBeyondNestedRows(
 				for (const name of child.names) {
 					const namedCases = child.cases[name] ?? [];
 
-					addCollectionsQueriedBy(name, child.query[name] ?? {}, namedCases);
+					addCollectionsQueriedBy(name, child.query[name] ?? {}, [
+						...namedCases,
+						...child.aggregateCases?.[name] ?? [],
+					]);
+
 					addWhatNestedNodesDependOn(child.children[name] ?? [], namedCases, path);
 				}
 
@@ -852,7 +965,7 @@ export function scopedCacheCollectionsBeyondNestedRows(
 				addCollectionsQueriedBy(
 					child.name,
 					child.query,
-					child.cases,
+					casesReadBy(child),
 					scopedCacheO2mChildPinnedByParentKey(
 						schema,
 						child.name,
@@ -868,7 +981,7 @@ export function scopedCacheCollectionsBeyondNestedRows(
 			addCollectionsQueriedBy(
 				child.relation.related_collection!,
 				child.query,
-				child.cases,
+				casesReadBy(child),
 			);
 
 			// Not a filter, so nothing above reads it: the case decides per ROW

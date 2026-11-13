@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockEnv, state } = vi.hoisted(() => {
+const { mockEnv, state, trackTransactionsOf } = vi.hoisted(() => {
 	return {
 		mockEnv: {} as Record<string, any>,
+		trackTransactionsOf: vi.fn(),
 		state: {
 			coreFiles: [] as string[],
 			customFiles: [] as string[],
@@ -44,6 +45,10 @@ vi.mock('knex', () => {
 	};
 });
 
+vi.mock('../utils/transaction.js', () => {
+	return { trackTransactionsOf };
+});
+
 vi.mock('../logger/index.js', () => {
 	return {
 		useLogger: () => {
@@ -60,10 +65,6 @@ vi.mock('../utils/node-id.js', () => {
 	return { nodeId: 'testnode' };
 });
 
-vi.mock('../extensions/lib/get-extensions-path.js', () => {
-	return { getExtensionsPath: () => '/extensions' };
-});
-
 vi.mock('fs-extra', () => {
 	return {
 		default: {
@@ -72,7 +73,7 @@ vi.mock('fs-extra', () => {
 					throw new Error('ENOENT');
 				}
 
-				if (target.startsWith('/extensions')) {
+				if (target === '/custom-migrations') {
 					return state.customFiles;
 				}
 
@@ -91,6 +92,7 @@ async function loadDatabase() {
 function resetState() {
 	mockEnv['DB_CLIENT'] = 'pg';
 	mockEnv['DB_CONNECTION_STRING'] = 'postgres://localhost/directus';
+	mockEnv['MIGRATIONS_PATH'] = '/custom-migrations';
 	state.coreFiles = ['20990101A-first.js', '20990102A-second.js'];
 	state.customFiles = [];
 	state.customExists = false;
@@ -98,6 +100,21 @@ function resetState() {
 	state.readdirFails = false;
 	state.selectFails = false;
 }
+
+describe('getDatabase', () => {
+	beforeEach(() => {
+		resetState();
+		trackTransactionsOf.mockClear();
+	});
+
+	it('tracks the transactions of the instance it builds', async () => {
+		const { getDatabase } = await loadDatabase();
+
+		const database = getDatabase();
+
+		expect(trackTransactionsOf.mock.calls).toEqual([[database]]);
+	});
+});
 
 describe('outstandingMigrations', () => {
 	beforeEach(resetState);
@@ -122,7 +139,7 @@ describe('outstandingMigrations', () => {
 		expect(await outstandingMigrations()).toEqual([]);
 	});
 
-	it('counts the migrations staged in the extensions path too', async () => {
+	it('counts the migrations staged in MIGRATIONS_PATH too', async () => {
 		state.customExists = true;
 		state.customFiles = ['20990103A-custom.js'];
 		state.completed = [{ version: '20990101A' }, { version: '20990102A' }];
@@ -132,12 +149,44 @@ describe('outstandingMigrations', () => {
 		expect(await outstandingMigrations()).toEqual(['20990103A']);
 	});
 
-	it('ignores the runner and its type declarations', async () => {
-		state.coreFiles = ['run.js', 'run.d.ts', '20990101A-first.js'];
+	it('ignores the runner, the list and their type declarations', async () => {
+		state.coreFiles = [
+			'run.js',
+			'run.d.ts',
+			'list.js',
+			'list.d.ts',
+			'20990101A-first.js',
+			'20990101A-first.d.ts',
+		];
 
 		const { outstandingMigrations } = await loadDatabase();
 
 		expect(await outstandingMigrations()).toEqual(['20990101A']);
+	});
+
+	it('counts the migrations of the installed bundles', async () => {
+		state.completed = [
+			{ version: '20990101A' },
+			{ version: '20990102A' },
+			{ version: '@consumer/domain:20990101A' },
+		];
+
+		const { outstandingMigrations } = await loadDatabase();
+
+		expect(
+			await outstandingMigrations([
+				{
+					bundle: '@consumer/domain',
+					name: '20990101A-add-orders',
+					config: { up: async () => {}, down: async () => {} },
+				},
+				{
+					bundle: '@consumer/domain',
+					name: '20990104A-add-invoices',
+					config: { up: async () => {}, down: async () => {} },
+				},
+			]),
+		).toEqual(['@consumer/domain:20990104A']);
 	});
 
 	it('exits when the migrations directory cannot be read', async () => {

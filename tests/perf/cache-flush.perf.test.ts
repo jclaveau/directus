@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Redis from 'ioredis';
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { createExtensionPackage } from './extension-package.js';
 import { summarise, summaryRow, type Summary } from './measure.js';
 
 /**
@@ -43,6 +44,8 @@ import { summarise, summaryRow, type Summary } from './measure.js';
  */
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+let extensionPackage: string;
 const cli = process.env['PERF_CLI'] ?? join(root, 'dist', 'cli');
 const adminToken = process.env['PERF_ADMIN_TOKEN'] ?? 'bench-admin-token';
 
@@ -158,7 +161,7 @@ function instanceEnv(port: number, env: Record<string, string>) {
 		SERVE_APP: 'false',
 		LOG_LEVEL: 'warn',
 		TELEMETRY: 'false',
-		EXTENSIONS_PATH: join(root, 'tests', 'perf', 'cache-extensions'),
+		PACKAGE_FILE_LOCATION: extensionPackage,
 		PORT: String(port),
 		PUBLIC_URL: `http://127.0.0.1:${port}`,
 		...env,
@@ -310,7 +313,13 @@ async function readKeyShapes(arm: Arm): Promise<KeyShapes> {
 
 	for (const client of [redis, cacheRedis]) {
 		const responseKey = await scanFirst(client, `${namespace}_response*`);
-		const indexKey = await scanFirst(client, `${namespace}:scoped-cache-index:*`);
+
+		// A fingerprint set, the kind a flush drops: the index-key sets under the
+		// same prefix outlive it on purpose.
+		const indexKey = await scanFirst(
+			client,
+			`${namespace}:scoped-cache-index:fingerprint:*`,
+		);
 
 		if (responseKey && indexKey) {
 			found.push({ client, responseKey, indexKey });
@@ -484,7 +493,7 @@ function seriesOf(
 }
 
 beforeAll(async () => {
-	await mkdir(join(root, 'tests', 'perf', 'cache-extensions'), { recursive: true });
+	extensionPackage = await createExtensionPackage();
 
 	const seedPort = basePort + arms.length;
 

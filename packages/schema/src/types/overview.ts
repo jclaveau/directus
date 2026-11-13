@@ -12,6 +12,7 @@ export type SchemaOverview = {
 				numeric_precision?: number | null;
 				numeric_scale?: number | null;
 				max_length: number | null;
+				in_unique_index?: boolean;
 			};
 		};
 	};

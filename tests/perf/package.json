@@ -11,7 +11,8 @@
 		"bench:devserver": "vitest --watch=false devserver.perf",
 		"bench:pin-fanout": "vitest --watch=false pin-fanout.perf",
 		"bench:pending-retry": "vitest --watch=false pending-retry.perf",
-		"bench:purge-walk": "vitest --watch=false purge-walk.perf"
+		"bench:purge-walk": "vitest --watch=false purge-walk.perf",
+		"bench:nested-write": "vitest --watch=false nested-write.perf"
 	},
 	"devDependencies": {
 		"@directus/tsconfig": "catalog:",

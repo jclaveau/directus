@@ -1,5 +1,9 @@
 import { useEnv } from '@directus/env';
-import type { AbstractServiceOptions } from '@directus/types';
+import type {
+	AbstractServiceOptions,
+	Item,
+	UpdateGroup,
+} from '@directus/types';
 import type { Knex } from 'knex';
 import { parseJSON } from '@directus/utils/values';
 import { useBus } from '../../bus/index.js';
@@ -305,21 +309,21 @@ export function onSharedSettingsChanged(
 export async function initSharedSettings(): Promise<void> {
 	const { default: emitter } = await import('../../emitter.js');
 
-	for (const event of ['settings.create', 'settings.update']) {
-		emitter.onAction(event, ({ payload }) => {
-			if (!payload) {
-				return;
-			}
-
-			for (const column of Object.values(SHARED_SETTINGS_COLUMNS)) {
-				if (column in payload === false) {
-					continue;
-				}
-
+	const announceColumnsOf = (writtenRows: Partial<Item>[]) => {
+		for (const column of Object.values(SHARED_SETTINGS_COLUMNS)) {
+			if (writtenRows.some((writtenRow) => column in writtenRow)) {
 				announceSharedSettings(column);
 			}
-		});
-	}
+		}
+	};
+
+	emitter.onAction('settings.create', ({ payload }) => {
+		announceColumnsOf(payload as Partial<Item>[]);
+	});
+
+	emitter.onAction('settings.update', ({ payload }) => {
+		announceColumnsOf((payload as UpdateGroup[]).map(({ data }) => data));
+	});
 }
 
 /**

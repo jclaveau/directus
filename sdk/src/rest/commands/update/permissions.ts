@@ -1,5 +1,10 @@
 import type { DirectusPermission } from '../../../schema/permission.js';
-import type { ApplyQueryFields, NestedPartial, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	NestedPartial,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import { throwIfEmpty } from '../../utils/index.js';
 import type { RestCommand } from '../../types.js';
 
@@ -18,7 +23,7 @@ export type UpdatePermissionOutput<
  * @throws Will throw if keys is empty
  */
 export const updatePermissions =
-	<Schema, const TQuery extends Query<Schema, DirectusPermission<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPermission<Schema>>>(
 		keys: DirectusPermission<Schema>['id'][],
 		item: Partial<DirectusPermission<Schema>>,
 		query?: TQuery,
@@ -41,7 +46,7 @@ export const updatePermissions =
  * @returns Returns the permission object for the updated permissions.
  */
 export const updatePermissionsBatch =
-	<Schema, const TQuery extends Query<Schema, DirectusPermission<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPermission<Schema>>>(
 		items: NestedPartial<DirectusPermission<Schema>>[],
 		query?: TQuery,
 	): RestCommand<UpdatePermissionOutput<Schema, TQuery>[], Schema> =>
@@ -61,7 +66,7 @@ export const updatePermissionsBatch =
  * @throws Will throw if key is empty
  */
 export const updatePermission =
-	<Schema, const TQuery extends Query<Schema, DirectusPermission<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusPermission<Schema>>>(
 		key: DirectusPermission<Schema>['id'],
 		item: Partial<DirectusPermission<Schema>>,
 		query?: TQuery,

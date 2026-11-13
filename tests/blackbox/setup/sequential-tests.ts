@@ -3,7 +3,13 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 	common: {
 		before: ['/common/common.test.ts'],
 		firstShardOnly: [],
-		after: [],
+		after: [
+			// Fires 100 concurrent connections at one instance and fails on a
+			// single timeout, broken connection or non-2xx: left in the parallel
+			// pool, the files beside it on a 4-core runner starve it into one
+			// (#367).
+			'/tests/common/assets/concurrency.test.ts',
+		],
 		// If specified, only run these tests sequentially
 		only: [
 			// '/common/common.test.ts',
@@ -104,6 +110,8 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/websocket/auth-strict-connects.test.ts',
 			'/tests/db/websocket/auth-strict-pings.test.ts',
 			'/tests/db/websocket/general.test.ts',
+			'/tests/db/websocket/batch-update.test.ts',
+			'/tests/db/websocket/relation-update.test.ts',
 			// WebSocket subscriptions starve under the parallel pool's load; run this
 			// (split out of m2o.test.ts) sequentially like the other WS suites (#277).
 			'/tests/db/routes/items/m2o-max-batch-mutation.test.ts',
@@ -112,8 +120,43 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// parallel middle its creates reach the subscriber's queue, and
 			// `getMessages(1)` returns a row the assertion never asked for.
 			'/tests/db/routes/items/batch-insert.test.ts',
+			// Reads through the GraphQL schema its given step cached for the user,
+			// and every `schemaChanged` drops it: any system write by a sibling,
+			// from a collection or field to a user or permission. The read from
+			// outside the range then builds a schema without the collection and
+			// fails validation before it reaches the refusal under test.
+			'/tests/db/routes/items/graphql-ip-gated-read.test.ts',
 			'/tests/db/routes/permissions/cache-purge.test.ts',
 			'/tests/db/routes/flows/webhook.test.ts',
+			// Activates its flows, two on `directus_users` updates: an instance a
+			// sibling boots meanwhile loads them, then runs them on its user updates.
+			'/tests/db/routes/flows/event-flow-runs.test.ts',
+			// Reloading the flow manager unloads every flow for a moment: run beside
+			// `event-flow-runs` it would drop the handlers that file waits on.
+			'/tests/db/routes/system/singular-write-flows.test.ts',
+			// Sets the password policy on the settings singleton, which every user
+			// creation of a sibling would then have to satisfy.
+			'/tests/db/routes/system/singular-write-users-password-policy.test.ts',
+			// Turn public registration on and off in the settings singleton, which a
+			// sibling registering or reading the settings would see mid-change.
+			'/tests/db/routes/system/singular-write-users-registration.test.ts',
+			// Adds a foreign key column to `directus_users` and drops it after, like
+			// `cache-nested-relation-tags`.
+			'/tests/db/routes/system/singular-write-users-nested-delete.test.ts',
+			// Writes users under fixed keys and emails a sibling could collide with.
+			'/tests/db/routes/items/write-user-integrity.test.ts',
+			// Saves operations, which reloads every flow, like `singular-write-flows`.
+			'/tests/db/routes/system/write-path-flow-operations.test.ts',
+			// Reloads the extensions, which unregisters every hook and endpoint for
+			// a moment.
+			'/tests/db/routes/system/write-path-extensions.test.ts',
+			// Applies a diff against a schema hash any sibling's schema write moves.
+			'/tests/db/routes/system/write-path-apply-diff.test.ts',
+			// Subscribes over a WebSocket, like the other WS suites.
+			'/tests/db/routes/system/write-path-websocket.test.ts',
+			// Turns public registration on and sets the URL allow lists in the
+			// settings singleton, like `singular-write-users-registration`.
+			'/tests/db/routes/users/write-url-allow-list.test.ts',
 			'/tests/db/app/cache.test.ts',
 			'/tests/db/app/processes.test.ts',
 			'/tests/db/app/pgbouncer.test.ts',
@@ -144,6 +187,9 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// waiting on before it will report itself ready at all.
 			'/tests/db/app/autoscale-prewarm-health.test.ts',
 			'/tests/db/app/autoscale-prewarm-daemon-lost.test.ts',
+			// Its release waits for the CPU to fall under a threshold: beside the
+			// instances that count statements, the pool came down 6, 4, 2, 1.
+			'/tests/db/app/autoscale-prewarm-load.test.ts',
 			'/tests/db/routes/collections/schema-cache.test.ts',
 			// Reads the whole schema back against a snapshot taken a moment before:
 			// a sibling creating its collections in between is a drift.

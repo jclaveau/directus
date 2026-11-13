@@ -150,7 +150,6 @@ describe.each(vendors)('%s', (vendor) => {
 			/^a user whose schema is built by a read from "(.*)"$/,
 			async (ip: string) => {
 				reader.token = await createUser();
-				reader.schemaIp = ip;
 
 				expect(await readOverHttp(reader.token, ip)).toEqual({
 					data: { [COLLECTION]: [{ label: 'gated' }] },
@@ -184,28 +183,6 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 	}
 
-	// A suite beside this one flushing the system cache drops the schema the
-	// given step built: the read then builds its own from its IP, one without
-	// the collection, and never reaches the resolver whose refusal is under
-	// test. Rebuilt from inside the range, and read again.
-	async function readThroughBuiltSchema(
-		reader: Reader,
-		readRows: () => Promise<ReadResult>,
-	) {
-		let result = await readRows();
-
-		for (let attempt = 0; attempt < 5; attempt++) {
-			if (!JSON.stringify(result).includes('Cannot query field')) {
-				break;
-			}
-
-			await readOverHttp(reader.token, reader.schemaIp!);
-			result = await readRows();
-		}
-
-		return result;
-	}
-
 	function defineWhenSteps(
 		{ when }: StepFunctions,
 		reader: Reader,
@@ -213,23 +190,18 @@ describe.each(vendors)('%s', (vendor) => {
 		when.optional(
 			/^the user reads the rows over HTTP from "(.*)"$/,
 			async (ip: string) => {
-				reader.result = await readThroughBuiltSchema(reader, () => {
-					return readOverHttp(reader.token, ip);
-				});
+				reader.result = await readOverHttp(reader.token, ip);
 			},
 		);
 
 		when.optional(
 			/^the user reads the rows over a websocket from "(.*)"$/,
 			async (ip: string) => {
-				reader.result = await readThroughBuiltSchema(reader, async () => {
-					const results = openWebsocket(reader.token, ip)
-						.iterate({ query: READ_QUERY });
+				const { value } = await openWebsocket(reader.token, ip)
+					.iterate({ query: READ_QUERY })
+					.next();
 
-					const { value } = await results.next();
-
-					return value as ReadResult;
-				});
+				reader.result = value as ReadResult;
 			},
 		);
 
@@ -301,7 +273,6 @@ describe.each(vendors)('%s', (vendor) => {
 
 	type Reader = {
 		token: string;
-		schemaIp?: string;
 		result?: ReadResult;
 		insideIp?: string;
 		received: Record<string, unknown[]>;

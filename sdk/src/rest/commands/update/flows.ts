@@ -1,5 +1,10 @@
 import type { DirectusFlow } from '../../../schema/flow.js';
-import type { ApplyQueryFields, NestedPartial, Query } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	NestedPartial,
+	Query,
+	QueryMutation,
+} from '../../../types/index.js';
 import { throwIfEmpty } from '../../utils/index.js';
 import type { RestCommand } from '../../types.js';
 
@@ -18,7 +23,7 @@ export type UpdateFlowOutput<
  * @throws Will throw if keys is empty
  */
 export const updateFlows =
-	<Schema, const TQuery extends Query<Schema, DirectusFlow<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusFlow<Schema>>>(
 		keys: DirectusFlow<Schema>['id'][],
 		item: Partial<DirectusFlow<Schema>>,
 		query?: TQuery,
@@ -41,7 +46,7 @@ export const updateFlows =
  * @returns Returns the flow objects for the updated flows.
  */
 export const updateFlowsBatch =
-	<Schema, const TQuery extends Query<Schema, DirectusFlow<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusFlow<Schema>>>(
 		items: NestedPartial<DirectusFlow<Schema>>[],
 		query?: TQuery,
 	): RestCommand<UpdateFlowOutput<Schema, TQuery>[], Schema> =>
@@ -61,7 +66,7 @@ export const updateFlowsBatch =
  * @throws Will throw if key is empty
  */
 export const updateFlow =
-	<Schema, const TQuery extends Query<Schema, DirectusFlow<Schema>>>(
+	<Schema, const TQuery extends QueryMutation<Schema, DirectusFlow<Schema>>>(
 		key: DirectusFlow<Schema>['id'],
 		item: Partial<DirectusFlow<Schema>>,
 		query?: TQuery,

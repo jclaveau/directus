@@ -3,7 +3,12 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { oneLine } from '@directus/utils';
 import { useLogger } from '../logger/index.js';
 import { migrationsAreOutstanding } from '../outstanding-migrations.js';
+import {
+	readRequestScopedCachePurges,
+	recordScopedCachePurged,
+} from '../scoped-cache/purged-record.js';
 import { SynchronizedClock } from '../synchronization.js';
+import { emptyRequestState, requestStore } from './request-store.js';
 import { scheduleSynchronizedJob, validateCron } from './schedule.js';
 
 vi.mock('node-schedule');
@@ -105,6 +110,56 @@ describe('scheduleSynchronizedJob', () => {
 
 		expect(body).not.toHaveBeenCalled();
 		expect(warn).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		Each tick names its purges in a list of its own, not in the one of the
+		request that registered the job
+	`, async () => {
+		const { tick } = scheduledTick({ set: vi.fn().mockResolvedValue(true) });
+		const readings: unknown[] = [];
+
+		scheduleSynchronizedJob('flow-cron', '* * * * *', async () => {
+			recordScopedCachePurged([{ collection: 'articles' }]);
+			readings.push(await readRequestScopedCachePurges());
+		});
+
+		const requestState = { scopedCachePurged: { purged: [], queuedPurges: [] } };
+
+		await requestStore.run(requestState, async () => {
+			await tick();
+			await tick();
+		});
+
+		expect(readings).toEqual([
+			[{ collection: 'articles' }],
+			[{ collection: 'articles' }],
+		]);
+
+		expect(requestState).toEqual({
+			scopedCachePurged: { purged: [], queuedPurges: [] },
+		});
+
+		expect(warn).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		The job is armed outside the store of the request that registered it, so
+		the timers node-schedule re-arms from it do not hold that request's store
+	`, () => {
+		const { job } = scheduledTick({ set: vi.fn().mockResolvedValue(true) });
+		const armingStores: unknown[] = [];
+
+		vi.mocked(schedule.scheduleJob).mockImplementation((() => {
+			armingStores.push(requestStore.getStore());
+			return job;
+		}) as any);
+
+		requestStore.run(emptyRequestState(), () => {
+			scheduleSynchronizedJob('flow-cron', '* * * * *', vi.fn());
+		});
+
+		expect(armingStores).toEqual([undefined]);
 	});
 });
 

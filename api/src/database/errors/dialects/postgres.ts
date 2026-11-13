@@ -20,6 +20,14 @@ enum PostgresErrorCodes {
 	VALUE_LIMIT_VIOLATION = '22001',
 }
 
+/**
+ * Whether a driver error is postgres' unique_violation, which an update batch
+ * can raise where the caller's row order would not.
+ */
+export function isUniqueViolation(error: unknown): boolean {
+	return isObject(error) && error['code'] === PostgresErrorCodes.UNIQUE_VIOLATION;
+}
+
 export function extractError(
 	error: PostgresError,
 	data: Partial<Item>,

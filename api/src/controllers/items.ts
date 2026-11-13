@@ -1,6 +1,17 @@
-import { ErrorCode, ForbiddenError, RouteNotFoundError, isDirectusError } from '@directus/errors';
+import {
+	ErrorCode,
+	ForbiddenError,
+	InvalidQueryError,
+	RouteNotFoundError,
+	isDirectusError,
+} from '@directus/errors';
 import { isSystemCollection } from '@directus/system-data';
-import type { PrimaryKey } from '@directus/types';
+import {
+	RepeatedPkAnswers,
+	type MutationOptions,
+	type PrimaryKey,
+	type RepeatedPkAnswer,
+} from '@directus/types';
 import express from 'express';
 import collectionExists from '../middleware/collection-exists.js';
 import { mergeContentVersions } from '../middleware/merge-content-versions.js';
@@ -9,6 +20,8 @@ import { validateBatch } from '../middleware/validate-batch.js';
 import { ItemsService } from '../services/items.js';
 import { MetaService } from '../services/meta.js';
 import asyncHandler from '../utils/async-handler.js';
+import { mutationBatchingFromQuery } from '../utils/mutation-batching-from-query.js';
+import { nestedUpdatesFromQuery } from '../utils/nested-updates-from-query.js';
 import { readMeta } from '../utils/read-meta.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
@@ -35,21 +48,25 @@ router.post(
 
 		const savedKeys: PrimaryKey[] = [];
 
+		const createOptions = {
+			allowFilterCancel: true,
+			mutationBatching: mutationBatchingFromQuery(req.query),
+			nestedUpdates: nestedUpdatesFromQuery(req.query),
+		} as const;
+
 		if (Array.isArray(req.body)) {
-			const keys = await service.createMany(req.body, { allowFilterCancel: true });
+			const keys = await service.createMany(req.body, createOptions);
 			// Cancelled creates come back as null; drop them before reading the created items.
 			savedKeys.push(...keys.filter((key): key is PrimaryKey => key !== null));
 		}
 		else {
-			const key = await service.createOne(req.body, { allowFilterCancel: true });
+			const key = await service.createOne(req.body, createOptions);
 
 			if (key !== null) {
 				// A filter hook may cancel the creation by returning null; nothing to read back then.
 				savedKeys.push(key);
 			}
 		}
-
-		res.locals['scopedCachePurged'] = service.scopedCachePurged;
 
 		try {
 			if (Array.isArray(req.body)) {
@@ -184,28 +201,57 @@ router.patch(
 		});
 
 		if (req.singleton === true) {
-			await service.upsertSingleton(req.body);
+			await service.upsertSingleton(req.body, {
+				mutationBatching: mutationBatchingFromQuery(req.query),
+				nestedUpdates: nestedUpdatesFromQuery(req.query),
+			});
+
 			const item = await service.readSingleton(req.sanitizedQuery);
 
 			res.locals['payload'] = { data: item || null };
-			res.locals['scopedCachePurged'] = service.scopedCachePurged;
 			return next();
 		}
+
+		const onRepeatedPk = req.query['onRepeatedPk'];
+
+		if (
+			onRepeatedPk !== undefined
+			&& !RepeatedPkAnswers.includes(onRepeatedPk as RepeatedPkAnswer)
+		) {
+			throw new InvalidQueryError({
+				reason: `"onRepeatedPk" must be one of ${RepeatedPkAnswers.join(', ')}`,
+			});
+		}
+
+		// Named, so a refusal of a repeated row names the option this route reads.
+		const updateOptions: MutationOptions = {
+			allowFilterCancel: true,
+			onRepeatedPk: (onRepeatedPk ?? 'refuse') as RepeatedPkAnswer,
+			mutationBatching: mutationBatchingFromQuery(req.query),
+			nestedUpdates: nestedUpdatesFromQuery(req.query),
+		};
 
 		let keys: (PrimaryKey | null)[] = [];
 
 		if (Array.isArray(req.body)) {
-			keys = await service.updateBatch(req.body, { allowFilterCancel: true });
+			keys = await service.updateBatch(req.body, updateOptions);
 		}
 		else if (req.body.keys) {
-			keys = await service.updateMany(req.body.keys, req.body.data, { allowFilterCancel: true });
+			keys = await service.updateMany(
+				req.body.keys,
+				req.body.data,
+				updateOptions,
+			);
 		}
 		else {
 			const sanitizedQuery = await sanitizeQuery(req.body.query, req.schema, req.accountability);
-			keys = await service.updateByQuery(sanitizedQuery, req.body.data, { allowFilterCancel: true });
-		}
 
-		res.locals['scopedCachePurged'] = service.scopedCachePurged;
+			keys = await service.updateByQuery(
+				sanitizedQuery,
+				req.body.data,
+				updateOptions,
+			);
+		}
 
 		try {
 			// Cancelled updates come back as null; drop them before reading the affected items.
@@ -248,9 +294,11 @@ router.patch(
 			schema: req.schema,
 		});
 
-		const updatedPrimaryKey = await service.updateOne(req.params['pk']!, req.body, { allowFilterCancel: true });
-
-		res.locals['scopedCachePurged'] = service.scopedCachePurged;
+		const updatedPrimaryKey = await service.updateOne(req.params['pk']!, req.body, {
+			allowFilterCancel: true,
+			mutationBatching: mutationBatchingFromQuery(req.query),
+			nestedUpdates: nestedUpdatesFromQuery(req.query),
+		});
 
 		try {
 			const result = await service.readOne(updatedPrimaryKey, req.sanitizedQuery);
@@ -273,7 +321,7 @@ router.delete(
 	'/:collection',
 	collectionExists,
 	validateBatch('delete'),
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, _res, next) => {
 		if (isSystemCollection(req.params['collection']!)) {
 			throw new ForbiddenError({
 				reason: 'Forbidden access to directus_* collections',
@@ -296,7 +344,6 @@ router.delete(
 			await service.deleteByQuery(sanitizedQuery, { allowFilterCancel: true });
 		}
 
-		res.locals['scopedCachePurged'] = service.scopedCachePurged;
 		return next();
 	}),
 	respond,
@@ -305,7 +352,7 @@ router.delete(
 router.delete(
 	'/:collection/:pk',
 	collectionExists,
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, _res, next) => {
 		if (isSystemCollection(req.params['collection']!)) {
 			throw new ForbiddenError({
 				reason: 'Forbidden access to directus_* collections',
@@ -318,7 +365,6 @@ router.delete(
 		});
 
 		await service.deleteOne(req.params['pk']!, { allowFilterCancel: true });
-		res.locals['scopedCachePurged'] = service.scopedCachePurged;
 		return next();
 	}),
 	respond,

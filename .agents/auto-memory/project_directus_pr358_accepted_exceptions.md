@@ -78,7 +78,7 @@ Related: [[project_directus_cache_key_identities]], [[reference_directus_scopedc
   jean overruled my "it diverges from a pristine upstream file"
   ([[feedback_directus_diverge_from_upstream_freely]]).
 - Still open by design: the fifth floating-promise owner, and the `_in` pin fan-out
-  ceiling pending the planner's real N.
+  ceiling pending a consumer's real N.
 
 
 **Scope, still open (2026-08-19):** #358 carries **two goals** — the pk-pinning feature

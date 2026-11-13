@@ -1,6 +1,6 @@
 ---
 name: project_directus_cache_descriptor_query_analysis
-description: How to classify cached reads by filter shape from directus_cache_descriptors.query, and the CTO-gate that blocks arbitrary SQL on the prod Railway DB
+description: How to classify cached reads by filter shape from directus_cache_descriptors.query, and that a consumer's prod DB is gated against arbitrary SQL
 metadata:
   author: Jean Claveau
   type: project
@@ -26,15 +26,13 @@ WHERE d.q ~ ('filter\[' || a.field || '\]\[_[a-z_]+\]')
 GROUP BY 1,2,3 ORDER BY 4 DESC;
 ```
 
-Validate the regex against synthetic strings first: the LOCAL planner DB has **zero**
+Validate the regex against synthetic strings first: a LOCAL consumer DB had **zero**
 descriptors carrying any `filter[`, so 0 rows there means "no data", not "no exposure".
 
-**Prod access is gated.** `data/db_query_railway.sh` hard-exits when
-`RAILWAY_ENVIRONMENT=production`: "Don't do it without the go of the CTO — please comment
-those lines to enable it". Enabling means editing out the guard, and the harness
-classifier ALSO blocks touching that script (even a `cp`) regardless of jean's verbal go.
-Hand him the command to run with `!` instead of routing around it
-([[feedback_dont_reflexively_bypass_enforcement]]). It also needs `-e production` —
-`railway environment` cannot prompt non-interactively.
+**Prod access is gated.** A consumer's prod DB is SELECT-only and its query script
+refuses prod without an explicit go; the harness classifier ALSO blocks editing that
+guard regardless of jean's verbal go. Hand him the command to run with `!` instead of
+routing around it ([[feedback_dont_reflexively_bypass_enforcement]]). The how-to is in
+the consumer repo's memories.
 
-Related: [[reference_pn_db_query_local]], [[project_directus_cache_stats_table_roles]].
+Related: [[project_directus_cache_stats_table_roles]].

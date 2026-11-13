@@ -1,3 +1,4 @@
+import type { Knex } from 'knex';
 import type { ComponentOptions } from 'vue';
 import type { Accountability } from '../accountability.js';
 import type { DeepPartial } from '../misc.js';
@@ -8,6 +9,11 @@ import type { AppField } from '../fields.js';
 export type OperationContext = ApiExtensionContext & {
 	data: Record<string, unknown>;
 	accountability: Accountability | null;
+	/**
+	 * The transaction of the create, update or delete a blocking filter flow runs
+	 * in; `database` is that same transaction there. Absent for any other flow.
+	 */
+	transaction?: Knex;
 };
 
 export type OperationHandler<Options = Record<string, unknown>> = (

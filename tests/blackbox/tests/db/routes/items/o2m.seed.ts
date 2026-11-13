@@ -2,7 +2,7 @@ import {
 	CreateCollections,
 	CreateFieldO2M,
 	CreateItem,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { SeedFunctions } from '@common/seed-functions';
@@ -147,9 +147,17 @@ export const seedDBStructure = () => {
 					const localCollectionCities = `${collectionCities}_${pkType}`;
 
 					// Delete existing collections
-					await DeleteCollection(vendor, { collection: localCollectionCities });
-					await DeleteCollection(vendor, { collection: localCollectionStates });
-					await DeleteCollection(vendor, { collection: localCollectionCountries });
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionCities,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionStates,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionCountries,
+					});
 
 					// Countries, states and cities share their whole structure at this
 					// point, so one POST /collections builds all three in a single
