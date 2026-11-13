@@ -1,10 +1,12 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import {
+	loadExtensions,
 	onDehydrateExtensions,
 	onHydrateExtensions,
 	registerExtensions,
 } from './extensions';
-import { watchAppChunk } from './utils/sync-app-chunk';
+import { registerInterfaces } from './interfaces';
+import { readAppChunkUrl, watchAppChunk } from './utils/sync-app-chunk';
 
 vi.mock('./displays', () => {
 	return { getInternalDisplays: () => [], registerDisplays: vi.fn() };
@@ -34,7 +36,19 @@ vi.mock('./utils/translate-object-values', () => {
 });
 
 vi.mock('./utils/sync-app-chunk', () => {
-	return { watchAppChunk: vi.fn() };
+	return { readAppChunkUrl: vi.fn(), watchAppChunk: vi.fn() };
+});
+
+vi.mock('@directus-extensions', () => {
+	return {
+		interfaces: [{ id: 'dev-interface' }],
+		displays: [],
+		layouts: [],
+		modules: [],
+		panels: [],
+		operations: [],
+		themes: [],
+	};
 });
 
 vi.mock('./lang', async () => {
@@ -61,6 +75,7 @@ vi.mock('./modules', async () => {
 afterEach(() => {
 	vi.resetAllMocks();
 	vi.restoreAllMocks();
+	vi.unstubAllEnvs();
 });
 
 test('watches the app chunk while hydrated', async () => {
@@ -77,4 +92,28 @@ test('watches the app chunk while hydrated', async () => {
 	await onDehydrateExtensions();
 
 	expect(stopWatching).toHaveBeenCalledTimes(1);
+});
+
+test('registers the extensions of the app chunk the server serves', async () => {
+	vi.stubEnv('DEV', false);
+
+	vi.mocked(readAppChunkUrl).mockResolvedValue(
+		'data:text/javascript,export const interfaces = [{ id: "chunk-interface" }];'
+		+ 'export const displays = [], layouts = [], modules = [], panels = [],'
+		+ ' operations = [], themes = [];',
+	);
+
+	await loadExtensions();
+	registerExtensions({} as never);
+
+	expect(registerInterfaces).toHaveBeenCalledWith([{ id: 'chunk-interface' }], {});
+});
+
+test('registers the extensions the dev server builds', async () => {
+	vi.stubEnv('DEV', true);
+
+	await loadExtensions();
+	registerExtensions({} as never);
+
+	expect(registerInterfaces).toHaveBeenCalledWith([{ id: 'dev-interface' }], {});
 });

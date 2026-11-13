@@ -32,9 +32,15 @@ const onDehydrateCallbacks: (() => Promise<void>)[] = [];
 
 export async function loadExtensions(): Promise<void> {
 	try {
-		customExtensions = import.meta.env.DEV
-			? await import(/* @vite-ignore */ '@directus-extensions')
-			: await import(/* @vite-ignore */ await readAppChunkUrl());
+		if (import.meta.env.DEV) {
+			customExtensions = await import(/* @vite-ignore */ '@directus-extensions');
+		}
+		else {
+			// Read the URL before import(): Vite wraps import() in a non-async preload
+			// arrow, and an `await` in its argument makes the entry chunk unparsable.
+			const appChunkUrl = await readAppChunkUrl();
+			customExtensions = await import(/* @vite-ignore */ appChunkUrl);
+		}
 	} catch (err: any) {
 		// eslint-disable-next-line no-console
 		console.warn(`Couldn't load extensions`);
