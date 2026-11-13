@@ -34,3 +34,4 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [Blackbox DELETE semantics + cleanup helpers](../project_directus_blackbox_delete_semantics.md) — collection/field DELETE answers 403 (missing) / 204 (missing field), never 404; strict vs IfPresent helpers; FK drop order
 - [#617 schema-move lock PARKED](../project_directus_issue617_parked.md) — not a flake source; pick up only when a schema-wide assertion test exists
 - [bb scenario titles live in the .test.ts too](../reference_directus_bb_scenario_titles_in_test_file.md) — renaming a `Scenario:` without the sibling .test.ts title list fails the file "(0 test)" in CI only
+- [Test profile window (PROPOSED, #740/#741)](../project_directus_test_profile_window_proposal.md) — start/stop in-process profiler for tests; a profile cannot see DB planning (use wall − CPU); gate on same-run CPU ratio; bind-param tally first
