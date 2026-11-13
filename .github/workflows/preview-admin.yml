@@ -478,6 +478,8 @@ jobs:
         # The link is already in the PR body: a broken fixture keeps the preview
         # up, without its data, and marks this step failed.
         continue-on-error: true
+        # A hung script ends like a failing one, not at the job's 180 min.
+        timeout-minutes: 5
         run: |
           # One script per feature the ref ships (e.g. the subscriptions bundle's
           # plans and users), so a PR seeds what it adds without a change here.
