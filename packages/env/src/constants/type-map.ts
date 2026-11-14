@@ -331,6 +331,10 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	REDIS_PASSWORD: 'string',
 	'AUTH_.+_BIND_PASSWORD': 'string',
 	'STORAGE_.+_SECRET': 'string',
+
+	SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'string',
+	SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: 'string',
+	SUBSCRIPTIONS_MOLLIE_API_KEY: 'string',
 } as const;
 
 export const TYPE_MAP_REGEX: [RegExp, EnvType][] = Object.entries(TYPE_MAP).map(([name, value]) => [

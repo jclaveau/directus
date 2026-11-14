@@ -5,7 +5,10 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import createApp from './app.js';
 import { resolvedRateLimiterCharge } from './middleware/rate-limiter-ip.js';
-import { validateChoiceEnv } from './utils/validate-env.js';
+import {
+	validateChoiceEnv,
+	validateSubscriptionsEnv,
+} from './utils/validate-env.js';
 
 vi.mock('./database', () => ({
 	default: vi.fn(),
@@ -116,6 +119,12 @@ const request = async (path: string = '', init: RequestInit = {}) => {
 };
 
 describe('createApp', async () => {
+	test('Should validate the subscriptions env at boot', async () => {
+		await createApp();
+
+		expect(validateSubscriptionsEnv).toHaveBeenCalled();
+	});
+
 	describe('Content Security Policy', () => {
 		test('Should set content-security-policy header by default', async () => {
 			const response = await request();

@@ -287,6 +287,9 @@ catalogs:
     '@mapbox/mapbox-gl-geocoder':
       specifier: 5.1.2
       version: 5.1.2
+    '@mollie/api-client':
+      specifier: 4.6.0
+      version: 4.6.0
     '@ngneat/falso':
       specifier: 8.0.2
       version: 8.0.2
@@ -947,6 +950,9 @@ catalogs:
     strip-ansi:
       specifier: 7.2.0
       version: 7.2.0
+    stripe:
+      specifier: 23.1.0
+      version: 23.1.0
     stylelint:
       specifier: 17.14.1
       version: 17.14.1
@@ -2074,6 +2080,55 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.8.3
+
+  packages/core-extensions/subscriptions:
+    dependencies:
+      '@directus/errors':
+        specifier: workspace:*
+        version: link:../../errors
+      '@mollie/api-client':
+        specifier: 'catalog:'
+        version: 4.6.0(encoding@0.1.13)
+      express:
+        specifier: 'catalog:'
+        version: 4.22.2(supports-color@10.2.2)
+      stripe:
+        specifier: 'catalog:'
+        version: 23.1.0(@types/node@22.20.1)
+    devDependencies:
+      '@directus/extensions-sdk':
+        specifier: workspace:*
+        version: link:../../extensions-sdk
+      '@directus/tsconfig':
+        specifier: 'catalog:'
+        version: 4.0.0
+      '@directus/types':
+        specifier: workspace:*
+        version: link:../../types
+      '@directus/utils':
+        specifier: workspace:*
+        version: link:../../utils
+      '@types/express':
+        specifier: 'catalog:'
+        version: 4.17.25
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.1
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 4.1.11(vitest@4.1.11)
+      knex:
+        specifier: 'catalog:'
+        version: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
+      sqlite3:
+        specifier: 'catalog:'
+        version: 6.0.1
+      typescript:
+        specifier: 'catalog:'
+        version: 5.8.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.11)(happy-dom@20.11.1)(jsdom@30.1.1(@noble/hashes@1.8.0))(vite@8.3.0(@types/node@22.20.1)(jiti@2.7.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(yaml@2.9.0))
 
   packages/create-directus-extension:
     dependencies:
@@ -4669,6 +4724,10 @@ packages:
   '@minimistjs/subarg@1.0.0':
     resolution: {integrity: sha512-Q/ONBiM2zNeYUy0mVSO44mWWKYM3UHuEK43PKIOzJCbvUnPoMH1K+gk3cf1kgnCVJFlWmddahQQCmrmBGlk9jQ==}
 
+  '@mollie/api-client@4.6.0':
+    resolution: {integrity: sha512-7G3Ya3Yf+Z3q7aNhtlStxWp4p7FEgmWPyoq23crTcjmrYmos6hMjCweMKCPRj/aW7Z3UX7yark/lTgZRQvF4Cw==}
+    engines: {node: '>=8'}
+
   '@napi-rs/snappy-android-arm-eabi@7.3.3':
     resolution: {integrity: sha512-d4vUFFzNBvazGfB/KU8MnEax6itTIgRWXodPdZDnWKHy9HwVBndpCiedQDcSNHcZNYV36rx034rpn7SAuTL2NA==}
     engines: {node: '>= 10'}
@@ -6683,6 +6742,9 @@ packages:
 
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
+
+  '@types/node-fetch@2.6.13':
+    resolution: {integrity: sha512-QGpRVpzSaUs30JBSGPjOg4Uveu384erbHBoT1zeONvyCfwQxIkUshLAOqN/k9EjGviPRmWTTe6aH2qySWKTVSw==}
 
   '@types/node-schedule@2.1.8':
     resolution: {integrity: sha512-k00g6Yj/oUg/CDC+MeLHUzu0+OFxWbIqrFfDiLi6OPKxTujvpv29mHGM8GtKr7B+9Vv92FcK/8mRqi1DK5f3hA==}
@@ -11898,6 +11960,9 @@ packages:
   run-series@1.1.9:
     resolution: {integrity: sha512-Arc4hUN896vjkqCYrUXquBFtRZdv1PfLbTYP71efP6butxyQ0kWpiNJyAgsxscmQg1cqvHY32/UCBzXedTpU2g==}
 
+  ruply@1.0.1:
+    resolution: {integrity: sha512-p39LnaaJyuucPGlgaB0KiyifpcuOkn24+Hq5y0ejAD/LlH+mRAbkHn2tckCLgHir+S+nis1WYG+TYEC4zHX0WQ==}
+
   rw@1.3.3:
     resolution: {integrity: sha512-PdhdWy89SiZogBLaw42zdeqtRJ//zFd2PgQavcICDUgJT5oW10QCRKbJ6bg4r0/UY2M6BWd5tkxuGFRvCkgfHQ==}
 
@@ -12450,6 +12515,15 @@ packages:
   strip-json-comments@5.0.3:
     resolution: {integrity: sha512-1tB5mhVo7U+ETBKNf92xT4hrQa3pm0MZ0PQvuDnWgAAGHDsfp4lPSpiS6psrSiet87wyGPh9ft6wmhOMQ0hDiw==}
     engines: {node: '>=14.16'}
+
+  stripe@23.1.0:
+    resolution: {integrity: sha512-fVUfMSfTPoukfoV//MUKAx2+YxyKmYaYtnAL9VkfnHfaPNQylFdWZMD+zgUFerI8rjbaiER8Vzj2XEUQ2AhAsQ==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@types/node': '>=20'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
 
   strnum@2.4.1:
     resolution: {integrity: sha512-M9eUSMT2dCB2cTNPG7UYj6KuK7RJR2SN2+yCV/fTW3xzTCS6EaGZ5pSMgDIjB7r8zSfTGk+dvvn9rTjpVS9Mwg==}
@@ -15619,6 +15693,14 @@ snapshots:
     dependencies:
       minimist: 1.2.8
 
+  '@mollie/api-client@4.6.0(encoding@0.1.13)':
+    dependencies:
+      '@types/node-fetch': 2.6.13
+      node-fetch: 2.7.0(encoding@0.1.13)
+      ruply: 1.0.1
+    transitivePeerDependencies:
+      - encoding
+
   '@napi-rs/snappy-android-arm-eabi@7.3.3':
     optional: true
 
@@ -17847,6 +17929,11 @@ snapshots:
 
   '@types/ms@2.1.0': {}
 
+  '@types/node-fetch@2.6.13':
+    dependencies:
+      '@types/node': 26.0.0
+      form-data: 4.0.6
+
   '@types/node-schedule@2.1.8':
     dependencies:
       '@types/node': 22.20.1
@@ -18749,8 +18836,7 @@ snapshots:
       - debug
       - supports-color
 
-  b4a@1.8.1:
-    optional: true
+  b4a@1.8.1: {}
 
   backoff@2.5.0:
     dependencies:
@@ -18760,8 +18846,7 @@ snapshots:
 
   balanced-match@4.0.4: {}
 
-  bare-events@2.9.1:
-    optional: true
+  bare-events@2.9.1: {}
 
   bare-fs@4.7.2:
     dependencies:
@@ -18773,15 +18858,12 @@ snapshots:
     transitivePeerDependencies:
       - bare-abort-controller
       - react-native-b4a
-    optional: true
 
-  bare-os@3.9.1:
-    optional: true
+  bare-os@3.9.1: {}
 
   bare-path@3.0.1:
     dependencies:
       bare-os: 3.9.1
-    optional: true
 
   bare-stream@2.13.3(bare-events@2.9.1):
     dependencies:
@@ -18792,12 +18874,10 @@ snapshots:
       bare-events: 2.9.1
     transitivePeerDependencies:
       - react-native-b4a
-    optional: true
 
   bare-url@2.4.5:
     dependencies:
       bare-path: 3.0.1
-    optional: true
 
   base-64@0.1.0: {}
 
@@ -18833,7 +18913,6 @@ snapshots:
   bindings@1.5.0:
     dependencies:
       file-uri-to-path: 1.0.0
-    optional: true
 
   bintrees@1.0.2: {}
 
@@ -19911,7 +19990,6 @@ snapshots:
       bare-events: 2.9.1
     transitivePeerDependencies:
       - bare-abort-controller
-    optional: true
 
   events@3.3.0: {}
 
@@ -19944,8 +20022,7 @@ snapshots:
 
   exif-reader@2.0.3: {}
 
-  expand-template@2.0.3:
-    optional: true
+  expand-template@2.0.3: {}
 
   expect-type@1.3.0: {}
 
@@ -20051,8 +20128,7 @@ snapshots:
 
   fast-defer@1.1.9: {}
 
-  fast-fifo@1.3.2:
-    optional: true
+  fast-fifo@1.3.2: {}
 
   fast-glob@3.3.3:
     dependencies:
@@ -20112,8 +20188,7 @@ snapshots:
 
   file-saver@2.0.5: {}
 
-  file-uri-to-path@1.0.0:
-    optional: true
+  file-uri-to-path@1.0.0: {}
 
   fill-range@7.1.1:
     dependencies:
@@ -20390,8 +20465,7 @@ snapshots:
 
   getopts@2.3.0: {}
 
-  github-from-package@0.0.0:
-    optional: true
+  github-from-package@0.0.0: {}
 
   gl-matrix@3.4.4: {}
 
@@ -21811,8 +21885,7 @@ snapshots:
 
   mitt@3.0.1: {}
 
-  mkdirp-classic@0.5.3:
-    optional: true
+  mkdirp-classic@0.5.3: {}
 
   mkdirp@1.0.4: {}
 
@@ -21895,8 +21968,7 @@ snapshots:
 
   nanoid@5.1.16: {}
 
-  napi-build-utils@2.0.0:
-    optional: true
+  napi-build-utils@2.0.0: {}
 
   native-duplexpair@1.0.0:
     optional: true
@@ -21924,13 +21996,11 @@ snapshots:
   node-abi@3.92.0:
     dependencies:
       semver: 7.8.5
-    optional: true
 
   node-addon-api@7.1.1:
     optional: true
 
-  node-addon-api@8.8.0:
-    optional: true
+  node-addon-api@8.8.0: {}
 
   node-addon-api@8.9.2: {}
 
@@ -22938,7 +23008,6 @@ snapshots:
       - bare-abort-controller
       - bare-buffer
       - react-native-b4a
-    optional: true
 
   precond@0.2.3: {}
 
@@ -23503,6 +23572,8 @@ snapshots:
 
   run-series@1.1.9: {}
 
+  ruply@1.0.1: {}
+
   rw@1.3.3: {}
 
   rxjs@7.8.2:
@@ -23865,15 +23936,13 @@ snapshots:
 
   signal-exit@4.1.0: {}
 
-  simple-concat@1.0.1:
-    optional: true
+  simple-concat@1.0.1: {}
 
   simple-get@4.0.1:
     dependencies:
       decompress-response: 6.0.0
       once: 1.4.0
       simple-concat: 1.0.1
-    optional: true
 
   simple-update-notifier@2.0.0:
     dependencies:
@@ -24058,7 +24127,6 @@ snapshots:
       - bare-abort-controller
       - bare-buffer
       - react-native-b4a
-    optional: true
 
   ssri@10.0.5:
     dependencies:
@@ -24112,7 +24180,6 @@ snapshots:
     transitivePeerDependencies:
       - bare-abort-controller
       - react-native-b4a
-    optional: true
 
   string-length@4.0.2:
     dependencies:
@@ -24189,6 +24256,10 @@ snapshots:
   strip-json-comments@3.1.1: {}
 
   strip-json-comments@5.0.3: {}
+
+  stripe@23.1.0(@types/node@22.20.1):
+    optionalDependencies:
+      '@types/node': 22.20.1
 
   strnum@2.4.1:
     dependencies:
@@ -24451,7 +24522,6 @@ snapshots:
       - bare-abort-controller
       - bare-buffer
       - react-native-b4a
-    optional: true
 
   tar-stream@3.2.0:
     dependencies:
@@ -24463,7 +24533,6 @@ snapshots:
       - bare-abort-controller
       - bare-buffer
       - react-native-b4a
-    optional: true
 
   tar@7.5.16:
     dependencies:
@@ -24520,7 +24589,6 @@ snapshots:
     transitivePeerDependencies:
       - bare-abort-controller
       - react-native-b4a
-    optional: true
 
   temp-dir@2.0.0: {}
 
@@ -24546,7 +24614,6 @@ snapshots:
       b4a: 1.8.1
     transitivePeerDependencies:
       - react-native-b4a
-    optional: true
 
   thirty-two@1.0.2: {}
 
@@ -24672,7 +24739,6 @@ snapshots:
   tunnel-agent@0.6.0:
     dependencies:
       safe-buffer: 5.2.1
-    optional: true
 
   tus-js-client@4.3.1:
     dependencies:
@@ -25161,6 +25227,37 @@ snapshots:
       '@types/node': 22.20.1
       '@vitest/coverage-v8': 4.1.11(vitest@4.1.11)
       happy-dom: 18.0.1
+      jsdom: 30.1.1(@noble/hashes@1.8.0)
+    transitivePeerDependencies:
+      - msw
+
+  vitest@4.1.11(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.11)(happy-dom@20.11.1)(jsdom@30.1.1(@noble/hashes@1.8.0))(vite@8.3.0(@types/node@22.20.1)(jiti@2.7.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(yaml@2.9.0)):
+    dependencies:
+      '@vitest/expect': 4.1.11
+      '@vitest/mocker': 4.1.11(vite@8.3.0(@types/node@22.20.1)(jiti@2.7.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(yaml@2.9.0))
+      '@vitest/pretty-format': 4.1.11
+      '@vitest/runner': 4.1.11
+      '@vitest/snapshot': 4.1.11
+      '@vitest/spy': 4.1.11
+      '@vitest/utils': 4.1.11
+      es-module-lexer: 2.3.2
+      expect-type: 1.3.0
+      magic-string: 0.30.21
+      obug: 2.1.3
+      pathe: 2.0.3
+      picomatch: 4.0.7
+      std-env: 4.2.0
+      tinybench: 2.9.0
+      tinyexec: 1.2.4
+      tinyglobby: 0.2.17
+      tinyrainbow: 3.1.1
+      vite: 8.3.0(@types/node@22.20.1)(jiti@2.7.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(yaml@2.9.0)
+      why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@opentelemetry/api': 1.9.1
+      '@types/node': 22.20.1
+      '@vitest/coverage-v8': 4.1.11(vitest@4.1.11)
+      happy-dom: 20.11.1
       jsdom: 30.1.1(@noble/hashes@1.8.0)
     transitivePeerDependencies:
       - msw
