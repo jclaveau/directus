@@ -82,7 +82,9 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       # The PR description block, rewritten at each state of the run. Kept in the
-      # workflow, not in a file: the head code this job runs cannot rewrite it.
+      # workflow, not in a file the ref ships, so a PR cannot edit it. The head
+      # code this job runs can still override it through $GITHUB_ENV or
+      # $GITHUB_PATH: the `Preview` label is the trust gate, as before.
       PREVIEW_PR: ${{ github.event.pull_request.number || inputs.pr }}
       PREVIEW_SHA: ${{ github.event.pull_request.head.sha || inputs.ref }}
       PREVIEW_TIMEOUT_MINUTES: ${{ inputs.timeout_minutes || '180' }}
@@ -97,6 +99,10 @@ jobs:
         repository = os.environ['GITHUB_REPOSITORY']
         run_id = os.environ['GITHUB_RUN_ID']
         run_url = f"{os.environ['GITHUB_SERVER_URL']}/{repository}/actions/runs/{run_id}"
+        # Cancelled before its first step ran: the block is still the previous run's.
+        if 'PREVIEW_STARTED_AT' not in os.environ:
+            print(f"run {json.dumps(run_id)} never claimed the block: left as is")
+            sys.exit(0)
         started_at = int(os.environ['PREVIEW_STARTED_AT'])
         deadline = started_at + int(os.environ['PREVIEW_TIMEOUT_MINUTES']) * 60
         now = int(time.time())
@@ -151,7 +157,8 @@ jobs:
             ).stdout
 
         pull_path = f"repos/{repository}/pulls/{pr_number}"
-        pr_body = call_github(pull_path, '--jq', '.body // ""')
+        # --jq prints the body plus a newline: strip it, or each publish adds one.
+        pr_body = call_github(pull_path, '--jq', '.body // ""').removesuffix('\n')
         block_pattern = re.compile(r'<!-- admin-preview:start -->.*?<!-- admin-preview:end -->', re.S)
         owner_match = re.search(r'<!-- admin-preview:run=(\d+) -->', pr_body)
 
