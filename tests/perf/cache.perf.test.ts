@@ -282,18 +282,20 @@ function armsInRepOrder(rep: number): Arm[] {
 	return [...arms.slice(firstArm), ...arms.slice(0, firstArm)];
 }
 
+// A ceiling sits at the median paired ratio of 33 runs of unchanged code plus
+// 4 standard deviations, rounded up to 0.05, and is never lowered by that rule
+// (#742).
 const readShapes = [
 	{
 		name: 'flat',
-		// missVsOff up from 1.60: trunk alone measured 1.45 to 1.65 over five runs.
-		ceilings: { hitVsOff: 1.05, missVsOff: 1.75, hitVsFull: 1.20, missVsFull: 1.35 },
+		ceilings: { hitVsOff: 1.05, missVsOff: 1.80, hitVsFull: 1.25, missVsFull: 1.35 },
 		path: (tenant: string) =>
 			`/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=25`,
 	},
 	{
 		// Two m2o hops, so the pins come off nested rows rather than off the filter.
 		name: 'deep',
-		ceilings: { hitVsOff: 0.90, missVsOff: 1.60, hitVsFull: 1.25, missVsFull: 1.40 },
+		ceilings: { hitVsOff: 0.90, missVsOff: 1.70, hitVsFull: 1.30, missVsFull: 1.55 },
 		path: (tenant: string) => {
 			return `/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=25`
 				+ `&fields=*,author.*,author.company.*`;
@@ -302,7 +304,7 @@ const readShapes = [
 	{
 		// 200 rows, so the payload itself counts. One pin: the filtered column.
 		name: 'wide',
-		ceilings: { hitVsOff: 1.00, missVsOff: 1.65, hitVsFull: 1.25, missVsFull: 1.40 },
+		ceilings: { hitVsOff: 1.00, missVsOff: 1.70, hitVsFull: 1.30, missVsFull: 1.40 },
 		path: (tenant: string) =>
 			`/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=200`,
 	},
@@ -315,7 +317,7 @@ const readShapes = [
 		// row too, and that is the cost the shape exists to expose rather than
 		// one the ceiling should hide. The target every shape is held
 		// to stays in Headroom.
-		ceilings: { hitVsOff: 0.85, missVsOff: 2.25, hitVsFull: 1.20, missVsFull: 1.75 },
+		ceilings: { hitVsOff: 0.85, missVsOff: 2.25, hitVsFull: 1.30, missVsFull: 1.95 },
 		path: (tenant: string) => {
 			return `/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=200`
 				+ `&fields=*,author.*`;
