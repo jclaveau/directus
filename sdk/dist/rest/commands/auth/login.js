@@ -1,0 +1,2 @@
+import{getAuthEndpoint as e}from"../../utils/get-auth-endpoint.js";function t(t,n={}){return()=>{let r=e(n.provider),i=t;return`otp`in n&&(i.otp=n.otp),i.mode=n.mode??`cookie`,{path:r,method:`POST`,body:JSON.stringify(i)}}}export{t as login};
+//# sourceMappingURL=login.js.map

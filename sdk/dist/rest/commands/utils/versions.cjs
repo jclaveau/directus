@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n)=>()=>(e.throwIfEmpty(t,`ID cannot be empty`),{path:`/versions/${t}/save`,method:`POST`,body:JSON.stringify(n)}),n=t=>()=>(e.throwIfEmpty(t,`ID cannot be empty`),{path:`/versions/${t}/compare`,method:`GET`}),r=(t,n,r)=>()=>(e.throwIfEmpty(t,`ID cannot be empty`),{path:`/versions/${t}/promote`,method:`POST`,body:JSON.stringify(r?{mainHash:n,fields:r}:{mainHash:n})});exports.compareContentVersion=n,exports.promoteContentVersion=r,exports.saveToContentVersion=t;
+//# sourceMappingURL=versions.cjs.map

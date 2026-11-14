@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/users`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/users`,params:t??{},body:JSON.stringify(e),method:`POST`});exports.createUser=t,exports.createUsers=e;
+//# sourceMappingURL=users.cjs.map

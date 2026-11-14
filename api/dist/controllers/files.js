@@ -1,0 +1,252 @@
+import { useLogger } from "../logger/index.js";
+import { FilesService } from "../services/files.js";
+import async_handler_default from "../utils/async-handler.js";
+import { sanitizeQuery } from "../utils/sanitize-query.js";
+import { MetaService } from "../services/meta.js";
+import { respond } from "../middleware/respond.js";
+import use_collection_default from "../middleware/use-collection.js";
+import { validateBatch } from "../middleware/validate-batch.js";
+import { mutationBatchingFromQuery } from "../utils/mutation-batching-from-query.js";
+import { answerOnce } from "../utils/answer-once.js";
+import { createBusboy } from "../utils/create-busboy.js";
+import { useEnv } from "@directus/env";
+import { ErrorCode, InvalidPayloadError, isDirectusError } from "@directus/errors";
+import express from "express";
+import path from "node:path";
+import { oneLine, toArray } from "@directus/utils";
+import Joi from "joi";
+import bytes from "bytes";
+import formatTitle from "@directus/format-title";
+import { minimatch } from "minimatch";
+
+//#region src/controllers/files.ts
+const router = express.Router();
+const env = useEnv();
+router.use(use_collection_default("directus_files"));
+const multipartHandler = (req, res, routeNext) => {
+	const next = answerOnce(routeNext);
+	if (req.is("multipart/form-data") === false) return next();
+	let headers;
+	if (req.headers["content-type"]) headers = req.headers;
+	else headers = {
+		...req.headers,
+		"content-type": "application/octet-stream"
+	};
+	const busboy = createBusboy(req, {
+		headers,
+		defParamCharset: "utf8",
+		limits: { fileSize: bytes.parse(env["FILES_MAX_UPLOAD_SIZE"]) ?? void 0 }
+	});
+	const savedFiles = [];
+	const service = new FilesService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	const existingPrimaryKey = req.params["pk"] || void 0;
+	const mutationOptions = { mutationBatching: mutationBatchingFromQuery(req.query) };
+	/**
+	* The order of the fields in multipart/form-data is important. We require that all fields
+	* are provided _before_ the files. This allows us to set the storage location, and create
+	* the row in directus_files async during the upload of the actual file.
+	*/
+	let disk = toArray(env["STORAGE_LOCATIONS"])[0];
+	let payload = {};
+	let fileCount = 0;
+	busboy.on("field", (fieldname, val) => {
+		let fieldValue = val;
+		if (typeof fieldValue === "string" && fieldValue.trim() === "null") fieldValue = null;
+		if (typeof fieldValue === "string" && fieldValue.trim() === "false") fieldValue = false;
+		if (typeof fieldValue === "string" && fieldValue.trim() === "true") fieldValue = true;
+		if (fieldname === "storage") disk = val;
+		payload[fieldname] = fieldValue;
+	});
+	busboy.on("file", async (_fieldname, fileStream, { filename, mimeType }) => {
+		if (busboy.destroyed) return;
+		if (!filename) return busboy.emit("error", new InvalidPayloadError({ reason: `File is missing filename` }));
+		if (toArray(env["FILES_MIME_TYPE_ALLOW_LIST"]).some((pattern) => minimatch(mimeType, pattern)) === false) return busboy.emit("error", new InvalidPayloadError({ reason: `File is of invalid content type` }));
+		fileCount++;
+		if (!existingPrimaryKey) {
+			if (!payload.title) payload.title = formatTitle(path.parse(filename).name);
+		}
+		payload.filename_download ||= filename;
+		const payloadWithRequiredFields = {
+			...payload,
+			type: mimeType,
+			storage: payload.storage || disk
+		};
+		payload = {};
+		try {
+			const primaryKey = await service.uploadOne(fileStream, payloadWithRequiredFields, existingPrimaryKey, mutationOptions);
+			savedFiles.push(primaryKey);
+			if (isBodyRefused) await deleteSavedFiles();
+			else tryDone();
+		} catch (error) {
+			busboy.emit("error", error);
+		}
+	});
+	let isBodyRefused = false;
+	busboy.on("error", async (error) => {
+		isBodyRefused = true;
+		await deleteSavedFiles();
+		next(error);
+	});
+	let isParserClosed = false;
+	busboy.on("close", () => {
+		isParserClosed = true;
+		tryDone();
+	});
+	req.pipe(busboy);
+	async function deleteSavedFiles() {
+		if (existingPrimaryKey) return;
+		const createdFiles = savedFiles.splice(0);
+		if (createdFiles.length === 0) return;
+		try {
+			await service.deleteMany(createdFiles);
+		} catch (error) {
+			useLogger().error(error, oneLine`Couldn't delete the files ${JSON.stringify(createdFiles)}
+					of a refused upload`);
+		}
+	}
+	function tryDone() {
+		if (!isBodyRefused && isParserClosed && savedFiles.length === fileCount) {
+			if (fileCount === 0) return next(new InvalidPayloadError({ reason: `No files were included in the body` }));
+			res.locals["savedFiles"] = savedFiles;
+			return next();
+		}
+	}
+};
+router.post("/", async_handler_default(multipartHandler), async_handler_default(async (req, res, next) => {
+	const service = new FilesService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	let keys = [];
+	if (req.is("multipart/form-data")) keys = res.locals["savedFiles"];
+	else keys = await service.createOne(req.body, { mutationBatching: mutationBatchingFromQuery(req.query) });
+	try {
+		if (Array.isArray(keys) && keys.length > 1) {
+			const records = await service.readMany(keys, req.sanitizedQuery);
+			res.locals["payload"] = { data: records };
+		} else {
+			const key = Array.isArray(keys) ? keys[0] : keys;
+			const record = await service.readOne(key, req.sanitizedQuery);
+			res.locals["payload"] = { data: record };
+		}
+	} catch (error) {
+		if (isDirectusError(error, ErrorCode.Forbidden)) return next();
+		throw error;
+	}
+	return next();
+}), respond);
+const importSchema = Joi.object({
+	url: Joi.string().required(),
+	data: Joi.object()
+});
+router.post("/import", async_handler_default(async (req, res, next) => {
+	const { error } = importSchema.validate(req.body);
+	if (error) throw new InvalidPayloadError({ reason: error.message });
+	const service = new FilesService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	const primaryKey = await service.importOne(req.body.url, req.body.data);
+	try {
+		const record = await service.readOne(primaryKey, req.sanitizedQuery);
+		res.locals["payload"] = { data: record || null };
+	} catch (error$1) {
+		if (isDirectusError(error$1, ErrorCode.Forbidden)) return next();
+		throw error$1;
+	}
+	return next();
+}), respond);
+const readHandler = async_handler_default(async (req, res, next) => {
+	const service = new FilesService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	const metaService = new MetaService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	let result;
+	if (req.singleton) result = await service.readSingleton(req.sanitizedQuery);
+	else if (req.body.keys) result = await service.readMany(req.body.keys, req.sanitizedQuery);
+	else result = await service.readByQuery(req.sanitizedQuery);
+	const meta = await metaService.getMetaForQuery("directus_files", req.sanitizedQuery);
+	res.locals["payload"] = {
+		data: result,
+		meta
+	};
+	return next();
+});
+router.get("/", validateBatch("read"), readHandler, respond);
+router.search("/", validateBatch("read"), readHandler, respond);
+router.get("/:pk", async_handler_default(async (req, res, next) => {
+	const record = await new FilesService({
+		accountability: req.accountability,
+		schema: req.schema
+	}).readOne(req.params["pk"], req.sanitizedQuery);
+	res.locals["payload"] = { data: record || null };
+	return next();
+}), respond);
+router.patch("/", validateBatch("update"), async_handler_default(async (req, res, next) => {
+	const service = new FilesService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	const mutationOptions = { mutationBatching: mutationBatchingFromQuery(req.query) };
+	let keys = [];
+	if (Array.isArray(req.body)) keys = await service.updateBatch(req.body, mutationOptions);
+	else if (req.body.keys) keys = await service.updateMany(req.body.keys, req.body.data, mutationOptions);
+	else {
+		const sanitizedQuery = await sanitizeQuery(req.body.query, req.schema, req.accountability);
+		keys = await service.updateByQuery(sanitizedQuery, req.body.data, mutationOptions);
+	}
+	try {
+		const result = await service.readMany(keys, req.sanitizedQuery);
+		res.locals["payload"] = { data: result || null };
+	} catch (error) {
+		if (isDirectusError(error, ErrorCode.Forbidden)) return next();
+		throw error;
+	}
+	return next();
+}), respond);
+router.patch("/:pk", async_handler_default(multipartHandler), async_handler_default(async (req, res, next) => {
+	const service = new FilesService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	await service.updateOne(req.params["pk"], req.body, { mutationBatching: mutationBatchingFromQuery(req.query) });
+	try {
+		const record = await service.readOne(req.params["pk"], req.sanitizedQuery);
+		res.locals["payload"] = { data: record || null };
+	} catch (error) {
+		if (isDirectusError(error, ErrorCode.Forbidden)) return next();
+		throw error;
+	}
+	return next();
+}), respond);
+router.delete("/", validateBatch("delete"), async_handler_default(async (req, _res, next) => {
+	const service = new FilesService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	if (Array.isArray(req.body)) await service.deleteMany(req.body);
+	else if (req.body.keys) await service.deleteMany(req.body.keys);
+	else {
+		const sanitizedQuery = await sanitizeQuery(req.body.query, req.schema, req.accountability);
+		await service.deleteByQuery(sanitizedQuery);
+	}
+	return next();
+}), respond);
+router.delete("/:pk", async_handler_default(async (req, _res, next) => {
+	await new FilesService({
+		accountability: req.accountability,
+		schema: req.schema
+	}).deleteOne(req.params["pk"]);
+	return next();
+}), respond);
+var files_default = router;
+
+//#endregion
+export { files_default as default, multipartHandler };
