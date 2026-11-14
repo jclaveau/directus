@@ -854,6 +854,7 @@ async function openMonitorFeed(
 			for (const line of lines) {
 				if (line.startsWith('-')) {
 					feedError = new Error(`MONITOR feed refused: ${JSON.stringify(line)}`);
+					socket.destroy();
 					refuse(feedError);
 				}
 				else if (unansweredCommands > 0 && line === '+OK') {
