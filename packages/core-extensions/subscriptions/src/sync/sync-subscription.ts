@@ -1,11 +1,14 @@
 import type { AbstractService } from '@directus/types';
 import type { Knex } from 'knex';
 import { MANAGED_BY_SUBSCRIPTIONS, TERMINAL_STATUSES } from '../constants.js';
+import { UnboundProviderSubscriptionError } from '../errors.js';
 import {
 	recordSubscriptionEvent,
 	type SubscriptionEventSource,
 } from '../events/record-subscription-event.js';
 import type {
+	BillingInterval,
+	ProviderBilling,
 	ProviderSubscription,
 	SubscriptionProvider,
 } from '../providers/types.js';
@@ -18,34 +21,54 @@ export type SubscriptionSync = {
 	providerName: string;
 	providerSubscription: ProviderSubscription;
 	syncedAt: Date;
-	logger: { warn: (message: string) => void };
+	logger: {
+		warn: (message: string) => void;
+		error: (message: string) => void;
+	};
 };
 
 type StoredSubscription = {
 	id: number;
-	subscriber: number;
-	customer: number;
-	plan_reference: number;
+	plan: number;
+	provider_customer_id: string | null;
+	provider_subscription_id: string | null;
 	status: string;
 	current_period_end: Date | number | string | null;
 	cancel_at_period_end: boolean | number;
-	access: string | null;
 };
 
 type SubscriptionState = {
-	subscriber?: number;
-	customer?: number;
-	plan_reference?: number;
+	provider_customer_id?: string;
+	provider_subscription_id?: string;
 	status: string;
 	current_period_end: Date | number | string | null;
 	cancel_at_period_end: boolean;
-	access: string | null;
 };
 
+type SubscribedPlan = {
+	id: number;
+	code: string;
+	policy: string;
+	status: string;
+	amount: number | string;
+	currency: string;
+	interval: string;
+};
+
+const STORED_SUBSCRIPTION_FIELDS = [
+	'id',
+	'plan',
+	'provider_customer_id',
+	'provider_subscription_id',
+	'status',
+	'current_period_end',
+	'cancel_at_period_end',
+];
+
 /**
- * Writes the provider's state into `subscriptions` and its access row. A sync
- * changing nothing writes nothing, so `date_updated` and `user_updated` keep
- * naming the last real change.
+ * Writes the provider's state into `subscriptions` and the accesses of its
+ * beneficiaries. A sync changing nothing writes nothing, so `date_updated` and
+ * `user_updated` keep naming the last real change.
  */
 export async function syncSubscription({
 	trx,
@@ -56,221 +79,183 @@ export async function syncSubscription({
 	syncedAt,
 	logger,
 }: SubscriptionSync): Promise<void> {
-	const storedSubscription = await readStoredSubscription(
+	const storedSubscription = await bindStoredSubscription(
 		trx,
 		providerName,
-		providerSubscription.subscriptionId,
+		providerSubscription,
+		syncedAt,
 	);
 
-	const storedAccess = storedSubscription?.access ?? null;
-	const accessDecision = decideAccess(providerSubscription, syncedAt, logger);
-
-	const providerState = {
-		status: providerSubscription.status,
-		current_period_end: providerSubscription.currentPeriodEnd,
-		cancel_at_period_end: providerSubscription.cancelAtPeriodEnd,
-	};
-
-	// Revoking needs the stored row alone: a plan reference removed since, or a
-	// customer gone, must not keep a paid product granted.
-	if (accessDecision === 'revoke' && storedSubscription !== undefined) {
-		const storedSubscriber = await trx('subscribers')
-			.select('user')
-			.where('id', storedSubscription.subscriber)
-			.first();
-
-		// `unpaid` or `suspended` can still charge again once paid.
-		const isCancelRequested = storedSubscriber.user === null
-			&& !TERMINAL_STATUSES.includes(providerSubscription.status)
-			&& !providerSubscription.cancelAtPeriodEnd;
-
-		if (isCancelRequested) {
-			await requestProviderCancel(subscriptionProvider, providerSubscription);
-		}
-
-		await writeSubscriptionState({
-			trx,
-			storedSubscription,
-			subscriptionState: {
-				...providerState,
-				cancel_at_period_end: isCancelRequested
-					|| providerState.cancel_at_period_end,
-				access: await revokeAccess({
-					trx,
-					accessService,
-					storedAccess,
-					subscriptionId: storedSubscription.id,
-				}),
-			},
-			eventSource: isCancelRequested
-				? 'user_deleted'
-				: 'sync',
-			writtenAt: syncedAt,
-		});
-
-		return;
-	}
-
-	const subscriberCustomer = await trx('subscriber_customers')
-		.select('id', 'subscriber')
-		.where({
-			provider: providerName,
-			provider_customer_id: providerSubscription.customerId,
-		})
+	const subscribedPlan: SubscribedPlan = await trx('subscription_plans')
+		.select('id', 'code', 'policy', 'status', 'amount', 'currency', 'interval')
+		.where('id', storedSubscription.plan)
 		.first();
 
-	if (subscriberCustomer === undefined) {
-		throw new Error(
-			`No subscriber has ${JSON.stringify(providerName)} customer`
-			+ ` ${JSON.stringify(providerSubscription.customerId)}`,
-		);
-	}
-
-	const subscribedPlan = await trx('subscription_plan_references')
-		.join(
-			'subscription_plans',
-			'subscription_plans.id',
-			'subscription_plan_references.plan',
-		)
-		.select(
-			'subscription_plan_references.id as reference_id',
-			'subscription_plans.id',
-			'subscription_plans.policy',
-			'subscription_plans.status',
-		)
-		.where({
-			'subscription_plan_references.provider': providerName,
-			'subscription_plan_references.reference':
-				providerSubscription.planReference,
-		})
-		.first();
-
-	if (subscribedPlan === undefined) {
-		throw new Error(
-			`No plan has ${JSON.stringify(providerName)} reference`
-			+ ` ${JSON.stringify(providerSubscription.planReference)}`,
-		);
-	}
+	const isFirstSync = storedSubscription.provider_subscription_id === null;
 
 	// The checkout refuses such a plan, but this customer has paid: they get it.
-	if (storedSubscription === undefined && subscribedPlan.status !== 'active') {
+	if (isFirstSync && subscribedPlan.status !== 'active') {
 		logger.warn(
-			`Subscription ${JSON.stringify(providerSubscription.subscriptionId)}`
-			+ ` started on plan ${JSON.stringify(subscribedPlan.id)}, whose status`
-			+ ` is ${JSON.stringify(subscribedPlan.status)}`,
+			`Subscription ${JSON.stringify(storedSubscription.id)} started on plan`
+			+ ` ${JSON.stringify(subscribedPlan.code)}, whose status is`
+			+ ` ${JSON.stringify(subscribedPlan.status)}`,
 		);
 	}
 
-	const subscriber = await trx('subscribers')
-		.select('user')
-		.where('id', subscriberCustomer.subscriber)
-		.first();
+	// A plan changed in the provider's portal: the plan sold stays, an admin
+	// settles the difference.
+	if (!holdsPlanBilling(subscribedPlan, providerSubscription.billing)) {
+		logger.error(
+			`Subscription ${JSON.stringify(storedSubscription.id)} is billed`
+			+ ` ${JSON.stringify(providerSubscription.billing)} by`
+			+ ` ${JSON.stringify(providerName)}, its plan`
+			+ ` ${JSON.stringify(subscribedPlan.code)} sells`
+			+ ` ${JSON.stringify(readPlanBilling(subscribedPlan))}`,
+		);
+	}
 
-	const isKept = accessDecision === 'keep';
-	const isUserDeleted = isKept && subscriber.user === null;
+	const managerCount = await countManagers(trx, storedSubscription.id);
 
-	// Nothing to bill a deleted user for. The deletion itself runs no code of
-	// ours, whatever deleted the row: the hourly reconcile lands here.
-	const isCancelRequested = isUserDeleted
+	// Nothing to bill once no one manages it. The last manager's account
+	// deletion runs no code of ours: the hourly reconcile lands here.
+	const isCancelRequested = managerCount === 0
+		&& !TERMINAL_STATUSES.includes(providerSubscription.status)
 		&& !providerSubscription.cancelAtPeriodEnd;
 
 	if (isCancelRequested) {
 		await requestProviderCancel(subscriptionProvider, providerSubscription);
 	}
 
-	const resumedRow = await readResumedRow(
-		trx,
-		providerName,
-		providerSubscription,
-	);
+	const accessDecision = decideAccess(providerSubscription, syncedAt, logger);
 
-	// A resume shares the access of the row it resumes: one row per user and plan.
-	const grantedAccess = isKept && !isUserDeleted
-		? await keepAccess({
+	if (accessDecision === 'keep') {
+		await keepBeneficiaryAccesses({
 			trx,
 			accessService,
-			storedAccess: storedAccess ?? resumedRow?.access ?? null,
-			grantedUser: subscriber.user,
+			subscriptionId: storedSubscription.id,
 			planPolicy: subscribedPlan.policy,
-		})
-		: await revokeAccess({
+		});
+	}
+	else {
+		await revokeBeneficiaryAccesses({
 			trx,
 			accessService,
-			storedAccess,
-			subscriptionId: storedSubscription?.id ?? null,
+			subscriptionId: storedSubscription.id,
 		});
-
-	const subscriptionState: SubscriptionState = {
-		...providerState,
-		subscriber: subscriberCustomer.subscriber,
-		customer: subscriberCustomer.id,
-		plan_reference: subscribedPlan.reference_id,
-		cancel_at_period_end: isUserDeleted || providerState.cancel_at_period_end,
-		access: grantedAccess,
-	};
-
-	const eventSource = isCancelRequested
-		? 'user_deleted'
-		: 'sync';
-
-	if (storedSubscription !== undefined) {
-		await writeSubscriptionState({
-			trx,
-			storedSubscription,
-			subscriptionState,
-			eventSource,
-			writtenAt: syncedAt,
-		});
-
-		return;
 	}
 
-	await trx('subscriptions').insert({
-		...subscriptionState,
-		resumes: resumedRow?.id ?? null,
-		provider: providerName,
-		provider_subscription_id: providerSubscription.subscriptionId,
-		date_created: syncedAt,
-		date_updated: syncedAt,
+	await writeSubscriptionState({
+		trx,
+		storedSubscription,
+		subscriptionState: {
+			provider_customer_id: providerSubscription.customerId,
+			provider_subscription_id: providerSubscription.subscriptionId,
+			status: providerSubscription.status,
+			current_period_end: providerSubscription.currentPeriodEnd,
+			cancel_at_period_end: isCancelRequested
+				|| providerSubscription.cancelAtPeriodEnd,
+		},
+		eventSource: isCancelRequested
+			? 'user_deleted'
+			: 'sync',
+		writtenAt: syncedAt,
 	});
+}
 
-	const insertedSubscription = await readStoredSubscription(
+/**
+ * The row a provider's subscription is stored in: found by its provider id,
+ * else created carrying on the row it resumes, else the pending row the
+ * checkout named in the provider's metadata.
+ */
+async function bindStoredSubscription(
+	trx: Knex,
+	providerName: string,
+	providerSubscription: ProviderSubscription,
+	syncedAt: Date,
+): Promise<StoredSubscription> {
+	const storedSubscription = await readStoredSubscription(
 		trx,
 		providerName,
 		providerSubscription.subscriptionId,
 	);
 
-	await recordSubscriptionEvent(trx, {
-		subscriptionId: insertedSubscription!.id,
-		status: providerState.status,
-		currentPeriodEnd: providerState.current_period_end,
-		cancelAtPeriodEnd: subscriptionState.cancel_at_period_end,
-		source: eventSource,
-		userId: null,
-		recordedAt: syncedAt,
-	});
-}
-
-/** A resume is created by `POST /subscriptions/resume`, after the row it resumes. */
-async function readResumedRow(
-	trx: Knex,
-	providerName: string,
-	providerSubscription: ProviderSubscription,
-): Promise<{ id: number; access: string | null } | null> {
-	const { resumedSubscriptionId } = providerSubscription;
-
-	if (resumedSubscriptionId === undefined) {
-		return null;
+	if (storedSubscription !== undefined) {
+		return storedSubscription;
 	}
 
-	const resumedSubscription = await trx('subscriptions')
-		.select('id', 'access')
+	if (providerSubscription.resumedSubscriptionId !== undefined) {
+		return await createContinuingSubscription({
+			trx,
+			providerName,
+			providerSubscription,
+			createdAt: syncedAt,
+		});
+	}
+
+	const { directusSubscription } = providerSubscription;
+
+	const unboundError = new UnboundProviderSubscriptionError({
+		provider: providerName,
+		subscriptionId: providerSubscription.subscriptionId,
+		directusSubscription,
+	});
+
+	if (directusSubscription === null) {
+		throw unboundError;
+	}
+
+	const pendingQuery = trx('subscriptions')
+		.select(STORED_SUBSCRIPTION_FIELDS)
+		.where({
+			id: directusSubscription,
+			provider: providerName,
+			provider_subscription_id: null,
+		})
+		.first();
+
+	if (trx.client.dialect === 'postgresql') {
+		pendingQuery.forUpdate();
+	}
+
+	const pendingSubscription = await pendingQuery;
+
+	if (pendingSubscription === undefined) {
+		throw unboundError;
+	}
+
+	return pendingSubscription;
+}
+
+type ContinuingSubscriptionCreate = {
+	trx: Knex;
+	providerName: string;
+	providerSubscription: ProviderSubscription;
+	createdAt: Date;
+};
+
+/**
+ * Mollie cannot undo a cancel: a resume is a new subscription, carrying on the
+ * chain's last row with its plan, managers and beneficiaries. The beneficiaries
+ * share that row's accesses, so none is created twice.
+ */
+async function createContinuingSubscription({
+	trx,
+	providerName,
+	providerSubscription,
+	createdAt,
+}: ContinuingSubscriptionCreate): Promise<StoredSubscription> {
+	const { resumedSubscriptionId } = providerSubscription;
+
+	const resumedSubscription: ChainRow | undefined = await trx('subscriptions')
+		.select('id', 'plan', 'provider_customer_id')
 		.where({
 			provider: providerName,
 			provider_subscription_id: resumedSubscriptionId,
 		})
 		.first();
 
+	// Created by `POST /subscriptions/resume` after the row it resumes: a retry
+	// finds it once that row's own sync stored it.
 	if (resumedSubscription === undefined) {
 		throw new Error(
 			`Subscription ${JSON.stringify(providerSubscription.subscriptionId)}`
@@ -278,7 +263,134 @@ async function readResumedRow(
 		);
 	}
 
-	return resumedSubscription;
+	const chainTail = await findChainTail(trx, resumedSubscription);
+
+	await trx('subscriptions').insert({
+		plan: chainTail.plan,
+		continues: chainTail.id,
+		provider: providerName,
+		provider_customer_id: chainTail.provider_customer_id,
+		provider_subscription_id: null,
+		status: 'pending',
+		current_period_end: null,
+		cancel_at_period_end: false,
+		date_created: createdAt,
+		date_updated: createdAt,
+	});
+
+	const continuingSubscription: StoredSubscription = await trx('subscriptions')
+		.select(STORED_SUBSCRIPTION_FIELDS)
+		.where('continues', chainTail.id)
+		.first();
+
+	const tailManagers = await trx('subscription_managers')
+		.select('user')
+		.where('subscription', chainTail.id)
+		.orderBy('id');
+
+	if (tailManagers.length > 0) {
+		await trx('subscription_managers').insert(tailManagers.map((tailManager) => {
+			return {
+				subscription: continuingSubscription.id,
+				user: tailManager.user,
+			};
+		}));
+	}
+
+	const tailBeneficiaries = await trx('subscription_beneficiaries')
+		.select('user', 'access')
+		.where('subscription', chainTail.id)
+		.orderBy('id');
+
+	if (tailBeneficiaries.length > 0) {
+		await trx('subscription_beneficiaries')
+			.insert(tailBeneficiaries.map((tailBeneficiary) => {
+				return {
+					subscription: continuingSubscription.id,
+					user: tailBeneficiary.user,
+					access: tailBeneficiary.access,
+				};
+			}));
+	}
+
+	return continuingSubscription;
+}
+
+type ChainRow = {
+	id: number;
+	plan: number;
+	provider_customer_id: string | null;
+};
+
+/** A resume canceled before its first charge leaves the chain one row longer. */
+async function findChainTail(trx: Knex, chainRow: ChainRow): Promise<ChainRow> {
+	const nextRow: ChainRow | undefined = await trx('subscriptions')
+		.select('id', 'plan', 'provider_customer_id')
+		.where('continues', chainRow.id)
+		.first();
+
+	return nextRow === undefined
+		? chainRow
+		: await findChainTail(trx, nextRow);
+}
+
+async function countManagers(
+	trx: Knex,
+	subscriptionId: number,
+): Promise<number> {
+	const managerTally = await trx('subscription_managers')
+		.count({ managerCount: 'id' })
+		.where('subscription', subscriptionId)
+		.first();
+
+	return Number(managerTally!.managerCount);
+}
+
+function holdsPlanBilling(
+	subscribedPlan: SubscribedPlan,
+	providerBilling: ProviderBilling | null,
+): boolean {
+	const planBilling = readPlanBilling(subscribedPlan);
+
+	return providerBilling !== null
+		&& providerBilling.amountCents === planBilling.amountCents
+		&& providerBilling.currency === planBilling.currency
+		&& providerBilling.interval.months === planBilling.interval.months
+		&& providerBilling.interval.days === planBilling.interval.days;
+}
+
+function readPlanBilling(subscribedPlan: SubscribedPlan): ProviderBilling {
+	return {
+		// A decimal column: Postgres hands back "10.00", SQLite 10.
+		amountCents: Math.round(Number(subscribedPlan.amount) * 100),
+		currency: subscribedPlan.currency.toUpperCase(),
+		interval: readPlanInterval(subscribedPlan),
+	};
+}
+
+function readPlanInterval(subscribedPlan: SubscribedPlan): BillingInterval {
+	const planDuration: Record<string, unknown> = JSON.parse(
+		subscribedPlan.interval,
+	);
+
+	const readDurationPart = (durationUnit: string): number => {
+		const durationValue = planDuration[durationUnit] ?? 0;
+
+		if (typeof durationValue !== 'number') {
+			throw new Error(
+				`Plan ${JSON.stringify(subscribedPlan.code)} has interval`
+				+ ` ${JSON.stringify(subscribedPlan.interval)}, whose`
+				+ ` ${JSON.stringify(durationUnit)} is not a number`,
+			);
+		}
+
+		return durationValue;
+	};
+
+	return {
+		months: readDurationPart('years') * 12 + readDurationPart('months'),
+		days: readDurationPart('weeks') * 7 + readDurationPart('days'),
+	};
 }
 
 /**
@@ -325,6 +437,12 @@ export async function closeMissingSubscription({
 		return;
 	}
 
+	await revokeBeneficiaryAccesses({
+		trx,
+		accessService,
+		subscriptionId: storedSubscription.id,
+	});
+
 	await writeSubscriptionState({
 		trx,
 		storedSubscription,
@@ -332,12 +450,6 @@ export async function closeMissingSubscription({
 			status: 'canceled',
 			current_period_end: storedSubscription.current_period_end,
 			cancel_at_period_end: Boolean(storedSubscription.cancel_at_period_end),
-			access: await revokeAccess({
-				trx,
-				accessService,
-				storedAccess: storedSubscription.access,
-				subscriptionId: storedSubscription.id,
-			}),
 		},
 		eventSource: 'provider_missing',
 		writtenAt: closedAt,
@@ -358,16 +470,7 @@ export function selectStoredSubscription(
 	subscriptionId: string,
 ) {
 	const storedQuery = trx('subscriptions')
-		.select(
-			'id',
-			'subscriber',
-			'customer',
-			'plan_reference',
-			'status',
-			'current_period_end',
-			'cancel_at_period_end',
-			'access',
-		)
+		.select(STORED_SUBSCRIPTION_FIELDS)
 		.where({
 			provider: providerName,
 			provider_subscription_id: subscriptionId,
@@ -449,78 +552,86 @@ function readPeriodTime(periodEnd: unknown): number | null {
 		: new Date(periodEnd as Date | number | string).getTime();
 }
 
-type AccessKeeping = {
+type BeneficiaryAccessKeeping = {
 	trx: Knex;
 	accessService: AbstractService;
-	storedAccess: string | null;
-	grantedUser: string;
+	subscriptionId: number;
 	planPolicy: string;
 };
 
-async function keepAccess({
+/** A beneficiary whose account was deleted has no user left to grant. */
+async function keepBeneficiaryAccesses({
 	trx,
 	accessService,
-	storedAccess,
-	grantedUser,
+	subscriptionId,
 	planPolicy,
-}: AccessKeeping): Promise<string> {
-	if (storedAccess !== null) {
+}: BeneficiaryAccessKeeping): Promise<void> {
+	const grantedBeneficiaries = await trx('subscription_beneficiaries')
+		.select('id', 'user', 'access')
+		.where('subscription', subscriptionId)
+		.whereNotNull('user')
+		.orderBy('id');
+
+	for (const grantedBeneficiary of grantedBeneficiaries) {
+		if (grantedBeneficiary.access === null) {
+			const createdAccess = await accessService.createOne({
+				user: grantedBeneficiary.user,
+				policy: planPolicy,
+				managed_by: MANAGED_BY_SUBSCRIPTIONS,
+			});
+
+			await trx('subscription_beneficiaries')
+				.where('id', grantedBeneficiary.id)
+				.update({ access: String(createdAccess) });
+
+			continue;
+		}
+
 		const accessRow = await trx('directus_access')
 			.select('user', 'policy')
-			.where('id', storedAccess)
+			.where('id', grantedBeneficiary.access)
 			.first();
 
-		if (accessRow.user !== grantedUser
+		if (accessRow.user !== grantedBeneficiary.user
 			|| accessRow.policy !== planPolicy) {
 			// Moved, not replaced: a resumed subscription shares this row.
-			await accessService.updateOne(storedAccess, {
-				user: grantedUser,
+			await accessService.updateOne(grantedBeneficiary.access, {
+				user: grantedBeneficiary.user,
 				policy: planPolicy,
 			});
 		}
-
-		return storedAccess;
 	}
-
-	const createdAccess = await accessService.createOne({
-		user: grantedUser,
-		policy: planPolicy,
-		managed_by: MANAGED_BY_SUBSCRIPTIONS,
-	});
-
-	return String(createdAccess);
 }
 
-type AccessRevoke = {
+type BeneficiaryAccessRevoke = {
 	trx: Knex;
 	accessService: AbstractService;
-	storedAccess: string | null;
-	/** Null for a row not stored yet. */
-	subscriptionId: number | null;
+	subscriptionId: number;
 };
 
 /** An access a resume still shares stays: the other row keeps granting it. */
-async function revokeAccess({
+async function revokeBeneficiaryAccesses({
 	trx,
 	accessService,
-	storedAccess,
 	subscriptionId,
-}: AccessRevoke): Promise<null> {
-	if (storedAccess === null) {
-		return null;
+}: BeneficiaryAccessRevoke): Promise<void> {
+	const grantingBeneficiaries = await trx('subscription_beneficiaries')
+		.select('id', 'access')
+		.where('subscription', subscriptionId)
+		.whereNotNull('access')
+		.orderBy('id');
+
+	for (const grantingBeneficiary of grantingBeneficiaries) {
+		await trx('subscription_beneficiaries')
+			.where('id', grantingBeneficiary.id)
+			.update({ access: null });
+
+		const sharingBeneficiary = await trx('subscription_beneficiaries')
+			.first('id')
+			.where('access', grantingBeneficiary.access);
+
+		if (sharingBeneficiary === undefined) {
+			await accessService.deleteOne(grantingBeneficiary.access);
+		}
 	}
-
-	const sharingQuery = trx('subscriptions')
-		.first('id')
-		.where('access', storedAccess);
-
-	if (subscriptionId !== null) {
-		sharingQuery.whereNot('id', subscriptionId);
-	}
-
-	if (await sharingQuery === undefined) {
-		await accessService.deleteOne(storedAccess);
-	}
-
-	return null;
 }

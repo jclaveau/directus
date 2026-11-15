@@ -3,11 +3,10 @@ import { defineMigration } from '@directus/extensions-sdk/scalabus';
 const PARENT_COLLECTION = 'subscriptions';
 
 const CHILD_COLLECTIONS = [
-	{ collection: 'subscribers', icon: 'person', hidden: false },
 	{ collection: 'subscription_plans', icon: 'sell', hidden: false },
+	{ collection: 'subscription_managers', icon: 'manage_accounts', hidden: false },
+	{ collection: 'subscription_beneficiaries', icon: 'group', hidden: false },
 	{ collection: 'subscription_events', icon: 'history', hidden: true },
-	{ collection: 'subscriber_customers', icon: 'badge', hidden: true },
-	{ collection: 'subscription_plan_references', icon: 'link', hidden: true },
 ];
 
 const QUEUE_COLLECTION = 'subscription_sync_queue';
@@ -25,6 +24,11 @@ const PLAN_FIELDS = [
 		display_options: JSON.stringify({ template: '{{name}}' }),
 	},
 	{ field: 'amount', interface: 'input', note: 'VAT included' },
+	{
+		field: 'beneficiaries_max',
+		interface: 'input',
+		note: 'Users one subscription grants the policy to',
+	},
 	{
 		field: 'currency',
 		interface: 'select-dropdown',

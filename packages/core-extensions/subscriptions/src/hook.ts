@@ -7,11 +7,13 @@ import type {
 } from '@directus/types';
 import { readSubscriptionsConfig } from './config/read-subscriptions-config.js';
 import {
+	refuseFrozenPlanUpdate,
+	refuseLastManagerDelete,
+	refuseLastManagerMove,
 	refusePlanDelete,
 	refusePlanStatusUpdate,
 	refuseSubscriptionEventWrite,
 	refuseSubscriptionStateUpdate,
-	refuseUsedReferenceUpdate,
 } from './plans/refuse-direct-writes.js';
 import { createProviders } from './providers/create-providers.js';
 import { enqueueReconcile } from './sync/enqueue-reconcile.js';
@@ -124,23 +126,44 @@ export const subscriptionsHook = defineHook(
 					filterContext,
 				);
 
-				return await refusePlanStatusUpdate(
+				await refusePlanStatusUpdate(updateEntries, filterContext.database);
+
+				return await refuseFrozenPlanUpdate(
 					updateEntries,
 					filterContext.database,
 				);
 			},
 		);
 
+		filter<PrimaryKey[]>(
+			'subscription_managers.items.delete',
+			async (managerKeys, _eventMeta, filterContext) => {
+				await validateWriteAccess(
+					{
+						action: 'delete',
+						collection: 'subscription_managers',
+						primaryKeys: managerKeys,
+					},
+					filterContext,
+				);
+
+				return await refuseLastManagerDelete(
+					managerKeys,
+					filterContext.database,
+				);
+			},
+		);
+
 		filter<UpdateEntries>(
-			'subscription_plan_references.items.update',
+			'subscription_managers.items.update',
 			async (updateEntries, _eventMeta, filterContext) => {
 				await validateUpdateAccess(
-					'subscription_plan_references',
+					'subscription_managers',
 					updateEntries,
 					filterContext,
 				);
 
-				return await refuseUsedReferenceUpdate(
+				return await refuseLastManagerMove(
 					updateEntries,
 					filterContext.database,
 				);

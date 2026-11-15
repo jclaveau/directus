@@ -6,37 +6,6 @@ export const createSubscriptionTables = defineMigration(
 		async up(knex) {
 			// TODO(#610): only Postgres wraps this in a transaction; elsewhere a
 			// failure past the first table fails every later boot on "already exists".
-			await knex.schema.createTable('subscribers', (table) => {
-				table.increments('id');
-
-				table.uuid('user')
-					.nullable()
-					.unique()
-					.references('id')
-					.inTable('directus_users')
-					.onDelete('SET NULL');
-			});
-
-			await knex.schema.createTable('subscriber_customers', (table) => {
-				table.increments('id');
-
-				table.integer('subscriber')
-					.unsigned()
-					.notNullable()
-					.references('id')
-					.inTable('subscribers')
-					.onDelete('CASCADE');
-
-				table.string('provider', 32)
-					.notNullable();
-
-				table.string('provider_customer_id', 255)
-					.notNullable();
-
-				table.unique(['provider', 'provider_customer_id']);
-				table.index(['subscriber']);
-			});
-
 			await knex.schema.createTable('subscription_plans', (table) => {
 				table.increments('id');
 
@@ -63,6 +32,10 @@ export const createSubscriptionTables = defineMigration(
 					.notNullable()
 					.comment('date-fns Duration as JSON, e.g. {"months":1}');
 
+				table.integer('beneficiaries_max')
+					.notNullable()
+					.defaultTo(1);
+
 				table.enu('status', ['active', 'subscriptions-locked', 'archived'])
 					.notNullable()
 					.defaultTo('active');
@@ -70,58 +43,35 @@ export const createSubscriptionTables = defineMigration(
 				table.index(['policy']);
 			});
 
-			await knex.schema.createTable(
-				'subscription_plan_references',
-				(table) => {
-					table.increments('id');
-
-					table.integer('plan')
-						.unsigned()
-						.notNullable()
-						.references('id')
-						.inTable('subscription_plans')
-						.onDelete('CASCADE');
-
-					table.string('provider', 32)
-						.notNullable();
-
-					table.string('reference', 255)
-						.notNullable();
-
-					table.unique(['provider', 'reference']);
-					table.index(['plan']);
-				},
-			);
-
 			await knex.schema.createTable('subscriptions', (table) => {
 				table.increments('id');
 
-				table.integer('subscriber')
+				table.integer('plan')
 					.unsigned()
 					.notNullable()
 					.references('id')
-					.inTable('subscribers')
+					.inTable('subscription_plans')
 					.onDelete('RESTRICT');
 
-				table.integer('customer')
+				// The row a resume (or later a plan switch) carries on: Mollie cannot
+				// undo a cancel, so a resume is a new subscription.
+				table.integer('continues')
 					.unsigned()
-					.notNullable()
+					.nullable()
+					.unique()
 					.references('id')
-					.inTable('subscriber_customers')
-					.onDelete('RESTRICT');
-
-				table.integer('plan_reference')
-					.unsigned()
-					.notNullable()
-					.references('id')
-					.inTable('subscription_plan_references')
+					.inTable('subscriptions')
 					.onDelete('RESTRICT');
 
 				table.string('provider', 32)
 					.notNullable();
 
+				// Both null while pending: the provider's checkout fills them.
+				table.string('provider_customer_id', 255)
+					.nullable();
+
 				table.string('provider_subscription_id', 255)
-					.notNullable();
+					.nullable();
 
 				table.string('status', 32)
 					.notNullable();
@@ -133,10 +83,10 @@ export const createSubscriptionTables = defineMigration(
 					.notNullable()
 					.defaultTo(false);
 
-				table.uuid('access')
+				table.uuid('user_updated')
 					.nullable()
 					.references('id')
-					.inTable('directus_access')
+					.inTable('directus_users')
 					.onDelete('SET NULL');
 
 				table.timestamp('date_created', { useTz: true })
@@ -145,27 +95,57 @@ export const createSubscriptionTables = defineMigration(
 				table.timestamp('date_updated', { useTz: true })
 					.notNullable();
 
-				table.uuid('user_updated')
+				table.unique(['provider', 'provider_subscription_id']);
+				table.index(['plan']);
+				table.index(['user_updated']);
+			});
+
+			await knex.schema.createTable('subscription_managers', (table) => {
+				table.increments('id');
+
+				table.integer('subscription')
+					.unsigned()
+					.notNullable()
+					.references('id')
+					.inTable('subscriptions')
+					.onDelete('RESTRICT');
+
+				// A deleted account stops managing; the last one gone cancels.
+				table.uuid('user')
+					.notNullable()
+					.references('id')
+					.inTable('directus_users')
+					.onDelete('CASCADE');
+
+				table.unique(['subscription', 'user']);
+				table.index(['user']);
+			});
+
+			await knex.schema.createTable('subscription_beneficiaries', (table) => {
+				table.increments('id');
+
+				table.integer('subscription')
+					.unsigned()
+					.notNullable()
+					.references('id')
+					.inTable('subscriptions')
+					.onDelete('RESTRICT');
+
+				table.uuid('user')
 					.nullable()
 					.references('id')
 					.inTable('directus_users')
 					.onDelete('SET NULL');
 
-				// Mollie cannot undo a cancel: a resume is a new subscription.
-				table.integer('resumes')
-					.unsigned()
+				table.uuid('access')
 					.nullable()
 					.references('id')
-					.inTable('subscriptions')
-					.onDelete('RESTRICT');
+					.inTable('directus_access')
+					.onDelete('SET NULL');
 
-				table.unique(['provider', 'provider_subscription_id']);
-				table.index(['subscriber']);
-				table.index(['customer']);
-				table.index(['plan_reference']);
+				table.unique(['subscription', 'user']);
+				table.index(['user']);
 				table.index(['access']);
-				table.index(['user_updated']);
-				table.index(['resumes']);
 			});
 
 			await knex.schema.createTable('subscription_events', (table) => {
@@ -231,11 +211,10 @@ export const createSubscriptionTables = defineMigration(
 		async down(knex) {
 			await knex.schema.dropTable('subscription_sync_queue');
 			await knex.schema.dropTable('subscription_events');
+			await knex.schema.dropTable('subscription_beneficiaries');
+			await knex.schema.dropTable('subscription_managers');
 			await knex.schema.dropTable('subscriptions');
-			await knex.schema.dropTable('subscription_plan_references');
 			await knex.schema.dropTable('subscription_plans');
-			await knex.schema.dropTable('subscriber_customers');
-			await knex.schema.dropTable('subscribers');
 		},
 	},
 );

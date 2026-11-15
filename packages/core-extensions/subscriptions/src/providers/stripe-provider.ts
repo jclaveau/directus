@@ -4,7 +4,15 @@ import {
 	WebhookIgnoredError,
 	WebhookRefusedError,
 } from '../errors.js';
-import type { SubscriptionProvider } from './types.js';
+import { readDirectusSubscription } from './read-directus-subscription.js';
+import type { ProviderBilling, SubscriptionProvider } from './types.js';
+
+const STRIPE_INTERVALS: Record<string, { months: number; days: number }> = {
+	year: { months: 12, days: 0 },
+	month: { months: 1, days: 0 },
+	week: { months: 0, days: 7 },
+	day: { months: 0, days: 1 },
+};
 
 export function createStripeProvider(
 	stripeClient: Stripe,
@@ -78,8 +86,11 @@ export function createStripeProvider(
 				cancelAtPeriodEnd: stripeSubscription.status === 'canceled'
 					? false
 					: stripeSubscription.cancel_at_period_end,
-				planReference: otherItems.length === 0
-					? firstItem.price.id
+				directusSubscription: readDirectusSubscription(
+					stripeSubscription.metadata,
+				),
+				billing: otherItems.length === 0
+					? readStripeBilling(firstItem.price)
 					: null,
 			};
 		},
@@ -102,6 +113,26 @@ export function createStripeProvider(
 
 		composeResourceId({ subscriptionId }) {
 			return subscriptionId;
+		},
+	};
+}
+
+/** A metered or one-off price bills no fixed amount per interval. */
+function readStripeBilling(stripePrice: Stripe.Price): ProviderBilling | null {
+	const { unit_amount: unitAmount, recurring: recurringPrice } = stripePrice;
+
+	if (unitAmount === null || recurringPrice === null) {
+		return null;
+	}
+
+	const intervalUnit = STRIPE_INTERVALS[recurringPrice.interval]!;
+
+	return {
+		amountCents: unitAmount,
+		currency: stripePrice.currency.toUpperCase(),
+		interval: {
+			months: intervalUnit.months * recurringPrice.interval_count,
+			days: intervalUnit.days * recurringPrice.interval_count,
 		},
 	};
 }

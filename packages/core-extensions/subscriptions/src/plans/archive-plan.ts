@@ -56,27 +56,19 @@ export async function archivePlan({
 	}
 
 	const endingSubscriptions = await database('subscriptions')
-		.join(
-			'subscriber_customers',
-			'subscriber_customers.id',
-			'subscriptions.customer',
-		)
-		.join(
-			'subscription_plan_references',
-			'subscription_plan_references.id',
-			'subscriptions.plan_reference',
-		)
 		.select(
-			'subscriptions.id',
-			'subscriptions.provider',
-			'subscriptions.provider_subscription_id',
-			'subscriptions.status',
-			'subscriptions.current_period_end',
-			'subscriber_customers.provider_customer_id',
+			'id',
+			'provider',
+			'provider_subscription_id',
+			'status',
+			'current_period_end',
+			'provider_customer_id',
 		)
-		.where('subscription_plan_references.plan', storedPlan.id)
-		.where('subscriptions.cancel_at_period_end', false)
-		.whereNotIn('subscriptions.status', TERMINAL_STATUSES);
+		.where('plan', storedPlan.id)
+		// A pending row is no customer yet: nothing at the provider to end.
+		.whereNotNull('provider_subscription_id')
+		.where('cancel_at_period_end', false)
+		.whereNotIn('status', TERMINAL_STATUSES);
 
 	const expectedSentence = composeArchiveSentence(endingSubscriptions.length);
 

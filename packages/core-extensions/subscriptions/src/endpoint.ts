@@ -3,8 +3,10 @@ import { defineEndpoint } from '@directus/extensions-sdk/scalabus';
 import type { Accountability } from '@directus/types';
 import type { Request } from 'express';
 import { cancelOwnSubscription } from './cancel/cancel-own-subscription.js';
+import { readChosenSubscription } from './cancel/read-chosen-subscription.js';
 import { resumeOwnSubscription } from './cancel/resume-own-subscription.js';
 import { readSubscriptionsConfig } from './config/read-subscriptions-config.js';
+import { addOwnBeneficiary } from './members/add-own-beneficiary.js';
 import { archivePlan } from './plans/archive-plan.js';
 import { createProviders } from './providers/create-providers.js';
 import { receiveWebhook } from './webhook/receive-webhook.js';
@@ -40,11 +42,15 @@ export const subscriptionsEndpoint = defineEndpoint(
 		});
 
 		router.post('/cancel', (request: AccountableRequest, response, next) => {
-			cancelOwnSubscription({
-				database,
-				enabledProviders,
-				userId: request.accountability?.user ?? null,
-			})
+			Promise.resolve()
+				.then(() => {
+					return cancelOwnSubscription({
+						database,
+						enabledProviders,
+						userId: request.accountability?.user ?? null,
+						subscriptionId: readChosenSubscription(request.body),
+					});
+				})
 				.then(() => {
 					response.status(204)
 						.end();
@@ -52,16 +58,35 @@ export const subscriptionsEndpoint = defineEndpoint(
 		});
 
 		router.post('/resume', (request: AccountableRequest, response, next) => {
-			resumeOwnSubscription({
-				database,
-				enabledProviders,
-				userId: request.accountability?.user ?? null,
-			})
+			Promise.resolve()
+				.then(() => {
+					return resumeOwnSubscription({
+						database,
+						enabledProviders,
+						userId: request.accountability?.user ?? null,
+						subscriptionId: readChosenSubscription(request.body),
+					});
+				})
 				.then(() => {
 					response.status(204)
 						.end();
 				}, next);
 		});
+
+		router.post(
+			'/beneficiaries',
+			(request: AccountableRequest, response, next) => {
+				addOwnBeneficiary({
+					database,
+					enabledProviders,
+					userId: request.accountability?.user ?? null,
+					requestBody: request.body,
+				})
+					.then((beneficiaryId) => {
+						response.json({ data: { id: beneficiaryId } });
+					}, next);
+			},
+		);
 
 		router.post(
 			'/plans/:id/archive',

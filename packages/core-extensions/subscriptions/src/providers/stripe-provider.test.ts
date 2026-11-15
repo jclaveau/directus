@@ -244,8 +244,17 @@ describe('fetchSubscription', () => {
 			customer: 'cus_1',
 			status: 'active',
 			cancel_at_period_end: false,
+			metadata: { directus_subscription: '7' },
 			items: {
-				data: [{ current_period_end: 1_796_083_200, price: { id: 'price_1' } }],
+				data: [{
+					current_period_end: 1_796_083_200,
+					price: {
+						id: 'price_1',
+						unit_amount: 1000,
+						currency: 'eur',
+						recurring: { interval: 'month', interval_count: 1 },
+					},
+				}],
 			},
 		} as never);
 
@@ -256,7 +265,12 @@ describe('fetchSubscription', () => {
 			status: 'active',
 			currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
 			cancelAtPeriodEnd: false,
-			planReference: 'price_1',
+			directusSubscription: 7,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
 		});
 
 		expect(stripeClient.subscriptions.retrieve).toHaveBeenCalledWith('sub_1');
@@ -270,8 +284,17 @@ describe('fetchSubscription', () => {
 			customer: { id: 'cus_2' },
 			status: 'canceled',
 			cancel_at_period_end: true,
+			metadata: {},
 			items: {
-				data: [{ current_period_end: 1_796_083_200, price: { id: 'price_1' } }],
+				data: [{
+					current_period_end: 1_796_083_200,
+					price: {
+						id: 'price_1',
+						unit_amount: 12000,
+						currency: 'eur',
+						recurring: { interval: 'year', interval_count: 1 },
+					},
+				}],
 			},
 		} as never);
 
@@ -283,7 +306,63 @@ describe('fetchSubscription', () => {
 			currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
 			// Ended at Stripe, even when a cancel at period end was scheduled.
 			cancelAtPeriodEnd: false,
-			planReference: 'price_1',
+			directusSubscription: null,
+			billing: {
+				amountCents: 12000,
+				currency: 'EUR',
+				interval: { months: 12, days: 0 },
+			},
+		});
+	});
+
+	test.each([
+		[
+			{ interval: 'week', interval_count: 2 },
+			500,
+			{ amountCents: 500, currency: 'EUR', interval: { months: 0, days: 14 } },
+		],
+		[
+			{ interval: 'day', interval_count: 30 },
+			500,
+			{ amountCents: 500, currency: 'EUR', interval: { months: 0, days: 30 } },
+		],
+		[{ interval: 'month', interval_count: 1 }, null, null],
+		[null, 500, null],
+	])('bills %j at %j cents as %j', async (
+		recurringPrice,
+		unitAmount,
+		expectedBilling,
+	) => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		vi.spyOn(stripeClient.subscriptions, 'retrieve').mockResolvedValue({
+			id: 'sub_1',
+			customer: 'cus_1',
+			status: 'active',
+			cancel_at_period_end: false,
+			metadata: { directus_subscription: '7' },
+			items: {
+				data: [{
+					current_period_end: 1_796_083_200,
+					price: {
+						id: 'price_1',
+						unit_amount: unitAmount,
+						currency: 'eur',
+						recurring: recurringPrice,
+					},
+				}],
+			},
+		} as never);
+
+		expect(await createStripeProvider(stripeClient, 'whsec_1')
+			.fetchSubscription('sub_1')).toEqual({
+			subscriptionId: 'sub_1',
+			customerId: 'cus_1',
+			status: 'active',
+			currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+			cancelAtPeriodEnd: false,
+			directusSubscription: 7,
+			billing: expectedBilling,
 		});
 	});
 
@@ -301,7 +380,7 @@ describe('fetchSubscription', () => {
 		));
 	});
 
-	test('names no plan on several items, so a status can still revoke', async () => {
+	test('bills nothing on several items, so a status can still revoke', async () => {
 		const stripeClient = new Stripe('sk_test_1');
 
 		vi.spyOn(stripeClient.subscriptions, 'retrieve').mockResolvedValue({
@@ -309,6 +388,7 @@ describe('fetchSubscription', () => {
 			customer: 'cus_1',
 			status: 'unpaid',
 			cancel_at_period_end: false,
+			metadata: { directus_subscription: '7' },
 			items: {
 				data: [
 					{ current_period_end: 1_796_083_200, price: { id: 'price_1' } },
@@ -324,7 +404,8 @@ describe('fetchSubscription', () => {
 			status: 'unpaid',
 			currentPeriodEnd: new Date(1_796_083_200_000),
 			cancelAtPeriodEnd: false,
-			planReference: null,
+			directusSubscription: 7,
+			billing: null,
 		});
 	});
 
