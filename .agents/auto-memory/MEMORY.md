@@ -15,7 +15,7 @@ line appended below.
 - [No consumer data in fork memories](feedback_directus_no_consumer_data_in_fork_memories.md) — public repo: consumer specifics go to its private repo; a consumer prod DB is SELECT-only
 - [Non-PG review points go to #610](feedback_directus_non_pg_review_points_to_610.md) — sqlite/cockroach/maria finding → point in #610 + `TODO(#610):`, never fixed in the PR; a closed PR leaving a sqlite/maria gap → link in #330/#331, no ask
 - [Postgres only in the main workflow](feedback_directus_pg_only_dialect_focus.md) — no MariaDB/SQLite investment; never report their absence as a gap
-- [CI-triggering action needs its own approval](feedback_ci_trigger_needs_own_approval.md) — label/dispatch is its own ask; a likely-flake rerun is NOT (free runners) unless contended
+- [CI-triggering action needs its own approval](feedback_ci_trigger_needs_own_approval.md) — label/dispatch is its own ask; a likely-flake rerun is NOT (free runners) unless contended; except Mollie probe (dispatch freely if no contention) + preview-admin
 - [The admin preview is not a CI check](feedback_directus_ci_watch_skip_preview.md) — never wait on it, never mention it in a CI report
 - [New bb files are Gherkin](feedback_directus_blackbox_gherkin_standard.md) — `.feature` + step `.test.ts`
 

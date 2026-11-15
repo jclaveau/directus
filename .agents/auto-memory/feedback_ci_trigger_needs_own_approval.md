@@ -42,3 +42,10 @@ first: cost (a PRIVATE repo, paid minutes) and GHA runner contention
 (`~/.agents/scripts/gha-contention.sh`, account-wide). Labels and dispatches keep needing their
 own ask. See the cross-repo [[feedback_rerun_likely_flaky_without_asking]] and
 [[feedback_local_vs_ci_gate_by_repo_visibility]].
+
+**Exceptions jean granted (2026-11-15), no ask:**
+- `Mollie behaviour` probe (workflow 417187534): dispatch whenever useful, as long
+  as `~/.agents/scripts/gha-contention.sh` shows room. jean: _"You can dispatch
+  Mollie probe whenever you want as long as there is not too much gha contention"_.
+- `preview-admin.yml`: dispatch with a short `timeout_minutes` mid-loop, or cancel
+  it; see [[feedback_directus_redispatch_preview_freely]].
