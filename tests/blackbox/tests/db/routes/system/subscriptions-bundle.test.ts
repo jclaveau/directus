@@ -2,6 +2,7 @@ import config, { paths, type Env } from '@common/config';
 import {
 	defineFeature,
 	loadFeature,
+	messageOfDocString,
 	parseGherkinTable,
 	type StepCallback,
 } from '@common/cucumber';
@@ -34,11 +35,11 @@ import {
 	type ScenarioKeys,
 } from './singular-write-steps';
 
-type OwnPlanSubscriber = {
+type PendingSubscriptionSeed = {
 	id: number;
 	provider: string;
-	customer: string;
-	reference: string;
+	manager: number;
+	beneficiaries_max: number;
 	plan_status: string;
 };
 
@@ -61,11 +62,10 @@ const SYNC_POLL = { timeout: 45_000, interval: 500 };
 const BUNDLE_TABLES = [
 	'subscription_sync_queue',
 	'subscription_events',
+	'subscription_beneficiaries',
+	'subscription_managers',
 	'subscriptions',
-	'subscription_plan_references',
 	'subscription_plans',
-	'subscriber_customers',
-	'subscribers',
 ];
 
 const accessFeature = loadFeature(
@@ -92,6 +92,9 @@ describe.each(vendors)('%s', (vendor) => {
 	let fakeProviders: Awaited<ReturnType<typeof startFakeProviders>>;
 	let instanceProcess: ChildProcess;
 	let packageDirectory: string;
+
+	// Each `msg` the instance logged, raw: a line that is no JSON is kept whole.
+	const loggedMessages: string[] = [];
 
 	// A sync error stays in its queue row: reading it with the rows puts it in
 	// the failure's diff, as does a call the fake Mollie has no answer for.
@@ -128,6 +131,7 @@ describe.each(vendors)('%s', (vendor) => {
 			PORT: String(instancePort),
 			PUBLIC_URL: `http://127.0.0.1:${instancePort}`,
 			PACKAGE_FILE_LOCATION: packageDirectory,
+			LOG_STYLE: 'raw',
 			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_blackbox',
 			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_test_blackbox',
 			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: STRIPE_WEBHOOK_SECRET,
@@ -152,6 +156,17 @@ describe.each(vendors)('%s', (vendor) => {
 		instanceProcess = spawn('node', [paths.cli, 'start'], {
 			cwd: paths.cwd,
 			env: vendorEnv,
+		});
+
+		let unendedLogLine = '';
+
+		instanceProcess.stdout!.on('data', (logChunk) => {
+			const logLines = `${unendedLogLine}${String(logChunk)}`.split('\n');
+			unendedLogLine = logLines.pop()!;
+
+			for (const logLine of logLines) {
+				loggedMessages.push(readLogMessage(logLine));
+			}
 		});
 
 		await awaitDirectusConnection(instancePort);
@@ -252,48 +267,58 @@ describe.each(vendors)('%s', (vendor) => {
 		fakeProviders.forgetSubscription(subscriptionId);
 	}
 
-	async function seedOwnPlanSubscribers(rowsTable: Record<string, string>[]) {
-		for (const ownPlan of parseGherkinTable<OwnPlanSubscriber>(rowsTable)) {
-			const { id: seedId, provider, customer } = ownPlan;
+	async function seedPendingSubscriptions(rowsTable: Record<string, string>[]) {
+		const seededRows = parseGherkinTable<PendingSubscriptionSeed>(rowsTable);
+
+		for (const pendingSeed of seededRows) {
+			const { id: seedId, manager: managerSeed } = pendingSeed;
 			const seededPolicy = withKeys(`<policy_${seedId}>`, scenarioKeys);
-			const seededUser = withKeys(`<user_${seedId}>`, scenarioKeys);
+			const seededManager = withKeys(`<user_${managerSeed}>`, scenarioKeys);
+			const seededAt = new Date();
 
 			await database('directus_policies').insert({
 				id: seededPolicy,
 				name: `Lifecycle ${seedId}`,
 			});
 
-			await database('directus_users').insert({
-				id: seededUser,
-				email: `lifecycle-${seedId}@example.com`,
-				token: `lifecycle-${seedId}-token`,
-			});
-
-			await database('subscribers').insert({ id: seedId, user: seededUser });
-
-			await database('subscriber_customers').insert({
-				id: seedId,
-				subscriber: seedId,
-				provider,
-				provider_customer_id: customer,
-			});
+			// A manager of several subscriptions is seeded with the first.
+			if (managerSeed === seedId) {
+				await database('directus_users').insert({
+					id: seededManager,
+					email: `lifecycle-${seedId}@example.com`,
+					token: `lifecycle-${seedId}-token`,
+				});
+			}
 
 			await database('subscription_plans').insert({
 				id: seedId,
 				code: `plan-${seedId}`,
 				name: `Plan ${seedId}`,
 				policy: seededPolicy,
-				amount: 1000,
+				amount: 10,
 				currency: 'EUR',
 				interval: '{"months":1}',
-				status: ownPlan.plan_status,
+				beneficiaries_max: pendingSeed.beneficiaries_max,
+				status: pendingSeed.plan_status,
 			});
 
-			await database('subscription_plan_references').insert({
+			await database('subscriptions').insert({
 				id: seedId,
 				plan: seedId,
-				provider,
-				reference: ownPlan.reference,
+				provider: pendingSeed.provider,
+				status: 'pending',
+				date_created: seededAt,
+				date_updated: seededAt,
+			});
+
+			await database('subscription_managers').insert({
+				subscription: seedId,
+				user: seededManager,
+			});
+
+			await database('subscription_beneficiaries').insert({
+				subscription: seedId,
+				user: seededManager,
 			});
 		}
 	}
@@ -386,24 +411,51 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 	}
 
-	// `resumes` holds a row id, which a scenario cannot know up front.
-	function expectResumedSubscription(
+	// `continues` holds a row id, which a scenario cannot know up front.
+	function expectContinuedSubscription(
 		subscriptionId: string,
-		resumedSubscriptionId: string,
+		continuedSubscriptionId: string,
 	) {
 		return expectEventualRows(
 			() => {
 				return database('subscriptions')
 					.join(
-						'subscriptions as resumed_subscriptions',
-						'resumed_subscriptions.id',
-						'subscriptions.resumes',
+						'subscriptions as continued_subscriptions',
+						'continued_subscriptions.id',
+						'subscriptions.continues',
 					)
-					.select('resumed_subscriptions.provider_subscription_id')
+					.select('continued_subscriptions.provider_subscription_id')
 					.where('subscriptions.provider_subscription_id', subscriptionId);
 			},
-			[{ provider_subscription_id: resumedSubscriptionId }],
+			[{ provider_subscription_id: continuedSubscriptionId }],
 		);
+	}
+
+	function expectBeneficiaries(
+		subscriptionId: string,
+		rowsTable: Record<string, string>[],
+	) {
+		return expectEventualRows(
+			() => {
+				return database('subscription_beneficiaries')
+					.join(
+						'subscriptions',
+						'subscriptions.id',
+						'subscription_beneficiaries.subscription',
+					)
+					.select(Object.keys(rowsTable[0]!).map((columnName) => {
+						return `subscription_beneficiaries.${columnName}`;
+					}))
+					.where('subscriptions.provider_subscription_id', subscriptionId)
+					.orderBy('subscription_beneficiaries.id');
+			},
+			readExpectedRows(rowsTable),
+		);
+	}
+
+	function expectLoggedMessage(loggedDocString: string) {
+		return expect.poll(() => loggedMessages, SYNC_POLL)
+			.toContain(messageOfDocString(loggedDocString));
 	}
 
 	function expectSubscriptionEvents(
@@ -551,16 +603,17 @@ describe.each(vendors)('%s', (vendor) => {
 			given(/^the rows of (\w+):$/, seedRows);
 			and(/^the rows of (\w+):$/, seedRows);
 			and(/^the rows of (\w+):$/, seedRows);
-			and(/^the rows of (\w+):$/, seedRows);
-			and(/^the rows of (\w+):$/, seedRows);
-			and(/^the rows of (\w+):$/, seedRows);
 			and(/^this row of (\w+):$/, seedColumnRow);
+			and(/^the rows of (\w+):$/, seedRows);
 			then('these requests get these responses:', sendRequestRows);
 		}, 60_000);
 	});
 
 	const lifecycleSteps: [RegExp, StepCallback][] = [
-		[/^these subscribers, each with its own plan:$/, seedOwnPlanSubscribers],
+		[
+			/^these pending subscriptions, each with its own plan:$/,
+			seedPendingSubscriptions,
+		],
 		[/^the rows of (\w+):$/, seedRows],
 		[/^Mollie holds this subscription:$/, holdSubscription],
 		[/^Mollie holds this mandate:$/, holdMandate],
@@ -572,7 +625,15 @@ describe.each(vendors)('%s', (vendor) => {
 		[/^this user eventually holds no access:$/, expectNoAccess],
 		[/^subscription (\w+) is eventually stored:$/, expectStoredSubscription],
 		[/^the events of subscription (\w+) are eventually:$/, expectSubscriptionEvents],
-		[/^subscription (\w+) eventually resumes (\w+)$/, expectResumedSubscription],
+		[
+			/^subscription (\w+) eventually continues (\w+)$/,
+			expectContinuedSubscription,
+		],
+		[
+			/^the beneficiaries of subscription (\w+) are eventually:$/,
+			expectBeneficiaries,
+		],
+		[/^the instance eventually logged:$/, expectLoggedMessage],
 		[/^these sync queue rows are eventually stored:$/, expectQueueRows],
 		[/^the sync queue eventually holds no row for (\S+)$/, expectNoQueueRow],
 		[/^the providers eventually received these writes:$/, expectReceivedWrites],
@@ -702,3 +763,12 @@ describe.each(vendors)('%s', (vendor) => {
 		}, 60_000);
 	});
 });
+
+function readLogMessage(logLine: string): string {
+	try {
+		return JSON.parse(logLine).msg ?? logLine;
+	}
+	catch {
+		return logLine;
+	}
+}

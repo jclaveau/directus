@@ -24,6 +24,7 @@ const PLANS = [
 		amount: 9.9,
 		currency: 'EUR',
 		interval: '{"months":1}',
+		beneficiaries_max: 1,
 	},
 	{
 		code: 'pro',
@@ -31,6 +32,7 @@ const PLANS = [
 		amount: 29,
 		currency: 'EUR',
 		interval: '{"months":1}',
+		beneficiaries_max: 2,
 	},
 	{
 		code: 'pro-yearly',
@@ -38,6 +40,7 @@ const PLANS = [
 		amount: 290,
 		currency: 'EUR',
 		interval: '{"years":1}',
+		beneficiaries_max: 2,
 	},
 	{
 		code: 'team-quarterly',
@@ -45,8 +48,11 @@ const PLANS = [
 		amount: 199,
 		currency: 'USD',
 		interval: '{"months":3}',
+		beneficiaries_max: 10,
 	},
 ];
+
+const createdPlans = [];
 
 for (const previewPlan of PLANS) {
 	const planPolicy = await postAsAdmin('/policies', {
@@ -56,23 +62,10 @@ for (const previewPlan of PLANS) {
 		admin_access: false,
 	});
 
-	const createdPlan = await postAsAdmin('/items/subscription_plans', {
+	createdPlans.push(await postAsAdmin('/items/subscription_plans', {
 		...previewPlan,
 		policy: planPolicy.id,
-	});
-
-	await postAsAdmin('/items/subscription_plan_references', [
-		{
-			plan: createdPlan.id,
-			provider: 'stripe',
-			reference: `price_preview_${previewPlan.code}`,
-		},
-		{
-			plan: createdPlan.id,
-			provider: 'mollie',
-			reference: `${previewPlan.code}-plan`,
-		},
-	]);
+	}));
 }
 
 const PREVIEW_USERS = [
@@ -83,16 +76,28 @@ const PREVIEW_USERS = [
 
 const createdUsers = await postAsAdmin('/users', PREVIEW_USERS);
 
-// Grace stays a plain user: only the first two are subscribers.
-await postAsAdmin(
-	'/items/subscribers',
-	createdUsers.slice(0, 2).map((createdUser) => {
-		return { user: createdUser.id };
-	}),
-);
+// Ada and Linus share a pending Pro subscription, both managing and
+// benefiting from it; Grace stays a plain user.
+const seededAt = new Date().toISOString();
+
+const proSubscription = await postAsAdmin('/items/subscriptions', {
+	plan: createdPlans[1].id,
+	provider: 'mollie',
+	status: 'pending',
+	date_created: seededAt,
+	date_updated: seededAt,
+});
+
+const sharingUsers = createdUsers.slice(0, 2).map((createdUser) => {
+	return { subscription: proSubscription.id, user: createdUser.id };
+});
+
+await postAsAdmin('/items/subscription_managers', sharingUsers);
+await postAsAdmin('/items/subscription_beneficiaries', sharingUsers);
 
 console.log(
-	`seeded ${PLANS.length} plans and ${PREVIEW_USERS.length} users`,
+	`seeded ${PLANS.length} plans, ${PREVIEW_USERS.length} users and`
+	+ ' 1 pending subscription',
 );
 
 async function postAsAdmin(requestPath, requestBody) {
