@@ -1,6 +1,9 @@
 import type { AbstractService } from '@directus/types';
 import type { Knex } from 'knex';
-import { MissingProviderSubscriptionError } from '../errors.js';
+import {
+	MissingProviderSubscriptionError,
+	UnboundProviderSubscriptionError,
+} from '../errors.js';
 import { findProvider } from '../providers/create-providers.js';
 import type { SubscriptionProviders } from '../providers/types.js';
 import {
@@ -98,15 +101,32 @@ async function syncNextRow({
 				return;
 			}
 
-			await syncSubscription({
-				trx,
-				accessService: createAccessService(trx),
-				subscriptionProvider,
-				providerName: claimedRow.provider,
-				providerSubscription: fetchedSubscription,
-				syncedAt: new Date(),
-				logger,
-			});
+			try {
+				await syncSubscription({
+					trx,
+					accessService: createAccessService(trx),
+					subscriptionProvider,
+					providerName: claimedRow.provider,
+					providerSubscription: fetchedSubscription,
+					syncedAt: new Date(),
+					logger,
+				});
+			}
+			catch (syncError) {
+				if (!(syncError instanceof UnboundProviderSubscriptionError)) {
+					throw syncError;
+				}
+
+				await claimedQueueRow.delete();
+
+				logger.error(
+					`Subscription sync of ${JSON.stringify(claimedRow.provider)}`
+					+ ` ${JSON.stringify(claimedRow.resource_id)} dropped:`
+					+ ` ${JSON.stringify(syncError.message)}`,
+				);
+
+				return;
+			}
 
 			const syncedResourceId = subscriptionProvider.composeResourceId({
 				subscriptionId: fetchedSubscription.subscriptionId,

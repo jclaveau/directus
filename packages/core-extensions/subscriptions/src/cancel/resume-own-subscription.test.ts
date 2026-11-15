@@ -26,22 +26,15 @@ beforeEach(async () => {
 	await createSubscriptionTables.config.up(database);
 
 	vi.useFakeTimers({ now: new Date('2026-11-05T00:00:00Z'), toFake: ['Date'] });
-	await database('subscribers').insert({ user: 'user-1' });
-
-	await database('subscriber_customers')
-		.insert({ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' });
 
 	await database('subscription_plans').insert({
 		code: 'monthly',
 		name: 'Monthly',
 		policy: 'policy-1',
-		amount: 990,
+		amount: 10,
 		currency: 'EUR',
 		interval: '{"months":1}',
 	});
-
-	await database('subscription_plan_references')
-		.insert({ plan: 1, provider: 'mollie', reference: 'monthly' });
 });
 
 afterEach(async () => {
@@ -56,10 +49,9 @@ describe('resumeOwnSubscription', () => {
 		and records who asked
 	`, async () => {
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'mollie',
+			provider_customer_id: 'cst_1',
 			provider_subscription_id: 'sub_1',
 			status: 'canceled',
 			current_period_end: new Date('2026-12-01T00:00:00Z'),
@@ -67,6 +59,9 @@ describe('resumeOwnSubscription', () => {
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
 
 		const resumeCancel = vi.fn().mockResolvedValue({
 			resourceId: 'cst_1/sub_2',
@@ -115,10 +110,9 @@ describe('resumeOwnSubscription', () => {
 		clears the cancel of a Stripe subscription and records who asked
 	`, async () => {
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'stripe',
+			provider_customer_id: 'cus_1',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
 			current_period_end: new Date('2026-12-01T00:00:00Z'),
@@ -126,6 +120,9 @@ describe('resumeOwnSubscription', () => {
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
 
 		// Same order as the sync worker, or the two deadlock on postgres.
 		await database.raw(`
@@ -182,10 +179,9 @@ describe('resumeOwnSubscription', () => {
 
 	test('refuses a cancel whose paid period is over', async () => {
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'mollie',
+			provider_customer_id: 'cst_1',
 			provider_subscription_id: 'sub_1',
 			status: 'canceled',
 			current_period_end: new Date('2026-11-05T00:00:00Z'),
@@ -193,6 +189,9 @@ describe('resumeOwnSubscription', () => {
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
 
 		await expect(resumeOwnSubscription({
 			database,
@@ -203,10 +202,9 @@ describe('resumeOwnSubscription', () => {
 
 	test('refuses a subscription that is not cancelling', async () => {
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'stripe',
+			provider_customer_id: 'cus_1',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
 			current_period_end: new Date('2026-12-01T00:00:00Z'),
@@ -214,6 +212,9 @@ describe('resumeOwnSubscription', () => {
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
 
 		await expect(resumeOwnSubscription({
 			database,
@@ -224,10 +225,9 @@ describe('resumeOwnSubscription', () => {
 
 	test('refuses a Stripe subscription Stripe already canceled', async () => {
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'stripe',
+			provider_customer_id: 'cus_1',
 			provider_subscription_id: 'sub_1',
 			status: 'canceled',
 			current_period_end: new Date('2026-12-01T00:00:00Z'),
@@ -235,6 +235,9 @@ describe('resumeOwnSubscription', () => {
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
 
 		const resumeCancel = vi.fn();
 
@@ -252,10 +255,9 @@ describe('resumeOwnSubscription', () => {
 	test('refuses a canceled subscription a stored one already resumes', async () => {
 		await database('subscriptions').insert([
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_1',
 				status: 'canceled',
 				current_period_end: new Date('2026-12-01T00:00:00Z'),
@@ -264,18 +266,22 @@ describe('resumeOwnSubscription', () => {
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_2',
 				status: 'active',
 				current_period_end: new Date('2026-12-01T00:00:00Z'),
 				cancel_at_period_end: false,
-				resumes: 1,
+				continues: 1,
 				date_created: new Date('2026-11-01T00:00:00Z'),
 				date_updated: new Date('2026-11-01T00:00:00Z'),
 			},
+		]);
+
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 2, user: 'user-1' },
 		]);
 
 		await expect(resumeOwnSubscription({
@@ -291,10 +297,9 @@ describe('resumeOwnSubscription', () => {
 	`, async () => {
 		await database('subscriptions').insert([
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_1',
 				status: 'canceled',
 				current_period_end: new Date('2026-12-01T00:00:00Z'),
@@ -303,18 +308,22 @@ describe('resumeOwnSubscription', () => {
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_2',
 				status: 'canceled',
 				current_period_end: null,
 				cancel_at_period_end: true,
-				resumes: 1,
+				continues: 1,
 				date_created: new Date('2026-11-01T00:00:00Z'),
 				date_updated: new Date('2026-11-02T00:00:00Z'),
 			},
+		]);
+
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 2, user: 'user-1' },
 		]);
 
 		const resumeCancel = vi.fn().mockResolvedValue({
@@ -346,10 +355,9 @@ describe('resumeOwnSubscription', () => {
 	`, async () => {
 		await database('subscriptions').insert([
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_1',
 				status: 'canceled',
 				current_period_end: new Date('2026-12-01T00:00:00Z'),
@@ -358,18 +366,22 @@ describe('resumeOwnSubscription', () => {
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_2',
 				status: 'canceled',
 				current_period_end: new Date('2027-01-01T00:00:00Z'),
 				cancel_at_period_end: true,
-				resumes: 1,
+				continues: 1,
 				date_created: new Date('2026-11-01T00:00:00Z'),
 				date_updated: new Date('2026-11-02T00:00:00Z'),
 			},
+		]);
+
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 2, user: 'user-1' },
 		]);
 
 		const resumeCancel = vi.fn().mockResolvedValue({
@@ -395,10 +407,9 @@ describe('resumeOwnSubscription', () => {
 	test('refuses a user with several canceled subscriptions', async () => {
 		await database('subscriptions').insert([
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_1',
 				status: 'canceled',
 				current_period_end: new Date('2026-12-01T00:00:00Z'),
@@ -407,10 +418,9 @@ describe('resumeOwnSubscription', () => {
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_2',
 				status: 'canceled',
 				current_period_end: new Date('2026-12-02T00:00:00Z'),
@@ -418,6 +428,11 @@ describe('resumeOwnSubscription', () => {
 				date_created: new Date('2026-10-02T00:00:00Z'),
 				date_updated: new Date('2026-10-02T00:00:00Z'),
 			},
+		]);
+
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 2, user: 'user-1' },
 		]);
 
 		await expect(resumeOwnSubscription({
@@ -429,16 +444,67 @@ describe('resumeOwnSubscription', () => {
 		}));
 	});
 
-	test('refuses a subscription of an archived plan', async () => {
-		await database('subscription_plans')
-			.where('id', 1)
-			.update({ status: 'archived' });
+	test('resumes the one canceled subscription the request names', async () => {
+		await database('subscriptions').insert([
+			{
+				plan: 1,
+				provider: 'mollie',
+				provider_customer_id: 'cst_1',
+				provider_subscription_id: 'sub_1',
+				status: 'canceled',
+				current_period_end: new Date('2026-12-01T00:00:00Z'),
+				cancel_at_period_end: true,
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+			{
+				plan: 1,
+				provider: 'mollie',
+				provider_customer_id: 'cst_1',
+				provider_subscription_id: 'sub_2',
+				status: 'canceled',
+				current_period_end: new Date('2026-12-02T00:00:00Z'),
+				cancel_at_period_end: true,
+				date_created: new Date('2026-10-02T00:00:00Z'),
+				date_updated: new Date('2026-10-02T00:00:00Z'),
+			},
+		]);
 
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 2, user: 'user-1' },
+		]);
+
+		const resumeCancel = vi.fn().mockResolvedValue({
+			resourceId: 'cst_1/sub_3',
+			isNewSubscription: true,
+		});
+
+		await resumeOwnSubscription({
+			database,
+			enabledProviders: new Map([
+				['mollie', { resumeCancel } as unknown as SubscriptionProvider],
+			]),
+			userId: 'user-1',
+			subscriptionId: 2,
+		});
+
+		expect(resumeCancel).toHaveBeenCalledWith({
+			subscriptionId: 'sub_2',
+			customerId: 'cst_1',
+			periodEnd: new Date('2026-12-02T00:00:00Z'),
+		});
+
+		expect(await database('subscription_sync_queue')
+			.select('provider', 'resource_id', 'pending'))
+			.toEqual([{ provider: 'mollie', resource_id: 'cst_1/sub_3', pending: 1 }]);
+	});
+
+	test('refuses a subscription the user only benefits from', async () => {
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'mollie',
+			provider_customer_id: 'cst_1',
 			provider_subscription_id: 'sub_1',
 			status: 'canceled',
 			current_period_end: new Date('2026-12-01T00:00:00Z'),
@@ -446,6 +512,45 @@ describe('resumeOwnSubscription', () => {
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-2' });
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-1', access: 'access-1' });
+
+		const resumeCancel = vi.fn();
+
+		await expect(resumeOwnSubscription({
+			database,
+			enabledProviders: new Map([
+				['mollie', { resumeCancel } as unknown as SubscriptionProvider],
+			]),
+			userId: 'user-1',
+		})).rejects.toThrow(new NoSubscriptionToResumeError());
+
+		expect(resumeCancel).not.toHaveBeenCalled();
+	});
+
+	test('refuses a subscription of an archived plan', async () => {
+		await database('subscription_plans')
+			.where('id', 1)
+			.update({ status: 'archived' });
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'mollie',
+			provider_customer_id: 'cst_1',
+			provider_subscription_id: 'sub_1',
+			status: 'canceled',
+			current_period_end: new Date('2026-12-01T00:00:00Z'),
+			cancel_at_period_end: true,
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
 
 		const resumeCancel = vi.fn();
 
@@ -462,10 +567,9 @@ describe('resumeOwnSubscription', () => {
 
 	test('queues nothing when the provider refuses', async () => {
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'mollie',
+			provider_customer_id: 'cst_1',
 			provider_subscription_id: 'sub_1',
 			status: 'canceled',
 			current_period_end: new Date('2026-12-01T00:00:00Z'),
@@ -473,6 +577,9 @@ describe('resumeOwnSubscription', () => {
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
 
 		await expect(resumeOwnSubscription({
 			database,

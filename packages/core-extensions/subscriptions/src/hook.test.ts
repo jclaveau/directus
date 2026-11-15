@@ -2,11 +2,13 @@ import { ForbiddenError } from '@directus/errors';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { subscriptionsHook } from './hook.js';
 import {
+	refuseFrozenPlanUpdate,
+	refuseLastManagerDelete,
+	refuseLastManagerMove,
 	refusePlanDelete,
 	refusePlanStatusUpdate,
 	refuseSubscriptionEventWrite,
 	refuseSubscriptionStateUpdate,
-	refuseUsedReferenceUpdate,
 } from './plans/refuse-direct-writes.js';
 import { enqueueReconcile } from './sync/enqueue-reconcile.js';
 import { runSyncBatch } from './sync/run-sync-batch.js';
@@ -75,7 +77,7 @@ describe('subscriptionsHook', () => {
 		expect(AccessService).toHaveBeenCalledWith({ knex: 'trx', schema: 'schema' });
 	});
 
-	test('filters the writes around the plans and their history', () => {
+	test('filters the writes around the plans, managers and history', () => {
 		const filter = vi.fn();
 
 		(subscriptionsHook.config as (...args: unknown[]) => void)(
@@ -86,7 +88,8 @@ describe('subscriptionsHook', () => {
 		expect(filter.mock.calls).toEqual([
 			['subscription_plans.items.delete', expect.any(Function)],
 			['subscription_plans.items.update', expect.any(Function)],
-			['subscription_plan_references.items.update', expect.any(Function)],
+			['subscription_managers.items.delete', expect.any(Function)],
+			['subscription_managers.items.update', expect.any(Function)],
 			['subscriptions.items.update', expect.any(Function)],
 			['subscription_events.items.create', expect.any(Function)],
 			['subscription_events.items.update', expect.any(Function)],
@@ -117,21 +120,46 @@ describe('subscriptionsHook', () => {
 			[[{ data: { status: 'archived' }, keys: [1] }], 'filter database'],
 		],
 		[
-			'subscription_plan_references.items.update',
-			2,
-			[{ data: { reference: 'other' }, keys: [1] }],
+			'subscription_plans.items.update',
+			1,
+			[{ data: { amount: 12 }, keys: [1] }],
 			{
 				action: 'update',
-				collection: 'subscription_plan_references',
+				collection: 'subscription_plans',
 				primaryKeys: [1],
-				fields: ['reference'],
+				fields: ['amount'],
 			},
-			refuseUsedReferenceUpdate,
-			[[{ data: { reference: 'other' }, keys: [1] }], 'filter database'],
+			refuseFrozenPlanUpdate,
+			[[{ data: { amount: 12 }, keys: [1] }], 'filter database'],
+		],
+		[
+			'subscription_managers.items.delete',
+			2,
+			[1],
+			{
+				action: 'delete',
+				collection: 'subscription_managers',
+				primaryKeys: [1],
+			},
+			refuseLastManagerDelete,
+			[[1], 'filter database'],
+		],
+		[
+			'subscription_managers.items.update',
+			3,
+			[{ data: { subscription: 2 }, keys: [1] }],
+			{
+				action: 'update',
+				collection: 'subscription_managers',
+				primaryKeys: [1],
+				fields: ['subscription'],
+			},
+			refuseLastManagerMove,
+			[[{ data: { subscription: 2 }, keys: [1] }], 'filter database'],
 		],
 		[
 			'subscriptions.items.update',
-			3,
+			4,
 			[{ data: { status: 'canceled' }, keys: [1] }],
 			{
 				action: 'update',
@@ -144,7 +172,7 @@ describe('subscriptionsHook', () => {
 		],
 		[
 			'subscription_events.items.create',
-			4,
+			5,
 			{ source: 'sync' },
 			{ action: 'create', collection: 'subscription_events' },
 			refuseSubscriptionEventWrite,
@@ -152,7 +180,7 @@ describe('subscriptionsHook', () => {
 		],
 		[
 			'subscription_events.items.update',
-			5,
+			6,
 			[{ data: { source: 'sync' }, keys: [1] }],
 			{ action: 'update', collection: 'subscription_events' },
 			refuseSubscriptionEventWrite,
@@ -160,7 +188,7 @@ describe('subscriptionsHook', () => {
 		],
 		[
 			'subscription_events.items.delete',
-			6,
+			7,
 			[1],
 			{ action: 'delete', collection: 'subscription_events' },
 			refuseSubscriptionEventWrite,

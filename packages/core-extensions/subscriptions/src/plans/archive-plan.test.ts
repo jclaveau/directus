@@ -21,24 +21,14 @@ beforeEach(async () => {
 
 	await createSubscriptionTables.config.up(database);
 
-	await database('subscribers').insert({ user: 'user-1' });
-
-	await database('subscriber_customers').insert([
-		{ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' },
-		{ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' },
-	]);
-
 	await database('subscription_plans').insert({
 		code: 'monthly',
 		name: 'Monthly',
 		policy: 'policy-1',
-		amount: 990,
+		amount: 10,
 		currency: 'EUR',
 		interval: '{"months":1}',
 	});
-
-	await database('subscription_plan_references')
-		.insert({ plan: 1, provider: 'stripe', reference: 'price_1' });
 
 	vi.useFakeTimers({ now: new Date('2026-11-05T00:00:00Z'), toFake: ['Date'] });
 });
@@ -70,10 +60,9 @@ describe('archivePlan', () => {
 	test('archives a plan ending nothing without a sentence', async () => {
 		await database('subscriptions').insert([
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'stripe',
+				provider_customer_id: 'cus_1',
 				provider_subscription_id: 'sub_ended',
 				status: 'canceled',
 				cancel_at_period_end: false,
@@ -81,10 +70,9 @@ describe('archivePlan', () => {
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'stripe',
+				provider_customer_id: 'cus_1',
 				provider_subscription_id: 'sub_ending',
 				status: 'active',
 				cancel_at_period_end: true,
@@ -115,14 +103,10 @@ describe('archivePlan', () => {
 			interval: '{"years":1}',
 		});
 
-		await database('subscription_plan_references')
-			.insert({ plan: 2, provider: 'stripe', reference: 'price_2' });
-
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 2,
+			plan: 1,
 			provider: 'stripe',
+			provider_customer_id: 'cus_1',
 			provider_subscription_id: 'sub_yearly',
 			status: 'active',
 			date_created: new Date('2026-10-01T00:00:00Z'),
@@ -140,10 +124,9 @@ describe('archivePlan', () => {
 
 	test('refuses without the sentence for one subscription', async () => {
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'stripe',
+			provider_customer_id: 'cus_1',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
 			date_created: new Date('2026-10-01T00:00:00Z'),
@@ -174,10 +157,9 @@ describe('archivePlan', () => {
 	test('ends every ongoing subscription once the sentence is typed', async () => {
 		await database('subscriptions').insert([
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'stripe',
+				provider_customer_id: 'cus_1',
 				provider_subscription_id: 'sub_1',
 				status: 'active',
 				current_period_end: new Date('2026-12-01T00:00:00Z'),
@@ -185,10 +167,9 @@ describe('archivePlan', () => {
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
 			{
-				subscriber: 1,
-				customer: 2,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_2',
 				status: 'past_due',
 				date_created: new Date('2026-10-01T00:00:00Z'),
@@ -274,10 +255,9 @@ describe('archivePlan', () => {
 
 	test('records no user for a token without one', async () => {
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'stripe',
+			provider_customer_id: 'cus_1',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
 			date_created: new Date('2026-10-01T00:00:00Z'),
@@ -301,10 +281,9 @@ describe('archivePlan', () => {
 
 	test('writes the queue row before the subscription', async () => {
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'stripe',
+			provider_customer_id: 'cus_1',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
 			date_created: new Date('2026-10-01T00:00:00Z'),
@@ -352,20 +331,18 @@ describe('archivePlan', () => {
 	test('ends nothing when a provider is disabled', async () => {
 		await database('subscriptions').insert([
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'stripe',
+				provider_customer_id: 'cus_1',
 				provider_subscription_id: 'sub_1',
 				status: 'active',
 				date_created: new Date('2026-10-01T00:00:00Z'),
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
 			{
-				subscriber: 1,
-				customer: 2,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_2',
 				status: 'active',
 				date_created: new Date('2026-10-01T00:00:00Z'),

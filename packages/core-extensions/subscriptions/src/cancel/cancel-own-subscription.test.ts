@@ -37,41 +37,40 @@ describe('cancelOwnSubscription', () => {
 		cancels the ongoing subscription at period end and queues its sync
 	`, async () => {
 		vi.useFakeTimers({ now: new Date('2026-11-05T00:00:00Z'), toFake: ['Date'] });
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' });
 
 		await database('subscription_plans').insert({
 			code: 'monthly',
 			name: 'Monthly',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
 		});
 
 		await database('subscriptions').insert([
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_old',
 				status: 'expired',
 				date_created: new Date('2026-01-01T00:00:00Z'),
 				date_updated: new Date('2026-01-01T00:00:00Z'),
 			},
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_1',
 				status: 'active',
 				date_created: new Date('2026-10-01T00:00:00Z'),
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
+		]);
+
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 2, user: 'user-1' },
 		]);
 
 		const mollieProvider = {
@@ -123,30 +122,27 @@ describe('cancelOwnSubscription', () => {
 	});
 
 	test('writes the queue row before the subscription', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
 		await database('subscription_plans').insert({
 			code: 'monthly',
 			name: 'Monthly',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
 		});
 
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'stripe',
+			provider_customer_id: 'cus_1',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
 
 		// Same order as the sync worker, or the two deadlock on postgres.
 		await database.raw(`
@@ -181,8 +177,6 @@ describe('cancelOwnSubscription', () => {
 	});
 
 	test('refuses a user without ongoing subscription', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
 		await expect(cancelOwnSubscription({
 			database,
 			enabledProviders: new Map(),
@@ -191,22 +185,19 @@ describe('cancelOwnSubscription', () => {
 	});
 
 	test('refuses a subscription already cancelling', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' });
-
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'mollie',
+			provider_customer_id: 'cst_1',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
 			cancel_at_period_end: true,
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
 
 		const cancelAtPeriodEnd = vi.fn();
 
@@ -222,17 +213,11 @@ describe('cancelOwnSubscription', () => {
 	});
 
 	test('cancels the new subscription of a user with one cancelling', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' });
-
 		await database('subscriptions').insert([
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_cancelling',
 				status: 'active',
 				cancel_at_period_end: true,
@@ -240,16 +225,20 @@ describe('cancelOwnSubscription', () => {
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_new',
 				status: 'active',
 				cancel_at_period_end: false,
 				date_created: new Date('2026-10-02T00:00:00Z'),
 				date_updated: new Date('2026-10-02T00:00:00Z'),
 			},
+		]);
+
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 2, user: 'user-1' },
 		]);
 
 		const mollieProvider = {
@@ -270,41 +259,39 @@ describe('cancelOwnSubscription', () => {
 	});
 
 	test('refuses a user with several ongoing subscriptions', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
 		await database('subscription_plans').insert({
 			code: 'monthly',
 			name: 'Monthly',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
 		});
 
 		await database('subscriptions').insert([
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'stripe',
+				provider_customer_id: 'cus_1',
 				provider_subscription_id: 'sub_1',
 				status: 'active',
 				date_created: new Date('2026-10-01T00:00:00Z'),
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'stripe',
+				provider_customer_id: 'cus_1',
 				provider_subscription_id: 'sub_2',
 				status: 'past_due',
 				date_created: new Date('2026-10-01T00:00:00Z'),
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
+		]);
+
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 2, user: 'user-1' },
 		]);
 
 		await expect(cancelOwnSubscription({
@@ -317,35 +304,122 @@ describe('cancelOwnSubscription', () => {
 	});
 
 	test('refuses a subscription of a disabled provider', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
 		await database('subscription_plans').insert({
 			code: 'monthly',
 			name: 'Monthly',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
 		});
 
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'stripe',
+			provider_customer_id: 'cus_1',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
 
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
 		await expect(cancelOwnSubscription({
 			database,
 			enabledProviders: new Map(),
 			userId: 'user-1',
 		})).rejects.toThrow(new UnknownProviderError({ provider: 'stripe' }));
+	});
+
+	test('cancels the one subscription the request names', async () => {
+		await database('subscriptions').insert([
+			{
+				plan: 1,
+				provider: 'stripe',
+				provider_customer_id: 'cus_1',
+				provider_subscription_id: 'sub_1',
+				status: 'active',
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+			{
+				plan: 1,
+				provider: 'stripe',
+				provider_customer_id: 'cus_1',
+				provider_subscription_id: 'sub_2',
+				status: 'active',
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+		]);
+
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 2, user: 'user-1' },
+		]);
+
+		const stripeProvider = {
+			composeResourceId: vi.fn().mockReturnValue('sub_2'),
+			cancelAtPeriodEnd: vi.fn(),
+		};
+
+		await cancelOwnSubscription({
+			database,
+			enabledProviders: new Map([
+				['stripe', stripeProvider as unknown as SubscriptionProvider],
+			]),
+			userId: 'user-1',
+			subscriptionId: 2,
+		});
+
+		expect(stripeProvider.composeResourceId)
+			.toHaveBeenCalledWith({ subscriptionId: 'sub_2', customerId: 'cus_1' });
+
+		expect(await database('subscriptions')
+			.select('id', 'cancel_at_period_end'))
+			.toEqual([
+				{ id: 1, cancel_at_period_end: 0 },
+				{ id: 2, cancel_at_period_end: 1 },
+			]);
+	});
+
+	test(oneLine`
+		refuses a subscription the user only benefits from, and one still
+		pending
+	`, async () => {
+		await database('subscriptions').insert([
+			{
+				plan: 1,
+				provider: 'stripe',
+				provider_customer_id: 'cus_1',
+				provider_subscription_id: 'sub_1',
+				status: 'active',
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+			{
+				plan: 1,
+				provider: 'stripe',
+				status: 'pending',
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+		]);
+
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-2' },
+			{ subscription: 2, user: 'user-1' },
+		]);
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await expect(cancelOwnSubscription({
+			database,
+			enabledProviders: new Map(),
+			userId: 'user-1',
+		})).rejects.toThrow(new NoSubscriptionToCancelError());
 	});
 });

@@ -49,9 +49,10 @@ describe('fetchSubscription', () => {
 					id: 'sub_1',
 					customerId: 'cst_1',
 					status: 'active',
+					amount: { currency: 'EUR', value: '10.00' },
 					interval: '1 month',
 					nextPaymentDate: '2026-12-01',
-					metadata: { plan: 'monthly' },
+					metadata: { directus_subscription: '1' },
 				}),
 			},
 		};
@@ -63,7 +64,12 @@ describe('fetchSubscription', () => {
 			status: 'active',
 			currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
 			cancelAtPeriodEnd: false,
-			planReference: 'monthly',
+			directusSubscription: 1,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
 		});
 
 		expect(mollieClient.payments.get).toHaveBeenCalledWith('tr_1');
@@ -183,8 +189,9 @@ describe('fetchSubscription', () => {
 					id: 'sub_1',
 					customerId: 'cst_1',
 					status: 'canceled',
+					amount: { currency: 'EUR', value: '10.00' },
 					interval: '1 month',
-					metadata: { plan: 'monthly' },
+					metadata: { directus_subscription: '1' },
 				}),
 			},
 			subscriptionPayments: {
@@ -202,7 +209,12 @@ describe('fetchSubscription', () => {
 			status: 'canceled',
 			currentPeriodEnd: new Date('2027-02-28T10:00:00Z'),
 			cancelAtPeriodEnd: true,
-			planReference: 'monthly',
+			directusSubscription: 1,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
 		});
 	});
 
@@ -213,9 +225,10 @@ describe('fetchSubscription', () => {
 					id: 'sub_1',
 					customerId: 'cst_1',
 					status: 'active',
+					amount: { currency: 'EUR', value: '10.00' },
 					interval: '1 month',
 					nextPaymentDate: '2026-12-01',
-					metadata: { plan: 'monthly' },
+					metadata: { directus_subscription: '1' },
 				}),
 			},
 		};
@@ -227,7 +240,12 @@ describe('fetchSubscription', () => {
 			status: 'active',
 			currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
 			cancelAtPeriodEnd: false,
-			planReference: 'monthly',
+			directusSubscription: 1,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
 		});
 
 		expect(mollieClient.customerSubscriptions.get)
@@ -243,8 +261,9 @@ describe('fetchSubscription', () => {
 					id: 'sub_1',
 					customerId: 'cst_1',
 					status: 'canceled',
+					amount: { currency: 'EUR', value: '10.00' },
 					interval: '1 month',
-					metadata: { plan: 'monthly' },
+					metadata: { directus_subscription: '1' },
 				}),
 			},
 			subscriptionPayments: {
@@ -266,7 +285,12 @@ describe('fetchSubscription', () => {
 			status: 'canceled',
 			currentPeriodEnd: new Date('2026-11-15T10:00:00Z'),
 			cancelAtPeriodEnd: true,
-			planReference: 'monthly',
+			directusSubscription: 1,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
 		});
 
 		expect(mollieClient.subscriptionPayments.iterate)
@@ -280,8 +304,9 @@ describe('fetchSubscription', () => {
 					id: 'sub_1',
 					customerId: 'cst_1',
 					status: 'suspended',
+					amount: { currency: 'EUR', value: '10.00' },
 					interval: '2 weeks',
-					metadata: { plan: 'fortnightly' },
+					metadata: { directus_subscription: '1' },
 				}),
 			},
 			subscriptionPayments: {
@@ -301,7 +326,12 @@ describe('fetchSubscription', () => {
 			status: 'suspended',
 			currentPeriodEnd: new Date('2026-10-29T10:00:00Z'),
 			cancelAtPeriodEnd: false,
-			planReference: 'fortnightly',
+			directusSubscription: 1,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 0, days: 14 },
+			},
 		});
 	});
 
@@ -314,8 +344,9 @@ describe('fetchSubscription', () => {
 					id: 'sub_1',
 					customerId: 'cst_1',
 					status: 'completed',
+					amount: { currency: 'EUR', value: '0.29' },
 					interval: '10 days',
-					metadata: { plan: 'trial' },
+					metadata: { directus_subscription: '1' },
 				}),
 			},
 			subscriptionPayments: {
@@ -335,7 +366,12 @@ describe('fetchSubscription', () => {
 			status: 'expired',
 			currentPeriodEnd: new Date('2026-10-25T10:00:00Z'),
 			cancelAtPeriodEnd: false,
-			planReference: 'trial',
+			directusSubscription: 1,
+			billing: {
+				amountCents: 29,
+				currency: 'EUR',
+				interval: { months: 0, days: 10 },
+			},
 		});
 	});
 
@@ -346,9 +382,10 @@ describe('fetchSubscription', () => {
 					id: 'sub_1',
 					customerId: 'cst_1',
 					status: 'canceled',
+					amount: { currency: 'EUR', value: '10.00' },
 					interval: '1 month',
 					nextPaymentDate: null,
-					metadata: { plan: 'monthly' },
+					metadata: { directus_subscription: '1' },
 				}),
 			},
 			subscriptionPayments: {
@@ -366,7 +403,12 @@ describe('fetchSubscription', () => {
 			status: 'canceled',
 			currentPeriodEnd: new Date('2026-11-15T10:00:00Z'),
 			cancelAtPeriodEnd: true,
-			planReference: 'monthly',
+			directusSubscription: 1,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
 		});
 	});
 
@@ -377,8 +419,9 @@ describe('fetchSubscription', () => {
 					id: 'sub_1',
 					customerId: 'cst_1',
 					status: 'pending',
+					amount: { currency: 'EUR', value: '10.00' },
 					interval: '1 month',
-					metadata: { plan: 'monthly' },
+					metadata: { directus_subscription: '1' },
 				}),
 			},
 			subscriptionPayments: {
@@ -395,7 +438,12 @@ describe('fetchSubscription', () => {
 			status: 'pending',
 			currentPeriodEnd: null,
 			cancelAtPeriodEnd: false,
-			planReference: 'monthly',
+			directusSubscription: 1,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
 		});
 	});
 
@@ -406,8 +454,9 @@ describe('fetchSubscription', () => {
 					id: 'sub_1',
 					customerId: 'cst_1',
 					status: 'canceled',
+					amount: { currency: 'EUR', value: '10.00' },
 					interval: '1 fortnight',
-					metadata: { plan: 'monthly' },
+					metadata: { directus_subscription: '1' },
 				}),
 			},
 			subscriptionPayments: {
@@ -433,9 +482,10 @@ describe('fetchSubscription', () => {
 					id: 'sub_1',
 					customerId: 'cst_1',
 					status: 'on_hold',
+					amount: { currency: 'EUR', value: '10.00' },
 					interval: '1 month',
 					nextPaymentDate: '2026-12-01',
-					metadata: { plan: 'monthly' },
+					metadata: { directus_subscription: '1' },
 				}),
 			},
 		};
@@ -447,21 +497,29 @@ describe('fetchSubscription', () => {
 			status: 'on_hold',
 			currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
 			cancelAtPeriodEnd: false,
-			planReference: 'monthly',
+			directusSubscription: 1,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
 		});
 	});
 
 	test.each([
-		[{ plan: 3 }],
+		[{ directus_subscription: 3 }],
+		[{ directus_subscription: '0' }],
+		[{ directus_subscription: '1a' }],
 		[null],
 		['monthly'],
-	])('names no plan on metadata %j', async (metadata) => {
+	])('names no stored subscription on metadata %j', async (metadata) => {
 		const mollieClient = {
 			customerSubscriptions: {
 				get: vi.fn().mockResolvedValue({
 					id: 'sub_1',
 					customerId: 'cst_1',
 					status: 'suspended',
+					amount: { currency: 'EUR', value: '10.00' },
 					interval: '1 month',
 					nextPaymentDate: '2026-12-01',
 					metadata,
@@ -472,7 +530,7 @@ describe('fetchSubscription', () => {
 		await expect(createMollieProvider(mollieClient as unknown as MollieClient)
 			.fetchSubscription('cst_1/sub_1')).resolves.toMatchObject({
 			status: 'suspended',
-			planReference: null,
+			directusSubscription: null,
 		});
 	});
 
@@ -483,9 +541,10 @@ describe('fetchSubscription', () => {
 					id: 'sub_2',
 					customerId: 'cst_1',
 					status: 'active',
+					amount: { currency: 'EUR', value: '10.00' },
 					interval: '1 month',
 					nextPaymentDate: '2026-12-01',
-					metadata: { plan: 'monthly', resumes: 'sub_1' },
+					metadata: { directus_subscription: '1', resumes: 'sub_1' },
 				}),
 			},
 		};
@@ -497,7 +556,12 @@ describe('fetchSubscription', () => {
 			status: 'active',
 			currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
 			cancelAtPeriodEnd: false,
-			planReference: 'monthly',
+			directusSubscription: 1,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
 			resumedSubscriptionId: 'sub_1',
 		});
 	});
@@ -536,7 +600,7 @@ describe('resumeCancel', () => {
 		const mollieClient = {
 			customerSubscriptions: {
 				iterate: vi.fn().mockReturnValue([
-					{ id: 'sub_1', metadata: { plan: 'monthly' } },
+					{ id: 'sub_1', metadata: { directus_subscription: '1' } },
 				]),
 				get: vi.fn().mockResolvedValue({
 					id: 'sub_1',
@@ -548,7 +612,7 @@ describe('resumeCancel', () => {
 					times: null,
 					timesRemaining: null,
 					webhookUrl: 'https://example.com/subscriptions/webhooks/mollie',
-					metadata: { plan: 'monthly' },
+					metadata: { directus_subscription: '1' },
 				}),
 				create: vi.fn().mockResolvedValue({ id: 'sub_2' }),
 			},
@@ -578,7 +642,7 @@ describe('resumeCancel', () => {
 			mandateId: 'mdt_2',
 			startDate: '2026-12-01',
 			webhookUrl: 'https://example.com/subscriptions/webhooks/mollie',
-			metadata: { plan: 'monthly', resumes: 'sub_1' },
+			metadata: { directus_subscription: '1', resumes: 'sub_1' },
 			idempotencyKey: 'resume-sub_1',
 		});
 	});
@@ -600,7 +664,7 @@ describe('resumeCancel', () => {
 					times: 12,
 					timesRemaining: 4,
 					webhookUrl: '',
-					metadata: { plan: 'monthly' },
+					metadata: { directus_subscription: '1' },
 				}),
 				create: vi.fn().mockResolvedValue({ id: 'sub_2' }),
 			},
@@ -627,7 +691,7 @@ describe('resumeCancel', () => {
 			mandateId: 'mdt_pending',
 			startDate: '2026-12-01',
 			times: 4,
-			metadata: { plan: 'monthly', resumes: 'sub_1' },
+			metadata: { directus_subscription: '1', resumes: 'sub_1' },
 			idempotencyKey: 'resume-sub_1',
 		});
 	});
@@ -636,8 +700,11 @@ describe('resumeCancel', () => {
 		const mollieClient = {
 			customerSubscriptions: {
 				iterate: vi.fn().mockReturnValue([
-					{ id: 'sub_1', metadata: { plan: 'monthly' } },
-					{ id: 'sub_2', metadata: { plan: 'monthly', resumes: 'sub_1' } },
+					{ id: 'sub_1', metadata: { directus_subscription: '1' } },
+					{
+						id: 'sub_2',
+						metadata: { directus_subscription: '1', resumes: 'sub_1' },
+					},
 				]),
 				get: vi.fn(),
 				create: vi.fn(),
@@ -666,11 +733,15 @@ describe('resumeCancel', () => {
 		const mollieClient = {
 			customerSubscriptions: {
 				iterate: vi.fn().mockReturnValue([
-					{ id: 'sub_1', status: 'canceled', metadata: { plan: 'monthly' } },
+					{
+						id: 'sub_1',
+						status: 'canceled',
+						metadata: { directus_subscription: '1' },
+					},
 					{
 						id: 'sub_2',
 						status: 'canceled',
-						metadata: { plan: 'monthly', resumes: 'sub_1' },
+						metadata: { directus_subscription: '1', resumes: 'sub_1' },
 					},
 				]),
 				get: vi.fn().mockResolvedValue({
@@ -682,7 +753,7 @@ describe('resumeCancel', () => {
 					mandateId: 'mdt_1',
 					times: null,
 					timesRemaining: null,
-					metadata: { plan: 'monthly' },
+					metadata: { directus_subscription: '1' },
 				}),
 				create: vi.fn().mockResolvedValue({ id: 'sub_3' }),
 			},
@@ -708,7 +779,7 @@ describe('resumeCancel', () => {
 			description: 'Monthly',
 			mandateId: 'mdt_1',
 			startDate: '2026-12-01',
-			metadata: { plan: 'monthly', resumes: 'sub_1' },
+			metadata: { directus_subscription: '1', resumes: 'sub_1' },
 			idempotencyKey: 'resume-sub_1-2',
 		});
 	});
@@ -721,7 +792,7 @@ describe('resumeCancel', () => {
 					id: 'sub_1',
 					status: 'canceled',
 					mandateId: 'mdt_1',
-					metadata: { plan: 'monthly' },
+					metadata: { directus_subscription: '1' },
 				}),
 				create: vi.fn(),
 			},

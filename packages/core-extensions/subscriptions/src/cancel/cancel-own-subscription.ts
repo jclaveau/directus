@@ -8,41 +8,46 @@ import {
 import { findProvider } from '../providers/create-providers.js';
 import type { SubscriptionProviders } from '../providers/types.js';
 import { enqueueSync } from '../queue/sync-queue.js';
+import { listManagedSubscriptions } from './list-managed-subscriptions.js';
 import { recordCancelRequest } from './record-cancel-request.js';
 
 export type OwnSubscriptionCancel = {
 	database: Knex;
 	enabledProviders: SubscriptionProviders;
 	userId: string | null;
+	/** Required once the user manages several ongoing subscriptions. */
+	subscriptionId?: number | undefined;
 };
 
 export async function cancelOwnSubscription({
 	database,
 	enabledProviders,
 	userId,
+	subscriptionId,
 }: OwnSubscriptionCancel): Promise<void> {
 	if (userId === null) {
 		throw new ForbiddenError();
 	}
 
-	const ongoingSubscriptions = await database('subscriptions')
-		.join('subscribers', 'subscribers.id', 'subscriptions.subscriber')
-		.join(
-			'subscriber_customers',
-			'subscriber_customers.id',
-			'subscriptions.customer',
-		)
+	const ongoingQuery = database('subscriptions')
 		.select(
 			'subscriptions.id',
 			'subscriptions.provider',
 			'subscriptions.provider_subscription_id',
 			'subscriptions.status',
 			'subscriptions.current_period_end',
-			'subscriber_customers.provider_customer_id',
+			'subscriptions.provider_customer_id',
 		)
-		.where('subscribers.user', userId)
+		.whereIn('subscriptions.id', listManagedSubscriptions(database, userId))
+		.whereNotNull('subscriptions.provider_subscription_id')
 		.where('subscriptions.cancel_at_period_end', false)
 		.whereNotIn('subscriptions.status', TERMINAL_STATUSES);
+
+	if (subscriptionId !== undefined) {
+		ongoingQuery.where('subscriptions.id', subscriptionId);
+	}
+
+	const ongoingSubscriptions = await ongoingQuery;
 
 	const [ownSubscription, ...otherSubscriptions] = ongoingSubscriptions;
 

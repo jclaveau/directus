@@ -4,12 +4,18 @@ import {
 	NoValidMandateError,
 	WebhookRefusedError,
 } from '../errors.js';
-import type { ProviderSubscriptionIds, SubscriptionProvider } from './types.js';
+import { readDirectusSubscription } from './read-directus-subscription.js';
+import type {
+	ProviderBilling,
+	ProviderSubscriptionIds,
+	SubscriptionProvider,
+} from './types.js';
 
 /** The fields read off Mollie's Subscription, which the client does not export. */
 type MollieSubscription = {
 	id: string;
 	customerId: string;
+	amount: { currency: string; value: string };
 	interval: string;
 	nextPaymentDate?: string | null;
 	metadata: unknown;
@@ -74,7 +80,10 @@ export function createMollieProvider(
 					mollieSubscription,
 				),
 				cancelAtPeriodEnd: mollieSubscription.status === 'canceled',
-				planReference: readMetadataText(mollieSubscription, 'plan'),
+				directusSubscription: readDirectusSubscription(
+					mollieSubscription.metadata,
+				),
+				billing: readMollieBilling(mollieSubscription),
 				...readResumedSubscription(mollieSubscription),
 			};
 		},
@@ -317,7 +326,29 @@ async function readPeriodEnd(
 	);
 }
 
-function addMollieInterval(startDate: Date, mollieInterval: string): Date {
+function readMollieBilling(
+	mollieSubscription: MollieSubscription,
+): ProviderBilling {
+	const { intervalCount, intervalUnit } = parseMollieInterval(
+		mollieSubscription.interval,
+	);
+
+	return {
+		// Mollie's value is a decimal string, "10.00" for 10 euros.
+		amountCents: Math.round(Number(mollieSubscription.amount.value) * 100),
+		currency: mollieSubscription.amount.currency.toUpperCase(),
+		interval: intervalUnit === 'month'
+			? { months: intervalCount, days: 0 }
+			: {
+				months: 0,
+				days: intervalUnit === 'week'
+					? 7 * intervalCount
+					: intervalCount,
+			},
+	};
+}
+
+function parseMollieInterval(mollieInterval: string) {
 	const intervalMatch = MOLLIE_INTERVAL.exec(mollieInterval);
 
 	if (intervalMatch === null) {
@@ -327,10 +358,17 @@ function addMollieInterval(startDate: Date, mollieInterval: string): Date {
 		);
 	}
 
-	const intervalCount = Number(intervalMatch[1]);
+	return {
+		intervalCount: Number(intervalMatch[1]),
+		intervalUnit: intervalMatch[2]!,
+	};
+}
+
+function addMollieInterval(startDate: Date, mollieInterval: string): Date {
+	const { intervalCount, intervalUnit } = parseMollieInterval(mollieInterval);
 	const endDate = new Date(startDate);
 
-	if (intervalMatch[2] === 'month') {
+	if (intervalUnit === 'month') {
 		endDate.setUTCMonth(endDate.getUTCMonth() + intervalCount);
 
 		// Jan 31 rolled over to March: a paid month ends on the last day of Feb.
@@ -338,7 +376,7 @@ function addMollieInterval(startDate: Date, mollieInterval: string): Date {
 			endDate.setUTCDate(0);
 		}
 	}
-	else if (intervalMatch[2] === 'week') {
+	else if (intervalUnit === 'week') {
 		endDate.setUTCDate(endDate.getUTCDate() + 7 * intervalCount);
 	}
 	else {

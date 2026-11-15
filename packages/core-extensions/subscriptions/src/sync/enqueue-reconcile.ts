@@ -16,19 +16,24 @@ export async function enqueueReconcile(
 	enabledProviders: SubscriptionProviders,
 ): Promise<number> {
 	const reconciledRows = await database('subscriptions')
-		.join(
-			'subscriber_customers',
-			'subscriber_customers.id',
-			'subscriptions.customer',
-		)
 		.select(
 			'subscriptions.provider',
 			'subscriptions.provider_subscription_id',
-			'subscriber_customers.provider_customer_id',
+			'subscriptions.provider_customer_id',
 		)
+		// A pending row has nothing at the provider to read yet.
+		.whereNotNull('subscriptions.provider_subscription_id')
 		.where((ongoingQuery) => {
 			ongoingQuery.whereNotIn('subscriptions.status', TERMINAL_STATUSES)
-				.orWhereNotNull('subscriptions.access');
+				.orWhereExists(
+					database('subscription_beneficiaries')
+						.select('subscription_beneficiaries.id')
+						.whereColumn(
+							'subscription_beneficiaries.subscription',
+							'subscriptions.id',
+						)
+						.whereNotNull('subscription_beneficiaries.access'),
+				);
 		})
 		.orderBy('subscriptions.id');
 

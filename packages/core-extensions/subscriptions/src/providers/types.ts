@@ -6,10 +6,25 @@ export type ProviderSubscription = {
 	status: string;
 	currentPeriodEnd: Date | null;
 	cancelAtPeriodEnd: boolean;
-	/** Null when not exactly one plan is named: revoking works, keeping refuses. */
-	planReference: string | null;
+	/** The `subscriptions.id` the checkout wrote into the provider's metadata. */
+	directusSubscription: number | null;
+	/** Null when the provider bills several prices at once. */
+	billing: ProviderBilling | null;
 	/** Mollie only: the canceled subscription this one resumes. */
 	resumedSubscriptionId?: string;
+};
+
+/** Years count as 12 months and weeks as 7 days, as on the plan's interval. */
+export type BillingInterval = {
+	months: number;
+	days: number;
+};
+
+export type ProviderBilling = {
+	amountCents: number;
+	/** ISO 4217, upper case. */
+	currency: string;
+	interval: BillingInterval;
 };
 
 export type ProviderSubscriptionIds = {
