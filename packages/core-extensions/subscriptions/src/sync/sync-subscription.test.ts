@@ -695,6 +695,7 @@ describe('syncSubscription', () => {
 				provider_subscription_id: 'sub_2',
 				status: 'active',
 				current_period_end: new Date('2026-12-01T00:00:00Z'),
+				cancel_at_period_end: false,
 				date_created: new Date('2026-10-01T00:00:00Z'),
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
@@ -739,6 +740,91 @@ describe('syncSubscription', () => {
 		expect(await database('subscription_beneficiaries')).toEqual([
 			{ id: 1, subscription: 1, user: 'user-1', access: null },
 			{ id: 2, subscription: 2, user: 'user-1', access: 'access-1' },
+		]);
+	});
+
+	test(oneLine`
+		grants a second resume the access the resumed row still holds
+	`, async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert([
+			{
+				plan: 1,
+				provider: 'mollie',
+				provider_customer_id: 'cst_1',
+				provider_subscription_id: 'sub_1',
+				status: 'canceled',
+				current_period_end: new Date('2026-12-01T00:00:00Z'),
+				cancel_at_period_end: true,
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+			{
+				plan: 1,
+				continues: 1,
+				provider: 'mollie',
+				provider_customer_id: 'cst_1',
+				provider_subscription_id: 'sub_2',
+				status: 'canceled',
+				current_period_end: null,
+				cancel_at_period_end: true,
+				date_created: new Date('2026-11-01T00:00:00Z'),
+				date_updated: new Date('2026-11-01T00:00:00Z'),
+			},
+		]);
+
+		await database('directus_access')
+			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
+
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 2, user: 'user-1' },
+		]);
+
+		await database('subscription_beneficiaries').insert([
+			{ subscription: 1, user: 'user-1', access: 'access-1' },
+			{ subscription: 2, user: 'user-1', access: null },
+		]);
+
+		const accessService = { createOne: vi.fn(), updateOne: vi.fn() };
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: accessService as unknown as AbstractService,
+			providerName: 'mollie',
+			providerSubscription: {
+				subscriptionId: 'sub_3',
+				customerId: 'cst_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2027-01-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: null,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+				resumedSubscriptionId: 'sub_1',
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(accessService.createOne).not.toHaveBeenCalled();
+
+		expect(await database('subscription_beneficiaries')).toEqual([
+			{ id: 1, subscription: 1, user: 'user-1', access: 'access-1' },
+			{ id: 2, subscription: 2, user: 'user-1', access: null },
+			{ id: 3, subscription: 3, user: 'user-1', access: 'access-1' },
 		]);
 	});
 

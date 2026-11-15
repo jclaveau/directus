@@ -104,7 +104,7 @@ describe('archivePlan', () => {
 		});
 
 		await database('subscriptions').insert({
-			plan: 1,
+			plan: 2,
 			provider: 'stripe',
 			provider_customer_id: 'cus_1',
 			provider_subscription_id: 'sub_yearly',
