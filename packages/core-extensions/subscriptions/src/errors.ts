@@ -96,3 +96,34 @@ export const NoValidMandateError = createError<{ customerId: string }>(
 	},
 	409,
 );
+
+/**
+ * Not retried: no checkout named a pending row in the provider's metadata, so
+ * a later sync finds nothing more. `runSyncBatch` drops the queue row, logged.
+ */
+export const UnboundProviderSubscriptionError = createError<{
+	provider: string;
+	subscriptionId: string;
+	directusSubscription: number | null;
+}>(
+	'UNBOUND_PROVIDER_SUBSCRIPTION',
+	({ provider, subscriptionId, directusSubscription }) => {
+		return `${JSON.stringify(provider)} subscription`
+			+ ` ${JSON.stringify(subscriptionId)} names no pending subscription:`
+			+ ` its metadata "directus_subscription" is`
+			+ ` ${JSON.stringify(directusSubscription)}`;
+	},
+	404,
+);
+
+export const BeneficiariesMaxReachedError = createError<{
+	planCode: string;
+	beneficiariesMax: number;
+}>(
+	'BENEFICIARIES_MAX_REACHED',
+	({ planCode, beneficiariesMax }) => {
+		return `Plan ${JSON.stringify(planCode)} allows`
+			+ ` ${JSON.stringify(beneficiariesMax)} beneficiaries, all taken`;
+	},
+	400,
+);

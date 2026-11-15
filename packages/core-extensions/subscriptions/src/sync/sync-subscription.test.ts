@@ -37,944 +37,41 @@ afterEach(async () => {
 });
 
 describe('syncSubscription', () => {
-	test('stores a new active subscription and grants its access', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
+	test('binds the pending row and grants each beneficiary', async () => {
 		await database('subscription_plans').insert({
-			code: 'monthly',
-			name: 'Monthly',
+			code: 'family',
+			name: 'Family',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
+			beneficiaries_max: 3,
 		});
-
-		await database('subscription_plan_references')
-			.insert({ plan: 1, provider: 'stripe', reference: 'price_1' });
-
-		const accessService = {
-			createOne: vi.fn().mockResolvedValue('access-1'),
-			deleteOne: vi.fn(),
-		};
-
-		await syncSubscription({
-			trx: database,
-			subscriptionProvider: {} as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: accessService as unknown as AbstractService,
-			providerName: 'stripe',
-			providerSubscription: {
-				subscriptionId: 'sub_1',
-				customerId: 'cus_1',
-				status: 'active',
-				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
-				cancelAtPeriodEnd: false,
-				planReference: 'price_1',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		});
-
-		expect(accessService.createOne).toHaveBeenCalledWith({
-			user: 'user-1',
-			policy: 'policy-1',
-			managed_by: '@scalabus/subscriptions',
-		});
-
-		expect(accessService.deleteOne).not.toHaveBeenCalled();
-
-		expect(await database('subscription_events')).toEqual([{
-			id: 1,
-			subscription: 1,
-			status: 'active',
-			current_period_end: 1_796_083_200_000,
-			cancel_at_period_end: 0,
-			source: 'sync',
-			user: null,
-			date_created: 1_793_836_800_000,
-		}]);
-
-		expect(await database('subscriptions')).toEqual([{
-			id: 1,
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
-			provider: 'stripe',
-			provider_subscription_id: 'sub_1',
-			status: 'active',
-			current_period_end: 1_796_083_200_000,
-			cancel_at_period_end: 0,
-			access: 'access-1',
-			date_created: 1_793_836_800_000,
-			date_updated: 1_793_836_800_000,
-			user_updated: null,
-			resumes: null,
-		}]);
-	});
-
-	test('keeps the access row already granted for the plan', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
-		await database('subscription_plans').insert({
-			code: 'monthly',
-			name: 'Monthly',
-			policy: 'policy-1',
-			amount: 990,
-			currency: 'EUR',
-			interval: '{"months":1}',
-		});
-
-		await database('subscription_plan_references')
-			.insert({ plan: 1, provider: 'stripe', reference: 'price_1' });
-
-		await database('directus_access')
-			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
 
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'stripe',
-			provider_subscription_id: 'sub_1',
-			status: 'trialing',
-			current_period_end: new Date('2026-11-01T00:00:00Z'),
-			access: 'access-1',
+			status: 'pending',
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
 
-		const accessService = { createOne: vi.fn(), deleteOne: vi.fn() };
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
 
-		await syncSubscription({
-			trx: database,
-			subscriptionProvider: {} as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: accessService as unknown as AbstractService,
-			providerName: 'stripe',
-			providerSubscription: {
-				subscriptionId: 'sub_1',
-				customerId: 'cus_1',
-				status: 'past_due',
-				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
-				cancelAtPeriodEnd: false,
-				planReference: 'price_1',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		});
-
-		expect(accessService.createOne).not.toHaveBeenCalled();
-		expect(accessService.deleteOne).not.toHaveBeenCalled();
-
-		expect(await database('subscriptions')).toEqual([{
-			id: 1,
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
-			provider: 'stripe',
-			provider_subscription_id: 'sub_1',
-			status: 'past_due',
-			current_period_end: 1_796_083_200_000,
-			cancel_at_period_end: 0,
-			access: 'access-1',
-			date_created: 1_790_812_800_000,
-			date_updated: 1_793_836_800_000,
-			user_updated: null,
-			resumes: null,
-		}]);
-	});
-
-	test('moves its access to the policy the plan changed to', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
-		await database('subscription_plans').insert([
-			{
-				code: 'monthly',
-				name: 'Monthly',
-				policy: 'policy-1',
-				amount: 990,
-				currency: 'EUR',
-				interval: '{"months":1}',
-			},
-			{
-				code: 'yearly',
-				name: 'Yearly',
-				policy: 'policy-2',
-				amount: 9900,
-				currency: 'EUR',
-				interval: '{"years":1}',
-			},
+		await database('subscription_beneficiaries').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 1, user: 'user-2' },
 		]);
 
-		await database('subscription_plan_references').insert([
-			{ plan: 1, provider: 'stripe', reference: 'price_1' },
-			{ plan: 2, provider: 'stripe', reference: 'price_2' },
-		]);
-
-		await database('directus_access')
-			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
-
-		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
-			provider: 'stripe',
-			provider_subscription_id: 'sub_1',
-			status: 'active',
-			access: 'access-1',
-			date_created: new Date('2026-10-01T00:00:00Z'),
-			date_updated: new Date('2026-10-01T00:00:00Z'),
-		});
-
 		const accessService = {
-			createOne: vi.fn(),
-			updateOne: vi.fn(),
+			createOne: vi.fn()
+				.mockResolvedValueOnce('access-1')
+				.mockResolvedValueOnce('access-2'),
 			deleteOne: vi.fn(),
 		};
 
-		await syncSubscription({
-			trx: database,
-			subscriptionProvider: {} as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: accessService as unknown as AbstractService,
-			providerName: 'stripe',
-			providerSubscription: {
-				subscriptionId: 'sub_1',
-				customerId: 'cus_1',
-				status: 'active',
-				currentPeriodEnd: new Date('2027-11-01T00:00:00Z'),
-				cancelAtPeriodEnd: false,
-				planReference: 'price_2',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		});
-
-		// A resumed subscription shares this row, so it moves rather than splits.
-		expect(accessService.updateOne).toHaveBeenCalledWith('access-1', {
-			user: 'user-1',
-			policy: 'policy-2',
-		});
-
-		expect(accessService.deleteOne).not.toHaveBeenCalled();
-		expect(accessService.createOne).not.toHaveBeenCalled();
-
-		expect(await database('subscriptions')
-			.select('plan_reference', 'access'))
-			.toEqual([{ plan_reference: 2, access: 'access-1' }]);
-	});
-
-	test('moves its access to the user the subscriber changed to', async () => {
-		await database('subscribers').insert({ user: 'user-2' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
-		await database('subscription_plans').insert({
-			code: 'monthly',
-			name: 'Monthly',
-			policy: 'policy-1',
-			amount: 990,
-			currency: 'EUR',
-			interval: '{"months":1}',
-		});
-
-		await database('subscription_plan_references')
-			.insert({ plan: 1, provider: 'stripe', reference: 'price_1' });
-
-		await database('directus_access')
-			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
-
-		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
-			provider: 'stripe',
-			provider_subscription_id: 'sub_1',
-			status: 'active',
-			access: 'access-1',
-			date_created: new Date('2026-10-01T00:00:00Z'),
-			date_updated: new Date('2026-10-01T00:00:00Z'),
-		});
-
-		const accessService = {
-			createOne: vi.fn(),
-			updateOne: vi.fn(),
-			deleteOne: vi.fn(),
-		};
-
-		await syncSubscription({
-			trx: database,
-			subscriptionProvider: {} as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: accessService as unknown as AbstractService,
-			providerName: 'stripe',
-			providerSubscription: {
-				subscriptionId: 'sub_1',
-				customerId: 'cus_1',
-				status: 'active',
-				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
-				cancelAtPeriodEnd: false,
-				planReference: 'price_1',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		});
-
-		expect(accessService.updateOne).toHaveBeenCalledWith('access-1', {
-			user: 'user-2',
-			policy: 'policy-1',
-		});
-
-		expect(accessService.deleteOne).not.toHaveBeenCalled();
-		expect(accessService.createOne).not.toHaveBeenCalled();
-	});
-
-	test('revokes the access of an ended subscription', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' });
-
-		await database('subscription_plans').insert({
-			code: 'monthly',
-			name: 'Monthly',
-			policy: 'policy-1',
-			amount: 990,
-			currency: 'EUR',
-			interval: '{"months":1}',
-		});
-
-		await database('subscription_plan_references')
-			.insert({ plan: 1, provider: 'mollie', reference: 'monthly' });
-
-		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
-			provider: 'mollie',
-			provider_subscription_id: 'sub_1',
-			status: 'canceled',
-			cancel_at_period_end: true,
-			access: 'access-1',
-			date_created: new Date('2026-10-01T00:00:00Z'),
-			date_updated: new Date('2026-10-01T00:00:00Z'),
-		});
-
-		const accessService = { createOne: vi.fn(), deleteOne: vi.fn() };
-
-		await syncSubscription({
-			trx: database,
-			subscriptionProvider: {} as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: accessService as unknown as AbstractService,
-			providerName: 'mollie',
-			providerSubscription: {
-				subscriptionId: 'sub_1',
-				customerId: 'cst_1',
-				status: 'canceled',
-				currentPeriodEnd: new Date('2026-11-01T00:00:00Z'),
-				cancelAtPeriodEnd: true,
-				planReference: 'monthly',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		});
-
-		expect(accessService.deleteOne).toHaveBeenCalledWith('access-1');
-		expect(accessService.createOne).not.toHaveBeenCalled();
-
-		expect(await database('subscriptions')
-			.select('status', 'access')).toEqual([{ status: 'canceled', access: null }]);
-	});
-
-	test('stores an unpaid subscription without granting access', async () => {
-		await database('subscribers').insert({ user: null });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
-		await database('subscription_plans').insert({
-			code: 'monthly',
-			name: 'Monthly',
-			policy: 'policy-1',
-			amount: 990,
-			currency: 'EUR',
-			interval: '{"months":1}',
-		});
-
-		await database('subscription_plan_references')
-			.insert({ plan: 1, provider: 'stripe', reference: 'price_1' });
-
-		const accessService = { createOne: vi.fn(), deleteOne: vi.fn() };
-
-		await syncSubscription({
-			trx: database,
-			subscriptionProvider: {} as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: accessService as unknown as AbstractService,
-			providerName: 'stripe',
-			providerSubscription: {
-				subscriptionId: 'sub_1',
-				customerId: 'cus_1',
-				status: 'unpaid',
-				currentPeriodEnd: null,
-				cancelAtPeriodEnd: false,
-				planReference: 'price_1',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		});
-
-		expect(accessService.deleteOne).not.toHaveBeenCalled();
-
-		expect(await database('subscriptions')
-			.select('status', 'current_period_end', 'access'))
-			.toEqual([{ status: 'unpaid', current_period_end: null, access: null }]);
-	});
-
-	test(oneLine`
-		stores a Mollie resume linked to the canceled row it resumes
-	`, async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' });
-
-		await database('subscription_plans').insert({
-			code: 'monthly',
-			name: 'Monthly',
-			policy: 'policy-1',
-			amount: 990,
-			currency: 'EUR',
-			interval: '{"months":1}',
-		});
-
-		await database('subscription_plan_references')
-			.insert({ plan: 1, provider: 'mollie', reference: 'monthly' });
-
-		await database('directus_access')
-			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
-
-		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
-			provider: 'mollie',
-			provider_subscription_id: 'sub_1',
-			status: 'canceled',
-			current_period_end: new Date('2026-12-01T00:00:00Z'),
-			cancel_at_period_end: true,
-			access: 'access-1',
-			date_created: new Date('2026-10-01T00:00:00Z'),
-			date_updated: new Date('2026-10-01T00:00:00Z'),
-		});
-
-		const accessService = { createOne: vi.fn(), deleteOne: vi.fn() };
-
-		await syncSubscription({
-			trx: database,
-			subscriptionProvider: {} as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: accessService as unknown as AbstractService,
-			providerName: 'mollie',
-			providerSubscription: {
-				subscriptionId: 'sub_2',
-				customerId: 'cst_1',
-				status: 'active',
-				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
-				cancelAtPeriodEnd: false,
-				planReference: 'monthly',
-				resumedSubscriptionId: 'sub_1',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		});
-
-		expect(accessService.createOne).not.toHaveBeenCalled();
-		expect(accessService.deleteOne).not.toHaveBeenCalled();
-
-		expect(await database('subscriptions')
-			.select('id', 'provider_subscription_id', 'resumes', 'access'))
-			.toEqual([
-				{
-					id: 1,
-					provider_subscription_id: 'sub_1',
-					resumes: null,
-					access: 'access-1',
-				},
-				{
-					id: 2,
-					provider_subscription_id: 'sub_2',
-					resumes: 1,
-					access: 'access-1',
-				},
-			]);
-	});
-
-	test('keeps an access a resume shares when the resumed row ends', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' });
-
-		await database('subscription_plans').insert({
-			code: 'monthly',
-			name: 'Monthly',
-			policy: 'policy-1',
-			amount: 990,
-			currency: 'EUR',
-			interval: '{"months":1}',
-		});
-
-		await database('subscription_plan_references')
-			.insert({ plan: 1, provider: 'mollie', reference: 'monthly' });
-
-		await database('subscriptions').insert([
-			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
-				provider: 'mollie',
-				provider_subscription_id: 'sub_1',
-				status: 'canceled',
-				current_period_end: new Date('2026-11-01T00:00:00Z'),
-				cancel_at_period_end: true,
-				access: 'access-1',
-				date_created: new Date('2026-10-01T00:00:00Z'),
-				date_updated: new Date('2026-10-01T00:00:00Z'),
-			},
-			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
-				provider: 'mollie',
-				provider_subscription_id: 'sub_2',
-				status: 'active',
-				current_period_end: new Date('2026-11-01T00:00:00Z'),
-				cancel_at_period_end: false,
-				access: 'access-1',
-				resumes: 1,
-				date_created: new Date('2026-10-15T00:00:00Z'),
-				date_updated: new Date('2026-10-15T00:00:00Z'),
-			},
-		]);
-
-		const accessService = { createOne: vi.fn(), deleteOne: vi.fn() };
-
-		await syncSubscription({
-			trx: database,
-			subscriptionProvider: {} as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: accessService as unknown as AbstractService,
-			providerName: 'mollie',
-			providerSubscription: {
-				subscriptionId: 'sub_1',
-				customerId: 'cst_1',
-				status: 'canceled',
-				currentPeriodEnd: new Date('2026-11-01T00:00:00Z'),
-				cancelAtPeriodEnd: true,
-				planReference: 'monthly',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		});
-
-		expect(accessService.deleteOne).not.toHaveBeenCalled();
-
-		expect(await database('subscriptions')
-			.select('provider_subscription_id', 'access'))
-			.toEqual([
-				{ provider_subscription_id: 'sub_1', access: null },
-				{ provider_subscription_id: 'sub_2', access: 'access-1' },
-			]);
-	});
-
-	test('refuses a resume of a row not stored', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' });
-
-		await database('subscription_plans').insert({
-			code: 'monthly',
-			name: 'Monthly',
-			policy: 'policy-1',
-			amount: 990,
-			currency: 'EUR',
-			interval: '{"months":1}',
-		});
-
-		await database('subscription_plan_references')
-			.insert({ plan: 1, provider: 'mollie', reference: 'monthly' });
-
-		await expect(syncSubscription({
-			trx: database,
-			subscriptionProvider: {} as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: {
-				createOne: vi.fn().mockResolvedValue('access-2'),
-			} as unknown as AbstractService,
-			providerName: 'mollie',
-			providerSubscription: {
-				subscriptionId: 'sub_2',
-				customerId: 'cst_1',
-				status: 'active',
-				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
-				cancelAtPeriodEnd: false,
-				planReference: 'monthly',
-				resumedSubscriptionId: 'sub_1',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		})).rejects.toThrow(new Error(
-			'Subscription "sub_2" resumes "sub_1", which is not stored',
-		));
-	});
-
-	test('refuses a customer no subscriber holds', async () => {
-		await expect(syncSubscription({
-			trx: database,
-			subscriptionProvider: {} as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: {} as AbstractService,
-			providerName: 'stripe',
-			providerSubscription: {
-				subscriptionId: 'sub_1',
-				customerId: 'cus_unknown',
-				status: 'active',
-				currentPeriodEnd: null,
-				cancelAtPeriodEnd: false,
-				planReference: 'price_1',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		})).rejects.toThrow(new Error(
-			'No subscriber has "stripe" customer "cus_unknown"',
-		));
-	});
-
-	test('refuses a plan reference no plan holds', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
-		await expect(syncSubscription({
-			trx: database,
-			subscriptionProvider: {} as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: {} as AbstractService,
-			providerName: 'stripe',
-			providerSubscription: {
-				subscriptionId: 'sub_1',
-				customerId: 'cus_1',
-				status: 'active',
-				currentPeriodEnd: null,
-				cancelAtPeriodEnd: false,
-				planReference: 'price_unknown',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		})).rejects.toThrow(new Error(
-			'No plan has "stripe" reference "price_unknown"',
-		));
-	});
-
-	test('writes nothing when nothing changed', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
-		await database('subscription_plans').insert({
-			code: 'monthly',
-			name: 'Monthly',
-			policy: 'policy-1',
-			amount: 990,
-			currency: 'EUR',
-			interval: '{"months":1}',
-		});
-
-		await database('subscription_plan_references')
-			.insert({ plan: 1, provider: 'stripe', reference: 'price_1' });
-
-		await database('directus_access')
-			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
-
-		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
-			provider: 'stripe',
-			provider_subscription_id: 'sub_1',
-			status: 'active',
-			current_period_end: new Date('2026-12-01T00:00:00Z'),
-			access: 'access-1',
-			user_updated: 'user-9',
-			date_created: new Date('2026-10-01T00:00:00Z'),
-			date_updated: new Date('2026-10-01T00:00:00Z'),
-		});
-
-		await syncSubscription({
-			trx: database,
-			subscriptionProvider: {} as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: {} as AbstractService,
-			providerName: 'stripe',
-			providerSubscription: {
-				subscriptionId: 'sub_1',
-				customerId: 'cus_1',
-				status: 'active',
-				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
-				cancelAtPeriodEnd: false,
-				planReference: 'price_1',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		});
-
-		expect(await database('subscriptions')
-			.select('user_updated', 'date_updated'))
-			.toEqual([{ user_updated: 'user-9', date_updated: 1_790_812_800_000 }]);
-
-		expect(await database('subscription_events')).toEqual([]);
-	});
-
-	test('records a change as the sync, clearing who last asked', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
-		await database('subscription_plans').insert({
-			code: 'monthly',
-			name: 'Monthly',
-			policy: 'policy-1',
-			amount: 990,
-			currency: 'EUR',
-			interval: '{"months":1}',
-		});
-
-		await database('subscription_plan_references')
-			.insert({ plan: 1, provider: 'stripe', reference: 'price_1' });
-
-		await database('directus_access')
-			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
-
-		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
-			provider: 'stripe',
-			provider_subscription_id: 'sub_1',
-			status: 'active',
-			current_period_end: new Date('2026-12-01T00:00:00Z'),
-			access: 'access-1',
-			user_updated: 'user-9',
-			date_created: new Date('2026-10-01T00:00:00Z'),
-			date_updated: new Date('2026-10-01T00:00:00Z'),
-		});
-
-		await syncSubscription({
-			trx: database,
-			subscriptionProvider: {} as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: {} as AbstractService,
-			providerName: 'stripe',
-			providerSubscription: {
-				subscriptionId: 'sub_1',
-				customerId: 'cus_1',
-				status: 'past_due',
-				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
-				cancelAtPeriodEnd: false,
-				planReference: 'price_1',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		});
-
-		expect(await database('subscriptions')
-			.select('status', 'user_updated', 'date_updated'))
-			.toEqual([{
-				status: 'past_due',
-				user_updated: null,
-				date_updated: 1_793_836_800_000,
-			}]);
-
-		expect(await database('subscription_events')).toEqual([{
-			id: 1,
-			subscription: 1,
-			status: 'past_due',
-			current_period_end: 1_796_083_200_000,
-			cancel_at_period_end: 0,
-			source: 'sync',
-			user: null,
-			date_created: 1_793_836_800_000,
-		}]);
-	});
-
-	test('revokes without the customer and plan reference', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
-			provider: 'stripe',
-			provider_subscription_id: 'sub_1',
-			status: 'active',
-			access: 'access-1',
-			date_created: new Date('2026-10-01T00:00:00Z'),
-			date_updated: new Date('2026-10-01T00:00:00Z'),
-		});
-
-		const accessService = { createOne: vi.fn(), deleteOne: vi.fn() };
-
-		await syncSubscription({
-			trx: database,
-			subscriptionProvider: {} as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: accessService as unknown as AbstractService,
-			providerName: 'stripe',
-			providerSubscription: {
-				subscriptionId: 'sub_1',
-				customerId: 'cus_gone',
-				status: 'unpaid',
-				currentPeriodEnd: null,
-				cancelAtPeriodEnd: false,
-				planReference: 'price_gone',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		});
-
-		expect(accessService.deleteOne).toHaveBeenCalledWith('access-1');
-
-		expect(await database('subscriptions')
-			.select('status', 'plan_reference', 'access'))
-			.toEqual([{ status: 'unpaid', plan_reference: 1, access: null }]);
-	});
-
-	test('cancels the revoked subscription of a deleted user', async () => {
-		await database('subscribers').insert({ user: null });
-
-		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
-			provider: 'stripe',
-			provider_subscription_id: 'sub_1',
-			status: 'active',
-			access: 'access-1',
-			date_created: new Date('2026-10-01T00:00:00Z'),
-			date_updated: new Date('2026-10-01T00:00:00Z'),
-		});
-
-		const stripeProvider = {
-			cancelAtPeriodEnd: vi.fn(),
-			composeResourceId: vi.fn().mockReturnValue('sub_1'),
-		};
-
-		await syncSubscription({
-			trx: database,
-			subscriptionProvider: stripeProvider as unknown as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: {
-				createOne: vi.fn(),
-				deleteOne: vi.fn(),
-			} as unknown as AbstractService,
-			providerName: 'stripe',
-			providerSubscription: {
-				subscriptionId: 'sub_1',
-				customerId: 'cus_1',
-				status: 'unpaid',
-				currentPeriodEnd: null,
-				cancelAtPeriodEnd: false,
-				planReference: 'price_1',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		});
-
-		expect(stripeProvider.cancelAtPeriodEnd).toHaveBeenCalledWith('sub_1');
-
-		expect(await database('subscriptions')
-			.select('status', 'cancel_at_period_end', 'access'))
-			.toEqual([{ status: 'unpaid', cancel_at_period_end: 1, access: null }]);
-
-		expect(await database('subscription_events')
-			.select('source', 'cancel_at_period_end'))
-			.toEqual([{ source: 'user_deleted', cancel_at_period_end: 1 }]);
-	});
-
-	test.each([
-		['canceled', false],
-		['unpaid', true],
-	])('does not cancel a %s subscription, cancelling: %s', async (
-		providerStatus,
-		isCancelling,
-	) => {
-		await database('subscribers').insert({ user: null });
-
-		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
-			provider: 'stripe',
-			provider_subscription_id: 'sub_1',
-			status: 'active',
-			date_created: new Date('2026-10-01T00:00:00Z'),
-			date_updated: new Date('2026-10-01T00:00:00Z'),
-		});
-
-		const stripeProvider = {
-			cancelAtPeriodEnd: vi.fn(),
-			composeResourceId: vi.fn(),
-		};
-
-		await syncSubscription({
-			trx: database,
-			subscriptionProvider: stripeProvider as unknown as SubscriptionProvider,
-			logger: { warn: vi.fn() },
-			accessService: {} as AbstractService,
-			providerName: 'stripe',
-			providerSubscription: {
-				subscriptionId: 'sub_1',
-				customerId: 'cus_1',
-				status: providerStatus,
-				currentPeriodEnd: null,
-				cancelAtPeriodEnd: isCancelling,
-				planReference: 'price_1',
-			},
-			syncedAt: new Date('2026-11-05T00:00:00Z'),
-		});
-
-		expect(stripeProvider.cancelAtPeriodEnd).not.toHaveBeenCalled();
-
-		expect(await database('subscription_events').select('source'))
-			.toEqual([{ source: 'sync' }]);
-	});
-
-	test('grants a paid subscription on a locked plan and warns', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
-		await database('subscription_plans').insert({
-			code: 'monthly',
-			name: 'Monthly',
-			policy: 'policy-1',
-			amount: 990,
-			currency: 'EUR',
-			interval: '{"months":1}',
-			status: 'subscriptions-locked',
-		});
-
-		await database('subscription_plan_references')
-			.insert({ plan: 1, provider: 'stripe', reference: 'price_1' });
-
-		const accessService = {
-			createOne: vi.fn().mockResolvedValue('access-1'),
-			deleteOne: vi.fn(),
-		};
-
-		const logger = { warn: vi.fn() };
+		const logger = { warn: vi.fn(), error: vi.fn() };
 
 		await syncSubscription({
 			trx: database,
@@ -988,63 +85,182 @@ describe('syncSubscription', () => {
 				status: 'active',
 				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
 				cancelAtPeriodEnd: false,
-				planReference: 'price_1',
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
 			},
 			syncedAt: new Date('2026-11-05T00:00:00Z'),
 		});
 
-		expect(logger.warn).toHaveBeenCalledWith(
-			'Subscription "sub_1" started on plan 1, whose status is'
-			+ ' "subscriptions-locked"',
-		);
+		expect(accessService.createOne).toHaveBeenNthCalledWith(1, {
+			user: 'user-1',
+			policy: 'policy-1',
+			managed_by: '@scalabus/subscriptions',
+		});
 
-		expect(await database('subscriptions').select('access'))
-			.toEqual([{ access: 'access-1' }]);
+		expect(accessService.createOne).toHaveBeenNthCalledWith(2, {
+			user: 'user-2',
+			policy: 'policy-1',
+			managed_by: '@scalabus/subscriptions',
+		});
+
+		expect(accessService.deleteOne).not.toHaveBeenCalled();
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).not.toHaveBeenCalled();
+
+		expect(await database('subscription_beneficiaries')).toEqual([
+			{ id: 1, subscription: 1, user: 'user-1', access: 'access-1' },
+			{ id: 2, subscription: 1, user: 'user-2', access: 'access-2' },
+		]);
+
+		expect(await database('subscription_events')).toEqual([{
+			id: 1,
+			subscription: 1,
+			status: 'active',
+			current_period_end: 1_796_083_200_000,
+			cancel_at_period_end: 0,
+			source: 'sync',
+			user: null,
+			date_created: 1_793_836_800_000,
+		}]);
+
+		expect(await database('subscriptions')).toEqual([{
+			id: 1,
+			plan: 1,
+			continues: null,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			current_period_end: 1_796_083_200_000,
+			cancel_at_period_end: 0,
+			user_updated: null,
+			date_created: 1_790_812_800_000,
+			date_updated: 1_793_836_800_000,
+		}]);
 	});
 
-	test('cancels the subscription of a deleted user and revokes it', async () => {
-		await database('subscribers').insert({ user: null });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
+	test('keeps the access already granted for the plan', async () => {
 		await database('subscription_plans').insert({
 			code: 'monthly',
 			name: 'Monthly',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
 		});
 
-		await database('subscription_plan_references')
-			.insert({ plan: 1, provider: 'stripe', reference: 'price_1' });
-
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'stripe',
+			provider_customer_id: 'cus_1',
 			provider_subscription_id: 'sub_1',
-			status: 'active',
-			current_period_end: new Date('2026-12-01T00:00:00Z'),
-			access: 'access-1',
+			status: 'trialing',
+			current_period_end: new Date('2026-11-01T00:00:00Z'),
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
 
-		const accessService = { createOne: vi.fn(), deleteOne: vi.fn() };
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
 
-		const subscriptionProvider = {
-			cancelAtPeriodEnd: vi.fn(),
-			composeResourceId: vi.fn().mockReturnValue('sub_1'),
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-1', access: 'access-1' });
+
+		await database('directus_access')
+			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
+
+		const accessService = {
+			createOne: vi.fn(),
+			updateOne: vi.fn(),
+			deleteOne: vi.fn(),
 		};
 
 		await syncSubscription({
 			trx: database,
-			subscriptionProvider:
-				subscriptionProvider as unknown as SubscriptionProvider,
-			logger: { warn: vi.fn() },
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: accessService as unknown as AbstractService,
+			providerName: 'stripe',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				status: 'past_due',
+				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(accessService.createOne).not.toHaveBeenCalled();
+		expect(accessService.updateOne).not.toHaveBeenCalled();
+		expect(accessService.deleteOne).not.toHaveBeenCalled();
+
+		expect(await database('subscription_beneficiaries')).toEqual([
+			{ id: 1, subscription: 1, user: 'user-1', access: 'access-1' },
+		]);
+
+		expect(await database('subscriptions')).toEqual([{
+			id: 1,
+			plan: 1,
+			continues: null,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'past_due',
+			current_period_end: 1_796_083_200_000,
+			cancel_at_period_end: 0,
+			user_updated: null,
+			date_created: 1_790_812_800_000,
+			date_updated: 1_793_836_800_000,
+		}]);
+	});
+
+	test('moves an access to the policy the plan changed to', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-2',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			current_period_end: new Date('2026-12-01T00:00:00Z'),
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-1', access: 'access-1' });
+
+		await database('directus_access')
+			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
+
+		const accessService = { createOne: vi.fn(), updateOne: vi.fn() };
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
 			accessService: accessService as unknown as AbstractService,
 			providerName: 'stripe',
 			providerSubscription: {
@@ -1053,61 +269,1103 @@ describe('syncSubscription', () => {
 				status: 'active',
 				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
 				cancelAtPeriodEnd: false,
-				planReference: 'price_1',
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
 			},
 			syncedAt: new Date('2026-11-05T00:00:00Z'),
 		});
 
-		expect(subscriptionProvider.composeResourceId)
-			.toHaveBeenCalledWith({ subscriptionId: 'sub_1', customerId: 'cus_1' });
-
-		expect(subscriptionProvider.cancelAtPeriodEnd)
-			.toHaveBeenCalledWith('sub_1');
-
 		expect(accessService.createOne).not.toHaveBeenCalled();
-		expect(accessService.deleteOne).toHaveBeenCalledWith('access-1');
 
-		expect(await database('subscriptions')
-			.select('cancel_at_period_end', 'access'))
-			.toEqual([{ cancel_at_period_end: 1, access: null }]);
-
-		expect(await database('subscription_events')
-			.select('cancel_at_period_end', 'source', 'user'))
-			.toEqual([{
-				cancel_at_period_end: 1,
-				source: 'user_deleted',
-				user: null,
-			}]);
+		expect(accessService.updateOne).toHaveBeenCalledWith(
+			'access-1',
+			{ user: 'user-1', policy: 'policy-2' },
+		);
 	});
 
-	test('cancels only once for a deleted user', async () => {
-		await database('subscribers').insert({ user: null });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
+	test('moves an access to the user the beneficiary changed to', async () => {
 		await database('subscription_plans').insert({
 			code: 'monthly',
 			name: 'Monthly',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
 		});
 
-		await database('subscription_plan_references')
-			.insert({ plan: 1, provider: 'stripe', reference: 'price_1' });
-
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'stripe',
+			provider_customer_id: 'cus_1',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
 			current_period_end: new Date('2026-12-01T00:00:00Z'),
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-2', access: 'access-1' });
+
+		await database('directus_access')
+			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
+
+		const accessService = { createOne: vi.fn(), updateOne: vi.fn() };
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: accessService as unknown as AbstractService,
+			providerName: 'stripe',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(accessService.createOne).not.toHaveBeenCalled();
+
+		expect(accessService.updateOne).toHaveBeenCalledWith(
+			'access-1',
+			{ user: 'user-2', policy: 'policy-1' },
+		);
+	});
+
+	test('revokes the accesses of an ended subscription', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			current_period_end: new Date('2026-11-01T00:00:00Z'),
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_beneficiaries').insert([
+			{ subscription: 1, user: 'user-1', access: 'access-1' },
+			{ subscription: 1, user: 'user-2', access: 'access-2' },
+		]);
+
+		const accessService = { createOne: vi.fn(), deleteOne: vi.fn() };
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: accessService as unknown as AbstractService,
+			providerName: 'stripe',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				status: 'canceled',
+				currentPeriodEnd: new Date('2026-11-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(accessService.createOne).not.toHaveBeenCalled();
+		expect(accessService.deleteOne).toHaveBeenNthCalledWith(1, 'access-1');
+		expect(accessService.deleteOne).toHaveBeenNthCalledWith(2, 'access-2');
+
+		expect(await database('subscription_beneficiaries')).toEqual([
+			{ id: 1, subscription: 1, user: 'user-1', access: null },
+			{ id: 2, subscription: 1, user: 'user-2', access: null },
+		]);
+
+		expect(await database('subscription_events')).toEqual([{
+			id: 1,
+			subscription: 1,
+			status: 'canceled',
+			current_period_end: 1_793_491_200_000,
+			cancel_at_period_end: 0,
+			source: 'sync',
+			user: null,
+			date_created: 1_793_836_800_000,
+		}]);
+	});
+
+	test('binds an unpaid subscription without granting it', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			status: 'pending',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		const accessService = { createOne: vi.fn(), deleteOne: vi.fn() };
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: accessService as unknown as AbstractService,
+			providerName: 'stripe',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				status: 'unpaid',
+				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(accessService.createOne).not.toHaveBeenCalled();
+		expect(accessService.deleteOne).not.toHaveBeenCalled();
+
+		expect(await database('subscription_beneficiaries')).toEqual([
+			{ id: 1, subscription: 1, user: 'user-1', access: null },
+		]);
+
+		expect(await database('subscriptions').select('status'))
+			.toEqual([{ status: 'unpaid' }]);
+	});
+
+	test(oneLine`
+		stores a resume after the chain's last row, with its plan, customer,
+		managers and beneficiaries
+	`, async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+			beneficiaries_max: 2,
+		});
+
+		// Resumed once already, then canceled before its first charge.
+		await database('subscriptions').insert([
+			{
+				plan: 1,
+				provider: 'mollie',
+				provider_customer_id: 'cst_1',
+				provider_subscription_id: 'sub_1',
+				status: 'canceled',
+				current_period_end: new Date('2026-12-01T00:00:00Z'),
+				cancel_at_period_end: true,
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+			{
+				plan: 1,
+				continues: 1,
+				provider: 'mollie',
+				provider_customer_id: 'cst_1',
+				provider_subscription_id: 'sub_2',
+				status: 'canceled',
+				current_period_end: new Date('2026-12-01T00:00:00Z'),
+				cancel_at_period_end: true,
+				date_created: new Date('2026-11-01T00:00:00Z'),
+				date_updated: new Date('2026-11-01T00:00:00Z'),
+			},
+		]);
+
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 2, user: 'user-1' },
+			{ subscription: 2, user: 'user-3' },
+		]);
+
+		await database('subscription_beneficiaries').insert([
+			{ subscription: 1, user: 'user-1', access: 'access-1' },
+			{ subscription: 2, user: 'user-1', access: 'access-1' },
+			{ subscription: 2, user: 'user-2', access: 'access-2' },
+		]);
+
+		await database('directus_access').insert([
+			{ id: 'access-1', user: 'user-1', policy: 'policy-1' },
+			{ id: 'access-2', user: 'user-2', policy: 'policy-1' },
+		]);
+
+		const accessService = {
+			createOne: vi.fn(),
+			updateOne: vi.fn(),
+			deleteOne: vi.fn(),
+		};
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: accessService as unknown as AbstractService,
+			providerName: 'mollie',
+			providerSubscription: {
+				subscriptionId: 'sub_3',
+				customerId: 'cst_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2027-01-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: null,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+				resumedSubscriptionId: 'sub_1',
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(accessService.createOne).not.toHaveBeenCalled();
+		expect(accessService.updateOne).not.toHaveBeenCalled();
+		expect(accessService.deleteOne).not.toHaveBeenCalled();
+
+		expect(await database('subscriptions').where('id', 3)).toEqual([{
+			id: 3,
+			plan: 1,
+			continues: 2,
+			provider: 'mollie',
+			provider_customer_id: 'cst_1',
+			provider_subscription_id: 'sub_3',
+			status: 'active',
+			current_period_end: 1_798_761_600_000,
+			cancel_at_period_end: 0,
+			user_updated: null,
+			date_created: 1_793_836_800_000,
+			date_updated: 1_793_836_800_000,
+		}]);
+
+		expect(await database('subscription_managers').where('subscription', 3))
+			.toEqual([
+				{ id: 4, subscription: 3, user: 'user-1' },
+				{ id: 5, subscription: 3, user: 'user-3' },
+			]);
+
+		expect(await database('subscription_beneficiaries')
+			.where('subscription', 3))
+			.toEqual([
+				{ id: 4, subscription: 3, user: 'user-1', access: 'access-1' },
+				{ id: 5, subscription: 3, user: 'user-2', access: 'access-2' },
+			]);
+	});
+
+	test('stores a resume of a chain whose last row has no member', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'mollie',
+			provider_customer_id: 'cst_1',
+			provider_subscription_id: 'sub_1',
+			status: 'canceled',
+			current_period_end: new Date('2026-12-01T00:00:00Z'),
 			cancel_at_period_end: true,
-			access: null,
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		const subscriptionProvider = {
+			cancelAtPeriodEnd: vi.fn(),
+			composeResourceId: vi.fn().mockReturnValue('cst_1/sub_2'),
+		};
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider:
+				subscriptionProvider as unknown as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: {} as AbstractService,
+			providerName: 'mollie',
+			providerSubscription: {
+				subscriptionId: 'sub_2',
+				customerId: 'cst_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2027-01-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: null,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+				resumedSubscriptionId: 'sub_1',
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(subscriptionProvider.cancelAtPeriodEnd)
+			.toHaveBeenCalledWith('cst_1/sub_2');
+
+		expect(await database('subscription_managers')).toEqual([]);
+		expect(await database('subscription_beneficiaries')).toEqual([]);
+
+		expect(await database('subscriptions')
+			.select('id', 'continues', 'cancel_at_period_end')
+			.where('id', 2))
+			.toEqual([{ id: 2, continues: 1, cancel_at_period_end: 1 }]);
+	});
+
+	test('keeps an access a resume shares when the resumed row ends', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert([
+			{
+				plan: 1,
+				provider: 'mollie',
+				provider_customer_id: 'cst_1',
+				provider_subscription_id: 'sub_1',
+				status: 'canceled',
+				current_period_end: new Date('2026-11-01T00:00:00Z'),
+				cancel_at_period_end: true,
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+			{
+				plan: 1,
+				continues: 1,
+				provider: 'mollie',
+				provider_customer_id: 'cst_1',
+				provider_subscription_id: 'sub_2',
+				status: 'active',
+				current_period_end: new Date('2026-12-01T00:00:00Z'),
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			},
+		]);
+
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 2, user: 'user-1' },
+		]);
+
+		await database('subscription_beneficiaries').insert([
+			{ subscription: 1, user: 'user-1', access: 'access-1' },
+			{ subscription: 2, user: 'user-1', access: 'access-1' },
+		]);
+
+		const accessService = { deleteOne: vi.fn() };
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: accessService as unknown as AbstractService,
+			providerName: 'mollie',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cst_1',
+				status: 'canceled',
+				currentPeriodEnd: new Date('2026-11-01T00:00:00Z'),
+				cancelAtPeriodEnd: true,
+				directusSubscription: null,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(accessService.deleteOne).not.toHaveBeenCalled();
+
+		expect(await database('subscription_beneficiaries')).toEqual([
+			{ id: 1, subscription: 1, user: 'user-1', access: null },
+			{ id: 2, subscription: 2, user: 'user-1', access: 'access-1' },
+		]);
+	});
+
+	test('refuses a resume of a row not stored', async () => {
+		const syncing = syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: {} as AbstractService,
+			providerName: 'mollie',
+			providerSubscription: {
+				subscriptionId: 'sub_2',
+				customerId: 'cst_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: null,
+				billing: null,
+				resumedSubscriptionId: 'sub_1',
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		await expect(syncing).rejects.toThrow(
+			'Subscription "sub_2" resumes "sub_1", which is not stored',
+		);
+
+		expect(await database('subscriptions')).toEqual([]);
+	});
+
+	test.each([
+		[null, 'null'],
+		[2, '2'],
+		[1, '1'],
+	])(
+		'refuses a subscription whose metadata names %j',
+		async (directusSubscription, namedSubscription) => {
+			// Row 1 is pending for another provider.
+			await database('subscription_plans').insert({
+				code: 'monthly',
+				name: 'Monthly',
+				policy: 'policy-1',
+				amount: 10,
+				currency: 'EUR',
+				interval: '{"months":1}',
+			});
+
+			await database('subscriptions').insert({
+				plan: 1,
+				provider: 'mollie',
+				status: 'pending',
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			});
+
+			const syncing = syncSubscription({
+				trx: database,
+				subscriptionProvider: {} as SubscriptionProvider,
+				logger: { warn: vi.fn(), error: vi.fn() },
+				accessService: {} as AbstractService,
+				providerName: 'stripe',
+				providerSubscription: {
+					subscriptionId: 'sub_1',
+					customerId: 'cus_1',
+					status: 'active',
+					currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+					cancelAtPeriodEnd: false,
+					directusSubscription,
+					billing: null,
+				},
+				syncedAt: new Date('2026-11-05T00:00:00Z'),
+			});
+
+			await expect(syncing).rejects.toThrow(
+				'"stripe" subscription "sub_1" names no pending subscription:'
+				+ ` its metadata "directus_subscription" is ${namedSubscription}`,
+			);
+
+			expect(await database('subscription_events')).toEqual([]);
+		},
+	);
+
+	test('writes nothing when nothing changed', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			current_period_end: new Date('2026-12-01T00:00:00Z'),
+			user_updated: 'admin-1',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-1', access: 'access-1' });
+
+		await database('directus_access')
+			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: {} as AbstractService,
+			providerName: 'stripe',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(await database('subscription_events')).toEqual([]);
+
+		expect(await database('subscriptions')
+			.select('user_updated', 'date_updated'))
+			.toEqual([{
+				user_updated: 'admin-1',
+				date_updated: 1_790_812_800_000,
+			}]);
+	});
+
+	test('records a change as the sync, clearing who last asked', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			current_period_end: new Date('2026-12-01T00:00:00Z'),
+			user_updated: 'admin-1',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: {} as AbstractService,
+			providerName: 'stripe',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				cancelAtPeriodEnd: true,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(await database('subscriptions')
+			.select('cancel_at_period_end', 'user_updated', 'date_updated'))
+			.toEqual([{
+				cancel_at_period_end: 1,
+				user_updated: null,
+				date_updated: 1_793_836_800_000,
+			}]);
+
+		expect(await database('subscription_events')).toEqual([{
+			id: 1,
+			subscription: 1,
+			status: 'active',
+			current_period_end: 1_796_083_200_000,
+			cancel_at_period_end: 1,
+			source: 'sync',
+			user: null,
+			date_created: 1_793_836_800_000,
+		}]);
+	});
+
+	test.each([
+		[
+			{
+				amountCents: 1200,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
+			'{"amountCents":1200,"currency":"EUR","interval":{"months":1,"days":0}}',
+		],
+		[
+			{
+				amountCents: 1000,
+				currency: 'USD',
+				interval: { months: 1, days: 0 },
+			},
+			'{"amountCents":1000,"currency":"USD","interval":{"months":1,"days":0}}',
+		],
+		[
+			{
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 12, days: 0 },
+			},
+			'{"amountCents":1000,"currency":"EUR","interval":{"months":12,"days":0}}',
+		],
+		[
+			{
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 7 },
+			},
+			'{"amountCents":1000,"currency":"EUR","interval":{"months":1,"days":7}}',
+		],
+		[null, 'null'],
+	])(
+		'logs a provider billing %j the plan does not sell',
+		async (providerBilling, loggedBilling) => {
+			await database('subscription_plans').insert({
+				code: 'monthly',
+				name: 'Monthly',
+				policy: 'policy-1',
+				amount: 10,
+				currency: 'eur',
+				interval: '{"months":1}',
+			});
+
+			await database('subscriptions').insert({
+				plan: 1,
+				provider: 'stripe',
+				provider_customer_id: 'cus_1',
+				provider_subscription_id: 'sub_1',
+				status: 'active',
+				current_period_end: new Date('2026-12-01T00:00:00Z'),
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			});
+
+			await database('subscription_managers')
+				.insert({ subscription: 1, user: 'user-1' });
+
+			const logger = { warn: vi.fn(), error: vi.fn() };
+
+			await syncSubscription({
+				trx: database,
+				subscriptionProvider: {} as SubscriptionProvider,
+				logger,
+				accessService: {} as AbstractService,
+				providerName: 'stripe',
+				providerSubscription: {
+					subscriptionId: 'sub_1',
+					customerId: 'cus_1',
+					status: 'active',
+					currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+					cancelAtPeriodEnd: false,
+					directusSubscription: 1,
+					billing: providerBilling,
+				},
+				syncedAt: new Date('2026-11-05T00:00:00Z'),
+			});
+
+			expect(logger.error).toHaveBeenCalledWith(
+				`Subscription 1 is billed ${loggedBilling} by "stripe", its plan`
+				+ ' "monthly" sells {"amountCents":1000,"currency":"EUR",'
+				+ '"interval":{"months":1,"days":0}}',
+			);
+		},
+	);
+
+	test('reads years as 12 months and weeks as 7 days', async () => {
+		await database('subscription_plans').insert({
+			code: 'yearly',
+			name: 'Yearly',
+			policy: 'policy-1',
+			amount: 100,
+			currency: 'EUR',
+			interval: '{"years":1,"months":1,"weeks":2,"days":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			current_period_end: new Date('2026-12-01T00:00:00Z'),
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		const logger = { warn: vi.fn(), error: vi.fn() };
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger,
+			accessService: {} as AbstractService,
+			providerName: 'stripe',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 10_000,
+					currency: 'EUR',
+					interval: { months: 13, days: 15 },
+				},
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(logger.error).not.toHaveBeenCalled();
+	});
+
+	test('refuses a plan interval part that is not a number', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":"1"}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			current_period_end: new Date('2026-12-01T00:00:00Z'),
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		const syncing = syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: {} as AbstractService,
+			providerName: 'stripe',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		await expect(syncing).rejects.toThrow(
+			'Plan "monthly" has interval "{\\"months\\":\\"1\\"}", whose "months"'
+			+ ' is not a number',
+		);
+	});
+
+	test('grants a paid subscription on a locked plan and warns', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+			status: 'subscriptions-locked',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			status: 'pending',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		const accessService = {
+			createOne: vi.fn().mockResolvedValue('access-1'),
+		};
+
+		const logger = { warn: vi.fn(), error: vi.fn() };
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger,
+			accessService: accessService as unknown as AbstractService,
+			providerName: 'stripe',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			'Subscription 1 started on plan "monthly", whose status is'
+			+ ' "subscriptions-locked"',
+		);
+
+		expect(await database('subscription_beneficiaries')).toEqual([
+			{ id: 1, subscription: 1, user: 'user-1', access: 'access-1' },
+		]);
+	});
+
+	test('skips a beneficiary whose account was deleted', async () => {
+		await database('subscription_plans').insert({
+			code: 'family',
+			name: 'Family',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+			beneficiaries_max: 2,
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			status: 'pending',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_beneficiaries').insert([
+			{ subscription: 1, user: null },
+			{ subscription: 1, user: 'user-2' },
+		]);
+
+		const accessService = {
+			createOne: vi.fn().mockResolvedValue('access-2'),
+		};
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider: {} as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: accessService as unknown as AbstractService,
+			providerName: 'stripe',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(accessService.createOne).toHaveBeenCalledOnce();
+
+		expect(await database('subscription_beneficiaries')).toEqual([
+			{ id: 1, subscription: 1, user: null, access: null },
+			{ id: 2, subscription: 1, user: 'user-2', access: 'access-2' },
+		]);
+	});
+
+	test(oneLine`
+		cancels at period end a subscription no one manages, its beneficiaries
+		keeping their access till then
+	`, async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			current_period_end: new Date('2026-12-01T00:00:00Z'),
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-2', access: 'access-2' });
+
+		await database('directus_access')
+			.insert({ id: 'access-2', user: 'user-2', policy: 'policy-1' });
+
+		const subscriptionProvider = {
+			cancelAtPeriodEnd: vi.fn(),
+			composeResourceId: vi.fn().mockReturnValue('sub_1'),
+		};
+
+		const accessService = { deleteOne: vi.fn() };
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider:
+				subscriptionProvider as unknown as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: accessService as unknown as AbstractService,
+			providerName: 'stripe',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(subscriptionProvider.composeResourceId).toHaveBeenCalledWith({
+			subscriptionId: 'sub_1',
+			customerId: 'cus_1',
+		});
+
+		expect(subscriptionProvider.cancelAtPeriodEnd)
+			.toHaveBeenCalledWith('sub_1');
+
+		expect(accessService.deleteOne).not.toHaveBeenCalled();
+
+		expect(await database('subscription_beneficiaries')).toEqual([
+			{ id: 1, subscription: 1, user: 'user-2', access: 'access-2' },
+		]);
+
+		expect(await database('subscription_events')).toEqual([{
+			id: 1,
+			subscription: 1,
+			status: 'active',
+			current_period_end: 1_796_083_200_000,
+			cancel_at_period_end: 1,
+			source: 'user_deleted',
+			user: null,
+			date_created: 1_793_836_800_000,
+		}]);
+	});
+
+	test('cancels a subscription no one manages only once', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			current_period_end: new Date('2026-12-01T00:00:00Z'),
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
@@ -1118,7 +1376,7 @@ describe('syncSubscription', () => {
 			trx: database,
 			subscriptionProvider:
 				subscriptionProvider as unknown as SubscriptionProvider,
-			logger: { warn: vi.fn() },
+			logger: { warn: vi.fn(), error: vi.fn() },
 			accessService: {} as AbstractService,
 			providerName: 'stripe',
 			providerSubscription: {
@@ -1127,79 +1385,166 @@ describe('syncSubscription', () => {
 				status: 'active',
 				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
 				cancelAtPeriodEnd: true,
-				planReference: 'price_1',
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
 			},
 			syncedAt: new Date('2026-11-05T00:00:00Z'),
 		});
 
 		expect(subscriptionProvider.cancelAtPeriodEnd).not.toHaveBeenCalled();
-		expect(await database('subscription_events')).toEqual([]);
+
+		expect(await database('subscription_events').select('source'))
+			.toEqual([{ source: 'sync' }]);
 	});
 
-	test('cancels a new subscription of a deleted user', async () => {
-		await database('subscribers').insert({ user: null });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
+	test('cancels an unpaid subscription no one manages', async () => {
 		await database('subscription_plans').insert({
 			code: 'monthly',
 			name: 'Monthly',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
 		});
 
-		await database('subscription_plan_references')
-			.insert({ plan: 1, provider: 'stripe', reference: 'price_1' });
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			current_period_end: new Date('2026-12-01T00:00:00Z'),
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-2', access: 'access-2' });
 
 		const subscriptionProvider = {
 			cancelAtPeriodEnd: vi.fn(),
 			composeResourceId: vi.fn().mockReturnValue('sub_1'),
 		};
 
+		const accessService = { deleteOne: vi.fn() };
+
 		await syncSubscription({
 			trx: database,
 			subscriptionProvider:
 				subscriptionProvider as unknown as SubscriptionProvider,
-			logger: { warn: vi.fn() },
+			logger: { warn: vi.fn(), error: vi.fn() },
+			accessService: accessService as unknown as AbstractService,
+			providerName: 'stripe',
+			providerSubscription: {
+				subscriptionId: 'sub_1',
+				customerId: 'cus_1',
+				status: 'unpaid',
+				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			},
+			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(subscriptionProvider.cancelAtPeriodEnd)
+			.toHaveBeenCalledWith('sub_1');
+
+		expect(accessService.deleteOne).toHaveBeenCalledWith('access-2');
+
+		expect(await database('subscriptions')
+			.select('status', 'cancel_at_period_end'))
+			.toEqual([{ status: 'unpaid', cancel_at_period_end: 1 }]);
+
+		expect(await database('subscription_events').select('source'))
+			.toEqual([{ source: 'user_deleted' }]);
+	});
+
+	test('cancels no ended subscription no one manages', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			current_period_end: new Date('2026-11-01T00:00:00Z'),
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		const subscriptionProvider = { cancelAtPeriodEnd: vi.fn() };
+
+		await syncSubscription({
+			trx: database,
+			subscriptionProvider:
+				subscriptionProvider as unknown as SubscriptionProvider,
+			logger: { warn: vi.fn(), error: vi.fn() },
 			accessService: {} as AbstractService,
 			providerName: 'stripe',
 			providerSubscription: {
 				subscriptionId: 'sub_1',
 				customerId: 'cus_1',
-				status: 'active',
-				currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+				status: 'canceled',
+				currentPeriodEnd: new Date('2026-11-01T00:00:00Z'),
 				cancelAtPeriodEnd: false,
-				planReference: 'price_1',
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
 			},
 			syncedAt: new Date('2026-11-05T00:00:00Z'),
 		});
 
-		expect(await database('subscriptions')
-			.select('cancel_at_period_end', 'access'))
-			.toEqual([{ cancel_at_period_end: 1, access: null }]);
+		expect(subscriptionProvider.cancelAtPeriodEnd).not.toHaveBeenCalled();
 
 		expect(await database('subscription_events').select('source'))
-			.toEqual([{ source: 'user_deleted' }]);
+			.toEqual([{ source: 'sync' }]);
 	});
 });
 
 describe('closeMissingSubscription', () => {
 	test('marks the row canceled, revokes it, and keeps its history', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'stripe',
+			provider_customer_id: 'cus_1',
 			provider_subscription_id: 'sub_1',
 			status: 'active',
 			current_period_end: new Date('2026-12-01T00:00:00Z'),
-			access: 'access-1',
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-1', access: 'access-1' });
 
 		const accessService = { deleteOne: vi.fn() };
 
@@ -1213,12 +1558,15 @@ describe('closeMissingSubscription', () => {
 
 		expect(accessService.deleteOne).toHaveBeenCalledWith('access-1');
 
+		expect(await database('subscription_beneficiaries')).toEqual([
+			{ id: 1, subscription: 1, user: 'user-1', access: null },
+		]);
+
 		expect(await database('subscriptions')
-			.select('status', 'current_period_end', 'access', 'date_updated'))
+			.select('status', 'current_period_end', 'date_updated'))
 			.toEqual([{
 				status: 'canceled',
 				current_period_end: 1_796_083_200_000,
-				access: null,
 				date_updated: 1_793_836_800_000,
 			}]);
 
@@ -1256,9 +1604,9 @@ describe('selectStoredSubscription', () => {
 			.toSQL()
 			.toNative())
 			.toEqual({
-				sql: 'select "id", "subscriber", "customer", "plan_reference",'
-					+ ' "status",'
-					+ ' "current_period_end", "cancel_at_period_end", "access"'
+				sql: 'select "id", "plan", "provider_customer_id",'
+					+ ' "provider_subscription_id", "status",'
+					+ ' "current_period_end", "cancel_at_period_end"'
 					+ ' from "subscriptions"'
 					+ ' where "provider" = $1 and "provider_subscription_id" = $2'
 					+ ' limit $3 for update',

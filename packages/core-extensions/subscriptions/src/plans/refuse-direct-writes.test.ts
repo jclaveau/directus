@@ -5,11 +5,13 @@ import {
 	createSubscriptionTables,
 } from '../migrations/create-subscription-tables.js';
 import {
+	refuseFrozenPlanUpdate,
+	refuseLastManagerDelete,
+	refuseLastManagerMove,
 	refusePlanDelete,
 	refusePlanStatusUpdate,
 	refuseSubscriptionEventWrite,
 	refuseSubscriptionStateUpdate,
-	refuseUsedReferenceUpdate,
 } from './refuse-direct-writes.js';
 
 let database: Knex;
@@ -35,7 +37,7 @@ describe('refusePlanDelete', () => {
 			code: 'monthly',
 			name: 'Monthly',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
 		});
@@ -68,7 +70,7 @@ describe('refusePlanStatusUpdate', () => {
 			code: 'monthly',
 			name: 'Monthly',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
 			status: 'archived',
@@ -87,7 +89,7 @@ describe('refusePlanStatusUpdate', () => {
 			code: 'monthly',
 			name: 'Monthly',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
 			status: 'archived',
@@ -104,7 +106,7 @@ describe('refusePlanStatusUpdate', () => {
 			code: 'monthly',
 			name: 'Monthly',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
 		});
@@ -118,58 +120,149 @@ describe('refusePlanStatusUpdate', () => {
 	});
 });
 
-describe('refuseUsedReferenceUpdate', () => {
+describe('refuseFrozenPlanUpdate', () => {
 	beforeEach(async () => {
-		await database('subscription_plans').insert({
-			code: 'monthly',
-			name: 'Monthly',
-			policy: 'policy-1',
-			amount: 990,
-			currency: 'EUR',
-			interval: '{"months":1}',
-		});
-
-		await database('subscription_plan_references').insert([
-			{ plan: 1, provider: 'stripe', reference: 'price_used' },
-			{ plan: 1, provider: 'mollie', reference: 'price_unused' },
+		await database('subscription_plans').insert([
+			{
+				code: 'monthly',
+				name: 'Monthly',
+				policy: 'policy-1',
+				amount: 10,
+				currency: 'EUR',
+				interval: '{"months":1}',
+			},
+			{
+				code: 'yearly',
+				name: 'Yearly',
+				policy: 'policy-1',
+				amount: 100,
+				currency: 'EUR',
+				interval: '{"months":12}',
+			},
 		]);
 
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'stripe',
-			provider_subscription_id: 'sub_1',
-			status: 'active',
+			status: 'pending',
 			date_created: new Date('2026-10-01T00:00:00Z'),
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
 	});
 
 	test.each([
-		[{ reference: 'price_other' }],
-		[{ provider: 'mollie' }],
-		[{ plan: 2 }],
-	])('refuses changing %j of a used reference', async (referenceData) => {
-		await expect(refuseUsedReferenceUpdate(
-			[{ data: referenceData, keys: [1] }],
+		[{ amount: 12 }],
+		[{ currency: 'USD' }],
+		[{ interval: { months: 2 } }],
+		[{ beneficiaries_max: 3 }],
+		[{ name: 'Monthly', amount: '10.01' }],
+	])('refuses changing %j of a subscribed plan', async (planData) => {
+		await expect(refuseFrozenPlanUpdate(
+			[{ data: planData, keys: [2, 1] }],
 			database,
 		)).rejects.toThrow(new InvalidPayloadError({
-			reason: 'Plan reference "price_used" is used by a subscription,'
-				+ ' it cannot change',
+			reason: 'Plan "monthly" has subscriptions: create a new plan to change'
+				+ ' its amount, currency, interval or beneficiaries_max',
 		}));
 	});
 
-	test('passes a reference no subscription uses', async () => {
-		await expect(refuseUsedReferenceUpdate(
-			[{ data: { reference: 'price_typo' }, keys: [2] }],
+	test('passes the values the subscribed plan already holds', async () => {
+		await expect(refuseFrozenPlanUpdate(
+			[
+				{
+					data: {
+						name: 'Monthly plan',
+						amount: '10.00',
+						currency: 'EUR',
+						interval: '{"months":1}',
+						beneficiaries_max: 1,
+					},
+					keys: [1],
+				},
+				{ data: { interval: { months: 1 } }, keys: [1] },
+			],
 			database,
-		)).resolves.toEqual([{ data: { reference: 'price_typo' }, keys: [2] }]);
+		)).resolves.toEqual([
+			{
+				data: {
+					name: 'Monthly plan',
+					amount: '10.00',
+					currency: 'EUR',
+					interval: '{"months":1}',
+					beneficiaries_max: 1,
+				},
+				keys: [1],
+			},
+			{ data: { interval: { months: 1 } }, keys: [1] },
+		]);
+	});
+
+	test('passes a new price of a plan no subscription uses', async () => {
+		await expect(refuseFrozenPlanUpdate(
+			[{ data: { amount: 120 }, keys: [2] }],
+			database,
+		)).resolves.toEqual([{ data: { amount: 120 }, keys: [2] }]);
+	});
+
+	test('passes a rename of a subscribed plan', async () => {
+		await expect(refuseFrozenPlanUpdate(
+			[{ data: { name: 'Renamed' }, keys: [1] }],
+			database,
+		)).resolves.toEqual([{ data: { name: 'Renamed' }, keys: [1] }]);
+	});
+});
+
+describe('refuseLastManagerDelete', () => {
+	beforeEach(async () => {
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 1, user: 'user-2' },
+			{ subscription: 2, user: 'user-1' },
+		]);
+	});
+
+	test.each([[[1]], [[2]], [[]]])('passes the delete of %j', async (
+		managerKeys,
+	) => {
+		await expect(refuseLastManagerDelete(managerKeys, database))
+			.resolves.toEqual(managerKeys);
+	});
+
+	test.each([
+		[[1, 2], 'Subscription 1 needs at least 1 manager'],
+		[[1, 3], 'Subscription 2 needs at least 1 manager'],
+	])('refuses the delete of %j', async (managerKeys, refusalReason) => {
+		await expect(refuseLastManagerDelete(managerKeys, database))
+			.rejects.toThrow(new InvalidPayloadError({ reason: refusalReason }));
+	});
+});
+
+describe('refuseLastManagerMove', () => {
+	beforeEach(async () => {
+		await database('subscription_managers').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 1, user: 'user-2' },
+			{ subscription: 2, user: 'user-1' },
+		]);
+	});
+
+	test.each([
+		[{ data: { subscription: 2 }, keys: [1] }],
+		[{ data: { subscription: 2 }, keys: [3] }],
+		[{ data: { user: 'user-3' }, keys: [3] }],
+		[{ key: 3 }],
+	])('passes %j', async (updateEntry) => {
+		await expect(refuseLastManagerMove([updateEntry], database))
+			.resolves.toEqual([updateEntry]);
+	});
+
+	test('refuses moving the last manager away', async () => {
+		await expect(refuseLastManagerMove(
+			[{ data: { subscription: 1 }, keys: [3] }],
+			database,
+		)).rejects.toThrow(new InvalidPayloadError({
+			reason: 'Subscription 2 needs at least 1 manager',
+		}));
 	});
 });
 

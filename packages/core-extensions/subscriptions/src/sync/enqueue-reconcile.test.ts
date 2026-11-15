@@ -31,56 +31,57 @@ afterEach(async () => {
 
 describe('enqueueReconcile', () => {
 	test('queues ongoing subscriptions and those still holding access', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers').insert([
-			{ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' },
-			{ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' },
-		]);
-
 		await database('subscription_plans').insert({
 			code: 'monthly',
 			name: 'Monthly',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
 		});
 
 		await database('subscriptions').insert([
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'stripe',
+				provider_customer_id: 'cus_1',
 				provider_subscription_id: 'sub_active',
 				status: 'active',
-				access: 'access-1',
 				date_created: new Date('2026-10-01T00:00:00Z'),
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'stripe',
+				provider_customer_id: 'cus_1',
 				provider_subscription_id: 'sub_ended',
 				status: 'canceled',
-				access: null,
 				date_created: new Date('2026-10-01T00:00:00Z'),
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
 			{
-				subscriber: 1,
-				customer: 2,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_expired',
 				status: 'expired',
-				access: 'access-2',
 				date_created: new Date('2026-10-01T00:00:00Z'),
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
+		]);
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			status: 'pending',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_beneficiaries').insert([
+			{ subscription: 1, user: 'user-1', access: 'access-1' },
+			{ subscription: 2, user: 'user-1', access: null },
+			{ subscription: 3, user: 'user-1', access: 'access-2' },
 		]);
 
 		expect(await enqueueReconcile(database, new Map([
@@ -107,36 +108,29 @@ describe('enqueueReconcile', () => {
 	});
 
 	test('leaves out a sync parked at the attempt ceiling', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
 		await database('subscription_plans').insert({
 			code: 'monthly',
 			name: 'Monthly',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
 		});
 
 		await database('subscriptions').insert([
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'stripe',
+				provider_customer_id: 'cus_1',
 				provider_subscription_id: 'sub_parked',
 				status: 'active',
 				date_created: new Date('2026-10-01T00:00:00Z'),
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'stripe',
+				provider_customer_id: 'cus_1',
 				provider_subscription_id: 'sub_retrying',
 				status: 'active',
 				date_created: new Date('2026-10-01T00:00:00Z'),
@@ -176,16 +170,10 @@ describe('enqueueReconcile', () => {
 	});
 
 	test('queues a sync parked for a day, keeping its attempts', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers')
-			.insert({ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' });
-
 		await database('subscriptions').insert({
-			subscriber: 1,
-			customer: 1,
-			plan_reference: 1,
+			plan: 1,
 			provider: 'stripe',
+			provider_customer_id: 'cus_1',
 			provider_subscription_id: 'sub_parked',
 			status: 'active',
 			date_created: new Date('2026-10-01T00:00:00Z'),
@@ -216,38 +204,29 @@ describe('enqueueReconcile', () => {
 	});
 
 	test('refuses subscriptions of disabled providers after the others', async () => {
-		await database('subscribers').insert({ user: 'user-1' });
-
-		await database('subscriber_customers').insert([
-			{ subscriber: 1, provider: 'mollie', provider_customer_id: 'cst_1' },
-			{ subscriber: 1, provider: 'stripe', provider_customer_id: 'cus_1' },
-		]);
-
 		await database('subscription_plans').insert({
 			code: 'monthly',
 			name: 'Monthly',
 			policy: 'policy-1',
-			amount: 990,
+			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
 		});
 
 		await database('subscriptions').insert([
 			{
-				subscriber: 1,
-				customer: 1,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'mollie',
+				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_1',
 				status: 'active',
 				date_created: new Date('2026-10-01T00:00:00Z'),
 				date_updated: new Date('2026-10-01T00:00:00Z'),
 			},
 			{
-				subscriber: 1,
-				customer: 2,
-				plan_reference: 1,
+				plan: 1,
 				provider: 'stripe',
+				provider_customer_id: 'cus_1',
 				provider_subscription_id: 'sub_2',
 				status: 'active',
 				date_created: new Date('2026-10-01T00:00:00Z'),

@@ -19,10 +19,9 @@ describe('createSubscriptionTables', () => {
 			.pluck('name'))
 			.toEqual([
 				'sqlite_sequence',
-				'subscriber_customers',
-				'subscribers',
+				'subscription_beneficiaries',
 				'subscription_events',
-				'subscription_plan_references',
+				'subscription_managers',
 				'subscription_plans',
 				'subscription_sync_queue',
 				'subscriptions',
@@ -54,22 +53,19 @@ describe('createSubscriptionTables', () => {
 			.orderBy('name')
 			.pluck('name'))
 			.toEqual([
-				'subscriber_customers_provider_provider_customer_id_unique',
-				'subscriber_customers_subscriber_index',
-				'subscribers_user_unique',
+				'subscription_beneficiaries_access_index',
+				'subscription_beneficiaries_subscription_user_unique',
+				'subscription_beneficiaries_user_index',
 				'subscription_events_subscription_index',
-				'subscription_plan_references_plan_index',
-				'subscription_plan_references_provider_reference_unique',
+				'subscription_managers_subscription_user_unique',
+				'subscription_managers_user_index',
 				'subscription_plans_code_unique',
 				'subscription_plans_policy_index',
 				'subscription_sync_queue_pending_next_attempt_at_index',
 				'subscription_sync_queue_provider_resource_id_unique',
-				'subscriptions_access_index',
-				'subscriptions_customer_index',
-				'subscriptions_plan_reference_index',
+				'subscriptions_continues_unique',
+				'subscriptions_plan_index',
 				'subscriptions_provider_provider_subscription_id_unique',
-				'subscriptions_resumes_index',
-				'subscriptions_subscriber_index',
 				'subscriptions_user_updated_index',
 			]);
 

@@ -57,34 +57,144 @@ export async function refusePlanStatusUpdate(
 	return updateEntries;
 }
 
+const FROZEN_PLAN_FIELDS = [
+	'amount',
+	'currency',
+	'interval',
+	'beneficiaries_max',
+] as const;
+
 /**
- * A subscription points at the reference it was sold under, which says what the
- * provider bills: the row would otherwise claim another product. An unused one
+ * What the provider bills and how many seats were sold: a subscription keeps
+ * the plan it was sold under, so a new price is a new plan. An unused plan
  * stays editable, for a typo.
  */
-export async function refuseUsedReferenceUpdate(
+export async function refuseFrozenPlanUpdate(
 	updateEntries: UpdateEntries,
 	database: Knex,
 ): Promise<UpdateEntries> {
-	const usedReference = await database('subscriptions')
-		.join(
-			'subscription_plan_references',
-			'subscription_plan_references.id',
-			'subscriptions.plan_reference',
+	for (const updateEntry of updateEntries) {
+		if (!('data' in updateEntry)) {
+			continue;
+		}
+
+		const frozenFields = FROZEN_PLAN_FIELDS.filter((fieldName) => {
+			return fieldName in updateEntry.data;
+		});
+
+		if (frozenFields.length === 0) {
+			continue;
+		}
+
+		const subscribedPlans = await database('subscription_plans')
+			.select('code', ...frozenFields)
+			.whereIn('id', updateEntry.keys)
+			.whereExists(
+				database('subscriptions')
+					.select('subscriptions.id')
+					.whereColumn('subscriptions.plan', 'subscription_plans.id'),
+			)
+			.orderBy('id');
+
+		for (const subscribedPlan of subscribedPlans) {
+			const isChanging = frozenFields.some((fieldName) => {
+				return readFrozenValue(fieldName, subscribedPlan[fieldName])
+					!== readFrozenValue(fieldName, updateEntry.data[fieldName]);
+			});
+
+			if (isChanging) {
+				throw new InvalidPayloadError({
+					reason: `Plan ${JSON.stringify(subscribedPlan.code)} has`
+						+ ' subscriptions: create a new plan to change its amount,'
+						+ ' currency, interval or beneficiaries_max',
+				});
+			}
+		}
+	}
+
+	return updateEntries;
+}
+
+/** The database hands a decimal back as "10.00" and a JSON column as text. */
+function readFrozenValue(
+	fieldName: typeof FROZEN_PLAN_FIELDS[number],
+	fieldValue: unknown,
+): string {
+	if (fieldName === 'amount' || fieldName === 'beneficiaries_max') {
+		return String(Number(fieldValue));
+	}
+
+	if (fieldName === 'interval') {
+		return JSON.stringify(typeof fieldValue === 'string'
+			? JSON.parse(fieldValue)
+			: fieldValue);
+	}
+
+	return String(fieldValue);
+}
+
+/** A user delete cascades instead: its sync cancels at period end. */
+export async function refuseLastManagerRemoval(
+	removedKeys: PrimaryKey[],
+	database: Knex,
+): Promise<void> {
+	if (removedKeys.length === 0) {
+		return;
+	}
+
+	const orphanedSubscription = await database('subscription_managers')
+		.distinct('subscription')
+		.whereIn('id', removedKeys)
+		.whereNotExists(
+			database('subscription_managers as staying_managers')
+				.select('staying_managers.id')
+				.whereColumn(
+					'staying_managers.subscription',
+					'subscription_managers.subscription',
+				)
+				.whereNotIn('staying_managers.id', removedKeys),
 		)
-		.select('subscription_plan_references.reference')
-		.whereIn(
-			'subscriptions.plan_reference',
-			listUpdatedKeys(updateEntries, ['plan', 'provider', 'reference']),
-		)
+		.orderBy('subscription')
 		.first();
 
-	if (usedReference !== undefined) {
+	if (orphanedSubscription !== undefined) {
 		throw new InvalidPayloadError({
-			reason: `Plan reference ${JSON.stringify(usedReference.reference)} is`
-				+ ' used by a subscription, it cannot change',
+			reason: `Subscription ${JSON.stringify(orphanedSubscription.subscription)}`
+				+ ' needs at least 1 manager',
 		});
 	}
+}
+
+export async function refuseLastManagerDelete(
+	managerKeys: PrimaryKey[],
+	database: Knex,
+): Promise<PrimaryKey[]> {
+	await refuseLastManagerRemoval(managerKeys, database);
+
+	return managerKeys;
+}
+
+/** Moving a manager to another subscription removes them from theirs. */
+export async function refuseLastManagerMove(
+	updateEntries: UpdateEntries,
+	database: Knex,
+): Promise<UpdateEntries> {
+	const movedKeys: PrimaryKey[] = [];
+
+	for (const updateEntry of updateEntries) {
+		if (!('data' in updateEntry) || !('subscription' in updateEntry.data)) {
+			continue;
+		}
+
+		const leavingManagers = await database('subscription_managers')
+			.pluck('id')
+			.whereIn('id', updateEntry.keys)
+			.whereNot('subscription', Number(updateEntry.data['subscription']));
+
+		movedKeys.push(...leavingManagers);
+	}
+
+	await refuseLastManagerRemoval(movedKeys, database);
 
 	return updateEntries;
 }
