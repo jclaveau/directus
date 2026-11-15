@@ -100,3 +100,12 @@ a dispatch on `preview-admin-<ref>`, so the `edited` run really does **not** can
 a dispatched preview — it started, skipped, and the dispatch kept running.
 
 A `Run Blackbox` label toggle kills a preview exactly the way a body PATCH does: the push-triggered run is cancelled by per-PR concurrency and the `labeled` event's own run **skips** (the workflow gates on `synchronize`/`opened`), leaving no live preview at all. Measured on PR #456, twice, 2026-09-14 — runs 34896923113 cancelled / 34896942496 skipped. So the order after a push is: push, then any label (rarely needed — blackbox runs on every code PR since 2026-08-05, and a label added after the push cancels its run), then `gh workflow run preview-admin.yml --ref <feature-branch>` **last**.
+
+**While work is still in progress, cancel the PR-event preview (2026-11-15).** jean:
+_"You can dispatch preview-admin with a timeout when your are looping or simpler,
+cancel it as I would check it only when your work is ready to be reviewed"_. Every
+push of an autoreview or fix loop starts a 3h preview nobody opens. So, no ask:
+- mid-loop push → `gh run cancel <preview-admin run id>` (default), or dispatch
+  with `-f timeout_minutes=<small>` when a live admin helps the loop itself;
+- work ready for review → one full dispatch (`--ref X -f ref=X -f pr=N`), hand over
+  `<url>/auto-login`.
