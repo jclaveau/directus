@@ -75,7 +75,7 @@ line appended below.
 - [processes/autoscale consolidation](project_directus_processes_autoscale_consolidation.md) — one bounded `processes/supervisor/` gateway; routes/env frozen
 - [RAM: the node flags that work](project_directus_ram_node_flags.md) — never cap old space without a measured peak
 
-## fork (21) — branches, PR naming, licensing, derived branches, worktrees
+## fork (22) — branches, PR naming, licensing, derived branches, worktrees
 `.agents/auto-memory/index/fork.md`
 
 - [New feats base on v11.10.1-hhh-dev](feedback_directus_new_feat_base_hhh_dev.md) — fetch + sync hhh-dev first
