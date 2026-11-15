@@ -156,6 +156,7 @@ describe('refuseFrozenPlanUpdate', () => {
 		[{ interval: { months: 2 } }],
 		[{ beneficiaries_max: 3 }],
 		[{ name: 'Monthly', amount: '10.01' }],
+		[{ interval: 'monthly' }],
 	])('refuses changing %j of a subscribed plan', async (planData) => {
 		await expect(refuseFrozenPlanUpdate(
 			[{ data: planData, keys: [2, 1] }],
@@ -194,6 +195,19 @@ describe('refuseFrozenPlanUpdate', () => {
 				keys: [1],
 			},
 			{ data: { interval: { months: 1 } }, keys: [1] },
+		]);
+	});
+
+	test('passes an interval holding the same parts in another order', async () => {
+		await database('subscription_plans')
+			.where('id', 1)
+			.update({ interval: '{"months":1,"days":3}' });
+
+		await expect(refuseFrozenPlanUpdate(
+			[{ data: { interval: { days: 3, months: 1 } }, keys: [1] }],
+			database,
+		)).resolves.toEqual([
+			{ data: { interval: { days: 3, months: 1 } }, keys: [1] },
 		]);
 	});
 
