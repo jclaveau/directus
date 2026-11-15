@@ -302,15 +302,19 @@ async function createContinuingSubscription({
 		.where('subscription', chainTail.id)
 		.orderBy('id');
 
-	if (tailBeneficiaries.length > 0) {
-		await trx('subscription_beneficiaries')
-			.insert(tailBeneficiaries.map((tailBeneficiary) => {
-				return {
-					subscription: continuingSubscription.id,
-					user: tailBeneficiary.user,
-					access: tailBeneficiary.access,
-				};
-			}));
+	for (const tailBeneficiary of tailBeneficiaries) {
+		// A resume canceled before its first charge gave back its copy of the
+		// access an earlier row of the chain still grants.
+		const sharedAccess = tailBeneficiary.access === null
+			&& tailBeneficiary.user !== null
+			? await findChainAccess(trx, chainTail.id, tailBeneficiary.user)
+			: tailBeneficiary.access;
+
+		await trx('subscription_beneficiaries').insert({
+			subscription: continuingSubscription.id,
+			user: tailBeneficiary.user,
+			access: sharedAccess,
+		});
 	}
 
 	return continuingSubscription;
@@ -332,6 +336,31 @@ async function findChainTail(trx: Knex, chainRow: ChainRow): Promise<ChainRow> {
 	return nextRow === undefined
 		? chainRow
 		: await findChainTail(trx, nextRow);
+}
+
+async function findChainAccess(
+	trx: Knex,
+	chainRowId: number,
+	beneficiaryUser: string,
+): Promise<string | null> {
+	const chainBeneficiary = await trx('subscription_beneficiaries')
+		.select('access')
+		.where({ subscription: chainRowId, user: beneficiaryUser })
+		.whereNotNull('access')
+		.first();
+
+	if (chainBeneficiary !== undefined) {
+		return chainBeneficiary.access;
+	}
+
+	const chainRow = await trx('subscriptions')
+		.select('continues')
+		.where('id', chainRowId)
+		.first();
+
+	return chainRow.continues === null
+		? null
+		: await findChainAccess(trx, chainRow.continues, beneficiaryUser);
 }
 
 async function countManagers(
