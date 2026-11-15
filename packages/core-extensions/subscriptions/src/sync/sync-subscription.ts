@@ -423,9 +423,9 @@ function readPlanInterval(subscribedPlan: SubscribedPlan): BillingInterval {
 }
 
 /**
- * Outside the transaction: after a rollback the retry finds the provider already
- * cancelling and records `sync`. A stored cancel the provider no longer holds
- * cancels again with no event.
+ * Inside the sync's transaction, holding the row lock through the call: after a
+ * rollback the retry finds the provider already cancelling and records `sync`.
+ * A stored cancel the provider no longer holds cancels again with no event.
  */
 async function requestProviderCancel(
 	subscriptionProvider: SubscriptionProvider,
@@ -602,6 +602,19 @@ async function keepBeneficiaryAccesses({
 		.orderBy('id');
 
 	for (const grantedBeneficiary of grantedBeneficiaries) {
+		// A pending resume gave back its link to the access the chain grants.
+		const chainAccess = grantedBeneficiary.access === null
+			? await findChainAccess(trx, subscriptionId, grantedBeneficiary.user)
+			: null;
+
+		if (chainAccess !== null) {
+			await trx('subscription_beneficiaries')
+				.where('id', grantedBeneficiary.id)
+				.update({ access: chainAccess });
+
+			grantedBeneficiary.access = chainAccess;
+		}
+
 		if (grantedBeneficiary.access === null) {
 			const createdAccess = await accessService.createOne({
 				user: grantedBeneficiary.user,

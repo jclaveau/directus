@@ -67,7 +67,8 @@ const FROZEN_PLAN_FIELDS = [
 /**
  * What the provider bills and how many seats were sold: a subscription keeps
  * the plan it was sold under, so a new price is a new plan. An unused plan
- * stays editable, for a typo.
+ * stays editable, for a typo. A subscription created between this read and the
+ * update is not seen: the plan is then edited under it.
  */
 export async function refuseFrozenPlanUpdate(
 	updateEntries: UpdateEntries,
@@ -125,15 +126,40 @@ function readFrozenValue(
 	}
 
 	if (fieldName === 'interval') {
-		return JSON.stringify(typeof fieldValue === 'string'
-			? JSON.parse(fieldValue)
-			: fieldValue);
+		return readIntervalParts(fieldValue);
 	}
 
 	return String(fieldValue);
 }
 
-/** A user delete cascades instead: its sync cancels at period end. */
+/** An interval no JSON parse reads compares unequal: the plan refuses it. */
+function readIntervalParts(intervalValue: unknown): string {
+	let intervalParts: unknown = intervalValue;
+
+	if (typeof intervalValue === 'string') {
+		try {
+			intervalParts = JSON.parse(intervalValue);
+		}
+		catch {
+			return `unparsable ${intervalValue}`;
+		}
+	}
+
+	if (typeof intervalParts !== 'object' || intervalParts === null) {
+		return JSON.stringify(intervalParts);
+	}
+
+	return JSON.stringify(Object.fromEntries(
+		Object.entries(intervalParts).sort(([leftPart], [rightPart]) => {
+			return leftPart.localeCompare(rightPart);
+		}),
+	));
+}
+
+/**
+ * A user delete cascades instead: its sync cancels at period end. A plain read,
+ * no lock: two managers removing each other at once both pass.
+ */
 export async function refuseLastManagerRemoval(
 	removedKeys: PrimaryKey[],
 	database: Knex,
