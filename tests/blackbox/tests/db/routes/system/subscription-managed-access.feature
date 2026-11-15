@@ -1,10 +1,11 @@
 Feature: The access a subscription grants is the subscriptions bundle's alone
 
   - A request authenticates as the admin unless its `as` names a token;
-    `as: public` sends none, like Mollie.
+    `as: anonymous` sends none, like Mollie.
   - The instance loads the real `@scalabus/subscriptions` bundle and was
     bootstrapped, which creates its tables.
   - Its Mollie client calls a fake Mollie, answering what `Mollie holds`.
+    A holding's `directus_id` is its metadata `directus_subscription`.
   - A `<name>` stands for one uuid, the same in the tables and the requests;
     `<granted_access>` is the access row the bundle stored.
 
@@ -17,27 +18,27 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | id               | email                  | token           |
       | <no_access_user> | no-access@example.com  | no-access-token |
       | <granted_user>   | subscribed@example.com |                 |
-    And the rows of subscribers:
-      | id | user           |
-      | 1  | <granted_user> |
-    And the rows of subscriber_customers:
-      | id | subscriber | provider | provider_customer_id |
-      | 1  | 1          | mollie   | cst_subscribed       |
     And the rows of subscription_plans:
       | id | code | name | policy        | amount | currency | interval     | status |
-      | 1  | pro  | Pro  | <plan_policy> | 1000   | EUR      | {"months":1} | active |
-    And the rows of subscription_plan_references:
-      | plan | provider | reference |
-      | 1    | mollie   | pro-plan  |
+      | 1  | pro  | Pro  | <plan_policy> | 10     | EUR      | {"months":1} | active |
+    And the rows of subscriptions:
+      | id  | plan | provider | status  | date_created | date_updated |
+      | 901 | 1    | mollie   | pending | 2026-01-01   | 2026-01-01   |
+    And the rows of subscription_managers:
+      | subscription | user           |
+      | 901          | <granted_user> |
+    And the rows of subscription_beneficiaries:
+      | subscription | user           |
+      | 901          | <granted_user> |
     And Mollie holds this subscription:
-      | payment    | customer       | subscription | plan_reference | status |
-      | tr_renewal | cst_subscribed | sub_renewing | pro-plan       | active |
+      | payment    | customer       | subscription | directus_id | status |
+      | tr_renewal | cst_subscribed | sub_renewing | 901         | active |
     When these requests get these responses:
-      | request                               | response  |
-      | as: public                            | code: 200 |+
-      | method: POST                          |           |
-      | path: /subscriptions/webhooks/mollie  |           |
-      | payload: id=tr_renewal                |           |
+      | request                              | response  |
+      | as: anonymous                        | code: 200 |+
+      | method: POST                         |           |
+      | path: /subscriptions/webhooks/mollie |           |
+      | payload: id=tr_renewal               |           |
     Then this access is eventually stored:
       | user           | policy        | managed_by              |
       | <granted_user> | <plan_policy> | @scalabus/subscriptions |
@@ -104,14 +105,14 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | payload:                       |   data:                                        |
       |   sort: 3                      |     sort: 3                                    |
     When Mollie holds this subscription:
-      | payment    | customer       | subscription | plan_reference | status    |
-      | tr_renewal | cst_subscribed | sub_renewing | pro-plan       | suspended |
+      | payment    | customer       | subscription | directus_id | status    |
+      | tr_renewal | cst_subscribed | sub_renewing | 901         | suspended |
     And these requests get these responses:
-      | request                               | response  |
-      | as: public                            | code: 200 |+
-      | method: POST                          |           |
-      | path: /subscriptions/webhooks/mollie  |           |
-      | payload: id=tr_renewal                |           |
+      | request                              | response  |
+      | as: anonymous                        | code: 200 |+
+      | method: POST                         |           |
+      | path: /subscriptions/webhooks/mollie |           |
+      | payload: id=tr_renewal               |           |
     Then this user eventually holds no access:
       | user           |
       | <granted_user> |
@@ -123,30 +124,23 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
     And the rows of directus_users:
       | id             | email               | token         |
       | <refused_user> | refused@example.com | refused-token |
-    And the rows of subscribers:
-      | id | user |
-      | 10 |      |
-    And the rows of subscriber_customers:
-      | id | subscriber | provider | provider_customer_id |
-      | 10 | 10         | mollie   | cst_direct           |
     And the rows of subscription_plans:
       | id | code   | name   | policy   | amount | currency | interval     | status   |
-      | 10 | direct | Direct | <policy> | 1000   | EUR      | {"months":1} | active   |
-      | 11 | gone   | Gone   | <policy> | 1000   | EUR      | {"months":1} | archived |
-    And the rows of subscription_plan_references:
-      | id | plan | provider | reference   |
-      | 10 | 10   | mollie   | direct-plan |
+      | 10 | direct | Direct | <policy> | 10     | EUR      | {"months":1} | active   |
+      | 11 | gone   | Gone   | <policy> | 10     | EUR      | {"months":1} | archived |
     And this row of subscriptions:
       | column                   | value      |
       | id                       | 900        |
-      | subscriber               | 10         |
-      | customer                 | 10         |
-      | plan_reference           | 10         |
+      | plan                     | 10         |
       | provider                 | mollie     |
+      | provider_customer_id     | cst_direct |
       | provider_subscription_id | sub_direct |
       | status                   | expired    |
       | date_created             | 2026-01-01 |
       | date_updated             | 2026-01-01 |
+    And the rows of subscription_managers:
+      | id  | subscription | user           |
+      | 900 | 900          | <refused_user> |
     Then these requests get these responses:
       | request                            | response                                   |
       | as: anonymous                      | code: 403                                  |+
@@ -206,23 +200,36 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       |                                    |         change.                            |
       |                                    |       extensions:                          |
       |                                    |         code: INVALID_PAYLOAD              |
-      | method: DELETE                     | code: 400                                  |+
-      | path: "/items/subscription_plan_\  | body:                                      |
-      |   references/10"                   |   errors:                                  |
-      |                                    |     - message: >-                          |
-      |                                    |         Cannot delete                      |
-      |                                    |         "subscription_plan_references:10": |
-      |                                    |         it is still referenced by          |
-      |                                    |         collection "subscriptions".        |
-      |                                    |       extensions:                          |
-      |                                    |         code: INVALID_FOREIGN_KEY          |
       | method: PATCH                      | code: 400                                  |+
-      | path: "/items/subscription_plan_\  | body:                                      |
-      |   references/10"                   |   errors:                                  |
+      | path: /items/subscription_plans/10 | body:                                      |
+      | payload:                           |   errors:                                  |
+      |   amount: 20                       |     - message: >-                          |
+      |                                    |         Invalid payload. Plan "direct" has |
+      |                                    |         subscriptions: create a new plan   |
+      |                                    |         to change its amount, currency,    |
+      |                                    |         interval or beneficiaries_max.     |
+      |                                    |       extensions:                          |
+      |                                    |         code: INVALID_PAYLOAD              |
+      | method: PATCH                      | code: 200                                  |+
+      | path: /items/subscription_plans/10 | body:                                      |
+      | payload:                           |   data:                                    |
+      |   amount: 10                       |     name: Direct plan                      |
+      |   beneficiaries_max: 1             |                                            |
+      |   name: Direct plan                |                                            |
+      | method: DELETE                     | code: 400                                  |+
+      | path: "/items/subscription_\       | body:                                      |
+      |   managers/900"                    |   errors:                                  |
+      |                                    |     - message: >-                          |
+      |                                    |         Invalid payload. Subscription 900  |
+      |                                    |         needs at least 1 manager.          |
+      |                                    |       extensions:                          |
+      |                                    |         code: INVALID_PAYLOAD              |
+      | method: PATCH                      | code: 400                                  |+
+      | path: "/items/subscription_\       | body:                                      |
+      |   managers/900"                    |   errors:                                  |
       | payload:                           |     - message: >-                          |
-      |   reference: other                 |         Invalid payload. Plan reference    |
-      |                                    |         "direct-plan" is used by a         |
-      |                                    |         subscription, it cannot change.    |
+      |   subscription: 901                |         Invalid payload. Subscription 900  |
+      |                                    |         needs at least 1 manager.          |
       |                                    |       extensions:                          |
       |                                    |         code: INVALID_PAYLOAD              |
       | method: PATCH                      | code: 400                                  |+
