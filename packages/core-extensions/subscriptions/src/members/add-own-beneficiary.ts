@@ -48,6 +48,17 @@ export async function addOwnBeneficiary({
 			throw new ForbiddenError();
 		}
 
+		// The insert's foreign key would answer a 500.
+		const seatedUser = await trx('directus_users')
+			.first('id')
+			.where('id', user);
+
+		if (seatedUser === undefined) {
+			throw new InvalidPayloadError({
+				reason: `User ${JSON.stringify(user)} does not exist`,
+			});
+		}
+
 		const beneficiaryId = await addBeneficiary(trx, { subscription, user });
 
 		// A pending row grants nothing yet: its first sync seats them all.
