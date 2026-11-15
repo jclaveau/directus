@@ -5,8 +5,11 @@ export type MollieHolding = {
 	payment: string;
 	customer: string;
 	subscription: string | null;
-	plan_reference: string;
+	/** The `subscriptions.id` in the metadata `directus_subscription`. */
+	directus_id: number | null;
 	status: string;
+	/** Defaults to the "10.00" every seeded plan sells. */
+	amount?: string;
 	paid_at?: string;
 	/** Set on a subscription the bundle created to resume `resumes`. */
 	resumes?: string;
@@ -22,7 +25,7 @@ export type MollieMandate = {
 export type StripeHolding = {
 	subscription: string;
 	customer: string;
-	price: string;
+	directus_id: number | null;
 	status: string;
 	cancel_at_period_end?: boolean;
 };
@@ -171,25 +174,29 @@ export async function startFakeProviders() {
 	}
 
 	function composeMollieSubscription(mollieHolding: MollieHolding) {
+		const { directus_id: directusSubscription } = mollieHolding;
+
 		return {
 			resource: 'subscription',
 			id: mollieHolding.subscription,
 			customerId: mollieHolding.customer,
 			status: mollieHolding.status,
-			amount: { currency: 'EUR', value: '10.00' },
+			amount: { currency: 'EUR', value: mollieHolding.amount ?? '10.00' },
 			times: null,
 			timesRemaining: null,
 			interval: '1 month',
-			description: `Plan ${mollieHolding.plan_reference}`,
+			description: `Subscription ${JSON.stringify(directusSubscription)}`,
 			nextPaymentDate: mollieHolding.status === 'canceled'
 				? undefined
 				: mollieHolding.start_date ?? '2099-01-01',
-			metadata: mollieHolding.resumes === undefined
-				? { plan: mollieHolding.plan_reference }
-				: {
-					plan: mollieHolding.plan_reference,
-					resumes: mollieHolding.resumes,
-				},
+			metadata: {
+				...directusSubscription === null
+					? {}
+					: { directus_subscription: String(directusSubscription) },
+				...mollieHolding.resumes === undefined
+					? {}
+					: { resumes: mollieHolding.resumes },
+			},
 		};
 	}
 
@@ -211,8 +218,9 @@ export async function startFakeProviders() {
 		customerId: string,
 		requestBody: string | object | null,
 	): FakeAnswer {
-		const { metadata } = requestBody as {
-			metadata: { plan: string; resumes: string };
+		const { metadata, amount: createdAmount } = requestBody as {
+			amount: { value: string };
+			metadata: { directus_subscription?: string; resumes: string };
 			startDate: string;
 		};
 
@@ -228,8 +236,11 @@ export async function startFakeProviders() {
 			payment: `tr_${createdSubscription}`,
 			customer: customerId,
 			subscription: createdSubscription,
-			plan_reference: metadata.plan,
+			directus_id: metadata.directus_subscription === undefined
+				? null
+				: Number(metadata.directus_subscription),
 			status: 'active',
+			amount: createdAmount.value,
 			resumes: metadata.resumes,
 			start_date: (requestBody as { startDate: string }).startDate,
 		};
@@ -301,12 +312,24 @@ export async function startFakeProviders() {
 				customer: stripeHolding.customer,
 				status: stripeHolding.status,
 				cancel_at_period_end: stripeHolding.cancel_at_period_end === true,
+				metadata: stripeHolding.directus_id === null
+					? {}
+					: {
+						directus_subscription: String(
+							stripeHolding.directus_id,
+						),
+					},
 				items: {
 					object: 'list',
 					data: [{
 						id: `si_${subscriptionId}`,
 						current_period_end: STRIPE_PERIOD_END,
-						price: { id: stripeHolding.price },
+						price: {
+							id: `price_${subscriptionId}`,
+							unit_amount: 1000,
+							currency: 'eur',
+							recurring: { interval: 'month', interval_count: 1 },
+						},
 					}],
 				},
 			},

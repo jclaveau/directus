@@ -4,21 +4,26 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
     `as: anonymous` sends none, like a provider.
   - The instance loads the real `@scalabus/subscriptions` bundle, and its Mollie
     and Stripe clients call fake ones, answering what `holds` says.
-  - `these subscribers, each with its own plan` writes, for an `id` of 21: the
-    policy `<policy_21>` named `Lifecycle 21`, the user `<user_21>` with the email
-    `lifecycle-21@example.com` and the token `lifecycle-21-token`, and the
-    subscriber, customer, plan and plan reference 21.
+  - `these pending subscriptions, each with its own plan` writes, for an `id` of
+    21: the policy `<policy_21>` named `Lifecycle 21`, the plan 21 `plan-21`
+    selling 10 EUR a month, and the subscription 21 pending at `provider`, which
+    the user `<user_{manager}>` manages and benefits from. A `manager` equal to
+    the `id` also writes that user, with the email `lifecycle-21@example.com` and
+    the token `lifecycle-21-token`.
+  - A provider names the pending subscription it bills in its metadata
+    `directus_subscription`, as the checkout wrote it: `directus_id` in a
+    holding.
   - A `<name>` stands for one uuid, the same in the tables and the requests.
   - `received these writes` reads what the providers received since it last read.
 
   Scenario: a user cancels, and keeps the access they paid for until the period ends
-    Given these subscribers, each with its own plan:
-      | id | provider | customer         | reference   | plan_status |
-      | 21 | mollie   | cst_cancel       | cancel-plan | active      |
-      | 22 | mollie   | cst_unsubscribed | unused-plan | active      |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 21 | mollie   | 21      | 1                 | active      |
+      | 22 | mollie   | 22      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment   | customer   | subscription | plan_reference | status | paid_at    |
-      | tr_cancel | cst_cancel | sub_cancel   | cancel-plan    | active | 2099-01-01 |
+      | payment   | customer   | subscription | directus_id | status | paid_at    |
+      | tr_cancel | cst_cancel | sub_cancel   | 21          | active | 2099-01-01 |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -73,12 +78,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       |                             |         code: NO_SUBSCRIPTION_TO_CANCEL   |
 
   Scenario: a user takes back a Mollie cancel: a new subscription starts at period end
-    Given these subscribers, each with its own plan:
-      | id | provider | customer   | reference   | plan_status |
-      | 24 | mollie   | cst_resume | resume-plan | active      |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 24 | mollie   | 24      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment   | customer   | subscription | plan_reference | status   | paid_at    |
-      | tr_resume | cst_resume | sub_resume   | resume-plan    | canceled | 2099-01-01 |
+      | payment   | customer   | subscription | directus_id | status   | paid_at    |
+      | tr_resume | cst_resume | sub_resume   | 24          | canceled | 2099-01-01 |
     And Mollie holds this mandate:
       | mandate    | customer   | status |
       | mdt_resume | cst_resume | valid  |
@@ -97,17 +102,17 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | method: POST                |           |
       | path: /subscriptions/resume |           |
     Then Mollie eventually received this subscription for cst_resume:
-      | field       | value                                         |
-      | amount      | {"currency":"EUR","value":"10.00"}            |
-      | interval    | 1 month                                       |
-      | description | Plan resume-plan                              |
-      | mandateId   | mdt_resume                                    |
-      | startDate   | 2099-02-01                                    |
-      | metadata    | {"plan":"resume-plan","resumes":"sub_resume"} |
+      | field       | value                                                 |
+      | amount      | {"currency":"EUR","value":"10.00"}                    |
+      | interval    | 1 month                                               |
+      | description | Subscription 24                                       |
+      | mandateId   | mdt_resume                                            |
+      | startDate   | 2099-02-01                                            |
+      | metadata    | {"directus_subscription":"24","resumes":"sub_resume"} |
     And subscription sub_resume_2 is eventually stored:
       | status | cancel_at_period_end | current_period_end       |
       | active | false                | 2099-02-01T00:00:00.000Z |
-    And subscription sub_resume_2 eventually resumes sub_resume
+    And subscription sub_resume_2 eventually continues sub_resume
     And the events of subscription sub_resume are eventually:
       | source | status   | cancel_at_period_end | user      |
       | sync   | canceled | true                 |           |
@@ -115,6 +120,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
     And this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_24> | <policy_24> | @scalabus/subscriptions |
+    And the beneficiaries of subscription sub_resume_2 are eventually:
+      | user      | access           |
+      | <user_24> | <granted_access> |
     And these requests get these responses:
       | request                     | response                                |
       | as: lifecycle-24-token      | code: 404                               |+
@@ -127,12 +135,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       |                             |         code: NO_SUBSCRIPTION_TO_RESUME |
 
   Scenario: a user cancels their resume, then resumes the period still paid again
-    Given these subscribers, each with its own plan:
-      | id | provider | customer  | reference  | plan_status |
-      | 25 | mollie   | cst_twice | twice-plan | active      |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 25 | mollie   | 25      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment  | customer  | subscription | plan_reference | status   | paid_at    |
-      | tr_twice | cst_twice | sub_twice    | twice-plan     | canceled | 2099-01-01 |
+      | payment  | customer  | subscription | directus_id | status   | paid_at    |
+      | tr_twice | cst_twice | sub_twice    | 25          | canceled | 2099-01-01 |
     And Mollie holds this mandate:
       | mandate   | customer  | status |
       | mdt_twice | cst_twice | valid  |
@@ -151,13 +159,13 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | method: POST                |           |
       | path: /subscriptions/resume |           |
     Then Mollie eventually received this subscription for cst_twice:
-      | field       | value                                       |
-      | amount      | {"currency":"EUR","value":"10.00"}          |
-      | interval    | 1 month                                     |
-      | description | Plan twice-plan                             |
-      | mandateId   | mdt_twice                                   |
-      | startDate   | 2099-02-01                                  |
-      | metadata    | {"plan":"twice-plan","resumes":"sub_twice"} |
+      | field       | value                                                |
+      | amount      | {"currency":"EUR","value":"10.00"}                   |
+      | interval    | 1 month                                              |
+      | description | Subscription 25                                      |
+      | mandateId   | mdt_twice                                            |
+      | startDate   | 2099-02-01                                           |
+      | metadata    | {"directus_subscription":"25","resumes":"sub_twice"} |
     And subscription sub_twice_2 is eventually stored:
       | status | cancel_at_period_end | current_period_end       |
       | active | false                | 2099-02-01T00:00:00.000Z |
@@ -178,26 +186,26 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | method: POST                |           |
       | path: /subscriptions/resume |           |
     Then Mollie eventually received this subscription for cst_twice:
-      | field       | value                                       |
-      | amount      | {"currency":"EUR","value":"10.00"}          |
-      | interval    | 1 month                                     |
-      | description | Plan twice-plan                             |
-      | mandateId   | mdt_twice                                   |
-      | startDate   | 2099-02-01                                  |
-      | metadata    | {"plan":"twice-plan","resumes":"sub_twice"} |
-    And subscription sub_twice_3 eventually resumes sub_twice
+      | field       | value                                                |
+      | amount      | {"currency":"EUR","value":"10.00"}                   |
+      | interval    | 1 month                                              |
+      | description | Subscription 25                                      |
+      | mandateId   | mdt_twice                                            |
+      | startDate   | 2099-02-01                                           |
+      | metadata    | {"directus_subscription":"25","resumes":"sub_twice"} |
+    And subscription sub_twice_3 eventually continues sub_twice_2
     And this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_25> | <policy_25> | @scalabus/subscriptions |
 
   Scenario: a plan policy change moves the access a resumed subscription shares
-    Given these subscribers, each with its own plan:
-      | id | provider | customer  | reference  | plan_status |
-      | 26 | mollie   | cst_split | split-plan | active      |
-      | 27 | mollie   | cst_moved | moved-plan | active      |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 26 | mollie   | 26      | 1                 | active      |
+      | 27 | mollie   | 27      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment  | customer  | subscription | plan_reference | status   | paid_at    |
-      | tr_split | cst_split | sub_split    | split-plan     | canceled | 2099-01-01 |
+      | payment  | customer  | subscription | directus_id | status   | paid_at    |
+      | tr_split | cst_split | sub_split    | 26          | canceled | 2099-01-01 |
     And Mollie holds this mandate:
       | mandate   | customer  | status |
       | mdt_split | cst_split | valid  |
@@ -216,14 +224,14 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | method: POST                |           |
       | path: /subscriptions/resume |           |
     Then Mollie eventually received this subscription for cst_split:
-      | field       | value                                       |
-      | amount      | {"currency":"EUR","value":"10.00"}          |
-      | interval    | 1 month                                     |
-      | description | Plan split-plan                             |
-      | mandateId   | mdt_split                                   |
-      | startDate   | 2099-02-01                                  |
-      | metadata    | {"plan":"split-plan","resumes":"sub_split"} |
-    And subscription sub_split_2 eventually resumes sub_split
+      | field       | value                                                |
+      | amount      | {"currency":"EUR","value":"10.00"}                   |
+      | interval    | 1 month                                              |
+      | description | Subscription 26                                      |
+      | mandateId   | mdt_split                                            |
+      | startDate   | 2099-02-01                                           |
+      | metadata    | {"directus_subscription":"26","resumes":"sub_split"} |
+    And subscription sub_split_2 eventually continues sub_split
     When these requests get these responses:
       | request                              | response  |
       | method: PATCH                        | code: 200 |+
@@ -243,23 +251,24 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | method: POST                         |           |
       | path: /subscriptions/webhooks/mollie |           |
       | payload: id=tr_split                 |           |
-    Then subscription sub_split is eventually stored:
-      | status   | access           |
-      | canceled | <granted_access> |
+    Then the beneficiaries of subscription sub_split are eventually:
+      | user      | access           |
+      | <user_26> | <granted_access> |
     And this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_26> | <policy_27> | @scalabus/subscriptions |
 
-  Scenario: a cancel naming two ongoing subscriptions is refused, none is canceled
-    Given these subscribers, each with its own plan:
-      | id | provider | customer   | reference | plan_status |
-      | 23 | mollie   | cst_double | two-plan  | active      |
+  Scenario: a manager of two ongoing subscriptions names the one to cancel
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 23 | mollie   | 23      | 1                 | active      |
+      | 28 | mollie   | 23      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment | customer   | subscription | plan_reference | status |
-      | tr_one  | cst_double | sub_one      | two-plan       | active |
+      | payment | customer   | subscription | directus_id | status |
+      | tr_one  | cst_double | sub_one      | 23          | active |
     And Mollie holds this subscription:
-      | payment | customer   | subscription | plan_reference | status |
-      | tr_two  | cst_double | sub_two      | two-plan       | active |
+      | payment | customer   | subscription | directus_id | status |
+      | tr_two  | cst_double | sub_two      | 28          | active |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -286,14 +295,25 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       |                             |         cancel, expected one                  |
       |                             |       extensions:                             |
       |                             |         code: SEVERAL_SUBSCRIPTIONS_TO_CANCEL |
+      | as: lifecycle-23-token      | code: 204                                     |+
+      | method: POST                |                                               |
+      | path: /subscriptions/cancel |                                               |
+      | payload:                    |                                               |
+      |   subscription: 23          |                                               |
+    Then the providers eventually received these writes:
+      | method | path                                           | body |
+      | DELETE | /v2/customers/cst_double/subscriptions/sub_one |      |
+    And subscription sub_two is eventually stored:
+      | status | cancel_at_period_end |
+      | active | false                |
 
   Scenario: a canceled subscription whose paid period is over loses its access
-    Given these subscribers, each with its own plan:
-      | id | provider | customer  | reference | plan_status |
-      | 31 | mollie   | cst_ended | end-plan  | active      |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 31 | mollie   | 31      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment  | customer  | subscription | plan_reference | status |
-      | tr_ended | cst_ended | sub_ended    | end-plan       | active |
+      | payment  | customer  | subscription | directus_id | status |
+      | tr_ended | cst_ended | sub_ended    | 31          | active |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -304,8 +324,8 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | user      | policy      | managed_by              |
       | <user_31> | <policy_31> | @scalabus/subscriptions |
     When Mollie holds this subscription:
-      | payment  | customer  | subscription | plan_reference | status   | paid_at    |
-      | tr_ended | cst_ended | sub_ended    | end-plan       | canceled | 2020-01-01 |
+      | payment  | customer  | subscription | directus_id | status   | paid_at    |
+      | tr_ended | cst_ended | sub_ended    | 31          | canceled | 2020-01-01 |
     And these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -316,16 +336,19 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | user      |
       | <user_31> |
     And subscription sub_ended is eventually stored:
-      | status   | cancel_at_period_end | current_period_end       | access |
-      | canceled | true                 | 2020-02-01T00:00:00.000Z |        |
+      | status   | cancel_at_period_end | current_period_end       |
+      | canceled | true                 | 2020-02-01T00:00:00.000Z |
+    And the beneficiaries of subscription sub_ended are eventually:
+      | user      | access |
+      | <user_31> |        |
 
   Scenario: a suspended subscription paid again gets its access back
-    Given these subscribers, each with its own plan:
-      | id | provider | customer    | reference    | plan_status |
-      | 33 | mollie   | cst_resumed | resumed-plan | active      |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 33 | mollie   | 33      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment    | customer    | subscription | plan_reference | status    |
-      | tr_resumed | cst_resumed | sub_resumed  | resumed-plan   | suspended |
+      | payment    | customer    | subscription | directus_id | status    |
+      | tr_resumed | cst_resumed | sub_resumed  | 33          | suspended |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -333,11 +356,14 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | path: /subscriptions/webhooks/mollie |           |
       | payload: id=tr_resumed               |           |
     Then subscription sub_resumed is eventually stored:
-      | status    | access |
-      | suspended |        |
+      | status    |
+      | suspended |
+    And the beneficiaries of subscription sub_resumed are eventually:
+      | user      | access |
+      | <user_33> |        |
     When Mollie holds this subscription:
-      | payment    | customer    | subscription | plan_reference | status |
-      | tr_resumed | cst_resumed | sub_resumed  | resumed-plan   | active |
+      | payment    | customer    | subscription | directus_id | status |
+      | tr_resumed | cst_resumed | sub_resumed  | 33          | active |
     And these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -349,13 +375,13 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | <user_33> | <policy_33> | @scalabus/subscriptions |
 
   Scenario: archiving a plan ends its subscriptions once the admin typed the sentence
-    Given these subscribers, each with its own plan:
-      | id | provider | customer     | reference     | plan_status |
-      | 41 | mollie   | cst_archived | archived-plan | active      |
-      | 42 | mollie   | cst_empty    | empty-plan    | active      |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 41 | mollie   | 41      | 1                 | active      |
+      | 42 | mollie   | 42      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment     | customer     | subscription | plan_reference | status | paid_at    |
-      | tr_archived | cst_archived | sub_archived | archived-plan  | active | 2099-01-01 |
+      | payment     | customer     | subscription | directus_id | status | paid_at    |
+      | tr_archived | cst_archived | sub_archived | 41          | active | 2099-01-01 |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -428,12 +454,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | <user_41> | <policy_41> | @scalabus/subscriptions |
 
   Scenario: the subscription of a deleted user is canceled at its provider
-    Given these subscribers, each with its own plan:
-      | id | provider | customer    | reference    | plan_status |
-      | 51 | mollie   | cst_deleted | deleted-plan | active      |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 51 | mollie   | 51      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment    | customer    | subscription | plan_reference | status |
-      | tr_deleted | cst_deleted | sub_deleted  | deleted-plan   | active |
+      | payment    | customer    | subscription | directus_id | status |
+      | tr_deleted | cst_deleted | sub_deleted  | 51          | active |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -455,20 +481,23 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | method | path                                                | body |
       | DELETE | /v2/customers/cst_deleted/subscriptions/sub_deleted |      |
     And subscription sub_deleted is eventually stored:
-      | status | cancel_at_period_end | access |
-      | active | true                 |        |
+      | status | cancel_at_period_end |
+      | active | true                 |
+    And the beneficiaries of subscription sub_deleted are eventually:
+      | user | access |
+      |      |        |
     And the events of subscription sub_deleted are eventually:
       | source       | status | cancel_at_period_end |
       | sync         | active | false                |
       | user_deleted | active | true                 |
 
   Scenario: a subscription its provider no longer holds is closed, its row stays
-    Given these subscribers, each with its own plan:
-      | id | provider | customer | reference | plan_status |
-      | 61 | mollie   | cst_gone | gone-plan | active      |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 61 | mollie   | 61      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment | customer | subscription | plan_reference | status |
-      | tr_gone | cst_gone | sub_gone     | gone-plan      | active |
+      | payment | customer | subscription | directus_id | status |
+      | tr_gone | cst_gone | sub_gone     | 61          | active |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -495,12 +524,15 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
     And the sync queue eventually holds no row for tr_gone
 
   Scenario: a webhook is refused or dropped without granting anything
-    Given these subscribers, each with its own plan:
-      | id | provider | customer  | reference  | plan_status |
-      | 63 | mollie   | cst_first | first-plan | active      |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 63 | mollie   | 63      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment  | customer  | subscription | plan_reference | status |
-      | tr_first | cst_first |              | first-plan     | active |
+      | payment  | customer  | subscription | directus_id | status |
+      | tr_first | cst_first |              | 63          | active |
+    And Mollie holds this subscription:
+      | payment  | customer  | subscription | directus_id | status |
+      | tr_stray | cst_stray | sub_stray    |             | active |
     When these requests get these responses:
       | request                              | response                                 |
       | as: anonymous                        | code: 400                                |+
@@ -532,67 +564,67 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | method: POST                         |                                          |
       | path: /subscriptions/webhooks/mollie |                                          |
       | payload: id=tr_first                 |                                          |
+      | as: anonymous                        | code: 200                                |+
+      | method: POST                         |                                          |
+      | path: /subscriptions/webhooks/mollie |                                          |
+      | payload: id=tr_stray                 |                                          |
     Then the sync queue eventually holds no row for tr_first
+    And the sync queue eventually holds no row for tr_stray
+    And the instance eventually logged:
+      """
+      Subscription sync of "mollie" "tr_stray" dropped: "\"mollie\"
+      subscription \"sub_stray\" names no pending subscription: its metadata
+      \"directus_subscription\" is null"
+      """
     And this user eventually holds no access:
       | user      |
       | <user_63> |
 
   Scenario: a failed sync keeps its error until a webhook retries it
-    Given these subscribers, each with its own plan:
-      | id | provider | customer  | reference | plan_status |
-      | 71 | mollie   | cst_other | late-plan | active      |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 71 | mollie   | 71      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment | customer | subscription | plan_reference | status |
-      | tr_user | cst_new  | sub_late     | late-plan      | active |
-    And Mollie holds this subscription:
-      | payment | customer  | subscription  | plan_reference | status |
-      | tr_plan | cst_other | sub_late_plan | unknown-plan   | active |
+      | payment   | customer | subscription | directus_id | status | resumes  |
+      | tr_late_2 | cst_late | sub_late_2   | 71          | active | sub_late |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
       | method: POST                         |           |
       | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_user                  |           |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_plan                  |           |
+      | payload: id=tr_late_2                |           |
     Then these sync queue rows are eventually stored:
-      | resource_id | pending | attempts | last_error                                    |
-      | tr_plan     | true    | 1        | No plan has "mollie" reference "unknown-plan" |
-      | tr_user     | true    | 1        | No subscriber has "mollie" customer "cst_new" |
-    When the rows of subscriber_customers:
-      | id  | subscriber | provider | provider_customer_id |
-      | 710 | 71         | mollie   | cst_new              |
-    And Mollie holds this subscription:
-      | payment | customer  | subscription  | plan_reference | status    |
-      | tr_plan | cst_other | sub_late_plan | late-plan      | suspended |
+      | resource_id | last_error                                                        |
+      | tr_late_2   | Subscription "sub_late_2" resumes "sub_late", which is not stored |
+    When Mollie holds this subscription:
+      | payment | customer | subscription | directus_id | status   | paid_at    |
+      | tr_late | cst_late | sub_late     | 71          | canceled | 2099-01-01 |
     And these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
       | method: POST                         |           |
       | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_user                  |           |
+      | payload: id=tr_late                  |           |
       | as: anonymous                        | code: 200 |+
       | method: POST                         |           |
       | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_plan                  |           |
-    Then this access is eventually stored:
+      | payload: id=tr_late_2                |           |
+    Then subscription sub_late_2 eventually continues sub_late
+    And this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_71> | <policy_71> | @scalabus/subscriptions |
-    And the sync queue eventually holds no row for tr_user
-    And the sync queue eventually holds no row for tr_plan
+    And the sync queue eventually holds no row for tr_late_2
 
   Scenario: a webhook retries a parked sync
-    Given these subscribers, each with its own plan:
-      | id | provider | customer   | reference   | plan_status |
-      | 81 | mollie   | cst_parked | parked-plan | active      |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 81 | mollie   | 81      | 1                 | active      |
     And the rows of subscription_sync_queue:
       | provider | resource_id | pending | attempts | next_attempt_at | last_error  |
       | mollie   | tr_parked   | false   | 48       | 2020-01-01      | Unreachable |
     And Mollie holds this subscription:
-      | payment   | customer   | subscription | plan_reference | status |
-      | tr_parked | cst_parked | sub_parked   | parked-plan    | active |
+      | payment   | customer   | subscription | directus_id | status |
+      | tr_parked | cst_parked | sub_parked   | 81          | active |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -605,12 +637,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
     And the sync queue eventually holds no row for tr_parked
 
   Scenario: a paid webhook on a locked plan still grants it
-    Given these subscribers, each with its own plan:
-      | id | provider | customer   | reference   | plan_status          |
-      | 83 | mollie   | cst_locked | locked-plan | subscriptions-locked |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status          |
+      | 83 | mollie   | 83      | 1                 | subscriptions-locked |
     And Mollie holds this subscription:
-      | payment   | customer   | subscription | plan_reference | status |
-      | tr_locked | cst_locked | sub_locked   | locked-plan    | active |
+      | payment   | customer   | subscription | directus_id | status |
+      | tr_locked | cst_locked | sub_locked   | 83          | active |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -621,13 +653,105 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | user      | policy      | managed_by              |
       | <user_83> | <policy_83> | @scalabus/subscriptions |
 
+  Scenario: a plan changed in the provider's portal keeps the plan sold, logged
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 85 | mollie   | 85      | 1                 | active      |
+    And Mollie holds this subscription:
+      | payment   | customer   | subscription | directus_id | status | amount  |
+      | tr_billed | cst_billed | sub_billed   | 85          | active | "20.00" |
+    When these requests get these responses:
+      | request                              | response  |
+      | as: anonymous                        | code: 200 |+
+      | method: POST                         |           |
+      | path: /subscriptions/webhooks/mollie |           |
+      | payload: id=tr_billed                |           |
+    Then this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_85> | <policy_85> | @scalabus/subscriptions |
+    And the instance eventually logged:
+      """
+      Subscription 85 is billed
+      {"amountCents":2000,"currency":"EUR","interval":{"months":1,"days":0}} by
+      "mollie", its plan "plan-85" sells
+      {"amountCents":1000,"currency":"EUR","interval":{"months":1,"days":0}}
+      """
+
+  Scenario: a manager seats beneficiaries up to the plan's maximum
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 86 | mollie   | 86      | 2                 | active      |
+    And the rows of directus_users:
+      | id          | email                           | token                     |
+      | <friend_86> | lifecycle-friend-86@example.com | lifecycle-friend-86-token |
+      | <other_86>  | lifecycle-other-86@example.com  | lifecycle-other-86-token  |
+    And Mollie holds this subscription:
+      | payment  | customer  | subscription | directus_id | status |
+      | tr_seats | cst_seats | sub_seats    | 86          | active |
+    When these requests get these responses:
+      | request                              | response  |
+      | as: anonymous                        | code: 200 |+
+      | method: POST                         |           |
+      | path: /subscriptions/webhooks/mollie |           |
+      | payload: id=tr_seats                 |           |
+    Then this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_86> | <policy_86> | @scalabus/subscriptions |
+    And these requests get these responses:
+      | request                            | response                                  |
+      | as: lifecycle-other-86-token       | code: 403                                 |+
+      | method: POST                       | body:                                     |
+      | path: /subscriptions/beneficiaries |   errors:                                 |
+      | payload:                           |     - message: >-                         |
+      |   subscription: 86                 |         You don't have permission to      |
+      |   user: <other_86>                 |         access this.                      |
+      |                                    |       extensions:                         |
+      |                                    |         code: FORBIDDEN                   |
+      | as: lifecycle-86-token             | code: 200                                 |+
+      | method: POST                       |                                           |
+      | path: /subscriptions/beneficiaries |                                           |
+      | payload:                           |                                           |
+      |   subscription: 86                 |                                           |
+      |   user: <friend_86>                |                                           |
+      | as: lifecycle-86-token             | code: 400                                 |+
+      | method: POST                       | body:                                     |
+      | path: /subscriptions/beneficiaries |   errors:                                 |
+      | payload:                           |     - message: >-                         |
+      |   subscription: 86                 |         Invalid payload. User             |
+      |   user: <friend_86>                |         "<friend_86>" already             |
+      |                                    |         benefits from subscription 86.    |
+      |                                    |       extensions:                         |
+      |                                    |         code: INVALID_PAYLOAD             |
+      | as: lifecycle-86-token             | code: 400                                 |+
+      | method: POST                       | body:                                     |
+      | path: /subscriptions/beneficiaries |   errors:                                 |
+      | payload:                           |     - message: >-                         |
+      |   subscription: 86                 |         Plan "plan-86" allows 2           |
+      |   user: <other_86>                 |         beneficiaries, all taken          |
+      |                                    |       extensions:                         |
+      |                                    |         code: BENEFICIARIES_MAX_REACHED   |
+      | as: lifecycle-friend-86-token      | code: 404                                 |+
+      | method: POST                       | body:                                     |
+      | path: /subscriptions/cancel        |   errors:                                 |
+      |                                    |     - message: >-                         |
+      |                                    |         No ongoing subscription to cancel |
+      |                                    |       extensions:                         |
+      |                                    |         code: NO_SUBSCRIPTION_TO_CANCEL   |
+    Then this access is eventually stored:
+      | user        | policy      | managed_by              |
+      | <friend_86> | <policy_86> | @scalabus/subscriptions |
+    And the beneficiaries of subscription sub_seats are eventually:
+      | user        |
+      | <user_86>   |
+      | <friend_86> |
+
   Scenario: Stripe signs its webhooks, cancels at period end, and can lose a subscription
-    Given these subscribers, each with its own plan:
-      | id | provider | customer   | reference    | plan_status |
-      | 91 | stripe   | cus_stripe | price_stripe | active      |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 91 | stripe   | 91      | 1                 | active      |
     And Stripe holds this subscription:
-      | subscription | customer   | price        | status |
-      | sub_stripe   | cus_stripe | price_stripe | active |
+      | subscription | customer   | directus_id | status |
+      | sub_stripe   | cus_stripe | 91          | active |
     When these requests get these responses:
       | request                              | response                                 |
       | as: anonymous                        | code: 400                                |+
@@ -690,12 +814,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
     And the sync queue eventually holds no row for sub_stripe
 
   Scenario: Stripe cancels at once a subscription set to end: its access goes at once
-    Given these subscribers, each with its own plan:
-      | id | provider | customer | reference | plan_status |
-      | 92 | stripe   | cus_now  | price_now | active      |
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 92 | stripe   | 92      | 1                 | active      |
     And Stripe holds this subscription:
-      | subscription | customer | price     | status | cancel_at_period_end |
-      | sub_now      | cus_now  | price_now | active | true                 |
+      | subscription | customer | directus_id | status | cancel_at_period_end |
+      | sub_now      | cus_now  | 92          | active | true                 |
     When Stripe sends these events:
       | type                          | subscription |
       | customer.subscription.updated | sub_now      |
@@ -703,8 +827,8 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | user      | policy      | managed_by              |
       | <user_92> | <policy_92> | @scalabus/subscriptions |
     When Stripe holds this subscription:
-      | subscription | customer | price     | status   | cancel_at_period_end |
-      | sub_now      | cus_now  | price_now | canceled | true                 |
+      | subscription | customer | directus_id | status   | cancel_at_period_end |
+      | sub_now      | cus_now  | 92          | canceled | true                 |
     And Stripe sends these events:
       | type                          | subscription |
       | customer.subscription.deleted | sub_now      |
