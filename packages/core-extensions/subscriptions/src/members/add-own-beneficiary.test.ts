@@ -18,6 +18,13 @@ beforeEach(async () => {
 		pool: { min: 1, max: 1 },
 	});
 
+	await database.schema.createTable('directus_users', (table) => {
+		table.uuid('id');
+	});
+
+	await database('directus_users')
+		.insert({ id: '6f9619ff-8b86-d011-b42d-00c04fc964ff' });
+
 	await createSubscriptionTables.config.up(database);
 	vi.useFakeTimers({ now: new Date('2026-11-05T00:00:00Z'), toFake: ['Date'] });
 
@@ -134,6 +141,33 @@ describe('addOwnBeneficiary', () => {
 
 		expect(await database('subscription_beneficiaries').count({ seats: '*' }))
 			.toEqual([{ seats: 1 }]);
+	});
+
+	test('refuses seating a user that does not exist', async () => {
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			status: 'pending',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await expect(addOwnBeneficiary({
+			database,
+			enabledProviders: new Map(),
+			userId: 'user-1',
+			requestBody: {
+				subscription: 1,
+				user: '00000000-0000-0000-0000-000000000000',
+			},
+		})).rejects.toThrow(new InvalidPayloadError({
+			reason: 'User "00000000-0000-0000-0000-000000000000" does not exist',
+		}));
+
+		expect(await database('subscription_beneficiaries')).toEqual([]);
 	});
 
 	test.each([
