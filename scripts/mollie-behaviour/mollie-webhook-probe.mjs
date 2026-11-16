@@ -179,8 +179,11 @@ async function callMollie(method, path, { body, bearerToken = apiKey } = {}) {
 		: JSON.parse(responseText);
 }
 
-function checkSignature(rawBody, signatureHeader) {
-	if (signatureHeader === undefined) {
+// "valid" only for the exact format the bundle will accept: one header line
+// holding `sha256=` + the lowercase hex HMAC-SHA256 of the raw body bytes.
+// Anything else names how it differs, so the baseline diff shows it.
+function checkSignature(rawBodyBytes, signatureLines) {
+	if (signatureLines.length === 0) {
 		return 'missing';
 	}
 
@@ -188,20 +191,39 @@ function checkSignature(rawBody, signatureHeader) {
 		return 'unchecked (no secret yet)';
 	}
 
-	const expectedBuffer = Buffer.from(
-		createHmac('sha256', webhookSecret)
-			.update(rawBody)
-			.digest('hex'),
-	);
+	if (signatureLines.length > 1) {
+		return `invalid (${signatureLines.length} header lines)`;
+	}
 
-	const givenBuffer = Buffer.from(
-		String(signatureHeader).replace(/^sha256=/, ''),
-	);
+	const signatureValue = signatureLines[0];
 
-	return expectedBuffer.length === givenBuffer.length
+	const expectedHex = createHmac('sha256', webhookSecret)
+		.update(rawBodyBytes)
+		.digest('hex');
+
+	const expectedBuffer = Buffer.from(`sha256=${expectedHex}`);
+	const givenBuffer = Buffer.from(signatureValue);
+
+	if (
+		expectedBuffer.length === givenBuffer.length
 		&& timingSafeEqual(expectedBuffer, givenBuffer)
-		? 'valid'
-		: 'invalid';
+	) {
+		return 'valid';
+	}
+
+	const strippedValue = signatureValue.replace(/^sha256=/i, '');
+
+	if (strippedValue.toLowerCase() === expectedHex) {
+		return signatureValue.startsWith('sha256=')
+			? 'invalid (uppercase hex)'
+			: `invalid (prefix ${JSON.stringify(signatureValue.slice(0, -64))})`;
+	}
+
+	if (signatureValue.includes(',')) {
+		return 'invalid (comma-separated values)';
+	}
+
+	return 'invalid (no match on the raw body)';
 }
 
 function parseCapturedBody(requestPath, rawBody) {
@@ -226,7 +248,22 @@ const receiverServer = createServer((incomingRequest, serverResponse) => {
 	incomingRequest.on('data', (bodyChunk) => bodyChunks.push(bodyChunk));
 
 	incomingRequest.on('end', () => {
-		const rawBody = Buffer.concat(bodyChunks).toString('utf8');
+		const rawBodyBytes = Buffer.concat(bodyChunks);
+		const rawBody = rawBodyBytes.toString('utf8');
+
+		const signatureLines = [];
+
+		for (
+			let headerIndex = 0;
+			headerIndex < incomingRequest.rawHeaders.length;
+			headerIndex += 2
+		) {
+			const headerName = incomingRequest.rawHeaders[headerIndex];
+
+			if (headerName.toLowerCase() === 'x-mollie-signature') {
+				signatureLines.push(incomingRequest.rawHeaders[headerIndex + 1]);
+			}
+		}
 
 		if (incomingRequest.method === 'GET') {
 			serverResponse.writeHead(200).end('ok');
@@ -238,10 +275,7 @@ const receiverServer = createServer((incomingRequest, serverResponse) => {
 			path: incomingRequest.url,
 			contentType: incomingRequest.headers['content-type'] ?? null,
 			userAgent: incomingRequest.headers['user-agent'] ?? null,
-			signatureStatus: checkSignature(
-				rawBody,
-				incomingRequest.headers['x-mollie-signature'],
-			),
+			signatureStatus: checkSignature(rawBodyBytes, signatureLines),
 			rawBody,
 		};
 
