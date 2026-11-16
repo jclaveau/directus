@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'vitest';
-import { readSubscriptionsConfig } from './read-subscriptions-config.js';
+import {
+	readReconcileCron,
+	readSubscriptionsConfig,
+} from './read-subscriptions-config.js';
 
 describe('readSubscriptionsConfig', () => {
 	test('enables no provider when no key is set', () => {
@@ -11,11 +14,34 @@ describe('readSubscriptionsConfig', () => {
 			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_test_1',
 			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: 'whsec_1',
 			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1',
+			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET: 'mollie_secret_1',
 		}))
 			.toEqual({
 				stripe: { secretKey: 'sk_test_1', webhookSecret: 'whsec_1' },
-				mollie: { apiKey: 'test_1' },
+				mollie: { apiKey: 'test_1', webhookSecret: 'mollie_secret_1' },
 			});
+	});
+
+	test('refuses a Mollie key without its webhook secret', () => {
+		expect(() => {
+			readSubscriptionsConfig({ SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1' });
+		})
+			.toThrow(new Error(
+				'"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET" is required when'
+				+ ' "SUBSCRIPTIONS_MOLLIE_API_KEY" is set',
+			));
+	});
+
+	test('refuses a Mollie webhook secret without its key', () => {
+		expect(() => {
+			readSubscriptionsConfig({
+				SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET: 'mollie_secret_1',
+			});
+		})
+			.toThrow(new Error(
+				'"SUBSCRIPTIONS_MOLLIE_API_KEY" is required when'
+				+ ' "SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET" is set',
+			));
 	});
 
 	test('refuses a Stripe key without its webhook secret', () => {
@@ -62,6 +88,24 @@ describe('readSubscriptionsConfig', () => {
 		expect(() => readSubscriptionsConfig({ SUBSCRIPTIONS_MOLLIE_API_KEY: 12 }))
 			.toThrow(new Error(
 				'"SUBSCRIPTIONS_MOLLIE_API_KEY" must be a non-empty string, got 12',
+			));
+	});
+});
+
+describe('readReconcileCron', () => {
+	test('reconciles every 15 minutes by default', () => {
+		expect(readReconcileCron({})).toBe('*/15 * * * *');
+	});
+
+	test('reads the schedule set', () => {
+		expect(readReconcileCron({ SUBSCRIPTIONS_RECONCILE_CRON: '0 * * * *' }))
+			.toBe('0 * * * *');
+	});
+
+	test('refuses a schedule that is not a string', () => {
+		expect(() => readReconcileCron({ SUBSCRIPTIONS_RECONCILE_CRON: 15 }))
+			.toThrow(new Error(
+				'"SUBSCRIPTIONS_RECONCILE_CRON" must be a non-empty string, got 15',
 			));
 	});
 });
