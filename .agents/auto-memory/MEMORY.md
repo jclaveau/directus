@@ -26,7 +26,7 @@ line appended below.
 - [PR #605 row-helpers](project_directus_pr605_row_helpers.md) — mapUpdateRows/mapCreateRows replace `.one` events
 - [PR #600 query-audit header](project_directus_pr600_query_audit.md) — counts in knex `_query`; ONE map header
 
-## scoped-cache (23) — tag derivation, pins, purges, value slices
+## scoped-cache (24) — tag derivation, pins, purges, value slices
 `.agents/auto-memory/index/scoped-cache.md`
 
 - [Scoped cache tag derivation](project_directus_scoped_cache_tag_derivation.md) — what a read gets tagged with; only stale vector = enrichment outside the AST
