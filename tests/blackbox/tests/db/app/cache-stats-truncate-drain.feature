@@ -12,6 +12,9 @@ Feature: A stats truncate leaves nothing a drain read before it
     table the truncate empties, so the truncate waits there with the purges
     table already empty.
   - A stats read drains the stream before it answers.
+  - The stats tables are shared by every namespace, while each namespace drains
+    a stream of its own: a sibling instance, on a namespace of its own, queues
+    a purge the truncate does not delete with its stream.
 
   Scenario: a purge queued before a truncate is not stored after it
     Given a row created in the collection queued its purge on the stream
@@ -21,3 +24,9 @@ Feature: A stats truncate leaves nothing a drain read before it
     And the transaction ends
     Then the truncate answered 200
     And no purge of the collection is stored
+
+  Scenario: a purge a sibling namespace queued before a truncate is not stored after it
+    Given a row created through the sibling namespace queued its purge on its stream
+    When the stats truncate runs
+    And a stats read on the sibling namespace drains its stream
+    Then no purge of the collection is stored

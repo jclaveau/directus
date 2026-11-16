@@ -42,10 +42,17 @@ describe.runIf(vendors.includes('postgres'))('postgres', () => {
 	env[vendor]['CACHE_STATS_DRAIN_SCHEDULE'] = '0 0 1 1 *';
 	env[vendor]['CACHE_STATS_RETENTION_SCHEDULE'] = '0 0 1 1 *';
 
+	// Its own namespace, over the same database: a stream the truncate leaves.
+	const siblingNamespace = `${namespace}-sibling`;
+	const siblingStreamName = `${siblingNamespace}:stats:events`;
+	const siblingEnv = cloneDeep(env);
+	siblingEnv[vendor]['CACHE_NAMESPACE'] = siblingNamespace;
+
 	const redisClient = new Redis({ host: 'localhost', port: 6108 });
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 	let database: Knex;
 	let instance: ChildProcess;
+	let siblingInstance: ChildProcess;
 	let lockHolder: Knex.Transaction | undefined;
 
 	beforeAll(async () => {
@@ -67,7 +74,17 @@ describe.runIf(vendors.includes('postgres'))('postgres', () => {
 		});
 
 		await awaitDirectusConnection(port);
-	}, 60_000);
+
+		const siblingPort = await freePortOfWorker();
+		siblingEnv[vendor].PORT = String(siblingPort);
+
+		siblingInstance = spawn('node', [paths.cli, 'start'], {
+			cwd: paths.cwd,
+			env: siblingEnv[vendor],
+		});
+
+		await awaitDirectusConnection(siblingPort);
+	}, 120_000);
 
 	afterAll(async () => {
 		// A scenario that failed with the table held would stall every file after.
@@ -76,6 +93,7 @@ describe.runIf(vendors.includes('postgres'))('postgres', () => {
 		}
 
 		await stopSpawnedInstance(instance);
+		await stopSpawnedInstance(siblingInstance);
 
 		for (const key of await redisClient.keys(`${namespace}*`)) {
 			await redisClient.del(key);
@@ -168,6 +186,67 @@ describe.runIf(vendors.includes('postgres'))('postgres', () => {
 				});
 
 				and('no purge of the collection is stored', async () => {
+					expect(
+						await database('directus_cache_stats_purges')
+							.where({ collection })
+							.select('mode'),
+					).toEqual([]);
+				});
+			},
+			60_000,
+		);
+
+		scenario(
+			'a purge a sibling namespace queued before a truncate is not stored after it',
+			({ given, when, and, then }) => {
+				given(
+					'a row created through the sibling namespace queued its purge on its stream',
+					async () => {
+						await request(getUrl(vendor, siblingEnv))
+							.post(`/items/${collection}`)
+							.send({ label: 'purged by the sibling' })
+							.set('Authorization', auth)
+							.expect(200);
+
+						const deadline = Date.now() + 10_000;
+						let purgeQueued = false;
+
+						while (!purgeQueued && Date.now() < deadline) {
+							const entries = await redisClient.xrange(
+								siblingStreamName,
+								'-',
+								'+',
+							);
+
+							purgeQueued = entries.some(([, fields]) => {
+								return fields.includes(collection);
+							});
+
+							await sleep(50);
+						}
+
+						expect(purgeQueued).toBe(true);
+					},
+				);
+
+				when('the stats truncate runs', async () => {
+					await request(getUrl(vendor, env))
+						.post('/utils/cache/stats/truncate')
+						.set('Authorization', auth)
+						.expect(200);
+				});
+
+				and(
+					'a stats read on the sibling namespace drains its stream',
+					async () => {
+						await request(getUrl(vendor, siblingEnv))
+							.get('/utils/cache/anomalies')
+							.set('Authorization', auth)
+							.expect(200);
+					},
+				);
+
+				then('no purge of the collection is stored', async () => {
 					expect(
 						await database('directus_cache_stats_purges')
 							.where({ collection })

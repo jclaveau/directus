@@ -1588,7 +1588,7 @@ describe('drainCacheEvents', () => {
 		let truncations = '4';
 
 		mockRedis.get.mockImplementation(async (key: string) => {
-			return key === 'scalabus:stats:truncations'
+			return key === 'stats:truncated_at'
 				? truncations
 				: null;
 		});
@@ -1620,6 +1620,49 @@ describe('drainCacheEvents', () => {
 
 		expect(mockLogger.warn).not.toHaveBeenCalled();
 		expect(mockRedis.call).toHaveBeenCalledWith('XACK', STREAM, 'drain', '1-0');
+	});
+
+	it('drops an event emitted before the last truncate', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'h', cacheKey: 'k1', ageMs: '1', ttlMs: '1', ts: '4999',
+			}),
+			streamEntry('2-0', {
+				kind: 'h', cacheKey: 'k2', ageMs: '1', ttlMs: '1', ts: '5000',
+			}),
+		];
+
+		mockRedis.get.mockImplementation(async (key: string) => {
+			return key === 'stats:truncated_at'
+				? '5000'
+				: null;
+		});
+
+		await drainCacheEvents();
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_stats_events',
+			[
+				{
+					time: new Date(5000),
+					cache_key: 'k2',
+					kind: 0,
+					age_ms: 1,
+					gap_ms: null,
+					ttl_ms: 1,
+					duration_ms: null,
+				},
+			],
+			500,
+		);
+
+		expect(mockRedis.call).toHaveBeenCalledWith(
+			'XACK',
+			STREAM,
+			'drain',
+			'1-0',
+			'2-0',
+		);
 	});
 
 	it('writes a batch no truncate followed', async () => {
@@ -2100,16 +2143,25 @@ describe('truncateCacheEvents', () => {
 		);
 	});
 
-	it('drops the stream, then moves the count, before emptying a table', async () => {
+	it('drops the stream, then stamps the time every namespace reads', async () => {
+		vi.useFakeTimers({ toFake: ['Date'] });
+		vi.setSystemTime(1_700_000_000_000);
+
 		await truncateCacheEvents();
 
+		vi.useRealTimers();
+
 		expect(mockRedis.del).toHaveBeenCalledWith('scalabus:stats:events');
-		expect(mockRedis.incr).toHaveBeenCalledWith('scalabus:stats:truncations');
+
+		expect(mockRedis.set).toHaveBeenCalledWith(
+			'stats:truncated_at',
+			'1700000000000',
+		);
 
 		expect(mockRedis.del.mock.invocationCallOrder[0])
-			.toBeLessThan(mockRedis.incr.mock.invocationCallOrder[0]!);
+			.toBeLessThan(mockRedis.set.mock.invocationCallOrder[0]!);
 
-		expect(mockRedis.incr.mock.invocationCallOrder[0])
+		expect(mockRedis.set.mock.invocationCallOrder[0])
 			.toBeLessThan(builder.truncate.mock.invocationCallOrder[0]);
 	});
 
