@@ -13,6 +13,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
   - A provider names the pending subscription it bills in its metadata
     `directus_subscription`, as the checkout wrote it, which a holding names
     too.
+  - `Mollie sends these events` posts one next-gen event per row, signed with
+    the instance's `SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET`; `entity` is its
+    `entityId`.
   - A `<name>` stands for one uuid, the same in the tables and the requests.
   - `received these writes` reads what the providers received since it last read.
 
@@ -29,12 +32,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | directus_subscription | 21         |
       | status                | active     |
       | paid_at               | 2099-01-01 |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_cancel                |           |
+    When Mollie sends these events:
+      | type         | entity    |
+      | payment.paid | tr_cancel |
     Then this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_21> | <policy_21> | @scalabus/subscriptions |
@@ -99,12 +99,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | mandate  | mdt_resume |
       | customer | cst_resume |
       | status   | valid      |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_resume                |           |
+    When Mollie sends these events:
+      | type         | entity    |
+      | payment.paid | tr_resume |
     Then subscription sub_resume is eventually stored:
       | status   | cancel_at_period_end | current_period_end       |
       | canceled | true                 | 2099-02-01T00:00:00.000Z |
@@ -163,12 +160,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | mandate  | mdt_twice |
       | customer | cst_twice |
       | status   | valid     |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_twice                 |           |
+    When Mollie sends these events:
+      | type         | entity   |
+      | payment.paid | tr_twice |
     Then subscription sub_twice is eventually stored:
       | status   | cancel_at_period_end | current_period_end       |
       | canceled | true                 | 2099-02-01T00:00:00.000Z |
@@ -235,12 +229,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | mandate  | mdt_split |
       | customer | cst_split |
       | status   | valid     |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_split                 |           |
+    When Mollie sends these events:
+      | type         | entity   |
+      | payment.paid | tr_split |
     Then subscription sub_split is eventually stored:
       | status   | cancel_at_period_end | current_period_end       |
       | canceled | true                 | 2099-02-01T00:00:00.000Z |
@@ -259,24 +250,20 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | metadata    | {"directus_subscription":"26","resumes":"sub_split"} |
     And subscription sub_split_2 eventually continues sub_split
     When these requests get these responses:
-      | request                              | response  |
-      | method: PATCH                        | code: 200 |+
-      | path: /items/subscription_plans/26   |           |
-      | payload:                             |           |
-      |   policy: <policy_27>                |           |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_sub_split_2           |           |
+      | request                            | response  |
+      | method: PATCH                      | code: 200 |+
+      | path: /items/subscription_plans/26 |           |
+      | payload:                           |           |
+      |   policy: <policy_27>              |           |
+    And Mollie sends these events:
+      | type         | entity         |
+      | payment.paid | tr_sub_split_2 |
     Then this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_26> | <policy_27> | @scalabus/subscriptions |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_split                 |           |
+    When Mollie sends these events:
+      | type         | entity   |
+      | payment.paid | tr_split |
     Then the beneficiaries of subscription sub_split are eventually:
       | user      | access           |
       | <user_26> | <granted_access> |
@@ -303,16 +290,10 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | subscription          | sub_two    |
       | directus_subscription | 28         |
       | status                | active     |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_one                   |           |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_two                   |           |
+    When Mollie sends these events:
+      | type         | entity |
+      | payment.paid | tr_one |
+      | payment.paid | tr_two |
     Then subscription sub_one is eventually stored:
       | status | cancel_at_period_end |
       | active | false                |
@@ -352,12 +333,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | subscription          | sub_ended |
       | directus_subscription | 31        |
       | status                | active    |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_ended                 |           |
+    When Mollie sends these events:
+      | type         | entity   |
+      | payment.paid | tr_ended |
     Then this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_31> | <policy_31> | @scalabus/subscriptions |
@@ -369,12 +347,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | directus_subscription | 31         |
       | status                | canceled   |
       | paid_at               | 2020-01-01 |
-    And these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_ended                 |           |
+    And Mollie sends these events:
+      | type         | entity   |
+      | payment.paid | tr_ended |
     Then this user eventually holds no access:
       | user      |
       | <user_31> |
@@ -396,12 +371,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | subscription          | sub_resumed |
       | directus_subscription | 33          |
       | status                | suspended   |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_resumed               |           |
+    When Mollie sends these events:
+      | type         | entity     |
+      | payment.paid | tr_resumed |
     Then subscription sub_resumed is eventually stored:
       | status    |
       | suspended |
@@ -415,12 +387,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | subscription          | sub_resumed |
       | directus_subscription | 33          |
       | status                | active      |
-    And these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_resumed               |           |
+    And Mollie sends these events:
+      | type         | entity     |
+      | payment.paid | tr_resumed |
     Then this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_33> | <policy_33> | @scalabus/subscriptions |
@@ -438,12 +407,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | directus_subscription | 41           |
       | status                | active       |
       | paid_at               | 2099-01-01   |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_archived              |           |
+    When Mollie sends these events:
+      | type         | entity      |
+      | payment.paid | tr_archived |
     Then subscription sub_archived is eventually stored:
       | status | cancel_at_period_end |
       | active | false                |
@@ -520,23 +486,19 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | subscription          | sub_deleted |
       | directus_subscription | 51          |
       | status                | active      |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_deleted               |           |
+    When Mollie sends these events:
+      | type         | entity     |
+      | payment.paid | tr_deleted |
     Then this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_51> | <policy_51> | @scalabus/subscriptions |
     When these requests get these responses:
-      | request                              | response  |
-      | method: DELETE                       | code: 204 |+
-      | path: /users/<user_51>               |           |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_deleted               |           |
+      | request                | response  |
+      | method: DELETE         | code: 204 |+
+      | path: /users/<user_51> |           |
+    And Mollie sends these events:
+      | type         | entity     |
+      | payment.paid | tr_deleted |
     Then the providers eventually received these writes:
       | method | path                                                | body |
       | DELETE | /v2/customers/cst_deleted/subscriptions/sub_deleted |      |
@@ -562,22 +524,16 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | subscription          | sub_gone |
       | directus_subscription | 61       |
       | status                | active   |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_gone                  |           |
+    When Mollie sends these events:
+      | type         | entity  |
+      | payment.paid | tr_gone |
     Then this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_61> | <policy_61> | @scalabus/subscriptions |
     When Mollie no longer holds subscription sub_gone
-    And these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_gone                  |           |
+    And Mollie sends these events:
+      | type         | entity  |
+      | payment.paid | tr_gone |
     Then this user eventually holds no access:
       | user      |
       | <user_61> |
@@ -607,23 +563,27 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | status                | active    |
     When these requests get these responses:
       | request                              | response                                 |
-      | as: anonymous                        | code: 400                                |+
+      | as: anonymous                        | code: 200                                |+
+      | method: POST                         |                                          |
+      | path: /subscriptions/webhooks/mollie |                                          |
+      | as: anonymous                        | code: 401                                |+
       | method: POST                         | body:                                    |
       | path: /subscriptions/webhooks/mollie |  errors:                                 |
-      | payload: id=not_a_payment            |  - message: >-                           |
-      |                                      |      Webhook from "mollie" refused: body |
-      |                                      |      id "not_a_payment" is not a payment |
-      |                                      |      id                                  |
+      | payload: id=tr_first                 |  - message: >-                           |
+      |                                      |      Webhook from "mollie" refused:      |
+      |                                      |      expected one "x-mollie-signature"   |
+      |                                      |      header, got null                    |
       |                                      |    extensions:                           |
-      |                                      |      code: SUBSCRIPTION_WEBHOOK_REFUSED  |
-      | as: anonymous                        | code: 400                                |+
+      |                                      |      code: SUBSCRIPTION_WEBHOOK_UNSIGNED |
+      | as: anonymous                        | code: 401                                |+
       | method: POST                         | body:                                    |
       | path: /subscriptions/webhooks/mollie |  errors:                                 |
-      | payload: other=1                     |  - message: >-                           |
-      |                                      |      Webhook from "mollie" refused: body |
-      |                                      |      id null is not a payment id         |
-      |                                      |    extensions:                           |
-      |                                      |      code: SUBSCRIPTION_WEBHOOK_REFUSED  |
+      | headers:                             |  - message: >-                           |
+      |   x-mollie-signature: sha256=forged  |      Webhook from "mollie" refused: the  |
+      | payload:                             |      "x-mollie-signature" header does    |
+      |   type: payment.paid                 |      not sign the body                   |
+      |   entityId: tr_first                 |    extensions:                           |
+      |                                      |      code: SUBSCRIPTION_WEBHOOK_UNSIGNED |
       | as: anonymous                        | code: 404                                |+
       | method: POST                         | body:                                    |
       | path: /subscriptions/webhooks/paddle |  errors:                                 |
@@ -632,14 +592,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       |                                      |      not enabled                         |
       |                                      |    extensions:                           |
       |                                      |      code: UNKNOWN_SUBSCRIPTION_PROVIDER |
-      | as: anonymous                        | code: 200                                |+
-      | method: POST                         |                                          |
-      | path: /subscriptions/webhooks/mollie |                                          |
-      | payload: id=tr_first                 |                                          |
-      | as: anonymous                        | code: 200                                |+
-      | method: POST                         |                                          |
-      | path: /subscriptions/webhooks/mollie |                                          |
-      | payload: id=tr_stray                 |                                          |
+    And Mollie sends these events:
+      | type            | entity   |
+      | hook.ping       |          |
+      | refund.refunded | re_stray |
+      | payment.paid    | tr_first |
+      | payment.paid    | tr_stray |
     Then the sync queue eventually holds no row for tr_first
     And the sync queue eventually holds no row for tr_stray
     And the instance eventually logged:
@@ -647,6 +605,11 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       Subscription sync of "mollie" "tr_stray" dropped: "\"mollie\"
       subscription \"sub_stray\" names no pending subscription: its metadata
       \"directus_subscription\" is null"
+      """
+    And the instance eventually logged:
+      """
+      Webhook from "mollie" ignored: event type "refund.refunded" names no
+      payment
       """
     And this user eventually holds no access:
       | user      |
@@ -664,12 +627,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | directus_subscription | 71         |
       | status                | active     |
       | resumes               | sub_late   |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_late_2                |           |
+    When Mollie sends these events:
+      | type         | entity    |
+      | payment.paid | tr_late_2 |
     Then these sync queue rows are eventually stored:
       | resource_id | last_error                                                        |
       | tr_late_2   | Subscription "sub_late_2" resumes "sub_late", which is not stored |
@@ -681,16 +641,10 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | directus_subscription | 71         |
       | status                | canceled   |
       | paid_at               | 2099-01-01 |
-    And these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_late                  |           |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_late_2                |           |
+    And Mollie sends these events:
+      | type         | entity    |
+      | payment.paid | tr_late   |
+      | payment.paid | tr_late_2 |
     Then subscription sub_late_2 eventually continues sub_late
     And this access is eventually stored:
       | user      | policy      | managed_by              |
@@ -711,12 +665,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | subscription          | sub_parked |
       | directus_subscription | 81         |
       | status                | active     |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_parked                |           |
+    When Mollie sends these events:
+      | type         | entity    |
+      | payment.paid | tr_parked |
     Then this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_81> | <policy_81> | @scalabus/subscriptions |
@@ -733,12 +684,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | subscription          | sub_locked |
       | directus_subscription | 83         |
       | status                | active     |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_locked                |           |
+    When Mollie sends these events:
+      | type         | entity    |
+      | payment.paid | tr_locked |
     Then this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_83> | <policy_83> | @scalabus/subscriptions |
@@ -755,12 +703,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | directus_subscription | 85         |
       | status                | active     |
       | amount                | "20.00"    |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_billed                |           |
+    When Mollie sends these events:
+      | type         | entity    |
+      | payment.paid | tr_billed |
     Then this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_85> | <policy_85> | @scalabus/subscriptions |
@@ -787,12 +732,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | subscription          | sub_seats |
       | directus_subscription | 86        |
       | status                | active    |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_seats                 |           |
+    When Mollie sends these events:
+      | type         | entity   |
+      | payment.paid | tr_seats |
     Then this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_86> | <policy_86> | @scalabus/subscriptions |
@@ -870,12 +812,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | subscription          | sub_removed |
       | directus_subscription | 87          |
       | status                | active      |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_removed               |           |
+    When Mollie sends these events:
+      | type         | entity     |
+      | payment.paid | tr_removed |
     Then this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_87> | <policy_87> | @scalabus/subscriptions |
@@ -909,12 +848,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | mandate  | mdt_kept |
       | customer | cst_kept |
       | status   | valid    |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_kept                  |           |
+    When Mollie sends these events:
+      | type         | entity  |
+      | payment.paid | tr_kept |
     Then subscription sub_kept is eventually stored:
       | status   | cancel_at_period_end | current_period_end       |
       | canceled | true                 | 2099-02-01T00:00:00.000Z |

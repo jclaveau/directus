@@ -37,12 +37,9 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | subscription          | sub_renewing   |
       | directus_subscription | 901            |
       | status                | active         |
-    When these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_renewal               |           |
+    When Mollie sends these events:
+      | type         | entity     |
+      | payment.paid | tr_renewal |
     Then this access is eventually stored:
       | user           | policy        | managed_by              |
       | <granted_user> | <plan_policy> | @scalabus/subscriptions |
@@ -115,12 +112,9 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | subscription          | sub_renewing   |
       | directus_subscription | 901            |
       | status                | suspended      |
-    And these requests get these responses:
-      | request                              | response  |
-      | as: anonymous                        | code: 200 |+
-      | method: POST                         |           |
-      | path: /subscriptions/webhooks/mollie |           |
-      | payload: id=tr_renewal               |           |
+    And Mollie sends these events:
+      | type         | entity     |
+      | payment.paid | tr_renewal |
     Then this user eventually holds no access:
       | user           |
       | <granted_user> |
