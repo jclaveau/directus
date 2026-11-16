@@ -923,7 +923,15 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | as: lifecycle-88-token      | code: 204 |+
       | method: POST                |           |
       | path: /subscriptions/resume |           |
-    Then subscription sub_kept_2 eventually continues sub_kept
+    Then Mollie eventually received this subscription for cst_kept:
+      | field       | value                                               |
+      | amount      | {"currency":"EUR","value":"10.00"}                  |
+      | interval    | 1 month                                             |
+      | description | Subscription 88                                     |
+      | mandateId   | mdt_kept                                            |
+      | startDate   | 2099-02-01                                          |
+      | metadata    | {"directus_subscription":"88","resumes":"sub_kept"} |
+    And subscription sub_kept_2 eventually continues sub_kept
     And this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_88> | <policy_88> | @scalabus/subscriptions |
