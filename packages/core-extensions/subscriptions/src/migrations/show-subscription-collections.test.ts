@@ -118,7 +118,8 @@ describe('showSubscriptionCollections', () => {
 	test('gives the plan form its dropdowns and an auto-generated id', async () => {
 		await showSubscriptionCollections.config.up(database);
 
-		expect(await database('directus_fields'))
+		expect(await database('directus_fields')
+			.where('collection', 'subscription_plans'))
 			.toEqual([
 				{
 					collection: 'subscription_plans',
@@ -198,6 +199,39 @@ describe('showSubscriptionCollections', () => {
 					readonly: 0,
 					hidden: 0,
 					note: null,
+				},
+			]);
+	});
+
+	test('shows the plan and continues of a subscription as read-only', async () => {
+		await showSubscriptionCollections.config.up(database);
+
+		expect(await database('directus_fields')
+			.where('collection', 'subscriptions'))
+			.toEqual([
+				{
+					collection: 'subscriptions',
+					field: 'plan',
+					special: null,
+					interface: null,
+					options: null,
+					display: null,
+					display_options: null,
+					readonly: 1,
+					hidden: 0,
+					note: 'Follows its provider, set by the bundle alone',
+				},
+				{
+					collection: 'subscriptions',
+					field: 'continues',
+					special: null,
+					interface: null,
+					options: null,
+					display: null,
+					display_options: null,
+					readonly: 1,
+					hidden: 0,
+					note: 'Follows its provider, set by the bundle alone',
 				},
 			]);
 	});
