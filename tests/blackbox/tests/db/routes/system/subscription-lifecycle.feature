@@ -859,6 +859,96 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       |            |
       | <other_86> |
 
+  Scenario: a deleted beneficiary row takes its access along
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 87 | mollie   | 87      | 1                 | active      |
+    And Mollie holds this subscription:
+      | column                | value       |
+      | payment               | tr_removed  |
+      | customer              | cst_removed |
+      | subscription          | sub_removed |
+      | directus_subscription | 87          |
+      | status                | active      |
+    When these requests get these responses:
+      | request                              | response  |
+      | as: anonymous                        | code: 200 |+
+      | method: POST                         |           |
+      | path: /subscriptions/webhooks/mollie |           |
+      | payload: id=tr_removed               |           |
+    Then this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_87> | <policy_87> | @scalabus/subscriptions |
+    When these requests get these responses:
+      | request                                 | response  |
+      | method: DELETE                          | code: 204 |+
+      | path: /items/subscription_beneficiaries |           |
+      | payload:                                |           |
+      |   query:                                |           |
+      |     filter:                             |           |
+      |       subscription:                     |           |
+      |         _eq: 87                         |           |
+    Then this user eventually holds no access:
+      | user      |
+      | <user_87> |
+
+  Scenario: a deleted beneficiary row keeps the access its resume still shares
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 88 | mollie   | 88      | 1                 | active      |
+    And Mollie holds this subscription:
+      | column                | value      |
+      | payment               | tr_kept    |
+      | customer              | cst_kept   |
+      | subscription          | sub_kept   |
+      | directus_subscription | 88         |
+      | status                | canceled   |
+      | paid_at               | 2099-01-01 |
+    And Mollie holds this mandate:
+      | column   | value    |
+      | mandate  | mdt_kept |
+      | customer | cst_kept |
+      | status   | valid    |
+    When these requests get these responses:
+      | request                              | response  |
+      | as: anonymous                        | code: 200 |+
+      | method: POST                         |           |
+      | path: /subscriptions/webhooks/mollie |           |
+      | payload: id=tr_kept                  |           |
+    Then subscription sub_kept is eventually stored:
+      | status   | cancel_at_period_end | current_period_end       |
+      | canceled | true                 | 2099-02-01T00:00:00.000Z |
+    When these requests get these responses:
+      | request                     | response  |
+      | as: lifecycle-88-token      | code: 204 |+
+      | method: POST                |           |
+      | path: /subscriptions/resume |           |
+    Then subscription sub_kept_2 eventually continues sub_kept
+    And this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_88> | <policy_88> | @scalabus/subscriptions |
+    And the beneficiaries of subscription sub_kept are eventually:
+      | user      | access           |
+      | <user_88> | <granted_access> |
+    And the beneficiaries of subscription sub_kept_2 are eventually:
+      | user      | access           |
+      | <user_88> | <granted_access> |
+    When these requests get these responses:
+      | request                                 | response  |
+      | method: DELETE                          | code: 204 |+
+      | path: /items/subscription_beneficiaries |           |
+      | payload:                                |           |
+      |   query:                                |           |
+      |     filter:                             |           |
+      |       subscription:                     |           |
+      |         _eq: 88                         |           |
+    Then the beneficiaries of subscription sub_kept_2 are eventually:
+      | user      | access           |
+      | <user_88> | <granted_access> |
+    And this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_88> | <policy_88> | @scalabus/subscriptions |
+
   Scenario: Stripe signs its webhooks, cancels at period end, and can lose a subscription
     Given these pending subscriptions, each with its own plan:
       | id | provider | manager | beneficiaries_max | plan_status |

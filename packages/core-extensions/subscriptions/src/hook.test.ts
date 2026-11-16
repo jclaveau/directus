@@ -2,6 +2,9 @@ import { ForbiddenError } from '@directus/errors';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { subscriptionsHook } from './hook.js';
 import {
+	revokeDeletedBeneficiaryAccesses,
+} from './members/revoke-deleted-beneficiary-accesses.js';
+import {
 	refuseFrozenPlanUpdate,
 	refuseLastManagerDelete,
 	refuseLastManagerMove,
@@ -14,6 +17,7 @@ import { enqueueReconcile } from './sync/enqueue-reconcile.js';
 import { runSyncBatch } from './sync/run-sync-batch.js';
 import { mountRawBody } from './webhook/mount-raw-body.js';
 
+vi.mock('./members/revoke-deleted-beneficiary-accesses.js');
 vi.mock('./plans/refuse-direct-writes.js');
 vi.mock('./sync/enqueue-reconcile.js');
 vi.mock('./sync/run-sync-batch.js');
@@ -94,7 +98,80 @@ describe('subscriptionsHook', () => {
 			['subscription_events.items.create', expect.any(Function)],
 			['subscription_events.items.update', expect.any(Function)],
 			['subscription_events.items.delete', expect.any(Function)],
+			['subscription_beneficiaries.items.delete', expect.any(Function)],
 		]);
+	});
+
+	test('a beneficiary delete checks the access, then revokes', async () => {
+		const filter = vi.fn();
+		const validateAccess = vi.fn();
+		const accessService = { deleteOne: vi.fn() };
+
+		const AccessService = vi.fn(function () {
+			return accessService;
+		});
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter, init: vi.fn(), schedule: vi.fn() },
+			{
+				env: { MAX_PAYLOAD_SIZE: '1mb' },
+				database: 'database',
+				services: { AccessService },
+				validateAccess,
+			},
+		);
+
+		expect(await filter.mock.calls[8]?.[1]([1], {}, {
+			database: 'filter database',
+			schema: 'schema',
+			accountability: { user: 'user-1' },
+		})).toEqual([1]);
+
+		expect(validateAccess).toHaveBeenCalledWith(
+			{
+				action: 'delete',
+				collection: 'subscription_beneficiaries',
+				primaryKeys: [1],
+				accountability: { user: 'user-1' },
+			},
+			{ knex: 'filter database', schema: 'schema' },
+		);
+
+		expect(AccessService).toHaveBeenCalledWith({
+			knex: 'filter database',
+			schema: 'schema',
+		});
+
+		expect(revokeDeletedBeneficiaryAccesses).toHaveBeenCalledWith({
+			trx: 'filter database',
+			accessService,
+			beneficiaryKeys: [1],
+		});
+	});
+
+	test('a beneficiary delete answers 403 before any revoke', async () => {
+		const filter = vi.fn();
+		const validateAccess = vi.fn().mockRejectedValue(new ForbiddenError());
+		const AccessService = vi.fn();
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter, init: vi.fn(), schedule: vi.fn() },
+			{
+				env: { MAX_PAYLOAD_SIZE: '1mb' },
+				database: 'database',
+				services: { AccessService },
+				validateAccess,
+			},
+		);
+
+		await expect(filter.mock.calls[8]?.[1]([1], {}, {
+			database: 'filter database',
+			schema: 'schema',
+			accountability: { user: 'user-1' },
+		})).rejects.toThrow(new ForbiddenError());
+
+		expect(AccessService).not.toHaveBeenCalled();
+		expect(revokeDeletedBeneficiaryAccesses).not.toHaveBeenCalled();
 	});
 
 	const WRITE_FILTERS = [
