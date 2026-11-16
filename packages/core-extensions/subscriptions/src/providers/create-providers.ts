@@ -22,6 +22,7 @@ export function createProviders(
 	if (subscriptionsConfig.mollie !== null) {
 		enabledProviders.set('mollie', createMollieProvider(
 			createMollieClient({ apiKey: subscriptionsConfig.mollie.apiKey }),
+			subscriptionsConfig.mollie.webhookSecret,
 		));
 	}
 

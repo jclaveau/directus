@@ -5,7 +5,10 @@ import type {
 	PrimaryKey,
 	UpdateEntries,
 } from '@directus/types';
-import { readSubscriptionsConfig } from './config/read-subscriptions-config.js';
+import {
+	readReconcileCron,
+	readSubscriptionsConfig,
+} from './config/read-subscriptions-config.js';
 import {
 	revokeDeletedBeneficiaryAccesses,
 } from './members/revoke-deleted-beneficiary-accesses.js';
@@ -28,8 +31,6 @@ import {
 
 export const SYNC_BATCH_CRON = '*/10 * * * * *';
 
-export const RECONCILE_CRON = '0 * * * *';
-
 type WriteFilterContext = Pick<
 	EventContext,
 	'accountability' | 'database' | 'schema'
@@ -47,6 +48,7 @@ export const subscriptionsHook = defineHook(
 	}) => {
 		const enabledProviders = createProviders(readSubscriptionsConfig(env));
 		const maxPayloadSize = readMaxPayloadSize(env);
+		const reconcileCron = readReconcileCron(env);
 
 		init('middlewares.before', ({ app }) => {
 			mountRawBody(app, maxPayloadSize);
@@ -233,7 +235,7 @@ export const subscriptionsHook = defineHook(
 			});
 		});
 
-		schedule(RECONCILE_CRON, async () => {
+		schedule(reconcileCron, async () => {
 			await enqueueReconcile(database, enabledProviders);
 		});
 	},
