@@ -45,7 +45,7 @@ const NORMALIZED_STATUSES: Record<string, string> = {
 
 export function createMollieProvider(
 	mollieClient: MollieClient,
-	webhookSecret: string,
+	webhookSecrets: string[],
 ): SubscriptionProvider {
 	return {
 		async verifyWebhook(rawBody, requestHeaders) {
@@ -56,7 +56,7 @@ export function createMollieProvider(
 				});
 			}
 
-			verifyMollieSignature(rawBody, requestHeaders, webhookSecret);
+			verifyMollieSignature(rawBody, requestHeaders, webhookSecrets);
 
 			const { eventType, entityId } = parseMollieEvent(rawBody);
 
@@ -231,11 +231,14 @@ function readRemainingTimes(canceledSubscription: {
 		: {};
 }
 
-/** Mollie signs the raw body: `sha256=` and the lowercase hex HMAC-SHA256. */
+/**
+ * Mollie signs the raw body: `sha256=` and the lowercase hex HMAC-SHA256. Any
+ * listed secret verifies, so a rotated one still does until it is dropped.
+ */
 function verifyMollieSignature(
 	rawBody: Buffer,
 	requestHeaders: IncomingHttpHeaders,
-	webhookSecret: string,
+	webhookSecrets: string[],
 ): void {
 	const signatureHeader = requestHeaders['x-mollie-signature'];
 
@@ -247,16 +250,20 @@ function verifyMollieSignature(
 		});
 	}
 
-	const bodyDigest = createHmac('sha256', webhookSecret)
-		.update(rawBody)
-		.digest('hex');
-
-	const expectedSignature = Buffer.from(`sha256=${bodyDigest}`);
-
 	const receivedSignature = Buffer.from(signatureHeader);
 
-	if (receivedSignature.length !== expectedSignature.length
-		|| !timingSafeEqual(receivedSignature, expectedSignature)) {
+	const isSigned = webhookSecrets.some((webhookSecret) => {
+		const bodyDigest = createHmac('sha256', webhookSecret)
+			.update(rawBody)
+			.digest('hex');
+
+		const expectedSignature = Buffer.from(`sha256=${bodyDigest}`);
+
+		return receivedSignature.length === expectedSignature.length
+			&& timingSafeEqual(receivedSignature, expectedSignature);
+	});
+
+	if (!isSigned) {
 		throw new WebhookSignatureError({
 			provider: 'mollie',
 			reason: 'the "x-mollie-signature" header does not sign the body',
