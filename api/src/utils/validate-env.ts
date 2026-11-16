@@ -286,6 +286,24 @@ export function validateSubscriptionsEnv(): void {
 		process.exit(1);
 	}
 
+	const mollieSecrets = env['SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS'];
+
+	if (typeof mollieSecrets === 'string') {
+		const emptyIndex = mollieSecrets
+			.split(',')
+			.findIndex((listedSecret) => listedSecret.trim() === '');
+
+		// A secret list names the position of an empty entry, never a secret.
+		if (emptyIndex !== -1) {
+			useLogger().error(
+				'"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" lists an empty secret'
+				+ ` at position ${emptyIndex + 1}.`,
+			);
+
+			process.exit(1);
+		}
+	}
+
 	for (const [setVariable, requiredVariable] of SUBSCRIPTIONS_ENV_PAIRS) {
 		if (env[setVariable] !== undefined && env[requiredVariable] === undefined) {
 			useLogger().error(
@@ -314,12 +332,12 @@ const SUBSCRIPTIONS_ENV = [
 	'SUBSCRIPTIONS_STRIPE_SECRET_KEY',
 	'SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET',
 	'SUBSCRIPTIONS_MOLLIE_API_KEY',
-	'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET',
+	'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS',
 ];
 
 const SUBSCRIPTIONS_ENV_PAIRS = [
 	['SUBSCRIPTIONS_STRIPE_SECRET_KEY', 'SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET'],
 	['SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET', 'SUBSCRIPTIONS_STRIPE_SECRET_KEY'],
-	['SUBSCRIPTIONS_MOLLIE_API_KEY', 'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET'],
-	['SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET', 'SUBSCRIPTIONS_MOLLIE_API_KEY'],
+	['SUBSCRIPTIONS_MOLLIE_API_KEY', 'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS'],
+	['SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS', 'SUBSCRIPTIONS_MOLLIE_API_KEY'],
 ] as const;
