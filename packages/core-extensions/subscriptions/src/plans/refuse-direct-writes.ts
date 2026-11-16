@@ -248,6 +248,19 @@ export function refuseSubscriptionStateUpdate(
 		});
 	}
 
+	// What the provider bills and which subscription it resumes, both set when
+	// the row is created.
+	const isChangingOrigin = updateEntries.some((updateEntry) => {
+		return 'data' in updateEntry
+			&& ('plan' in updateEntry.data || 'continues' in updateEntry.data);
+	});
+
+	if (isChangingOrigin) {
+		throw new InvalidPayloadError({
+			reason: '"plan" and "continues" of a subscription follow its provider',
+		});
+	}
+
 	return updateEntries;
 }
 
