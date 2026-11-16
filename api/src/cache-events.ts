@@ -1298,8 +1298,8 @@ async function persistStreamBatch(
 		else {
 			useLogger().warn(
 				err,
-				`[cache-stats] dropped ${batch.length} unpersistable events. `
-				+ `${err.message}`,
+				`[cache-stats] dropped ${JSON.stringify(batch.length)} unpersistable `
+				+ `events. ${JSON.stringify(err.message)}`,
 			);
 		}
 	}
