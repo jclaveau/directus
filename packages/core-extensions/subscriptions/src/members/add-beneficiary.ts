@@ -49,7 +49,12 @@ export async function addBeneficiary(
 		});
 	}
 
-	if (seatedBeneficiaries.length >= subscribedPlan.beneficiaries_max) {
+	// A deleted user's row keeps its history, not its seat.
+	const takenSeats = seatedBeneficiaries.filter((seatedBeneficiary) => {
+		return seatedBeneficiary.user !== null;
+	});
+
+	if (takenSeats.length >= subscribedPlan.beneficiaries_max) {
 		throw new BeneficiariesMaxReachedError({
 			planCode: subscribedPlan.code,
 			beneficiariesMax: subscribedPlan.beneficiaries_max,
