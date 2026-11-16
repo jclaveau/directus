@@ -7,6 +7,9 @@ import type {
 } from '@directus/types';
 import { readSubscriptionsConfig } from './config/read-subscriptions-config.js';
 import {
+	revokeDeletedBeneficiaryAccesses,
+} from './members/revoke-deleted-beneficiary-accesses.js';
+import {
 	refuseFrozenPlanUpdate,
 	refuseLastManagerDelete,
 	refuseLastManagerMove,
@@ -186,6 +189,33 @@ export const subscriptionsHook = defineHook(
 		filter('subscription_events.items.create', refuseEventWriteAs('create'));
 		filter('subscription_events.items.update', refuseEventWriteAs('update'));
 		filter('subscription_events.items.delete', refuseEventWriteAs('delete'));
+
+		// Before the rows go, in the delete's transaction: a beneficiary removed by
+		// a request would otherwise keep the policy it no longer pays for.
+		filter<PrimaryKey[]>(
+			'subscription_beneficiaries.items.delete',
+			async (beneficiaryKeys, _eventMeta, filterContext) => {
+				await validateWriteAccess(
+					{
+						action: 'delete',
+						collection: 'subscription_beneficiaries',
+						primaryKeys: beneficiaryKeys,
+					},
+					filterContext,
+				);
+
+				await revokeDeletedBeneficiaryAccesses({
+					trx: filterContext.database,
+					accessService: new services.AccessService({
+						knex: filterContext.database,
+						schema: filterContext.schema!,
+					}),
+					beneficiaryKeys,
+				});
+
+				return beneficiaryKeys;
+			},
+		);
 
 		schedule(SYNC_BATCH_CRON, async () => {
 			const schemaOverview = await getSchema();
