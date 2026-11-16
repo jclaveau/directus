@@ -5,6 +5,13 @@
 	"private": true,
 	"license": "BUSL-1.1",
 	"type": "module",
+	"exports": {
+		"./helpers": {
+			"types": "./dist/helpers.d.ts",
+			"default": "./dist/helpers.js"
+		},
+		"./package.json": "./package.json"
+	},
 	"directus:extension": {
 		"type": "bundle",
 		"path": {
@@ -17,7 +24,7 @@
 		"dist"
 	],
 	"scripts": {
-		"build": "directus-extension build --external stripe,@mollie/api-client,express",
+		"build": "directus-extension build --external stripe,@mollie/api-client,express && tsdown src/helpers.ts --dts --no-clean",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage"
 	},
@@ -37,6 +44,7 @@
 		"@vitest/coverage-v8": "catalog:",
 		"knex": "catalog:",
 		"sqlite3": "catalog:",
+		"tsdown": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"
 	}
