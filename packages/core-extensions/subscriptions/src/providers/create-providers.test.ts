@@ -12,7 +12,7 @@ describe('createProviders', () => {
 	test('enables each configured provider', () => {
 		expect([...createProviders({
 			stripe: { secretKey: 'sk_test_1', webhookSecret: 'whsec_1' },
-			mollie: { apiKey: 'test_1', webhookSecret: 'mollie_secret_1' },
+			mollie: { apiKey: 'test_1', webhookSecrets: ['mollie_secret_1'] },
 		}).keys()])
 			.toEqual(['stripe', 'mollie']);
 	});
