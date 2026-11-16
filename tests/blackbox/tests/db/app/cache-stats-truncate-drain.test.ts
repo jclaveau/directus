@@ -200,7 +200,7 @@ describe.runIf(vendors.includes('postgres'))('postgres', () => {
 			'a purge a sibling namespace queued before a truncate is not stored after it',
 			({ given, when, and, then }) => {
 				given(
-					'a row created through the sibling namespace queued its purge on its stream',
+					'a row created through the sibling queued its purge on its stream',
 					async () => {
 						await request(getUrl(vendor, siblingEnv))
 							.post(`/items/${collection}`)

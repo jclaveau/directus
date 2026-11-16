@@ -114,7 +114,6 @@ let mockRedis: {
 	get: Mock;
 	set: Mock;
 	del: Mock;
-	incr: Mock;
 	scan: Mock;
 	unlink: Mock;
 	pipeline: Mock;
@@ -164,7 +163,6 @@ beforeEach(() => {
 		get: vi.fn().mockResolvedValue(null),
 		set: vi.fn(),
 		del: vi.fn(),
-		incr: vi.fn(),
 		scan: vi.fn().mockResolvedValue(['0', []]),
 		unlink: vi.fn(),
 		pipeline: vi.fn(),

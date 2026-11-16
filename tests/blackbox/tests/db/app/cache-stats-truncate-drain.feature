@@ -26,7 +26,7 @@ Feature: A stats truncate leaves nothing a drain read before it
     And no purge of the collection is stored
 
   Scenario: a purge a sibling namespace queued before a truncate is not stored after it
-    Given a row created through the sibling namespace queued its purge on its stream
+    Given a row created through the sibling queued its purge on its stream
     When the stats truncate runs
     And a stats read on the sibling namespace drains its stream
     Then no purge of the collection is stored

@@ -370,7 +370,8 @@ const streamKey = () => `${statsNamespace()}:events`;
 const flagKey = () => `${statsNamespace()}:enabled`;
 const budgetAlertKey = () => `${statsNamespace()}:budget_alert`;
 const tombstoneKey = (redisKey: string) => `${statsNamespace()}:tomb:${redisKey}`;
-const truncationCountKey = () => `${statsNamespace()}:truncations`;
+// No namespace: the stats tables a truncate empties are shared by every one.
+const truncatedAtKey = () => 'stats:truncated_at';
 
 const anomalyThrottleKey = (reason: string, cacheKey: string) =>
 	`${statsNamespace()}:anom:${reason}:${cacheKey}`;
@@ -913,7 +914,7 @@ async function drainCacheEventStream(): Promise<number> {
 			break;
 		}
 
-		const truncationsAtRead = await readTruncationCount(redis);
+		const truncatedAtRead = await readTruncatedAt(redis);
 
 		// '>' = entries never handed to any consumer, so a concurrent drain on another
 		// node gets a disjoint slice, never this same batch.
@@ -935,7 +936,7 @@ async function drainCacheEventStream(): Promise<number> {
 			break;
 		}
 
-		await persistStreamBatch(redis, db, batch, truncationsAtRead);
+		await persistStreamBatch(redis, db, batch, truncatedAtRead);
 		drained += batch.length;
 
 		if (batch.length < FLUSH_BATCH) {
@@ -975,7 +976,7 @@ async function reclaimStalePending(
 			break;
 		}
 
-		const truncationsAtRead = await readTruncationCount(redis);
+		const truncatedAtRead = await readTruncatedAt(redis);
 
 		const [nextCursor, batch] = (await redis.call(
 			'XAUTOCLAIM',
@@ -989,7 +990,7 @@ async function reclaimStalePending(
 		)) as [string, [string, string[]][], string[]];
 
 		if (batch.length > 0) {
-			await persistStreamBatch(redis, db, batch, truncationsAtRead);
+			await persistStreamBatch(redis, db, batch, truncatedAtRead);
 			reclaimed += batch.length;
 		}
 
@@ -1044,10 +1045,12 @@ function storedCount(streamed: string | undefined): number | null {
 
 // Read before a batch is, so a truncate landing after the read moves it
 // whichever way the two interleave: the truncate drops the stream first.
-async function readTruncationCount(
+// Event `ts` and this time come off each node's own clock: an event emitted
+// within the skew between two nodes of a truncate may land on the wrong side.
+async function readTruncatedAt(
 	redis: ReturnType<typeof useRedis>,
 ): Promise<string> {
-	return (await redis.get(truncationCountKey())) ?? '0';
+	return (await redis.get(truncatedAtKey())) ?? '0';
 }
 
 class TruncatedStreamBatchError extends Error {}
@@ -1056,7 +1059,7 @@ async function persistStreamBatch(
 	redis: ReturnType<typeof useRedis>,
 	db: Knex,
 	batch: [string, string[]][],
-	truncationsAtRead: string,
+	truncatedAtRead: string,
 ): Promise<void> {
 	const ids = batch.map(([id]) => id);
 	const events: CacheEventRow[] = [];
@@ -1081,6 +1084,13 @@ async function persistStreamBatch(
 
 	for (const [, flat] of batch) {
 		const f = parseFields(flat);
+
+		// Emitted before the last truncate, in this namespace or another: its
+		// stream outlived the tables it was drained to. A locator has no ts.
+		if (f['ts'] && Number(f['ts']) < Number(truncatedAtRead)) {
+			continue;
+		}
+
 		const at = new Date(Number(f['ts']));
 
 		if (f['kind'] === 'p') {
@@ -1277,8 +1287,8 @@ async function persistStreamBatch(
 
 			// Last, once every table this batch writes is locked: a truncate since
 			// the read emptied them, and committing would bring back what it cleared.
-			// One that has not moved the count yet waits on those locks to empty them.
-			if (await readTruncationCount(redis) !== truncationsAtRead) {
+			// One that has not stamped its time yet waits on those locks to empty them.
+			if (await readTruncatedAt(redis) !== truncatedAtRead) {
 				throw new TruncatedStreamBatchError();
 			}
 		});
@@ -2931,11 +2941,12 @@ async function deleteStatsKeysByPattern(
 // Drop all gathered telemetry — the fast way to reclaim space after autokill.
 export async function truncateCacheEvents(): Promise<void> {
 	// The stream goes before the tables, or a drain reading it while they empty
-	// writes what it read once they are. The count moves after the stream, so a
-	// drain that read a batch before the DEL sees it moved and drops the batch.
+	// writes what it read once they are. The time is stamped after the stream,
+	// so a drain that read a batch before the DEL sees it moved and drops the
+	// batch, and every namespace drops the events it emitted before it.
 	if (redisConfigAvailable()) {
 		await useRedis().del(streamKey());
-		await useRedis().incr(truncationCountKey());
+		await useRedis().set(truncatedAtKey(), String(Date.now()));
 	}
 
 	const db = getDatabase();
