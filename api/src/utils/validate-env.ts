@@ -7,6 +7,7 @@ import {
 	allowedOutOfScopeFeatures,
 	OUT_OF_SCOPE_FEATURE_ISSUES,
 } from './out-of-scope-features.js';
+import { validateCron } from './validate-cron.js';
 
 export function validateEnv(requiredKeys: string[]): void {
 	const env = useEnv();
@@ -428,7 +429,7 @@ export function validateSubscriptionsEnv(): void {
 		process.exit(1);
 	}
 
-	for (const [setVariable, requiredVariable] of SUBSCRIPTIONS_STRIPE_ENV_PAIRS) {
+	for (const [setVariable, requiredVariable] of SUBSCRIPTIONS_ENV_PAIRS) {
 		if (env[setVariable] !== undefined && env[requiredVariable] === undefined) {
 			useLogger().error(
 				`${JSON.stringify(requiredVariable)} is required when`
@@ -438,15 +439,30 @@ export function validateSubscriptionsEnv(): void {
 			process.exit(1);
 		}
 	}
+
+	const reconcileCron = env['SUBSCRIPTIONS_RECONCILE_CRON'];
+
+	// Directus' schedule skips a cron it cannot read: no reconcile would run.
+	if (typeof reconcileCron === 'string' && !validateCron(reconcileCron)) {
+		useLogger().error(
+			'"SUBSCRIPTIONS_RECONCILE_CRON" is not a cron schedule, got'
+			+ ` ${JSON.stringify(reconcileCron)}.`,
+		);
+
+		process.exit(1);
+	}
 }
 
 const SUBSCRIPTIONS_ENV = [
 	'SUBSCRIPTIONS_STRIPE_SECRET_KEY',
 	'SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET',
 	'SUBSCRIPTIONS_MOLLIE_API_KEY',
+	'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET',
 ];
 
-const SUBSCRIPTIONS_STRIPE_ENV_PAIRS = [
+const SUBSCRIPTIONS_ENV_PAIRS = [
 	['SUBSCRIPTIONS_STRIPE_SECRET_KEY', 'SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET'],
 	['SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET', 'SUBSCRIPTIONS_STRIPE_SECRET_KEY'],
+	['SUBSCRIPTIONS_MOLLIE_API_KEY', 'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET'],
+	['SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET', 'SUBSCRIPTIONS_MOLLIE_API_KEY'],
 ] as const;

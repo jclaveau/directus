@@ -1,7 +1,9 @@
 export type SubscriptionsConfig = {
 	stripe: { secretKey: string; webhookSecret: string } | null;
-	mollie: { apiKey: string } | null;
+	mollie: { apiKey: string; webhookSecret: string } | null;
 };
+
+const DEFAULT_RECONCILE_CRON = '*/15 * * * *';
 
 export function readSubscriptionsConfig(
 	env: Record<string, unknown>,
@@ -15,28 +17,54 @@ export function readSubscriptionsConfig(
 
 	const mollieKey = readOptionalString(env, 'SUBSCRIPTIONS_MOLLIE_API_KEY');
 
-	if (stripeKey !== null && stripeSecret === null) {
-		throw new Error(
-			'"SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET" is required when'
-			+ ' "SUBSCRIPTIONS_STRIPE_SECRET_KEY" is set',
-		);
-	}
+	const mollieSecret = readOptionalString(
+		env,
+		'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET',
+	);
 
-	if (stripeKey === null && stripeSecret !== null) {
-		throw new Error(
-			'"SUBSCRIPTIONS_STRIPE_SECRET_KEY" is required when'
-			+ ' "SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET" is set',
-		);
-	}
+	refuseLonePair(
+		[stripeKey, 'SUBSCRIPTIONS_STRIPE_SECRET_KEY'],
+		[stripeSecret, 'SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET'],
+	);
+
+	refuseLonePair(
+		[mollieKey, 'SUBSCRIPTIONS_MOLLIE_API_KEY'],
+		[mollieSecret, 'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET'],
+	);
 
 	return {
 		stripe: stripeKey !== null && stripeSecret !== null
 			? { secretKey: stripeKey, webhookSecret: stripeSecret }
 			: null,
-		mollie: mollieKey === null
-? null
-: { apiKey: mollieKey },
+		mollie: mollieKey !== null && mollieSecret !== null
+			? { apiKey: mollieKey, webhookSecret: mollieSecret }
+			: null,
 	};
+}
+
+export function readReconcileCron(env: Record<string, unknown>): string {
+	return readOptionalString(env, 'SUBSCRIPTIONS_RECONCILE_CRON')
+		?? DEFAULT_RECONCILE_CRON;
+}
+
+// A key without its webhook secret would sync nothing a webhook sends.
+function refuseLonePair(
+	[keyValue, keyVariable]: [string | null, string],
+	[secretValue, secretVariable]: [string | null, string],
+): void {
+	if (keyValue !== null && secretValue === null) {
+		throw new Error(
+			`${JSON.stringify(secretVariable)} is required when`
+			+ ` ${JSON.stringify(keyVariable)} is set`,
+		);
+	}
+
+	if (keyValue === null && secretValue !== null) {
+		throw new Error(
+			`${JSON.stringify(keyVariable)} is required when`
+			+ ` ${JSON.stringify(secretVariable)} is set`,
+		);
+	}
 }
 
 function readOptionalString(

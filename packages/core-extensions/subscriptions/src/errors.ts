@@ -20,6 +20,18 @@ export const WebhookRefusedError = createError<{
 	400,
 );
 
+/** A post nobody signed with the webhook secret, whatever its body says. */
+export const WebhookSignatureError = createError<{
+	provider: string;
+	reason: string;
+}>(
+	'SUBSCRIPTION_WEBHOOK_UNSIGNED',
+	({ provider, reason }) => {
+		return `Webhook from ${JSON.stringify(provider)} refused: ${reason}`;
+	},
+	401,
+);
+
 /** Never reaches the provider: `receiveWebhook` logs it and answers 200. */
 export const WebhookIgnoredError = createError<{
 	provider: string;
