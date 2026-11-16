@@ -1465,6 +1465,11 @@ describe('drainCacheEvents', () => {
 		// subsequent tick (the wedge this guards against).
 		expect(mockDb.batchInsert).toHaveBeenCalledTimes(1);
 		expect(mockRedis.call).toHaveBeenCalledWith('XDEL', STREAM, '1-0');
+
+		expect(mockLogger.warn).toHaveBeenCalledWith(
+			new Error('value too long'),
+			'[cache-stats] dropped 1 unpersistable events. "value too long"',
+		);
 	});
 
 	it('is single-flight: an overlapping call no-ops during a drain', async () => {
