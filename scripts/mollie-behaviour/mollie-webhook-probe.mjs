@@ -15,12 +15,20 @@
 //    created then canceled; each carries a classic webhookUrl <tunnel>/classic
 // 5. listens, then compares what reached which webhook with the baseline
 //
+// `--mode rotation-check` does none of that: it points an existing next-gen
+// webhook (made by hand in the dashboard, whose secret only creation returns)
+// at the tunnel, pings it, and says which of two secrets signed the delivery,
+// to time how long a rolled secret keeps signing. It skips, exiting 0, while
+// MOLLIE_ROTATION_SECRET_A or the webhook id is unset.
+//
 // One run at a time per Mollie account: a run's start deletes every probe
 // webhook and cancels every probe subscription, another run's included.
 //
 // Usage:
 //   node scripts/mollie-behaviour/mollie-webhook-probe.mjs \
 //     [--listen-seconds 180] [--output-directory <dir>] [--update-baseline]
+//   node scripts/mollie-behaviour/mollie-webhook-probe.mjs \
+//     --mode rotation-check --rotation-webhook-id <hook_...>
 //
 // Env:
 //   SUBSCRIPTIONS_MOLLIE_API_KEY  a test_ API key (payments, subscriptions)
@@ -29,8 +37,10 @@
 //   CLOUDFLARED_BIN               cloudflared binary (default: on PATH)
 //   PLAYWRIGHT_CORE_PATH          playwright-core's index.mjs (default: resolved)
 //   GITHUB_STEP_SUMMARY           when set, the result is written there too
+//   MOLLIE_ROTATION_SECRET_A      rotation-check: the secret before "Roll secret"
+//   MOLLIE_ROTATION_SECRET_B      rotation-check: the secret after it (optional)
 //
-// Never prints the API key, the access token nor the webhook secret, and
+// Never prints the API key, the access token nor a webhook secret, and
 // writes none of them to the output directory.
 
 /* eslint-disable no-console -- a CLI, stdout is its output */
@@ -54,8 +64,42 @@ const { values: cliOptions } = parseArgs({
 		'listen-seconds': { type: 'string', default: '180' },
 		'output-directory': { type: 'string', default: 'mollie-behaviour-output' },
 		'update-baseline': { type: 'boolean', default: false },
+		'mode': { type: 'string', default: 'behaviour' },
+		'rotation-webhook-id': { type: 'string', default: '' },
 	},
 });
+
+const probeMode = cliOptions['mode'];
+
+if (!['behaviour', 'rotation-check'].includes(probeMode)) {
+	throw new Error(
+		'--mode must be "behaviour" or "rotation-check", got'
+		+ ` ${JSON.stringify(probeMode)}`,
+	);
+}
+
+const rotationWebhookId = cliOptions['rotation-webhook-id'];
+const rotationSecretA = process.env.MOLLIE_ROTATION_SECRET_A ?? '';
+const rotationSecretB = process.env.MOLLIE_ROTATION_SECRET_B ?? '';
+
+if (
+	probeMode === 'rotation-check'
+	&& (rotationSecretA === '' || rotationWebhookId === '')
+) {
+	console.log(
+		'rotation: skipped, MOLLIE_ROTATION_SECRET_A or --rotation-webhook-id'
+		+ ' is unset',
+	);
+
+	process.exit(0);
+}
+
+if (probeMode === 'rotation-check' && !/^hook_\w+$/.test(rotationWebhookId)) {
+	throw new Error(
+		'--rotation-webhook-id must be a hook_ id, got'
+		+ ` ${JSON.stringify(rotationWebhookId)}`,
+	);
+}
 
 const listenSeconds = Number(cliOptions['listen-seconds']);
 
@@ -140,13 +184,14 @@ const checkoutStatuses = ['paid', 'failed', 'canceled', 'expired', 'open'];
 // in an event carry: the output directory is uploaded on a public repo.
 function redactSecrets(rawText) {
 	return String(rawText)
-		.replace(/(test|live|access|org|pfl)_[A-Za-z0-9]+/g, '$1_REDACTED');
+		.replace(/(test|live|access|org|pfl|whsec)_[A-Za-z0-9]+/g, '$1_REDACTED');
 }
 
 mkdirSync(outputDirectory, { recursive: true });
 const capturesPath = join(outputDirectory, 'captures.jsonl');
 const cloudflaredLogPath = join(outputDirectory, 'cloudflared.log');
 const capturedRequests = [];
+const signedDeliveries = [];
 let webhookSecret = null;
 
 async function callMollie(method, path, { body, bearerToken = apiKey } = {}) {
@@ -269,6 +314,12 @@ const receiverServer = createServer((incomingRequest, serverResponse) => {
 			serverResponse.writeHead(200).end('ok');
 			return;
 		}
+
+		signedDeliveries.push({
+			path: incomingRequest.url,
+			rawBodyBytes,
+			signatureLines,
+		});
 
 		const capturedRequest = {
 			receivedAt: new Date().toISOString(),
@@ -747,6 +798,96 @@ function writeStepSummary(observedBehaviour, behaviourDifferences) {
 	);
 
 	appendFileSync(summaryPath, `${redactSecrets(summaryLines.join('\n'))}\n`);
+}
+
+// One header line per secret check: a line matches when it is exactly the
+// `sha256=` + lowercase hex format the bundle accepts.
+function describeMatch(rawBodyBytes, signatureLines, rotationSecret) {
+	if (rotationSecret === '') {
+		return 'unset';
+	}
+
+	const expectedHex = createHmac('sha256', rotationSecret)
+		.update(rawBodyBytes)
+		.digest('hex');
+
+	const expectedBuffer = Buffer.from(`sha256=${expectedHex}`);
+
+	const isMatched = signatureLines.some((signatureLine) => {
+		const givenBuffer = Buffer.from(signatureLine);
+
+		return givenBuffer.length === expectedBuffer.length
+			&& timingSafeEqual(givenBuffer, expectedBuffer);
+	});
+
+	return isMatched
+		? 'yes'
+		: 'no';
+}
+
+async function checkRotation() {
+	const rotationUrl = `${tunnelUrl}/rotation`;
+
+	// Only the url changes: the webhook, its event types and secret stay jean's.
+	await callMollie('PATCH', `/webhooks/${rotationWebhookId}`, {
+		bearerToken: accessToken,
+		body: { url: rotationUrl, testmode: true },
+	});
+
+	console.log(`  ${rotationWebhookId} now posts to the tunnel`);
+
+	await callMollie('POST', `/webhooks/${rotationWebhookId}/ping`, {
+		bearerToken: accessToken,
+		body: { testmode: true },
+	});
+
+	console.log('  ping sent');
+
+	for (let waitedSeconds = 0; waitedSeconds < listenSeconds; waitedSeconds++) {
+		const rotationDelivery = signedDeliveries.find((signedDelivery) => {
+			return signedDelivery.path.startsWith('/rotation');
+		});
+
+		if (rotationDelivery !== undefined) {
+			const { rawBodyBytes, signatureLines } = rotationDelivery;
+
+			const [matchesA, matchesB] = [rotationSecretA, rotationSecretB]
+				.map((rotationSecret) => {
+					return describeMatch(rawBodyBytes, signatureLines, rotationSecret);
+				});
+
+			console.log(
+				`rotation: header lines=${signatureLines.length};`
+				+ ` matches A=${matchesA}; matches B=${matchesB}`,
+			);
+
+			return;
+		}
+
+		await waitSeconds(1);
+	}
+
+	console.log(`rotation: no delivery in ${listenSeconds} s`);
+	process.exitCode = 1;
+}
+
+if (probeMode === 'rotation-check') {
+	try {
+		console.log(`== tunnel ${tunnelUrl} -> 127.0.0.1:${receiverPort}`);
+		await waitForTunnel();
+		console.log('  tunnel reachable');
+		await checkRotation();
+	}
+	catch (rotationError) {
+		const errorText = redactSecrets(JSON.stringify(String(rotationError)));
+		console.log(`\nrotation check failed: ${errorText}`);
+		process.exitCode = 1;
+	}
+	finally {
+		await runCleanup();
+	}
+
+	process.exit();
 }
 
 try {
