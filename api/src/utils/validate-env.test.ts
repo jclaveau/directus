@@ -442,13 +442,13 @@ describe('validateSubscriptionsEnv', () => {
 	test.each([
 		[
 			{ SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1' },
-			'"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET" is required when'
+			'"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" is required when'
 			+ ' "SUBSCRIPTIONS_MOLLIE_API_KEY" is set.',
 		],
 		[
-			{ SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET: 'mollie_secret_1' },
+			{ SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: 'mollie_secret_1' },
 			'"SUBSCRIPTIONS_MOLLIE_API_KEY" is required when'
-			+ ' "SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET" is set.',
+			+ ' "SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" is set.',
 		],
 	])('exits on a lone mollie variable in %j', (subscriptionsEnv, errorMessage) => {
 		vi.mocked(useEnv).mockReturnValueOnce(subscriptionsEnv);
@@ -456,6 +456,42 @@ describe('validateSubscriptionsEnv', () => {
 		validateSubscriptionsEnv();
 
 		expect(mockLogger.error).toHaveBeenCalledWith(errorMessage);
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('passes with two Mollie webhook secrets', () => {
+		vi.mocked(useEnv).mockReturnValueOnce({
+			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1',
+			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: 'mollie_secret_new, mollie_secret_old',
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test.each([
+		['mollie_secret_new,,mollie_secret_old', 2],
+		['mollie_secret_new, ,mollie_secret_old', 2],
+		['mollie_secret_new,', 2],
+		[',mollie_secret_old', 1],
+	])('exits on Mollie webhook secrets %j, without logging them', (
+		webhookSecrets,
+		emptyPosition,
+	) => {
+		vi.mocked(useEnv).mockReturnValueOnce({
+			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1',
+			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: webhookSecrets,
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" lists an empty secret'
+			+ ` at position ${emptyPosition}.`,
+		);
+
 		expect(process.exit).toHaveBeenCalledWith(1);
 	});
 

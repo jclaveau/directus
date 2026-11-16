@@ -13,9 +13,11 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
   - A provider names the pending subscription it bills in its metadata
     `directus_subscription`, as the checkout wrote it, which a holding names
     too.
+  - The instance's `SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS` lists
+    `mollie_secret_blackbox`, then `mollie_secret_old`.
   - `Mollie sends these events` posts one next-gen event per row, signed with
-    the instance's `SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET`; `entity` is its
-    `entityId`.
+    `mollie_secret_blackbox`; `entity` is its `entityId`. `these Mollie events
+    get these responses` signs each event with the `secret` its cell names.
   - A `<name>` stands for one uuid, the same in the tables and the requests.
   - `received these writes` reads what the providers received since it last read.
 
@@ -614,6 +616,36 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
     And this user eventually holds no access:
       | user      |
       | <user_63> |
+
+  Scenario: an event signed with any secret listed is synced, so a secret can rotate
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 64 | mollie   | 64      | 1                 | active      |
+    And Mollie holds this subscription:
+      | column                | value      |
+      | payment               | tr_rotate  |
+      | customer              | cst_rotate |
+      | subscription          | sub_rotate |
+      | directus_subscription | 64         |
+      | status                | active     |
+      | paid_at               | 2099-01-01 |
+    When these Mollie events get these responses:
+      | event                          | response                                 |
+      | secret: mollie_secret_unlisted | code: 401                                |+
+      | type: payment.paid             | body:                                    |
+      | entityId: tr_rotate            |  errors:                                 |
+      |                                |  - message: >-                           |
+      |                                |      Webhook from "mollie" refused: the  |
+      |                                |      "x-mollie-signature" header does    |
+      |                                |      not sign the body                   |
+      |                                |    extensions:                           |
+      |                                |      code: SUBSCRIPTION_WEBHOOK_UNSIGNED |
+      | secret: mollie_secret_old      | code: 200                                |+
+      | type: payment.paid             |                                          |
+      | entityId: tr_rotate            |                                          |
+    Then this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_64> | <policy_64> | @scalabus/subscriptions |
 
   Scenario: a failed sync keeps its error until a webhook retries it
     Given these pending subscriptions, each with its own plan:
