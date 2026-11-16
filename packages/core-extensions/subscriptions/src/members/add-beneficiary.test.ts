@@ -82,7 +82,7 @@ describe('addBeneficiary', () => {
 	test('refuses a seat past the plan\'s beneficiaries_max', async () => {
 		await database('subscription_beneficiaries').insert([
 			{ subscription: 1, user: 'user-1', access: null },
-			{ subscription: 1, user: null, access: null },
+			{ subscription: 1, user: 'user-2', access: null },
 		]);
 
 		await expect(addBeneficiary(
@@ -95,5 +95,17 @@ describe('addBeneficiary', () => {
 
 		expect(await database('subscription_beneficiaries').count({ seats: '*' }))
 			.toEqual([{ seats: 2 }]);
+	});
+
+	test('frees the seat of a deleted user', async () => {
+		await database('subscription_beneficiaries').insert([
+			{ subscription: 1, user: 'user-1', access: null },
+			{ subscription: 1, user: null, access: 'access-2' },
+		]);
+
+		expect(await addBeneficiary(
+			database,
+			{ subscription: 1, user: 'user-3' },
+		)).toBe(3);
 	});
 });
