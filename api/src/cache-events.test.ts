@@ -1583,18 +1583,18 @@ describe('drainCacheEvents', () => {
 
 	it('rolls back a batch read before a truncate, still acking it', async () => {
 		streamBatch = [streamEntry('1-0', { kind: 'h', cacheKey: 'k', ts: '1' })];
-		let truncations = '4';
+		let storedTruncatedAt = '4';
 
 		mockRedis.get.mockImplementation(async (key: string) => {
 			return key === 'stats:truncated_at'
-				? truncations
+				? storedTruncatedAt
 				: null;
 		});
 
 		mockRedis.call.mockImplementation(async (command: string) => {
 			// A truncate lands between the read and the write.
 			if (command === 'XREADGROUP') {
-				truncations = '5';
+				storedTruncatedAt = '5';
 				return [[STREAM, streamBatch]];
 			}
 
