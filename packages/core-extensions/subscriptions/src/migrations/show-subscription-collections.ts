@@ -53,9 +53,18 @@ const PLAN_FIELDS = [
 	},
 ];
 
+const SUBSCRIPTION_FIELDS = ['plan', 'continues'].map((providerField) => {
+	return {
+		field: providerField,
+		readonly: true,
+		note: 'Follows its provider, set by the bundle alone',
+	};
+});
+
 /**
  * Shows the bundle's tables in the admin, under `subscriptions`, and gives the
- * plan form its dropdowns and an auto-generated id. A
+ * plan form its dropdowns and an auto-generated id; a subscription's plan and
+ * the one it continues show read-only, the provider sets them. A
  * `directus_collections` row makes a table part of `GET /schema/snapshot`, so a
  * `schema apply` of a snapshot made before this runs drops these tables too, not
  * only the sync queue (see create-parked-syncs-preset.ts, core guard #728).
@@ -99,12 +108,27 @@ export const showSubscriptionCollections = defineMigration(
 					};
 				}),
 			);
+
+			await knex('directus_fields').insert(
+				SUBSCRIPTION_FIELDS.map((subscriptionField) => {
+					return {
+						collection: PARENT_COLLECTION,
+						hidden: false,
+						...subscriptionField,
+					};
+				}),
+			);
 		},
 
 		async down(knex) {
 			await knex('directus_fields')
 				.where('collection', PLAN_COLLECTION)
 				.whereIn('field', PLAN_FIELDS.map(({ field }) => field))
+				.delete();
+
+			await knex('directus_fields')
+				.where('collection', PARENT_COLLECTION)
+				.whereIn('field', SUBSCRIPTION_FIELDS.map(({ field }) => field))
 				.delete();
 
 			await knex('directus_collections')
