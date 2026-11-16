@@ -114,6 +114,7 @@ let mockRedis: {
 	get: Mock;
 	set: Mock;
 	del: Mock;
+	incr: Mock;
 	scan: Mock;
 	unlink: Mock;
 	pipeline: Mock;
@@ -163,6 +164,7 @@ beforeEach(() => {
 		get: vi.fn().mockResolvedValue(null),
 		set: vi.fn(),
 		del: vi.fn(),
+		incr: vi.fn(),
 		scan: vi.fn().mockResolvedValue(['0', []]),
 		unlink: vi.fn(),
 		pipeline: vi.fn(),
@@ -1575,6 +1577,58 @@ describe('drainCacheEvents', () => {
 
 		expect(mockRedis.call).toHaveBeenCalledWith('XACK', STREAM, 'drain', '7-0');
 	});
+
+	it('rolls back a batch read before a truncate, still acking it', async () => {
+		streamBatch = [streamEntry('1-0', { kind: 'h', cacheKey: 'k', ts: '1' })];
+		let truncations = '4';
+
+		mockRedis.get.mockImplementation(async (key: string) => {
+			return key === 'scalabus:stats:truncations'
+				? truncations
+				: null;
+		});
+
+		mockRedis.call.mockImplementation(async (command: string) => {
+			// A truncate lands between the read and the write.
+			if (command === 'XREADGROUP') {
+				truncations = '5';
+				return [[STREAM, streamBatch]];
+			}
+
+			if (command === 'XAUTOCLAIM') {
+				return ['0-0', [], []];
+			}
+
+			return null;
+		});
+
+		mockDb.transaction = vi.fn((callback: any) => callback(mockDb));
+
+		await drainCacheEvents();
+
+		await expect(mockDb.transaction.mock.results[0].value)
+			.rejects.toBeInstanceOf(Error);
+
+		expect(mockLogger.info).toHaveBeenCalledWith(
+			'[cache-stats] dropped 1 events read before a truncate',
+		);
+
+		expect(mockLogger.warn).not.toHaveBeenCalled();
+		expect(mockRedis.call).toHaveBeenCalledWith('XACK', STREAM, 'drain', '1-0');
+	});
+
+	it('writes a batch no truncate followed', async () => {
+		streamBatch = [streamEntry('1-0', { kind: 'h', cacheKey: 'k', ts: '1' })];
+		mockRedis.get.mockResolvedValue('4');
+		mockDb.transaction = vi.fn((callback: any) => callback(mockDb));
+
+		await drainCacheEvents();
+
+		await expect(mockDb.transaction.mock.results[0].value)
+			.resolves.toBeUndefined();
+
+		expect(mockLogger.info).not.toHaveBeenCalled();
+	});
 });
 
 describe('drainCacheEventsBeforeRead', () => {
@@ -2039,6 +2093,19 @@ describe('truncateCacheEvents', () => {
 		expect(mockRedis.unlink).toHaveBeenCalledWith(
 			'scalabus:stats:anom:missing_scope:h1',
 		);
+	});
+
+	it('drops the stream, then moves the count, before emptying a table', async () => {
+		await truncateCacheEvents();
+
+		expect(mockRedis.del).toHaveBeenCalledWith('scalabus:stats:events');
+		expect(mockRedis.incr).toHaveBeenCalledWith('scalabus:stats:truncations');
+
+		expect(mockRedis.del.mock.invocationCallOrder[0])
+			.toBeLessThan(mockRedis.incr.mock.invocationCallOrder[0]!);
+
+		expect(mockRedis.incr.mock.invocationCallOrder[0])
+			.toBeLessThan(builder.truncate.mock.invocationCallOrder[0]);
 	});
 
 	it('skips the Redis reset when Redis is not configured', async () => {

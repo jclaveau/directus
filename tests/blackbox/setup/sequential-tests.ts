@@ -99,6 +99,10 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// in `common/config.ts`, and both announce on a bus of their own.
 			'/tests/db/app/cache-settings.test.ts',
 			'/tests/db/app/cache-settings-switch.test.ts',
+			// Holds a stats table locked and truncates the stats tables, which every
+			// namespace shares: a sibling's drain would wait on the lock, and its rows
+			// would be emptied under it.
+			'/tests/db/app/cache-stats-truncate-drain.test.ts',
 			// Adds an o2m alias to `directus_users` and drops it after: an instance
 			// on its own namespace never hears that schema change, and 500s reading
 			// a user through the dropped table.
