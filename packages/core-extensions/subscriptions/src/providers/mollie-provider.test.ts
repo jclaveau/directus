@@ -12,7 +12,7 @@ import { createMollieProvider } from './mollie-provider.js';
 
 describe('verifyWebhook', () => {
 	test('queues the payment of a signed event without calling Mollie', async () => {
-		await expect(createMollieProvider({} as MollieClient, 'mollie_secret_1')
+		await expect(createMollieProvider({} as MollieClient, ['mollie_secret_1'])
 			.verifyWebhook(
 				Buffer.from('{"type":"payment.paid","entityId":"tr_1"}'),
 				{
@@ -23,8 +23,41 @@ describe('verifyWebhook', () => {
 			.resolves.toBe('tr_1');
 	});
 
+	test('queues the payment of an event signed with an older secret', async () => {
+		await expect(createMollieProvider(
+			{} as MollieClient,
+			['mollie_secret_new', 'mollie_secret_1'],
+		)
+			.verifyWebhook(
+				Buffer.from('{"type":"payment.paid","entityId":"tr_1"}'),
+				{
+					'x-mollie-signature': 'sha256='
+						+ '11da12aa76cb8250b01791f1bbb74df86020069415b315ef4a2a3ecec9a47bc3',
+				},
+			))
+			.resolves.toBe('tr_1');
+	});
+
+	test('refuses an event signed with no secret listed', async () => {
+		await expect(createMollieProvider(
+			{} as MollieClient,
+			['mollie_secret_new', 'mollie_secret_old'],
+		)
+			.verifyWebhook(
+				Buffer.from('{"type":"payment.paid","entityId":"tr_1"}'),
+				{
+					'x-mollie-signature': 'sha256='
+						+ '11da12aa76cb8250b01791f1bbb74df86020069415b315ef4a2a3ecec9a47bc3',
+				},
+			))
+			.rejects.toThrow(new WebhookSignatureError({
+				provider: 'mollie',
+				reason: 'the "x-mollie-signature" header does not sign the body',
+			}));
+	});
+
 	test('ignores the empty body of a webhook check', async () => {
-		await expect(createMollieProvider({} as MollieClient, 'mollie_secret_1')
+		await expect(createMollieProvider({} as MollieClient, ['mollie_secret_1'])
 			.verifyWebhook(Buffer.from(''), {}))
 			.rejects.toThrow(new WebhookIgnoredError({
 				provider: 'mollie',
@@ -33,7 +66,7 @@ describe('verifyWebhook', () => {
 	});
 
 	test('refuses a classic webhook, which Mollie does not sign', async () => {
-		await expect(createMollieProvider({} as MollieClient, 'mollie_secret_1')
+		await expect(createMollieProvider({} as MollieClient, ['mollie_secret_1'])
 			.verifyWebhook(Buffer.from('id=tr_1'), {}))
 			.rejects.toThrow(new WebhookSignatureError({
 				provider: 'mollie',
@@ -53,7 +86,7 @@ describe('verifyWebhook', () => {
 			+ ', sha256='
 			+ '11da12aa76cb8250b01791f1bbb74df86020069415b315ef4a2a3ecec9a47bc3'],
 	])('refuses a signature made with %s', async (_signatureCase, mollieSignature) => {
-		await expect(createMollieProvider({} as MollieClient, 'mollie_secret_1')
+		await expect(createMollieProvider({} as MollieClient, ['mollie_secret_1'])
 			.verifyWebhook(
 				Buffer.from('{"type":"payment.paid","entityId":"tr_1"}'),
 				{ 'x-mollie-signature': mollieSignature },
@@ -80,7 +113,7 @@ describe('verifyWebhook', () => {
 		eventSignature,
 		ignoredReason,
 	) => {
-		await expect(createMollieProvider({} as MollieClient, 'mollie_secret_1')
+		await expect(createMollieProvider({} as MollieClient, ['mollie_secret_1'])
 			.verifyWebhook(
 				Buffer.from(eventBody),
 				{ 'x-mollie-signature': `sha256=${eventSignature}` },
@@ -117,7 +150,7 @@ describe('verifyWebhook', () => {
 		eventSignature,
 		refusedReason,
 	) => {
-		await expect(createMollieProvider({} as MollieClient, 'mollie_secret_1')
+		await expect(createMollieProvider({} as MollieClient, ['mollie_secret_1'])
 			.verifyWebhook(
 				Buffer.from(eventBody),
 				{ 'x-mollie-signature': `sha256=${eventSignature}` },
@@ -154,7 +187,7 @@ describe('fetchSubscription', () => {
 
 		await expect(createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.fetchSubscription('tr_1')).resolves.toEqual({
 			subscriptionId: 'sub_1',
@@ -333,7 +366,7 @@ describe('fetchSubscription', () => {
 
 		await expect(createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.fetchSubscription('cst_1/sub_1')).resolves.toEqual({
 			subscriptionId: 'sub_1',
@@ -381,7 +414,7 @@ describe('fetchSubscription', () => {
 
 		await expect(createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.fetchSubscription('cst_1/sub_1')).resolves.toEqual({
 			subscriptionId: 'sub_1',
@@ -425,7 +458,7 @@ describe('fetchSubscription', () => {
 
 		await expect(createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.fetchSubscription('cst_1/sub_1')).resolves.toEqual({
 			subscriptionId: 'sub_1',
@@ -468,7 +501,7 @@ describe('fetchSubscription', () => {
 
 		await expect(createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.fetchSubscription('cst_1/sub_1')).resolves.toEqual({
 			subscriptionId: 'sub_1',
@@ -543,7 +576,7 @@ describe('fetchSubscription', () => {
 
 		await expect(createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.fetchSubscription('cst_1/sub_1')).resolves.toEqual({
 			subscriptionId: 'sub_1',
@@ -584,7 +617,7 @@ describe('fetchSubscription', () => {
 
 		await expect(createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.fetchSubscription('cst_1/sub_1')).rejects.toThrow(new Error(
 			'Mollie interval "1 fortnight" is not "<count> months|weeks|days"',
@@ -608,7 +641,7 @@ describe('fetchSubscription', () => {
 
 		await expect(createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.fetchSubscription('cst_1/sub_1')).resolves.toEqual({
 			subscriptionId: 'sub_1',
@@ -648,7 +681,7 @@ describe('fetchSubscription', () => {
 
 		await expect(createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.fetchSubscription('cst_1/sub_1')).resolves.toMatchObject({
 			status: 'suspended',
@@ -673,7 +706,7 @@ describe('fetchSubscription', () => {
 
 		await expect(createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.fetchSubscription('cst_1/sub_2')).resolves.toEqual({
 			subscriptionId: 'sub_2',
@@ -697,7 +730,7 @@ describe('fetchSubscription', () => {
 		['/sub_1', 'Mollie resource id "/sub_1" is not'],
 		['cst_1/sub_1/extra', 'Mollie resource id "cst_1/sub_1/extra" is not'],
 	])('refuses the resource id %j', async (resourceId, messageStart) => {
-		await expect(createMollieProvider({} as MollieClient, 'mollie_secret_1')
+		await expect(createMollieProvider({} as MollieClient, ['mollie_secret_1'])
 			.fetchSubscription(resourceId)).rejects.toThrow(new Error(
 			`${messageStart} "<customer id>/<subscription id>"`,
 		));
@@ -712,7 +745,7 @@ describe('cancelAtPeriodEnd', () => {
 
 		await createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.cancelAtPeriodEnd('cst_1/sub_1');
 
@@ -755,7 +788,7 @@ describe('resumeCancel', () => {
 
 		await expect(createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.resumeCancel({
 				customerId: 'cst_1',
@@ -809,7 +842,7 @@ describe('resumeCancel', () => {
 
 		await createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.resumeCancel({
 				customerId: 'cst_1',
@@ -847,7 +880,7 @@ describe('resumeCancel', () => {
 
 		await expect(createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.resumeCancel({
 				customerId: 'cst_1',
@@ -901,7 +934,7 @@ describe('resumeCancel', () => {
 
 		await expect(createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.resumeCancel({
 				customerId: 'cst_1',
@@ -945,7 +978,7 @@ describe('resumeCancel', () => {
 
 		await expect(createMollieProvider(
 			mollieClient as unknown as MollieClient,
-			'mollie_secret_1',
+			['mollie_secret_1'],
 		)
 			.resumeCancel({
 				customerId: 'cst_1',
@@ -962,7 +995,7 @@ describe('resumeCancel', () => {
 
 describe('composeResourceId', () => {
 	test('keys Mollie resources on the customer and subscription ids', () => {
-		expect(createMollieProvider({} as MollieClient, 'mollie_secret_1')
+		expect(createMollieProvider({} as MollieClient, ['mollie_secret_1'])
 			.composeResourceId({ subscriptionId: 'sub_1', customerId: 'cst_1' }))
 			.toBe('cst_1/sub_1');
 	});

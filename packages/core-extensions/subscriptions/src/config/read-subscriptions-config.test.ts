@@ -14,12 +14,44 @@ describe('readSubscriptionsConfig', () => {
 			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_test_1',
 			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: 'whsec_1',
 			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1',
-			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET: 'mollie_secret_1',
+			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: 'mollie_secret_1',
 		}))
 			.toEqual({
 				stripe: { secretKey: 'sk_test_1', webhookSecret: 'whsec_1' },
-				mollie: { apiKey: 'test_1', webhookSecret: 'mollie_secret_1' },
+				mollie: { apiKey: 'test_1', webhookSecrets: ['mollie_secret_1'] },
 			});
+	});
+
+	test('reads every Mollie webhook secret listed, trimmed', () => {
+		expect(readSubscriptionsConfig({
+			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1',
+			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: 'mollie_secret_new, mollie_secret_old',
+		}))
+			.toEqual({
+				stripe: null,
+				mollie: {
+					apiKey: 'test_1',
+					webhookSecrets: ['mollie_secret_new', 'mollie_secret_old'],
+				},
+			});
+	});
+
+	test.each([
+		['mollie_secret_new,,mollie_secret_old', 2],
+		['mollie_secret_new, ,mollie_secret_old', 2],
+		['mollie_secret_new,', 2],
+		[',mollie_secret_old', 1],
+	])('refuses the Mollie webhook secrets %j', (webhookSecrets, emptyPosition) => {
+		expect(() => {
+			readSubscriptionsConfig({
+				SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1',
+				SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: webhookSecrets,
+			});
+		})
+			.toThrow(new Error(
+				'"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" lists an empty secret'
+				+ ` at position ${emptyPosition}`,
+			));
 	});
 
 	test('refuses a Mollie key without its webhook secret', () => {
@@ -27,7 +59,7 @@ describe('readSubscriptionsConfig', () => {
 			readSubscriptionsConfig({ SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1' });
 		})
 			.toThrow(new Error(
-				'"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET" is required when'
+				'"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" is required when'
 				+ ' "SUBSCRIPTIONS_MOLLIE_API_KEY" is set',
 			));
 	});
@@ -35,12 +67,12 @@ describe('readSubscriptionsConfig', () => {
 	test('refuses a Mollie webhook secret without its key', () => {
 		expect(() => {
 			readSubscriptionsConfig({
-				SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET: 'mollie_secret_1',
+				SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: 'mollie_secret_1',
 			});
 		})
 			.toThrow(new Error(
 				'"SUBSCRIPTIONS_MOLLIE_API_KEY" is required when'
-				+ ' "SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET" is set',
+				+ ' "SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" is set',
 			));
 	});
 

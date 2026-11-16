@@ -1,9 +1,11 @@
 import config, { paths, type Env } from '@common/config';
 import {
+	cellOfKnownKeys,
 	defineFeature,
 	loadFeature,
 	messageOfDocString,
 	parseGherkinTable,
+	responseCellOf,
 	type StepCallback,
 } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
@@ -14,6 +16,7 @@ import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
 import { writeExtensionPackage } from '@utils/write-extension-package';
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import knex, { type Knex } from 'knex';
+import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
 import { createHmac, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -57,6 +60,9 @@ const BUNDLE_DIRECTORY = join(
 const STRIPE_WEBHOOK_SECRET = 'whsec_blackbox';
 
 const MOLLIE_WEBHOOK_SECRET = 'mollie_secret_blackbox';
+
+// Listed after the current one, as while a rotated secret still signs.
+const MOLLIE_OLD_WEBHOOK_SECRET = 'mollie_secret_old';
 
 // The sync runs every 10 seconds, after a boot that may still be settling.
 const SYNC_POLL = { timeout: 45_000, interval: 500 };
@@ -135,7 +141,8 @@ describe.each(vendors)('%s', (vendor) => {
 			PACKAGE_FILE_LOCATION: packageDirectory,
 			LOG_STYLE: 'raw',
 			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_blackbox',
-			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET: MOLLIE_WEBHOOK_SECRET,
+			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS:
+				`${MOLLIE_WEBHOOK_SECRET},${MOLLIE_OLD_WEBHOOK_SECRET}`,
 			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_test_blackbox',
 			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: STRIPE_WEBHOOK_SECRET,
 			BLACKBOX_PROVIDERS_PORT: String(fakeProviders.listeningPort),
@@ -391,6 +398,61 @@ describe.each(vendors)('%s', (vendor) => {
 			);
 
 			expect(mollieResponse.status).toBe(200);
+		}
+	}
+
+	// The event cell names the secret signing it, listed by the instance or not.
+	async function sendSignedMollieEvents(
+		rowsTable: { event: string; response: string }[],
+	) {
+		for (const { event: eventText, response: responseText } of rowsTable) {
+			const { secret: signingSecret, ...eventFields } = cellOfKnownKeys<{
+				secret: string;
+				type: string;
+				entityId: string;
+			}>(
+				'request',
+				loadYaml(eventText),
+				['secret', 'type', 'entityId'],
+				'subscriptions-bundle.test.ts',
+			);
+
+			const expectedResponse = responseCellOf<object>(
+				loadYaml(responseText),
+				['code', 'body'],
+				'subscriptions-bundle.test.ts',
+			);
+
+			const eventBody = JSON.stringify({
+				resource: 'event',
+				id: 'event_blackbox',
+				...eventFields,
+			});
+
+			const eventSignature = createHmac('sha256', signingSecret)
+				.update(eventBody)
+				.digest('hex');
+
+			const mollieResponse = await fetch(
+				`${vendorEnv['PUBLIC_URL']}/subscriptions/webhooks/mollie`,
+				{
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'X-Mollie-Signature': `sha256=${eventSignature}`,
+					},
+					body: eventBody,
+				},
+			);
+
+			const receivedText = await mollieResponse.text();
+
+			expect({
+				code: mollieResponse.status,
+				body: receivedText === ''
+					? undefined
+					: JSON.parse(receivedText),
+			}).toMatchObject(expectedResponse);
 		}
 	}
 
@@ -658,6 +720,7 @@ describe.each(vendors)('%s', (vendor) => {
 		[/^these requests get these responses:$/, sendRequestRows],
 		[/^Stripe sends these events:$/, sendStripeEvents],
 		[/^Mollie sends these events:$/, sendMollieEvents],
+		[/^these Mollie events get these responses:$/, sendSignedMollieEvents],
 		[/^this access is eventually stored:$/, expectStoredAccess],
 		[/^this user eventually holds no access:$/, expectNoAccess],
 		[/^subscription (\w+) is eventually stored:$/, expectStoredSubscription],
