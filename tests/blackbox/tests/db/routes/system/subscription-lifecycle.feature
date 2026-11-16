@@ -11,8 +11,8 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
     the `id` also writes that user, with the email `lifecycle-21@example.com` and
     the token `lifecycle-21-token`.
   - A provider names the pending subscription it bills in its metadata
-    `directus_subscription`, as the checkout wrote it: `directus_id` in a
-    holding.
+    `directus_subscription`, as the checkout wrote it, which a holding names
+    too.
   - A `<name>` stands for one uuid, the same in the tables and the requests.
   - `received these writes` reads what the providers received since it last read.
 
@@ -22,8 +22,13 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | 21 | mollie   | 21      | 1                 | active      |
       | 22 | mollie   | 22      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment   | customer   | subscription | directus_id | status | paid_at    |
-      | tr_cancel | cst_cancel | sub_cancel   | 21          | active | 2099-01-01 |
+      | column                | value      |
+      | payment               | tr_cancel  |
+      | customer              | cst_cancel |
+      | subscription          | sub_cancel |
+      | directus_subscription | 21         |
+      | status                | active     |
+      | paid_at               | 2099-01-01 |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -82,11 +87,18 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | id | provider | manager | beneficiaries_max | plan_status |
       | 24 | mollie   | 24      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment   | customer   | subscription | directus_id | status   | paid_at    |
-      | tr_resume | cst_resume | sub_resume   | 24          | canceled | 2099-01-01 |
+      | column                | value      |
+      | payment               | tr_resume  |
+      | customer              | cst_resume |
+      | subscription          | sub_resume |
+      | directus_subscription | 24         |
+      | status                | canceled   |
+      | paid_at               | 2099-01-01 |
     And Mollie holds this mandate:
-      | mandate    | customer   | status |
-      | mdt_resume | cst_resume | valid  |
+      | column   | value      |
+      | mandate  | mdt_resume |
+      | customer | cst_resume |
+      | status   | valid      |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -139,11 +151,18 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | id | provider | manager | beneficiaries_max | plan_status |
       | 25 | mollie   | 25      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment  | customer  | subscription | directus_id | status   | paid_at    |
-      | tr_twice | cst_twice | sub_twice    | 25          | canceled | 2099-01-01 |
+      | column                | value      |
+      | payment               | tr_twice   |
+      | customer              | cst_twice  |
+      | subscription          | sub_twice  |
+      | directus_subscription | 25         |
+      | status                | canceled   |
+      | paid_at               | 2099-01-01 |
     And Mollie holds this mandate:
-      | mandate   | customer  | status |
-      | mdt_twice | cst_twice | valid  |
+      | column   | value     |
+      | mandate  | mdt_twice |
+      | customer | cst_twice |
+      | status   | valid     |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -204,11 +223,18 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | 26 | mollie   | 26      | 1                 | active      |
       | 27 | mollie   | 27      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment  | customer  | subscription | directus_id | status   | paid_at    |
-      | tr_split | cst_split | sub_split    | 26          | canceled | 2099-01-01 |
+      | column                | value      |
+      | payment               | tr_split   |
+      | customer              | cst_split  |
+      | subscription          | sub_split  |
+      | directus_subscription | 26         |
+      | status                | canceled   |
+      | paid_at               | 2099-01-01 |
     And Mollie holds this mandate:
-      | mandate   | customer  | status |
-      | mdt_split | cst_split | valid  |
+      | column   | value     |
+      | mandate  | mdt_split |
+      | customer | cst_split |
+      | status   | valid     |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -264,11 +290,19 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | 23 | mollie   | 23      | 1                 | active      |
       | 28 | mollie   | 23      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment | customer   | subscription | directus_id | status |
-      | tr_one  | cst_double | sub_one      | 23          | active |
+      | column                | value      |
+      | payment               | tr_one     |
+      | customer              | cst_double |
+      | subscription          | sub_one    |
+      | directus_subscription | 23         |
+      | status                | active     |
     And Mollie holds this subscription:
-      | payment | customer   | subscription | directus_id | status |
-      | tr_two  | cst_double | sub_two      | 28          | active |
+      | column                | value      |
+      | payment               | tr_two     |
+      | customer              | cst_double |
+      | subscription          | sub_two    |
+      | directus_subscription | 28         |
+      | status                | active     |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -312,8 +346,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | id | provider | manager | beneficiaries_max | plan_status |
       | 31 | mollie   | 31      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment  | customer  | subscription | directus_id | status |
-      | tr_ended | cst_ended | sub_ended    | 31          | active |
+      | column                | value     |
+      | payment               | tr_ended  |
+      | customer              | cst_ended |
+      | subscription          | sub_ended |
+      | directus_subscription | 31        |
+      | status                | active    |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -324,8 +362,13 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | user      | policy      | managed_by              |
       | <user_31> | <policy_31> | @scalabus/subscriptions |
     When Mollie holds this subscription:
-      | payment  | customer  | subscription | directus_id | status   | paid_at    |
-      | tr_ended | cst_ended | sub_ended    | 31          | canceled | 2020-01-01 |
+      | column                | value      |
+      | payment               | tr_ended   |
+      | customer              | cst_ended  |
+      | subscription          | sub_ended  |
+      | directus_subscription | 31         |
+      | status                | canceled   |
+      | paid_at               | 2020-01-01 |
     And these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -347,8 +390,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | id | provider | manager | beneficiaries_max | plan_status |
       | 33 | mollie   | 33      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment    | customer    | subscription | directus_id | status    |
-      | tr_resumed | cst_resumed | sub_resumed  | 33          | suspended |
+      | column                | value       |
+      | payment               | tr_resumed  |
+      | customer              | cst_resumed |
+      | subscription          | sub_resumed |
+      | directus_subscription | 33          |
+      | status                | suspended   |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -362,8 +409,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | user      | access |
       | <user_33> |        |
     When Mollie holds this subscription:
-      | payment    | customer    | subscription | directus_id | status |
-      | tr_resumed | cst_resumed | sub_resumed  | 33          | active |
+      | column                | value       |
+      | payment               | tr_resumed  |
+      | customer              | cst_resumed |
+      | subscription          | sub_resumed |
+      | directus_subscription | 33          |
+      | status                | active      |
     And these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -380,8 +431,13 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | 41 | mollie   | 41      | 1                 | active      |
       | 42 | mollie   | 42      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment     | customer     | subscription | directus_id | status | paid_at    |
-      | tr_archived | cst_archived | sub_archived | 41          | active | 2099-01-01 |
+      | column                | value        |
+      | payment               | tr_archived  |
+      | customer              | cst_archived |
+      | subscription          | sub_archived |
+      | directus_subscription | 41           |
+      | status                | active       |
+      | paid_at               | 2099-01-01   |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -458,8 +514,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | id | provider | manager | beneficiaries_max | plan_status |
       | 51 | mollie   | 51      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment    | customer    | subscription | directus_id | status |
-      | tr_deleted | cst_deleted | sub_deleted  | 51          | active |
+      | column                | value       |
+      | payment               | tr_deleted  |
+      | customer              | cst_deleted |
+      | subscription          | sub_deleted |
+      | directus_subscription | 51          |
+      | status                | active      |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -496,8 +556,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | id | provider | manager | beneficiaries_max | plan_status |
       | 61 | mollie   | 61      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment | customer | subscription | directus_id | status |
-      | tr_gone | cst_gone | sub_gone     | 61          | active |
+      | column                | value    |
+      | payment               | tr_gone  |
+      | customer              | cst_gone |
+      | subscription          | sub_gone |
+      | directus_subscription | 61       |
+      | status                | active   |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -528,11 +592,19 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | id | provider | manager | beneficiaries_max | plan_status |
       | 63 | mollie   | 63      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment  | customer  | subscription | directus_id | status |
-      | tr_first | cst_first |              | 63          | active |
+      | column                | value     |
+      | payment               | tr_first  |
+      | customer              | cst_first |
+      | subscription          |           |
+      | directus_subscription | 63        |
+      | status                | active    |
     And Mollie holds this subscription:
-      | payment  | customer  | subscription | directus_id | status |
-      | tr_stray | cst_stray | sub_stray    |             | active |
+      | column                | value     |
+      | payment               | tr_stray  |
+      | customer              | cst_stray |
+      | subscription          | sub_stray |
+      | directus_subscription |           |
+      | status                | active    |
     When these requests get these responses:
       | request                              | response                                 |
       | as: anonymous                        | code: 400                                |+
@@ -585,8 +657,13 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | id | provider | manager | beneficiaries_max | plan_status |
       | 71 | mollie   | 71      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment   | customer | subscription | directus_id | status | resumes  |
-      | tr_late_2 | cst_late | sub_late_2   | 71          | active | sub_late |
+      | column                | value      |
+      | payment               | tr_late_2  |
+      | customer              | cst_late   |
+      | subscription          | sub_late_2 |
+      | directus_subscription | 71         |
+      | status                | active     |
+      | resumes               | sub_late   |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -597,8 +674,13 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | resource_id | last_error                                                        |
       | tr_late_2   | Subscription "sub_late_2" resumes "sub_late", which is not stored |
     When Mollie holds this subscription:
-      | payment | customer | subscription | directus_id | status   | paid_at    |
-      | tr_late | cst_late | sub_late     | 71          | canceled | 2099-01-01 |
+      | column                | value      |
+      | payment               | tr_late    |
+      | customer              | cst_late   |
+      | subscription          | sub_late   |
+      | directus_subscription | 71         |
+      | status                | canceled   |
+      | paid_at               | 2099-01-01 |
     And these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -623,8 +705,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | provider | resource_id | pending | attempts | next_attempt_at | last_error  |
       | mollie   | tr_parked   | false   | 48       | 2020-01-01      | Unreachable |
     And Mollie holds this subscription:
-      | payment   | customer   | subscription | directus_id | status |
-      | tr_parked | cst_parked | sub_parked   | 81          | active |
+      | column                | value      |
+      | payment               | tr_parked  |
+      | customer              | cst_parked |
+      | subscription          | sub_parked |
+      | directus_subscription | 81         |
+      | status                | active     |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -641,8 +727,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | id | provider | manager | beneficiaries_max | plan_status          |
       | 83 | mollie   | 83      | 1                 | subscriptions-locked |
     And Mollie holds this subscription:
-      | payment   | customer   | subscription | directus_id | status |
-      | tr_locked | cst_locked | sub_locked   | 83          | active |
+      | column                | value      |
+      | payment               | tr_locked  |
+      | customer              | cst_locked |
+      | subscription          | sub_locked |
+      | directus_subscription | 83         |
+      | status                | active     |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -658,8 +748,13 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | id | provider | manager | beneficiaries_max | plan_status |
       | 85 | mollie   | 85      | 1                 | active      |
     And Mollie holds this subscription:
-      | payment   | customer   | subscription | directus_id | status | amount  |
-      | tr_billed | cst_billed | sub_billed   | 85          | active | "20.00" |
+      | column                | value      |
+      | payment               | tr_billed  |
+      | customer              | cst_billed |
+      | subscription          | sub_billed |
+      | directus_subscription | 85         |
+      | status                | active     |
+      | amount                | "20.00"    |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -677,7 +772,7 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       {"amountCents":1000,"currency":"EUR","interval":{"months":1,"days":0}}
       """
 
-  Scenario: a manager seats beneficiaries up to the plan's maximum
+  Scenario: a manager seats beneficiaries up to the plan's maximum, freed by a delete
     Given these pending subscriptions, each with its own plan:
       | id | provider | manager | beneficiaries_max | plan_status |
       | 86 | mollie   | 86      | 2                 | active      |
@@ -686,8 +781,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | <friend_86> | lifecycle-friend-86@example.com | lifecycle-friend-86-token |
       | <other_86>  | lifecycle-other-86@example.com  | lifecycle-other-86-token  |
     And Mollie holds this subscription:
-      | payment  | customer  | subscription | directus_id | status |
-      | tr_seats | cst_seats | sub_seats    | 86          | active |
+      | column                | value     |
+      | payment               | tr_seats  |
+      | customer              | cst_seats |
+      | subscription          | sub_seats |
+      | directus_subscription | 86        |
+      | status                | active    |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -744,14 +843,32 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | user        |
       | <user_86>   |
       | <friend_86> |
+    When these requests get these responses:
+      | request                            | response  |
+      | method: DELETE                     | code: 204 |+
+      | path: /users/<friend_86>           |           |
+      | as: lifecycle-86-token             | code: 200 |+
+      | method: POST                       |           |
+      | path: /subscriptions/beneficiaries |           |
+      | payload:                           |           |
+      |   subscription: 86                 |           |
+      |   user: <other_86>                 |           |
+    Then the beneficiaries of subscription sub_seats are eventually:
+      | user       |
+      | <user_86>  |
+      |            |
+      | <other_86> |
 
   Scenario: Stripe signs its webhooks, cancels at period end, and can lose a subscription
     Given these pending subscriptions, each with its own plan:
       | id | provider | manager | beneficiaries_max | plan_status |
       | 91 | stripe   | 91      | 1                 | active      |
     And Stripe holds this subscription:
-      | subscription | customer   | directus_id | status |
-      | sub_stripe   | cus_stripe | 91          | active |
+      | column                | value      |
+      | subscription          | sub_stripe |
+      | customer              | cus_stripe |
+      | directus_subscription | 91         |
+      | status                | active     |
     When these requests get these responses:
       | request                              | response                                 |
       | as: anonymous                        | code: 400                                |+
@@ -818,8 +935,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | id | provider | manager | beneficiaries_max | plan_status |
       | 92 | stripe   | 92      | 1                 | active      |
     And Stripe holds this subscription:
-      | subscription | customer | directus_id | status | cancel_at_period_end |
-      | sub_now      | cus_now  | 92          | active | true                 |
+      | column                | value   |
+      | subscription          | sub_now |
+      | customer              | cus_now |
+      | directus_subscription | 92      |
+      | status                | active  |
+      | cancel_at_period_end  | true    |
     When Stripe sends these events:
       | type                          | subscription |
       | customer.subscription.updated | sub_now      |
@@ -827,8 +948,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | user      | policy      | managed_by              |
       | <user_92> | <policy_92> | @scalabus/subscriptions |
     When Stripe holds this subscription:
-      | subscription | customer | directus_id | status   | cancel_at_period_end |
-      | sub_now      | cus_now  | 92          | canceled | true                 |
+      | column                | value    |
+      | subscription          | sub_now  |
+      | customer              | cus_now  |
+      | directus_subscription | 92       |
+      | status                | canceled |
+      | cancel_at_period_end  | true     |
     And Stripe sends these events:
       | type                          | subscription |
       | customer.subscription.deleted | sub_now      |

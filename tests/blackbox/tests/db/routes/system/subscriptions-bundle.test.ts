@@ -226,40 +226,38 @@ describe.each(vendors)('%s', (vendor) => {
 	}
 
 	// A table too wide for a row per line.
+	type ColumnValueRow = { column: string; value: string };
+
+	function readColumnRow(columnsTable: ColumnValueRow[]) {
+		return Object.fromEntries(columnsTable.map(({ column, value }) => {
+			return [column, value];
+		}));
+	}
+
 	function seedColumnRow(
 		tableName: string,
-		columnsTable: { column: string; value: string }[],
+		columnsTable: ColumnValueRow[],
 	) {
-		return seedRows(tableName, [
-			Object.fromEntries(columnsTable.map(({ column, value }) => {
-				return [column, value];
-			})),
-		]);
+		return seedRows(tableName, [readColumnRow(columnsTable)]);
 	}
 
 	// Everything held stays held, so an hourly reconcile falling in a later
 	// scenario finds its answer.
-	function holdSubscription(rowsTable: Record<string, string>[]) {
-		expect(rowsTable).toHaveLength(1);
-
+	function holdSubscription(columnsTable: ColumnValueRow[]) {
 		fakeProviders.holdAtMollie(
-			parseGherkinTable<MollieHolding>(rowsTable)[0]!,
+			parseGherkinTable<MollieHolding>([readColumnRow(columnsTable)])[0]!,
 		);
 	}
 
-	function holdMandate(rowsTable: Record<string, string>[]) {
-		expect(rowsTable).toHaveLength(1);
-
+	function holdMandate(columnsTable: ColumnValueRow[]) {
 		fakeProviders.holdMandateAtMollie(
-			parseGherkinTable<MollieMandate>(rowsTable)[0]!,
+			parseGherkinTable<MollieMandate>([readColumnRow(columnsTable)])[0]!,
 		);
 	}
 
-	function holdStripeSubscription(rowsTable: Record<string, string>[]) {
-		expect(rowsTable).toHaveLength(1);
-
+	function holdStripeSubscription(columnsTable: ColumnValueRow[]) {
 		fakeProviders.holdAtStripe(
-			parseGherkinTable<StripeHolding>(rowsTable)[0]!,
+			parseGherkinTable<StripeHolding>([readColumnRow(columnsTable)])[0]!,
 		);
 	}
 
