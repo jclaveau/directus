@@ -1,6 +1,6 @@
 export type SubscriptionsConfig = {
 	stripe: { secretKey: string; webhookSecret: string } | null;
-	mollie: { apiKey: string; webhookSecret: string } | null;
+	mollie: { apiKey: string; webhookSecrets: string[] } | null;
 };
 
 const DEFAULT_RECONCILE_CRON = '*/15 * * * *';
@@ -17,9 +17,9 @@ export function readSubscriptionsConfig(
 
 	const mollieKey = readOptionalString(env, 'SUBSCRIPTIONS_MOLLIE_API_KEY');
 
-	const mollieSecret = readOptionalString(
+	const mollieSecrets = readOptionalString(
 		env,
-		'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET',
+		'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS',
 	);
 
 	refuseLonePair(
@@ -29,15 +29,21 @@ export function readSubscriptionsConfig(
 
 	refuseLonePair(
 		[mollieKey, 'SUBSCRIPTIONS_MOLLIE_API_KEY'],
-		[mollieSecret, 'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET'],
+		[mollieSecrets, 'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS'],
 	);
 
 	return {
 		stripe: stripeKey !== null && stripeSecret !== null
 			? { secretKey: stripeKey, webhookSecret: stripeSecret }
 			: null,
-		mollie: mollieKey !== null && mollieSecret !== null
-			? { apiKey: mollieKey, webhookSecret: mollieSecret }
+		mollie: mollieKey !== null && mollieSecrets !== null
+			? {
+				apiKey: mollieKey,
+				webhookSecrets: splitWebhookSecrets(
+					mollieSecrets,
+					'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS',
+				),
+			}
 			: null,
 	};
 }
@@ -45,6 +51,30 @@ export function readSubscriptionsConfig(
 export function readReconcileCron(env: Record<string, unknown>): string {
 	return readOptionalString(env, 'SUBSCRIPTIONS_RECONCILE_CRON')
 		?? DEFAULT_RECONCILE_CRON;
+}
+
+/**
+ * A comma-separated list, so a rotated secret still verifies until it is
+ * dropped. The error names the variable and the position, never a secret.
+ */
+function splitWebhookSecrets(
+	listedSecrets: string,
+	variableName: string,
+): string[] {
+	const webhookSecrets = listedSecrets
+		.split(',')
+		.map((listedSecret) => listedSecret.trim());
+
+	const emptyIndex = webhookSecrets.indexOf('');
+
+	if (emptyIndex !== -1) {
+		throw new Error(
+			`${JSON.stringify(variableName)} lists an empty secret`
+			+ ` at position ${emptyIndex + 1}`,
+		);
+	}
+
+	return webhookSecrets;
 }
 
 // A key without its webhook secret would sync nothing a webhook sends.
