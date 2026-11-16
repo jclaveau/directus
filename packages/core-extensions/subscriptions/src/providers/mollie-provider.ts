@@ -1,8 +1,12 @@
 import { MollieApiError, type MollieClient } from '@mollie/api-client';
+import type { IncomingHttpHeaders } from 'node:http';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
 	MissingProviderSubscriptionError,
 	NoValidMandateError,
+	WebhookIgnoredError,
 	WebhookRefusedError,
+	WebhookSignatureError,
 } from '../errors.js';
 import { readDirectusSubscription } from './read-directus-subscription.js';
 import type {
@@ -41,22 +45,39 @@ const NORMALIZED_STATUSES: Record<string, string> = {
 
 export function createMollieProvider(
 	mollieClient: MollieClient,
+	webhookSecret: string,
 ): SubscriptionProvider {
 	return {
-		async verifyWebhook(rawBody) {
-			const paymentId = new URLSearchParams(rawBody.toString('utf8'))
-				.get('id');
-
-			if (paymentId === null || !MOLLIE_PAYMENT_ID.test(paymentId)) {
-				throw new WebhookRefusedError({
+		async verifyWebhook(rawBody, requestHeaders) {
+			if (rawBody.length === 0) {
+				throw new WebhookIgnoredError({
 					provider: 'mollie',
-					reason: `body id ${JSON.stringify(paymentId)} is not a payment id`,
+					reason: 'the body is empty',
 				});
 			}
 
-			// Mollie signs nothing, so the id is a hint for the sync worker to
-			// check: calling Mollie here would let a flood spend our API key.
-			return paymentId;
+			verifyMollieSignature(rawBody, requestHeaders, webhookSecret);
+
+			const { eventType, entityId } = parseMollieEvent(rawBody);
+
+			if (!eventType.startsWith('payment.')) {
+				throw new WebhookIgnoredError({
+					provider: 'mollie',
+					reason: `event type ${JSON.stringify(eventType)} names no payment`,
+				});
+			}
+
+			if (typeof entityId !== 'string' || !MOLLIE_PAYMENT_ID.test(entityId)) {
+				throw new WebhookRefusedError({
+					provider: 'mollie',
+					reason: `event entityId ${JSON.stringify(entityId)}`
+						+ ' is not a payment id',
+				});
+			}
+
+			// The sync worker reads the payment back from Mollie: calling it here
+			// would let a flood of signed replays spend our API key.
+			return entityId;
 		},
 
 		async fetchSubscription(resourceId) {
@@ -149,7 +170,6 @@ export function createMollieProvider(
 					startDate: periodEnd.toISOString()
 						.slice(0, 10),
 					...readRemainingTimes(canceledSubscription),
-					...readWebhookUrl(canceledSubscription),
 					metadata: {
 						...readMetadataObject(canceledSubscription),
 						resumes: subscriptionId,
@@ -211,11 +231,76 @@ function readRemainingTimes(canceledSubscription: {
 		: {};
 }
 
-function readWebhookUrl(canceledSubscription: { webhookUrl?: string | null }) {
-	return typeof canceledSubscription.webhookUrl === 'string'
-		&& canceledSubscription.webhookUrl !== ''
-		? { webhookUrl: canceledSubscription.webhookUrl }
+/** Mollie signs the raw body: `sha256=` and the lowercase hex HMAC-SHA256. */
+function verifyMollieSignature(
+	rawBody: Buffer,
+	requestHeaders: IncomingHttpHeaders,
+	webhookSecret: string,
+): void {
+	const signatureHeader = requestHeaders['x-mollie-signature'];
+
+	if (typeof signatureHeader !== 'string') {
+		throw new WebhookSignatureError({
+			provider: 'mollie',
+			reason: 'expected one "x-mollie-signature" header, got'
+				+ ` ${JSON.stringify(signatureHeader ?? null)}`,
+		});
+	}
+
+	const bodyDigest = createHmac('sha256', webhookSecret)
+		.update(rawBody)
+		.digest('hex');
+
+	const expectedSignature = Buffer.from(`sha256=${bodyDigest}`);
+
+	const receivedSignature = Buffer.from(signatureHeader);
+
+	if (receivedSignature.length !== expectedSignature.length
+		|| !timingSafeEqual(receivedSignature, expectedSignature)) {
+		throw new WebhookSignatureError({
+			provider: 'mollie',
+			reason: 'the "x-mollie-signature" header does not sign the body',
+		});
+	}
+}
+
+function parseMollieEvent(rawBody: Buffer): {
+	eventType: string;
+	entityId: unknown;
+} {
+	let mollieEvent: unknown;
+
+	try {
+		mollieEvent = JSON.parse(rawBody.toString('utf8'));
+	}
+	catch (error) {
+		throw new WebhookRefusedError(
+			{ provider: 'mollie', reason: 'the body is not JSON' },
+			{ cause: error },
+		);
+	}
+
+	const eventFields = typeof mollieEvent === 'object' && mollieEvent !== null
+		? mollieEvent
 		: {};
+
+	const eventType = 'type' in eventFields
+		? eventFields.type
+		: null;
+
+	if (typeof eventType !== 'string') {
+		throw new WebhookRefusedError({
+			provider: 'mollie',
+			reason: `event type ${JSON.stringify(eventType)} is not a string`,
+		});
+	}
+
+	return {
+		eventType,
+		entityId: 'entityId' in eventFields
+			? eventFields.entityId
+			: null,
+	};
 }
 
 function composeMollieResourceId({
