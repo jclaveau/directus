@@ -293,6 +293,17 @@ describe('refuseSubscriptionStateUpdate', () => {
 		}));
 	});
 
+	test.each([
+		[{ plan: 2 }],
+		[{ continues: 3 }],
+	])('refuses writing %j', (subscriptionData) => {
+		expect(() => {
+			refuseSubscriptionStateUpdate([{ data: subscriptionData, keys: [1] }]);
+		}).toThrow(new InvalidPayloadError({
+			reason: '"plan" and "continues" of a subscription follow its provider',
+		}));
+	});
+
 	test('passes any other field', () => {
 		expect(refuseSubscriptionStateUpdate([
 			{ data: { user_updated: 'user-1' }, keys: [1] },

@@ -4,8 +4,8 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
     `as: anonymous` sends none, like Mollie.
   - The instance loads the real `@scalabus/subscriptions` bundle and was
     bootstrapped, which creates its tables.
-  - Its Mollie client calls a fake Mollie, answering what `Mollie holds`.
-    A holding's `directus_id` is its metadata `directus_subscription`.
+  - Its Mollie client calls a fake Mollie, answering what `Mollie holds`;
+    a holding names its subscription in the metadata `directus_subscription`.
   - A `<name>` stands for one uuid, the same in the tables and the requests;
     `<granted_access>` is the access row the bundle stored.
 
@@ -31,8 +31,12 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | subscription | user           |
       | 901          | <granted_user> |
     And Mollie holds this subscription:
-      | payment    | customer       | subscription | directus_id | status |
-      | tr_renewal | cst_subscribed | sub_renewing | 901         | active |
+      | column                | value          |
+      | payment               | tr_renewal     |
+      | customer              | cst_subscribed |
+      | subscription          | sub_renewing   |
+      | directus_subscription | 901            |
+      | status                | active         |
     When these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -105,8 +109,12 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | payload:                       |   data:                                        |
       |   sort: 3                      |     sort: 3                                    |
     When Mollie holds this subscription:
-      | payment    | customer       | subscription | directus_id | status    |
-      | tr_renewal | cst_subscribed | sub_renewing | 901         | suspended |
+      | column                | value          |
+      | payment               | tr_renewal     |
+      | customer              | cst_subscribed |
+      | subscription          | sub_renewing   |
+      | directus_subscription | 901            |
+      | status                | suspended      |
     And these requests get these responses:
       | request                              | response  |
       | as: anonymous                        | code: 200 |+
@@ -239,6 +247,24 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       |                                    |         Invalid payload. "status" and      |
       |                                    |         "cancel_at_period_end" of a        |
       |                                    |         subscription follow its provider.  |
+      |                                    |       extensions:                          |
+      |                                    |         code: INVALID_PAYLOAD              |
+      | method: PATCH                      | code: 400                                  |+
+      | path: /items/subscriptions/900     | body:                                      |
+      | payload:                           |   errors:                                  |
+      |   plan: 11                         |     - message: >-                          |
+      |                                    |         Invalid payload. "plan" and        |
+      |                                    |         "continues" of a subscription      |
+      |                                    |         follow its provider.               |
+      |                                    |       extensions:                          |
+      |                                    |         code: INVALID_PAYLOAD              |
+      | method: PATCH                      | code: 400                                  |+
+      | path: /items/subscriptions/900     | body:                                      |
+      | payload:                           |   errors:                                  |
+      |   continues: 900                   |     - message: >-                          |
+      |                                    |         Invalid payload. "plan" and        |
+      |                                    |         "continues" of a subscription      |
+      |                                    |         follow its provider.               |
       |                                    |       extensions:                          |
       |                                    |         code: INVALID_PAYLOAD              |
       | as: anonymous                      | code: 403                                  |+

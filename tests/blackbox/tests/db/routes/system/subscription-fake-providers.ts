@@ -5,8 +5,8 @@ export type MollieHolding = {
 	payment: string;
 	customer: string;
 	subscription: string | null;
-	/** The `subscriptions.id` in the metadata `directus_subscription`. */
-	directus_id: number | null;
+	/** The `subscriptions.id` in the metadata of the same name. */
+	directus_subscription: number | null;
 	status: string;
 	/** Defaults to the "10.00" every seeded plan sells. */
 	amount?: string;
@@ -25,7 +25,7 @@ export type MollieMandate = {
 export type StripeHolding = {
 	subscription: string;
 	customer: string;
-	directus_id: number | null;
+	directus_subscription: number | null;
 	status: string;
 	cancel_at_period_end?: boolean;
 };
@@ -174,7 +174,7 @@ export async function startFakeProviders() {
 	}
 
 	function composeMollieSubscription(mollieHolding: MollieHolding) {
-		const { directus_id: directusSubscription } = mollieHolding;
+		const { directus_subscription: directusSubscription } = mollieHolding;
 
 		return {
 			resource: 'subscription',
@@ -236,7 +236,7 @@ export async function startFakeProviders() {
 			payment: `tr_${createdSubscription}`,
 			customer: customerId,
 			subscription: createdSubscription,
-			directus_id: metadata.directus_subscription === undefined
+			directus_subscription: metadata.directus_subscription === undefined
 				? null
 				: Number(metadata.directus_subscription),
 			status: 'active',
@@ -312,11 +312,11 @@ export async function startFakeProviders() {
 				customer: stripeHolding.customer,
 				status: stripeHolding.status,
 				cancel_at_period_end: stripeHolding.cancel_at_period_end === true,
-				metadata: stripeHolding.directus_id === null
+				metadata: stripeHolding.directus_subscription === null
 					? {}
 					: {
 						directus_subscription: String(
-							stripeHolding.directus_id,
+							stripeHolding.directus_subscription,
 						),
 					},
 				items: {
