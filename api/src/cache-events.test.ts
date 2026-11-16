@@ -1463,6 +1463,11 @@ describe('drainCacheEvents', () => {
 		// subsequent tick (the wedge this guards against).
 		expect(mockDb.batchInsert).toHaveBeenCalledTimes(1);
 		expect(mockRedis.call).toHaveBeenCalledWith('XDEL', STREAM, '1-0');
+
+		expect(mockLogger.warn).toHaveBeenCalledWith(
+			new Error('value too long'),
+			'[cache-stats] dropped 1 unpersistable events. "value too long"',
+		);
 	});
 
 	it('is single-flight: an overlapping call no-ops during a drain', async () => {
@@ -1574,6 +1579,101 @@ describe('drainCacheEvents', () => {
 		);
 
 		expect(mockRedis.call).toHaveBeenCalledWith('XACK', STREAM, 'drain', '7-0');
+	});
+
+	it('rolls back a batch read before a truncate, still acking it', async () => {
+		streamBatch = [streamEntry('1-0', { kind: 'h', cacheKey: 'k', ts: '1' })];
+		let storedTruncatedAt = '4';
+
+		mockRedis.get.mockImplementation(async (key: string) => {
+			return key === 'stats:truncated_at'
+				? storedTruncatedAt
+				: null;
+		});
+
+		mockRedis.call.mockImplementation(async (command: string) => {
+			// A truncate lands between the read and the write.
+			if (command === 'XREADGROUP') {
+				storedTruncatedAt = '5';
+				return [[STREAM, streamBatch]];
+			}
+
+			if (command === 'XAUTOCLAIM') {
+				return ['0-0', [], []];
+			}
+
+			return null;
+		});
+
+		mockDb.transaction = vi.fn((callback: any) => callback(mockDb));
+
+		await drainCacheEvents();
+
+		await expect(mockDb.transaction.mock.results[0].value)
+			.rejects.toBeInstanceOf(Error);
+
+		expect(mockLogger.info).toHaveBeenCalledWith(
+			'[cache-stats] dropped 1 events read before a truncate',
+		);
+
+		expect(mockLogger.warn).not.toHaveBeenCalled();
+		expect(mockRedis.call).toHaveBeenCalledWith('XACK', STREAM, 'drain', '1-0');
+	});
+
+	it('drops an event emitted before the last truncate', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'h', cacheKey: 'k1', ageMs: '1', ttlMs: '1', ts: '4999',
+			}),
+			streamEntry('2-0', {
+				kind: 'h', cacheKey: 'k2', ageMs: '1', ttlMs: '1', ts: '5000',
+			}),
+		];
+
+		mockRedis.get.mockImplementation(async (key: string) => {
+			return key === 'stats:truncated_at'
+				? '5000'
+				: null;
+		});
+
+		await drainCacheEvents();
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_stats_events',
+			[
+				{
+					time: new Date(5000),
+					cache_key: 'k2',
+					kind: 0,
+					age_ms: 1,
+					gap_ms: null,
+					ttl_ms: 1,
+					duration_ms: null,
+				},
+			],
+			500,
+		);
+
+		expect(mockRedis.call).toHaveBeenCalledWith(
+			'XACK',
+			STREAM,
+			'drain',
+			'1-0',
+			'2-0',
+		);
+	});
+
+	it('writes a batch no truncate followed', async () => {
+		streamBatch = [streamEntry('1-0', { kind: 'h', cacheKey: 'k', ts: '1' })];
+		mockRedis.get.mockResolvedValue('4');
+		mockDb.transaction = vi.fn((callback: any) => callback(mockDb));
+
+		await drainCacheEvents();
+
+		await expect(mockDb.transaction.mock.results[0].value)
+			.resolves.toBeUndefined();
+
+		expect(mockLogger.info).not.toHaveBeenCalled();
 	});
 });
 
@@ -2039,6 +2139,28 @@ describe('truncateCacheEvents', () => {
 		expect(mockRedis.unlink).toHaveBeenCalledWith(
 			'scalabus:stats:anom:missing_scope:h1',
 		);
+	});
+
+	it('drops the stream, then stamps the time every namespace reads', async () => {
+		vi.useFakeTimers({ toFake: ['Date'] });
+		vi.setSystemTime(1_700_000_000_000);
+
+		await truncateCacheEvents();
+
+		vi.useRealTimers();
+
+		expect(mockRedis.del).toHaveBeenCalledWith('scalabus:stats:events');
+
+		expect(mockRedis.set).toHaveBeenCalledWith(
+			'stats:truncated_at',
+			'1700000000000',
+		);
+
+		expect(mockRedis.del.mock.invocationCallOrder[0])
+			.toBeLessThan(mockRedis.set.mock.invocationCallOrder[0]!);
+
+		expect(mockRedis.set.mock.invocationCallOrder[0])
+			.toBeLessThan(builder.truncate.mock.invocationCallOrder[0]);
 	});
 
 	it('skips the Redis reset when Redis is not configured', async () => {
