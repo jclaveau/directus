@@ -56,6 +56,8 @@ const BUNDLE_DIRECTORY = join(
 
 const STRIPE_WEBHOOK_SECRET = 'whsec_blackbox';
 
+const MOLLIE_WEBHOOK_SECRET = 'mollie_secret_blackbox';
+
 // The sync runs every 10 seconds, after a boot that may still be settling.
 const SYNC_POLL = { timeout: 45_000, interval: 500 };
 
@@ -133,6 +135,7 @@ describe.each(vendors)('%s', (vendor) => {
 			PACKAGE_FILE_LOCATION: packageDirectory,
 			LOG_STYLE: 'raw',
 			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_blackbox',
+			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET: MOLLIE_WEBHOOK_SECRET,
 			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_test_blackbox',
 			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: STRIPE_WEBHOOK_SECRET,
 			BLACKBOX_PROVIDERS_PORT: String(fakeProviders.listeningPort),
@@ -353,6 +356,41 @@ describe.each(vendors)('%s', (vendor) => {
 			);
 
 			expect(stripeResponse.status).toBe(200);
+		}
+	}
+
+	// Signed like Mollie's next-gen webhook, which `sendRows` cannot do: the
+	// signature covers the exact bytes sent.
+	async function sendMollieEvents(
+		rowsTable: { type: string; entity: string }[],
+	) {
+		for (const { type: eventType, entity } of rowsTable) {
+			const eventBody = JSON.stringify({
+				resource: 'event',
+				id: 'event_blackbox',
+				type: eventType,
+				...entity === ''
+					? {}
+					: { entityId: entity },
+			});
+
+			const eventSignature = createHmac('sha256', MOLLIE_WEBHOOK_SECRET)
+				.update(eventBody)
+				.digest('hex');
+
+			const mollieResponse = await fetch(
+				`${vendorEnv['PUBLIC_URL']}/subscriptions/webhooks/mollie`,
+				{
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'X-Mollie-Signature': `sha256=${eventSignature}`,
+					},
+					body: eventBody,
+				},
+			);
+
+			expect(mollieResponse.status).toBe(200);
 		}
 	}
 
@@ -589,11 +627,11 @@ describe.each(vendors)('%s', (vendor) => {
 			and(/^the rows of (\w+):$/, seedRows);
 			and(/^the rows of (\w+):$/, seedRows);
 			and('Mollie holds this subscription:', holdSubscription);
-			when('these requests get these responses:', sendRequestRows);
+			when('Mollie sends these events:', sendMollieEvents);
 			then('this access is eventually stored:', expectStoredAccess);
 			and('these requests get these responses:', sendRequestRows);
 			when('Mollie holds this subscription:', holdSubscription);
-			and('these requests get these responses:', sendRequestRows);
+			and('Mollie sends these events:', sendMollieEvents);
 			then('this user eventually holds no access:', expectNoAccess);
 		}, 180_000);
 
@@ -619,6 +657,7 @@ describe.each(vendors)('%s', (vendor) => {
 		[/^(?:Mollie|Stripe) no longer holds subscription (\w+)$/, forgetSubscription],
 		[/^these requests get these responses:$/, sendRequestRows],
 		[/^Stripe sends these events:$/, sendStripeEvents],
+		[/^Mollie sends these events:$/, sendMollieEvents],
 		[/^this access is eventually stored:$/, expectStoredAccess],
 		[/^this user eventually holds no access:$/, expectNoAccess],
 		[/^subscription (\w+) is eventually stored:$/, expectStoredSubscription],

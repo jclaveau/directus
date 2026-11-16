@@ -352,7 +352,7 @@ describe('subscriptionsHook', () => {
 		expect(refuseWrite).toHaveBeenCalled();
 	});
 
-	test('queues a reconcile every hour', async () => {
+	test('queues a reconcile every 15 minutes by default', async () => {
 		const schedule = vi.fn();
 
 		(subscriptionsHook.config as (...args: unknown[]) => void)(
@@ -360,8 +360,25 @@ describe('subscriptionsHook', () => {
 			{ env: { MAX_PAYLOAD_SIZE: '1mb' }, database: 'database' },
 		);
 
-		expect(schedule).toHaveBeenCalledWith('0 * * * *', expect.any(Function));
+		expect(schedule).toHaveBeenCalledWith('*/15 * * * *', expect.any(Function));
 		await schedule.mock.calls[1]?.[1]();
 		expect(enqueueReconcile).toHaveBeenCalledWith('database', new Map());
+	});
+
+	test('queues a reconcile on the schedule the env sets', () => {
+		const schedule = vi.fn();
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter: vi.fn(), init: vi.fn(), schedule },
+			{
+				env: {
+					MAX_PAYLOAD_SIZE: '1mb',
+					SUBSCRIPTIONS_RECONCILE_CRON: '0 * * * *',
+				},
+				database: 'database',
+			},
+		);
+
+		expect(schedule).toHaveBeenCalledWith('0 * * * *', expect.any(Function));
 	});
 });

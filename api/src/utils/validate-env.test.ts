@@ -548,6 +548,52 @@ describe('validateSubscriptionsEnv', () => {
 		expect(process.exit).toHaveBeenCalledWith(1);
 	});
 
+	test.each([
+		[
+			{ SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1' },
+			'"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET" is required when'
+			+ ' "SUBSCRIPTIONS_MOLLIE_API_KEY" is set.',
+		],
+		[
+			{ SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET: 'mollie_secret_1' },
+			'"SUBSCRIPTIONS_MOLLIE_API_KEY" is required when'
+			+ ' "SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRET" is set.',
+		],
+	])('exits on a lone mollie variable in %j', (subscriptionsEnv, errorMessage) => {
+		vi.mocked(useEnv).mockReturnValueOnce(subscriptionsEnv);
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(errorMessage);
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('passes with a reconcile schedule cron reads', () => {
+		vi.mocked(useEnv).mockReturnValueOnce({
+			SUBSCRIPTIONS_RECONCILE_CRON: '*/5 * * * *',
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test('exits on a reconcile schedule cron cannot read', () => {
+		vi.mocked(useEnv).mockReturnValueOnce({
+			SUBSCRIPTIONS_RECONCILE_CRON: 'every 15 minutes',
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_RECONCILE_CRON" is not a cron schedule, got'
+			+ ' "every 15 minutes".',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
 	test('exits on an empty variable', () => {
 		vi.mocked(useEnv).mockReturnValueOnce({ SUBSCRIPTIONS_MOLLIE_API_KEY: '' });
 
