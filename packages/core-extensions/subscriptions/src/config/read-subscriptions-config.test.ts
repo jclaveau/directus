@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-	readMollieApiKey,
+	readMollieAccessToken,
 	readReconcileCron,
 	readSubscriptionsConfig,
 } from './read-subscriptions-config.js';
@@ -209,16 +209,19 @@ describe('readReconcileCron', () => {
 	});
 });
 
-describe('readMollieApiKey', () => {
-	test('reads the key alone, before any webhook secret exists', () => {
-		expect(readMollieApiKey({ SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1' }))
-			.toBe('test_1');
+describe('readMollieAccessToken', () => {
+	test('reads the organization access token, no API key needed', () => {
+		expect(readMollieAccessToken({
+			SUBSCRIPTIONS_MOLLIE_ACCESS_TOKEN: 'mollie_token_1',
+		}))
+			.toBe('mollie_token_1');
 	});
 
-	test('refuses a missing key', () => {
-		expect(() => readMollieApiKey({}))
+	test('refuses a missing token, though the API key is set', () => {
+		expect(() => readMollieAccessToken({ SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1' }))
 			.toThrow(new Error(
-				'"SUBSCRIPTIONS_MOLLIE_API_KEY" is required to create a Mollie webhook',
+				'"SUBSCRIPTIONS_MOLLIE_ACCESS_TOKEN" is required to create a Mollie'
+				+ ' webhook: Mollie refuses an API key there',
 			));
 	});
 });
