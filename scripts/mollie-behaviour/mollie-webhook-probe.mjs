@@ -588,6 +588,43 @@ async function tryEventTypes(nextGenUrl) {
 	return eventTypeVerdicts;
 }
 
+// The bundle's `mollie-setup-webhook` command holds only the API key: whether
+// that key creates a webhook, and whether the answer carries its secret.
+// Printed, never compared: a value, not the secret, is the finding.
+async function describeApiKeyWebhook(nextGenUrl) {
+	let keyWebhook = null;
+
+	try {
+		keyWebhook = await callMollie('POST', '/webhooks', {
+			body: {
+				name: `${probeWebhookPrefix}-api-key`,
+				url: nextGenUrl,
+				eventTypes: ['payment.paid'],
+			},
+		});
+	}
+	catch (createError) {
+		if (createError.httpStatus === undefined) {
+			throw createError;
+		}
+
+		console.log(
+			`  refused: ${createError.httpStatus}`
+			+ ` ${redactSecrets(createError.responseText)}`,
+		);
+
+		return;
+	}
+
+	console.log(
+		'  created; answer holds a webhookSecret string='
+		+ `${typeof keyWebhook.webhookSecret === 'string'}`,
+	);
+
+	await callMollie('DELETE', `/webhooks/${keyWebhook.id}`);
+	console.log(`  deleted ${keyWebhook.id}`);
+}
+
 // A run killed before its cleanup leaves a probe subscription billing the
 // test customer every month.
 async function cancelLeftoverSubscriptions() {
@@ -933,6 +970,9 @@ try {
 	if (acceptedEventTypes.length === 0) {
 		throw new Error('Mollie accepted none of the candidate event types');
 	}
+
+	console.log('\n== webhook created with the API key');
+	await describeApiKeyWebhook(nextGenUrl);
 
 	console.log('\n== next-gen webhook');
 

@@ -20,6 +20,10 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
     get these responses` signs each event with the `secret` its cell names.
   - A `<name>` stands for one uuid, the same in the tables and the requests.
   - `received these writes` reads what the providers received since it last read.
+  - The instance also loads `subscriptions-synced-listener`, a hook logging
+    `subscriptions.synced <payload as JSON>` for each such action it receives.
+  - `the CLI runs <arguments> with these variables` runs `directus <arguments>`
+    against the instance's database, its env plus the variables listed.
 
   Scenario: a user cancels, and keeps the access they paid for until the period ends
     Given these pending subscriptions, each with its own plan:
@@ -1029,3 +1033,50 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
     And this user eventually holds no access:
       | user      |
       | <user_92> |
+
+  Scenario: each sync announces the access it changed to the extensions listening
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 95 | mollie   | 95      | 1                 | active      |
+    And Mollie holds this subscription:
+      | column                | value      |
+      | payment               | tr_synced  |
+      | customer              | cst_synced |
+      | subscription          | sub_synced |
+      | directus_subscription | 95         |
+      | status                | active     |
+    When Mollie sends these events:
+      | type         | entity    |
+      | payment.paid | tr_synced |
+    Then the instance eventually logged:
+      """
+      subscriptions.synced
+      {"subscription":95,"provider":"mollie","status":"active","access":"granted"}
+      """
+    When Mollie holds this subscription:
+      | column                | value      |
+      | payment               | tr_synced  |
+      | customer              | cst_synced |
+      | subscription          | sub_synced |
+      | directus_subscription | 95         |
+      | status                | canceled   |
+      | paid_at               | 2020-01-01 |
+    And Mollie sends these events:
+      | type         | entity    |
+      | payment.paid | tr_synced |
+    Then the instance eventually logged:
+      """
+      subscriptions.synced
+      {"subscription":95,"provider":"mollie","status":"canceled","access":"revoked"}
+      """
+
+  Scenario: a Mollie retry setting out of range stops the bundle, naming the variable
+    When the CLI runs subscriptions mollie-setup-webhook with these variables:
+      | variable                               | value |
+      | SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES | -1    |
+      | EXTENSIONS_MUST_LOAD                   | true  |
+    Then the CLI exited with 1, having logged:
+      """
+      "SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES" must be an integer from 0 to 10,
+      got -1
+      """

@@ -127,6 +127,11 @@ describe.each(vendors)('%s', (vendor) => {
 
 		await writeExtensionPackage(packageDirectory, {
 			'@scalabus/subscriptions': BUNDLE_DIRECTORY,
+			'subscriptions-synced-listener': join(
+				paths.cwd,
+				'extensions',
+				'subscriptions-synced-listener',
+			),
 		});
 
 		const reroutePreload = pathToFileURL(
@@ -680,6 +685,39 @@ describe.each(vendors)('%s', (vendor) => {
 			.toEqual({ accessRows: [], syncErrors: [], unansweredPaths: [] });
 	}
 
+	let cliRun: ReturnType<typeof spawnSync> | undefined;
+
+	function runCli(
+		cliArguments: string,
+		variablesTable: { variable: string; value: string }[],
+	) {
+		cliRun = spawnSync('node', [paths.cli, ...cliArguments.split(' ')], {
+			cwd: paths.cwd,
+			env: {
+				...vendorEnv,
+				...Object.fromEntries(variablesTable.map(({ variable, value }) => {
+					return [variable, value];
+				})),
+			},
+			timeout: 60_000,
+		});
+	}
+
+	function expectCliExit(exitStatus: string, loggedDocString: string) {
+		expect({
+			status: cliRun?.status,
+			messages: String(cliRun?.stdout)
+				.split('\n')
+				.map(readLogMessage),
+		})
+			.toEqual({
+				status: Number(exitStatus),
+				messages: expect.arrayContaining([
+					messageOfDocString(loggedDocString),
+				]),
+			});
+	}
+
 	defineFeature(accessFeature, (scenario) => {
 		scenario(accessFeature.scenarios[0]!.title, ({ given, when, then, and }) => {
 			given(/^the rows of (\w+):$/, seedRows);
@@ -741,6 +779,8 @@ describe.each(vendors)('%s', (vendor) => {
 			/^Mollie eventually received this subscription for (\w+):$/,
 			expectCreatedSubscription,
 		],
+		[/^the CLI runs (.+) with these variables:$/, runCli],
+		[/^the CLI exited with (\d+), having logged:$/, expectCliExit],
 	];
 
 	type DiffEntry = { collection: string; diff: { kind: string }[] };
