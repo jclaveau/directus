@@ -52,7 +52,7 @@ describe('subscriptionsHook', () => {
 		const schedule = vi.fn();
 		const logger = { warn: vi.fn() };
 		const AccessService = vi.fn();
-		const emitter = { emitAction: vi.fn() };
+		const emitter = { emitAction: vi.fn().mockResolvedValue(undefined) };
 
 		(subscriptionsHook.config as (...args: unknown[]) => void)(
 			{ filter: vi.fn(), init: vi.fn(), schedule },
