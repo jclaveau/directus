@@ -5,8 +5,8 @@ import {
 	MissingProviderSubscriptionError,
 	NoValidMandateError,
 	WebhookIgnoredError,
-	WebhookRefusedError,
 	WebhookSignatureError,
+	WebhookUnreadableError,
 } from '../errors.js';
 import { createMollieProvider } from './mollie-provider.js';
 
@@ -145,19 +145,19 @@ describe('verifyWebhook', () => {
 			'89690e297b0f8b0020ece46df58d67d1b936010547f444ff0fd1ef2051b932f3',
 			'event entityId "sub_1" is not a payment id',
 		],
-	])('refuses the signed body %s', async (
+	])('reads nothing from the signed body %s', async (
 		eventBody,
 		eventSignature,
-		refusedReason,
+		unreadableReason,
 	) => {
 		await expect(createMollieProvider({} as MollieClient, ['mollie_secret_1'])
 			.verifyWebhook(
 				Buffer.from(eventBody),
 				{ 'x-mollie-signature': `sha256=${eventSignature}` },
 			))
-			.rejects.toThrow(new WebhookRefusedError({
+			.rejects.toThrow(new WebhookUnreadableError({
 				provider: 'mollie',
-				reason: refusedReason,
+				reason: unreadableReason,
 			}));
 	});
 });
