@@ -651,6 +651,36 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | user      | policy      | managed_by              |
       | <user_64> | <policy_64> | @scalabus/subscriptions |
 
+  Scenario: a signed event the bundle cannot read is logged, kept and answered 200
+    When these Mollie events get these responses:
+      | event                          | response  |
+      | secret: mollie_secret_blackbox | code: 200 |+
+      | type: payment.paid             |           |
+      | entityId: sub_unreadable       |           |
+      | secret: mollie_secret_blackbox | code: 200 |+
+      | entityId: tr_unreadable        |           |
+    Then the sync queue eventually holds no row for sub_unreadable
+    And the sync queue eventually holds no row for tr_unreadable
+    And the instance eventually logged:
+      """
+      Webhook from "mollie" unreadable: event entityId "sub_unreadable" is not a
+      payment id
+      """
+    And the instance eventually logged:
+      """
+      Webhook from "mollie" unreadable: event type null is not a string
+      """
+    And these unreadable webhooks are eventually stored:
+      """
+      - resource: event
+        id: event_blackbox
+        type: payment.paid
+        entityId: sub_unreadable
+      - resource: event
+        id: event_blackbox
+        entityId: tr_unreadable
+      """
+
   Scenario: a failed sync keeps its error until a webhook retries it
     Given these pending subscriptions, each with its own plan:
       | id | provider | manager | beneficiaries_max | plan_status |

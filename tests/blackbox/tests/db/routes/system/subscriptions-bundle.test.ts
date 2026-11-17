@@ -587,6 +587,21 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 	}
 
+	// Each body as the YAML of its JSON: a body that is no JSON fails the poll.
+	function expectUnreadableWebhooks(webhooksDocString: string) {
+		return expect.poll(async () => {
+			const unreadableRows = await database('subscription_events')
+				.select('payload')
+				.where('source', 'webhook_unreadable')
+				.orderBy('id');
+
+			return unreadableRows.map((unreadableRow) => {
+				return JSON.parse(unreadableRow.payload);
+			});
+		}, SYNC_POLL)
+			.toEqual(loadYaml(webhooksDocString));
+	}
+
 	// Without the sync errors: the row may well hold the error being asserted.
 	function expectQueueRows(rowsTable: Record<string, string>[]) {
 		const expectedRows = readExpectedRows<{ resource_id: string }>(rowsTable);
@@ -767,6 +782,10 @@ describe.each(vendors)('%s', (vendor) => {
 		[/^this user eventually holds no access:$/, expectNoAccess],
 		[/^subscription (\w+) is eventually stored:$/, expectStoredSubscription],
 		[/^the events of subscription (\w+) are eventually:$/, expectSubscriptionEvents],
+		[
+			/^these unreadable webhooks are eventually stored:$/,
+			expectUnreadableWebhooks,
+		],
 		[
 			/^subscription (\w+) eventually continues (\w+)$/,
 			expectContinuedSubscription,
