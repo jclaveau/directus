@@ -1,12 +1,6 @@
-import type { MollieRetrySettings } from '../providers/retry-mollie-calls.js';
-
 export type SubscriptionsConfig = {
 	stripe: { secretKey: string; webhookSecret: string } | null;
-	mollie: {
-		apiKey: string;
-		webhookSecrets: string[];
-		retry: MollieRetrySettings;
-	} | null;
+	mollie: { apiKey: string; webhookSecrets: string[] } | null;
 };
 
 const DEFAULT_RECONCILE_CRON = '*/15 * * * *';
@@ -27,22 +21,6 @@ export function readSubscriptionsConfig(
 		env,
 		'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS',
 	);
-
-	// Read even with Mollie off: a typo must not wait for Mollie to be enabled.
-	const mollieRetry = {
-		maxRetries: readRetrySetting(
-			env,
-			'SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES',
-			10,
-			3,
-		),
-		delayMs: readRetrySetting(
-			env,
-			'SUBSCRIPTIONS_MOLLIE_RETRY_DELAY_MS',
-			60_000,
-			1000,
-		),
-	};
 
 	refuseLonePair(
 		[stripeKey, 'SUBSCRIPTIONS_STRIPE_SECRET_KEY'],
@@ -65,7 +43,6 @@ export function readSubscriptionsConfig(
 					mollieSecrets,
 					'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS',
 				),
-				retry: mollieRetry,
 			}
 			: null,
 	};
@@ -138,32 +115,6 @@ function refuseLonePair(
 			+ ` ${JSON.stringify(secretVariable)} is set`,
 		);
 	}
-}
-
-function readRetrySetting(
-	env: Record<string, unknown>,
-	variableName: string,
-	maxValue: number,
-	defaultValue: number,
-): number {
-	const settingValue = env[variableName];
-
-	if (settingValue === undefined) {
-		return defaultValue;
-	}
-
-	if (
-		Number.isInteger(settingValue) === false
-		|| (settingValue as number) < 0
-		|| (settingValue as number) > maxValue
-	) {
-		throw new Error(
-			`${JSON.stringify(variableName)} must be an integer from 0 to`
-			+ ` ${maxValue}, got ${JSON.stringify(settingValue)}`,
-		);
-	}
-
-	return settingValue as number;
 }
 
 function readOptionalString(
