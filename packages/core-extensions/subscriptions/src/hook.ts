@@ -235,12 +235,24 @@ export const subscriptionsHook = defineHook(
 				},
 				// The extensions' own emitter, not the global one `action()` listens
 				// on: a listener registers `emitter.onAction('subscriptions.synced')`.
+				// A listener throwing synchronously rejects emitAction itself.
 				emitSyncedAction: (syncedAction) => {
-					emitter.emitAction('subscriptions.synced', syncedAction, {
-						database,
-						schema: schemaOverview,
-						accountability: null,
-					});
+					emitter
+						.emitAction('subscriptions.synced', syncedAction, {
+							database,
+							schema: schemaOverview,
+							accountability: null,
+						})
+						.catch((listenerError: unknown) => {
+							const listenerMessage = listenerError instanceof Error
+								? listenerError.message
+								: listenerError;
+
+							logger.warn(
+								'A "subscriptions.synced" listener threw:'
+								+ ` ${JSON.stringify(listenerMessage)}`,
+							);
+						});
 				},
 			});
 		});

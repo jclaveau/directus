@@ -184,11 +184,11 @@ function readOptionalString(
 	}
 
 	// A `_FILE` secret keeps the file's trailing newline, which no provider
-	// accepts: every call or webhook would fail long after the boot.
+	// accepts: every call or webhook would fail long after the boot. The value
+	// is a secret, so the message names the variable only.
 	if (variableValue.trim() !== variableValue) {
 		throw new Error(
-			`${JSON.stringify(variableName)} must not start or end with whitespace,`
-			+ ` got ${JSON.stringify(variableValue)}`,
+			`${JSON.stringify(variableName)} must not start or end with whitespace`,
 		);
 	}
 

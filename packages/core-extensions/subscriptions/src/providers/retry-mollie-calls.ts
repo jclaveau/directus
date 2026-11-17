@@ -20,7 +20,9 @@ export async function retryMollieCall<CallAnswer>(
 		}
 		catch (callError) {
 			const isRetryable = callError instanceof MollieApiError
-				&& (callError.statusCode === 429 || callError.statusCode === undefined);
+				&& (callError.statusCode === 429
+					|| (callError.statusCode === undefined
+						&& isRefusedBeforeCall(callError) === false));
 
 			if (isRetryable === false || retryCount >= retrySettings.maxRetries) {
 				throw callError;
@@ -29,6 +31,14 @@ export async function retryMollieCall<CallAnswer>(
 			await waitRetryDelay(retrySettings.delayMs * (retryCount + 1));
 		}
 	}
+}
+
+/**
+ * The client checks an id's shape before any request and throws an ApiError
+ * with no status, like a network failure; a retry would refuse it again.
+ */
+function isRefusedBeforeCall(callError: MollieApiError): boolean {
+	return / id appears invalid: .* \(unexpected format\)$/.test(callError.message);
 }
 
 export function retryMollieProvider(
