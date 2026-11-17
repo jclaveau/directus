@@ -11,7 +11,12 @@ import {
 	selectDueSync,
 	type SyncQueueRow,
 } from '../queue/sync-queue.js';
-import { closeMissingSubscription, syncSubscription } from './sync-subscription.js';
+import {
+	closeMissingSubscription,
+	syncSubscription,
+	type AccessChange,
+	type SyncedSubscription,
+} from './sync-subscription.js';
 
 export const SYNC_BATCH_LIMIT = 50;
 
@@ -19,10 +24,19 @@ const FIRST_RETRY_DELAY_MS = 60_000;
 
 const LONGEST_RETRY_DELAY_MS = 3_600_000;
 
+/** The `subscriptions.synced` action's payload. */
+export type SyncedAction = {
+	subscription: number;
+	provider: string;
+	status: string;
+	access: AccessChange;
+};
+
 export type SyncBatchContext = {
 	database: Knex;
 	enabledProviders: SubscriptionProviders;
 	createAccessService: (trx: Knex) => AbstractService;
+	emitSyncedAction: (syncedAction: SyncedAction) => void;
 	logger: {
 		warn: (message: string) => void;
 		error: (message: string) => void;
@@ -48,11 +62,18 @@ async function syncNextRow({
 	database,
 	enabledProviders,
 	createAccessService,
+	emitSyncedAction,
 	logger,
 }: SyncBatchContext): Promise<boolean> {
-	const syncClaim: { claimedRow: SyncQueueRow | undefined } = {
+	const syncClaim: {
+		claimedRow: SyncQueueRow | undefined;
+		syncedSubscription: SyncedSubscription | undefined;
+	} = {
 		claimedRow: undefined,
+		syncedSubscription: undefined,
 	};
+
+	let committedSync: SyncedSubscription | undefined;
 
 	try {
 		await database.transaction(async (trx) => {
@@ -82,7 +103,7 @@ async function syncNextRow({
 				.where('id', claimedRow.id);
 
 			if (fetchedSubscription instanceof MissingProviderSubscriptionError) {
-				await closeMissingSubscription({
+				syncClaim.syncedSubscription = await closeMissingSubscription({
 					trx,
 					accessService: createAccessService(trx),
 					providerName: claimedRow.provider,
@@ -102,7 +123,7 @@ async function syncNextRow({
 			}
 
 			try {
-				await syncSubscription({
+				syncClaim.syncedSubscription = await syncSubscription({
 					trx,
 					accessService: createAccessService(trx),
 					subscriptionProvider,
@@ -143,6 +164,8 @@ async function syncNextRow({
 			await claimedQueueRow
 				.update({ pending: false, attempts: 0, last_error: null });
 		});
+
+		committedSync = syncClaim.syncedSubscription;
 	}
 	catch (error) {
 		const failedRow = syncClaim.claimedRow;
@@ -171,6 +194,16 @@ async function syncNextRow({
 		else {
 			logger.warn(failureMessage);
 		}
+	}
+
+	// Past the commit and outside the try: a listener's throw is no sync failure.
+	if (committedSync !== undefined) {
+		emitSyncedAction({
+			subscription: committedSync.subscription,
+			provider: syncClaim.claimedRow!.provider,
+			status: committedSync.status,
+			access: committedSync.access,
+		});
 	}
 
 	return syncClaim.claimedRow === undefined;
