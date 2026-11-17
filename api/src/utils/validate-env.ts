@@ -365,6 +365,26 @@ export function validateSubscriptionsEnv(): void {
 		}
 	}
 
+	// The bundle reads the same bounds (read-subscriptions-config.ts); left to
+	// it, a bad value only logs and the bundle is missing.
+	for (const [retryVariable, maxValue] of MOLLIE_RETRY_BOUNDS) {
+		const retryValue = env[retryVariable];
+
+		if (
+			retryValue !== undefined
+			&& (Number.isInteger(retryValue) === false
+				|| (retryValue as number) < 0
+				|| (retryValue as number) > maxValue)
+		) {
+			useLogger().error(
+				`${JSON.stringify(retryVariable)} must be an integer from 0 to`
+				+ ` ${maxValue}, got ${JSON.stringify(retryValue)}.`,
+			);
+
+			process.exit(1);
+		}
+	}
+
 	const reconcileCron = env['SUBSCRIPTIONS_RECONCILE_CRON'];
 
 	// Directus' schedule skips a cron it cannot read: no reconcile would run.
@@ -384,6 +404,11 @@ const SUBSCRIPTIONS_ENV = [
 	'SUBSCRIPTIONS_MOLLIE_API_KEY',
 	'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS',
 ];
+
+const MOLLIE_RETRY_BOUNDS = [
+	['SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES', 10],
+	['SUBSCRIPTIONS_MOLLIE_RETRY_DELAY_MS', 60_000],
+] as const;
 
 const SUBSCRIPTIONS_ENV_PAIRS = [
 	['SUBSCRIPTIONS_STRIPE_SECRET_KEY', 'SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET'],
