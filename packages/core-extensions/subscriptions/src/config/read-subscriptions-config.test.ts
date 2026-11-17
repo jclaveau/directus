@@ -179,7 +179,7 @@ describe('readSubscriptionsConfig', () => {
 		})
 			.toThrow(new Error(
 				'"SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET" must not start or end with'
-				+ ' whitespace, got "whsec_1\\n"',
+				+ ' whitespace',
 			));
 	});
 

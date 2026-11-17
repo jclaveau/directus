@@ -630,6 +630,48 @@ describe('validateSubscriptionsEnv', () => {
 		expect(process.exit).toHaveBeenCalledWith(1);
 	});
 
+	test('passes with Mollie retry settings in range', () => {
+		vi.mocked(useEnv).mockReturnValueOnce({
+			SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES: 10,
+			SUBSCRIPTIONS_MOLLIE_RETRY_DELAY_MS: 0,
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test.each([
+		[
+			{ SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES: '' },
+			'"SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES" must be an integer from 0'
+			+ ' to 10, got "".',
+		],
+		[
+			{ SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES: 11 },
+			'"SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES" must be an integer from 0'
+			+ ' to 10, got 11.',
+		],
+		[
+			{ SUBSCRIPTIONS_MOLLIE_RETRY_DELAY_MS: 'abc' },
+			'"SUBSCRIPTIONS_MOLLIE_RETRY_DELAY_MS" must be an integer from 0'
+			+ ' to 60000, got "abc".',
+		],
+		[
+			{ SUBSCRIPTIONS_MOLLIE_RETRY_DELAY_MS: -1 },
+			'"SUBSCRIPTIONS_MOLLIE_RETRY_DELAY_MS" must be an integer from 0'
+			+ ' to 60000, got -1.',
+		],
+	])('exits on the Mollie retry setting %j', (variables, errorMessage) => {
+		vi.mocked(useEnv).mockReturnValueOnce(variables);
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(errorMessage);
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
 	test('exits on an empty variable', () => {
 		vi.mocked(useEnv).mockReturnValueOnce({ SUBSCRIPTIONS_MOLLIE_API_KEY: '' });
 
