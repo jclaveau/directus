@@ -130,7 +130,7 @@ describe('runSyncBatch', () => {
 			resource_id: 'sub_1',
 			pending: 0,
 			attempts: 0,
-			next_attempt_at: 1_793_750_400_000,
+			next_attempt_at: 1_793_837_100_000,
 			last_error: null,
 		}]);
 
@@ -879,8 +879,17 @@ describe('runSyncBatch', () => {
 			last_error: null,
 		});
 
+		// Not vi.waitFor: it moves the faked clock, so the lease would end later.
+		let signalFetchStarted = (): void => {};
+
+		const fetchStarted = new Promise<void>((resolve) => {
+			signalFetchStarted = resolve;
+		});
+
 		// A worker that dies mid-call: its fetch never settles.
 		const stalledFetch = vi.fn(() => {
+			signalFetchStarted();
+
 			return new Promise(() => {});
 		});
 
@@ -895,9 +904,7 @@ describe('runSyncBatch', () => {
 			logger: { warn: vi.fn(), error: vi.fn() },
 		});
 
-		await vi.waitFor(() => {
-			expect(stalledFetch).toHaveBeenCalled();
-		});
+		await fetchStarted;
 
 		const retakingFetch = vi.fn()
 			.mockRejectedValue(new Error('Stripe is down'));
