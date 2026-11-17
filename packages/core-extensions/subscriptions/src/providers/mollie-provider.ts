@@ -5,8 +5,8 @@ import {
 	MissingProviderSubscriptionError,
 	NoValidMandateError,
 	WebhookIgnoredError,
-	WebhookRefusedError,
 	WebhookSignatureError,
+	WebhookUnreadableError,
 } from '../errors.js';
 import { readDirectusSubscription } from './read-directus-subscription.js';
 import type {
@@ -68,7 +68,7 @@ export function createMollieProvider(
 			}
 
 			if (typeof entityId !== 'string' || !MOLLIE_PAYMENT_ID.test(entityId)) {
-				throw new WebhookRefusedError({
+				throw new WebhookUnreadableError({
 					provider: 'mollie',
 					reason: `event entityId ${JSON.stringify(entityId)}`
 						+ ' is not a payment id',
@@ -283,7 +283,7 @@ function parseMollieEvent(rawBody: Buffer): {
 		mollieEvent = JSON.parse(rawBody.toString('utf8'));
 	}
 	catch (parseError) {
-		throw new WebhookRefusedError(
+		throw new WebhookUnreadableError(
 			{ provider: 'mollie', reason: 'the body is not JSON' },
 			{ cause: parseError },
 		);
@@ -298,7 +298,7 @@ function parseMollieEvent(rawBody: Buffer): {
 		: null;
 
 	if (typeof eventType !== 'string') {
-		throw new WebhookRefusedError({
+		throw new WebhookUnreadableError({
 			provider: 'mollie',
 			reason: `event type ${JSON.stringify(eventType)} is not a string`,
 		});
