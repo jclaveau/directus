@@ -40,6 +40,7 @@ describe('runSyncBatch', () => {
 			database,
 			enabledProviders: new Map(),
 			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
 			logger: { warn: vi.fn(), error: vi.fn() },
 		})).toBe(0);
 	});
@@ -93,6 +94,7 @@ describe('runSyncBatch', () => {
 
 		const accessService = { createOne: vi.fn().mockResolvedValue('access-1') };
 		const logger = { warn: vi.fn(), error: vi.fn() };
+		const emitSyncedAction = vi.fn();
 
 		expect(await runSyncBatch({
 			database,
@@ -103,8 +105,16 @@ describe('runSyncBatch', () => {
 				} as unknown as SubscriptionProvider],
 			]),
 			createAccessService: () => accessService as unknown as AbstractService,
+			emitSyncedAction,
 			logger,
 		})).toBe(1);
+
+		expect(emitSyncedAction.mock.calls).toEqual([[{
+			subscription: 1,
+			provider: 'stripe',
+			status: 'active',
+			access: 'granted',
+		}]]);
 
 		expect(fetchSubscription).toHaveBeenCalledWith('sub_1');
 		expect(logger.warn).not.toHaveBeenCalled();
@@ -127,6 +137,80 @@ describe('runSyncBatch', () => {
 		expect(await database('subscription_beneficiaries')).toEqual([
 			{ id: 1, subscription: 1, user: 'user-1', access: 'access-1' },
 		]);
+	});
+
+	test('announces a sync that left every access as it was', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			current_period_end: new Date('2026-12-01T00:00:00Z'),
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('directus_access')
+			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-1', access: 'access-1' });
+
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const emitSyncedAction = vi.fn();
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([
+				['stripe', {
+					fetchSubscription: vi.fn().mockResolvedValue({
+						subscriptionId: 'sub_1',
+						customerId: 'cus_1',
+						status: 'active',
+						currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+						cancelAtPeriodEnd: false,
+						directusSubscription: 1,
+						billing: {
+							amountCents: 1000,
+							currency: 'EUR',
+							interval: { months: 1, days: 0 },
+						},
+					}),
+					composeResourceId: vi.fn().mockReturnValue('sub_1'),
+				} as unknown as SubscriptionProvider],
+			]),
+			createAccessService: () => ({}) as AbstractService,
+			emitSyncedAction,
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(emitSyncedAction.mock.calls).toEqual([[{
+			subscription: 1,
+			provider: 'stripe',
+			status: 'active',
+			access: 'unchanged',
+		}]]);
 	});
 
 	test('drops the row of a payment id once synced', async () => {
@@ -181,6 +265,7 @@ describe('runSyncBatch', () => {
 				} as unknown as SubscriptionProvider,
 			]]),
 			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
 			logger: { warn: vi.fn(), error: vi.fn() },
 		});
 
@@ -205,6 +290,7 @@ describe('runSyncBatch', () => {
 		});
 
 		const logger = { warn: vi.fn(), error: vi.fn() };
+		const emitSyncedAction = vi.fn();
 
 		expect(await runSyncBatch({
 			database,
@@ -223,8 +309,11 @@ describe('runSyncBatch', () => {
 				} as unknown as SubscriptionProvider,
 			]]),
 			createAccessService: vi.fn(),
+			emitSyncedAction,
 			logger,
 		})).toBe(1);
+
+		expect(emitSyncedAction).not.toHaveBeenCalled();
 
 		expect(logger.error).toHaveBeenCalledWith(
 			'Subscription sync of "stripe" "sub_1" dropped: "\\"stripe\\"'
@@ -266,6 +355,7 @@ describe('runSyncBatch', () => {
 				} as unknown as SubscriptionProvider,
 			]]),
 			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
 			logger,
 		});
 
@@ -305,6 +395,7 @@ describe('runSyncBatch', () => {
 
 		const accessService = { deleteOne: vi.fn() };
 		const logger = { warn: vi.fn(), error: vi.fn() };
+		const emitSyncedAction = vi.fn();
 
 		await runSyncBatch({
 			database,
@@ -320,8 +411,16 @@ describe('runSyncBatch', () => {
 				} as unknown as SubscriptionProvider,
 			]]),
 			createAccessService: () => accessService as unknown as AbstractService,
+			emitSyncedAction,
 			logger,
 		});
+
+		expect(emitSyncedAction.mock.calls).toEqual([[{
+			subscription: 1,
+			provider: 'stripe',
+			status: 'canceled',
+			access: 'revoked',
+		}]]);
 
 		expect(logger.warn).toHaveBeenCalledWith(
 			'Subscription sync of "stripe" "sub_1" closed: the provider has no such'
@@ -361,6 +460,7 @@ describe('runSyncBatch', () => {
 				} as unknown as SubscriptionProvider,
 			]]),
 			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
 			logger,
 		});
 
@@ -418,6 +518,7 @@ describe('runSyncBatch', () => {
 				} as unknown as SubscriptionProvider,
 			]]),
 			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
 			logger: { warn: vi.fn(), error: vi.fn() },
 		});
 
@@ -465,6 +566,7 @@ describe('runSyncBatch', () => {
 				} as unknown as SubscriptionProvider,
 			]]),
 			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
 			logger: { warn: vi.fn(), error: vi.fn() },
 		});
 
@@ -488,6 +590,7 @@ describe('runSyncBatch', () => {
 		});
 
 		const logger = { warn: vi.fn(), error: vi.fn() };
+		const emitSyncedAction = vi.fn();
 
 		expect(await runSyncBatch({
 			database,
@@ -499,8 +602,11 @@ describe('runSyncBatch', () => {
 				} as unknown as SubscriptionProvider,
 			]]),
 			createAccessService: vi.fn(),
+			emitSyncedAction,
 			logger,
 		})).toBe(1);
+
+		expect(emitSyncedAction).not.toHaveBeenCalled();
 
 		expect(logger.warn).toHaveBeenCalledWith(
 			'Subscription sync of "stripe" "sub_1" failed, attempt 3:'
@@ -532,6 +638,7 @@ describe('runSyncBatch', () => {
 			database,
 			enabledProviders: new Map(),
 			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
 			logger: { warn: vi.fn(), error: vi.fn() },
 		});
 
@@ -568,6 +675,7 @@ describe('runSyncBatch', () => {
 				} as unknown as SubscriptionProvider,
 			]]),
 			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
 			logger,
 		});
 
@@ -609,6 +717,7 @@ describe('runSyncBatch', () => {
 				} as unknown as SubscriptionProvider,
 			]]),
 			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
 			logger,
 		});
 
@@ -634,6 +743,7 @@ describe('runSyncBatch', () => {
 			database,
 			enabledProviders: new Map(),
 			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
 			logger: { warn: vi.fn(), error: vi.fn() },
 		})).rejects.toThrow(new Error('connection lost'));
 	});
@@ -657,6 +767,7 @@ describe('runSyncBatch', () => {
 			database,
 			enabledProviders: new Map(),
 			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
 			logger: { warn: vi.fn(), error: vi.fn() },
 		})).toBe(50);
 

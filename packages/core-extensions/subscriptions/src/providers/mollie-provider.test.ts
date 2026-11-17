@@ -749,8 +749,12 @@ describe('cancelAtPeriodEnd', () => {
 		)
 			.cancelAtPeriodEnd('cst_1/sub_1');
 
+		// Fixed, so a retried cancel replays the first instead of failing on it.
 		expect(mollieClient.customerSubscriptions.cancel)
-			.toHaveBeenCalledWith('sub_1', { customerId: 'cst_1' });
+			.toHaveBeenCalledWith('sub_1', {
+				customerId: 'cst_1',
+				idempotencyKey: 'cancel-sub_1',
+			});
 	});
 });
 
