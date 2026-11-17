@@ -409,6 +409,26 @@ describe('subscriptionsHook', () => {
 		expect(refuseWrite).toHaveBeenCalled();
 	});
 
+	// The CLI loads this hook too, before `subscriptions mollie-setup-webhook`
+	// has made the webhook secret a Mollie key requires.
+	test('reads the provider config at a sync, not at registration', async () => {
+		const schedule = vi.fn();
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter: vi.fn(), init: vi.fn(), schedule },
+			{
+				env: { MAX_PAYLOAD_SIZE: '1mb', SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1' },
+				database: 'database',
+				getSchema: vi.fn().mockResolvedValue('schema'),
+			},
+		);
+
+		await expect(schedule.mock.calls[0]?.[1]()).rejects.toThrow(new Error(
+			'"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" is required when'
+			+ ' "SUBSCRIPTIONS_MOLLIE_API_KEY" is set',
+		));
+	});
+
 	test('queues a reconcile every 15 minutes by default', async () => {
 		const schedule = vi.fn();
 
