@@ -58,6 +58,7 @@ export const subscriptionsHook = defineHook(
 
 			return enabledProviders;
 		};
+
 		const maxPayloadSize = readMaxPayloadSize(env);
 		const reconcileCron = readReconcileCron(env);
 
