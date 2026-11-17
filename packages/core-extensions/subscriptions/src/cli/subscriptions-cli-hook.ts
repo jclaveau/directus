@@ -16,8 +16,8 @@ const MOLLIE_EVENT_TYPES = [
 ];
 
 /**
- * Its own bundle entry, ahead of the sync hook: that one refuses an API key
- * without its webhook secret, which only exists once this command has run.
+ * Its own bundle entry: the webhook secret a Mollie API key requires only
+ * exists once this command has run, so it reads the access token alone.
  */
 export const subscriptionsCliHook = defineHook(
 	'subscriptions-cli',

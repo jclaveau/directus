@@ -9,6 +9,7 @@ import { readSubscriptionsConfig } from './config/read-subscriptions-config.js';
 import { addOwnBeneficiary } from './members/add-own-beneficiary.js';
 import { archivePlan } from './plans/archive-plan.js';
 import { createProviders } from './providers/create-providers.js';
+import type { SubscriptionProviders } from './providers/types.js';
 import { receiveWebhook } from './webhook/receive-webhook.js';
 
 type AccountableRequest = Request & { accountability?: Accountability | null };
@@ -16,7 +17,16 @@ type AccountableRequest = Request & { accountability?: Accountability | null };
 export const subscriptionsEndpoint = defineEndpoint(
 	'subscriptions',
 	(router, { env, database, logger }) => {
-		const enabledProviders = createProviders(readSubscriptionsConfig(env));
+		let enabledProviders: SubscriptionProviders | undefined;
+
+		// Read at first use: the CLI loads this endpoint too, before
+		// `subscriptions mollie-setup-webhook` has made the webhook secret a
+		// Mollie key requires. The server refuses that env at boot already.
+		const readEnabledProviders = (): SubscriptionProviders => {
+			enabledProviders ??= createProviders(readSubscriptionsConfig(env));
+
+			return enabledProviders;
+		};
 
 		router.post('/webhooks/:provider', (request, response, next) => {
 			if (!Buffer.isBuffer(request.body)) {
@@ -27,14 +37,17 @@ export const subscriptionsEndpoint = defineEndpoint(
 				return;
 			}
 
-			receiveWebhook({
-				database,
-				enabledProviders,
-				providerName: String(request.params['provider']),
-				rawBody: request.body,
-				requestHeaders: request.headers,
-				logger,
-			})
+			Promise.resolve()
+				.then(() => {
+					return receiveWebhook({
+						database,
+						enabledProviders: readEnabledProviders(),
+						providerName: String(request.params['provider']),
+						rawBody: request.body,
+						requestHeaders: request.headers,
+						logger,
+					});
+				})
 				.then(() => {
 					response.status(200)
 						.end();
@@ -46,7 +59,7 @@ export const subscriptionsEndpoint = defineEndpoint(
 				.then(() => {
 					return cancelOwnSubscription({
 						database,
-						enabledProviders,
+						enabledProviders: readEnabledProviders(),
 						userId: request.accountability?.user ?? null,
 						subscriptionId: readChosenSubscription(request.body),
 					});
@@ -62,7 +75,7 @@ export const subscriptionsEndpoint = defineEndpoint(
 				.then(() => {
 					return resumeOwnSubscription({
 						database,
-						enabledProviders,
+						enabledProviders: readEnabledProviders(),
 						userId: request.accountability?.user ?? null,
 						subscriptionId: readChosenSubscription(request.body),
 					});
@@ -76,12 +89,15 @@ export const subscriptionsEndpoint = defineEndpoint(
 		router.post(
 			'/beneficiaries',
 			(request: AccountableRequest, response, next) => {
-				addOwnBeneficiary({
-					database,
-					enabledProviders,
-					userId: request.accountability?.user ?? null,
-					requestBody: request.body,
-				})
+				Promise.resolve()
+					.then(() => {
+						return addOwnBeneficiary({
+							database,
+							enabledProviders: readEnabledProviders(),
+							userId: request.accountability?.user ?? null,
+							requestBody: request.body,
+						});
+					})
 					.then((beneficiaryId) => {
 						response.json({ data: { id: beneficiaryId } });
 					}, next);
@@ -91,13 +107,16 @@ export const subscriptionsEndpoint = defineEndpoint(
 		router.post(
 			'/plans/:id/archive',
 			(request: AccountableRequest, response, next) => {
-				archivePlan({
-					database,
-					enabledProviders,
-					planId: String(request.params['id']),
-					confirmation: request.body?.confirmation,
-					accountability: request.accountability ?? null,
-				})
+				Promise.resolve()
+					.then(() => {
+						return archivePlan({
+							database,
+							enabledProviders: readEnabledProviders(),
+							planId: String(request.params['id']),
+							confirmation: request.body?.confirmation,
+							accountability: request.accountability ?? null,
+						});
+					})
 					.then((archivedPlan) => {
 						response.json({ data: archivedPlan });
 					}, next);
