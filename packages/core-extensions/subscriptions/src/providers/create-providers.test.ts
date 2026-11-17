@@ -1,18 +1,14 @@
 import { describe, expect, test, vi } from 'vitest';
 import { UnknownProviderError } from '../errors.js';
 import { createProviders, findProvider } from './create-providers.js';
-import { retryMollieProvider } from './retry-mollie-calls.js';
 import type { SubscriptionProvider } from './types.js';
 
-vi.mock('./retry-mollie-calls.js', async (importOriginal) => {
-	const retryModule = await importOriginal<
-		typeof import('./retry-mollie-calls.js')
-	>();
+const { createdMollieProvider } = vi.hoisted(() => {
+	return { createdMollieProvider: { fetchSubscription: vi.fn() } };
+});
 
-	return {
-		...retryModule,
-		retryMollieProvider: vi.fn(retryModule.retryMollieProvider),
-	};
+vi.mock('./mollie-provider.js', () => {
+	return { createMollieProvider: () => createdMollieProvider };
 });
 
 describe('createProviders', () => {
@@ -27,26 +23,18 @@ describe('createProviders', () => {
 			mollie: {
 				apiKey: 'test_1',
 				webhookSecrets: ['mollie_secret_1'],
-				retry: { maxRetries: 3, delayMs: 1000 },
 			},
 		}).keys()])
 			.toEqual(['stripe', 'mollie']);
 	});
 
-	test('retries the Mollie calls as the config sets', () => {
-		createProviders({
+	// The sync queue retries a failed call, with its backoff, at no worker's cost.
+	test('calls Mollie as is, a failure left to the sync queue', () => {
+		expect(createProviders({
 			stripe: null,
-			mollie: {
-				apiKey: 'test_1',
-				webhookSecrets: ['mollie_secret_1'],
-				retry: { maxRetries: 2, delayMs: 500 },
-			},
-		});
-
-		expect(retryMollieProvider).toHaveBeenCalledWith(
-			expect.objectContaining({ fetchSubscription: expect.any(Function) }),
-			{ maxRetries: 2, delayMs: 500 },
-		);
+			mollie: { apiKey: 'test_1', webhookSecrets: ['mollie_secret_1'] },
+		}).get('mollie'))
+			.toBe(createdMollieProvider);
 	});
 });
 
