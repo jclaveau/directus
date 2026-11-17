@@ -102,6 +102,7 @@ describe('resumeOwnSubscription', () => {
 			cancel_at_period_end: 1,
 			source: 'user',
 			user: 'user-1',
+			payload: null,
 			date_created: 1_793_836_800_000,
 		}]);
 	});
@@ -165,6 +166,7 @@ describe('resumeOwnSubscription', () => {
 			cancel_at_period_end: 0,
 			source: 'user',
 			user: 'user-1',
+			payload: null,
 			date_created: 1_793_836_800_000,
 		}]);
 	});

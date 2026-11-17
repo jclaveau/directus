@@ -124,6 +124,7 @@ describe('syncSubscription', () => {
 			cancel_at_period_end: 0,
 			source: 'sync',
 			user: null,
+			payload: null,
 			date_created: 1_793_836_800_000,
 		}]);
 
@@ -419,6 +420,7 @@ describe('syncSubscription', () => {
 			cancel_at_period_end: 0,
 			source: 'sync',
 			user: null,
+			payload: null,
 			date_created: 1_793_836_800_000,
 		}]);
 	});
@@ -1124,6 +1126,7 @@ describe('syncSubscription', () => {
 			cancel_at_period_end: 1,
 			source: 'sync',
 			user: null,
+			payload: null,
 			date_created: 1_793_836_800_000,
 		}]);
 	});
@@ -1522,6 +1525,7 @@ describe('syncSubscription', () => {
 			cancel_at_period_end: 1,
 			source: 'user_deleted',
 			user: null,
+			payload: null,
 			date_created: 1_793_836_800_000,
 		}]);
 	});
@@ -1755,6 +1759,7 @@ describe('closeMissingSubscription', () => {
 			cancel_at_period_end: 0,
 			source: 'provider_missing',
 			user: null,
+			payload: null,
 			date_created: 1_793_836_800_000,
 		}]);
 	});

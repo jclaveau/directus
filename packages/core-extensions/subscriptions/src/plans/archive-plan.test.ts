@@ -228,6 +228,7 @@ describe('archivePlan', () => {
 				cancel_at_period_end: 1,
 				source: 'plan_archived',
 				user: 'admin-1',
+				payload: null,
 				date_created: 1_793_836_800_000,
 			},
 			{
@@ -238,6 +239,7 @@ describe('archivePlan', () => {
 				cancel_at_period_end: 1,
 				source: 'plan_archived',
 				user: 'admin-1',
+				payload: null,
 				date_created: 1_793_836_800_000,
 			},
 		]);
