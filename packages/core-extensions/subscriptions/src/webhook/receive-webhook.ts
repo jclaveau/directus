@@ -1,6 +1,7 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import type { Knex } from 'knex';
-import { WebhookIgnoredError } from '../errors.js';
+import { WebhookIgnoredError, WebhookUnreadableError } from '../errors.js';
+import { recordUnreadableWebhook } from '../events/record-subscription-event.js';
 import { findProvider } from '../providers/create-providers.js';
 import type { SubscriptionProviders } from '../providers/types.js';
 import { enqueueSync } from '../queue/sync-queue.js';
@@ -11,7 +12,10 @@ export type ReceivedWebhook = {
 	providerName: string;
 	rawBody: Buffer;
 	requestHeaders: IncomingHttpHeaders;
-	logger: { warn: (message: string) => void };
+	logger: {
+		warn: (message: string) => void;
+		error: (message: string) => void;
+	};
 };
 
 /** Only queues the sync: the worker fetches the state the webhook hints at. */
@@ -34,6 +38,17 @@ export async function receiveWebhook({
 	catch (error) {
 		// Any answer but a 2xx has the provider retry what will never sync, then
 		// disable the endpoint.
+		if (error instanceof WebhookUnreadableError) {
+			logger.error(error.message);
+
+			await recordUnreadableWebhook(database, {
+				rawBody,
+				receivedAt: new Date(),
+			});
+
+			return;
+		}
+
 		if (!(error instanceof WebhookIgnoredError)) {
 			throw error;
 		}

@@ -5,7 +5,8 @@ export type SubscriptionEventSource =
 	| 'user'
 	| 'provider_missing'
 	| 'user_deleted'
-	| 'plan_archived';
+	| 'plan_archived'
+	| 'webhook_unreadable';
 
 export type SubscriptionEvent = {
 	subscriptionId: number;
@@ -30,5 +31,22 @@ export async function recordSubscriptionEvent(
 		source: subscriptionEvent.source,
 		user: subscriptionEvent.userId,
 		date_created: subscriptionEvent.recordedAt,
+	});
+}
+
+/** A signed webhook nobody could read, kept so it can be read and replayed. */
+export async function recordUnreadableWebhook(
+	database: Knex,
+	unreadableWebhook: { rawBody: Buffer; receivedAt: Date },
+): Promise<void> {
+	await database('subscription_events').insert({
+		subscription: null,
+		status: null,
+		current_period_end: null,
+		cancel_at_period_end: null,
+		source: 'webhook_unreadable',
+		user: null,
+		date_created: unreadableWebhook.receivedAt,
+		payload: unreadableWebhook.rawBody.toString('utf8'),
 	});
 }
