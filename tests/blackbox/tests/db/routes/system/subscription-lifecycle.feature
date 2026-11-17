@@ -1099,3 +1099,13 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       subscriptions.synced
       {"subscription":95,"provider":"mollie","status":"canceled","access":"revoked"}
       """
+
+  Scenario: the Mollie webhook setup runs before the bundle has its webhook secret
+    When the CLI runs subscriptions mollie-setup-webhook --help with these variables:
+      | variable                             | value |
+      | SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS |       |
+      | EXTENSIONS_MUST_LOAD                 | true  |
+    Then the CLI exited with 0, having logged:
+      """
+      Usage: directus subscriptions mollie-setup-webhook [options]
+      """

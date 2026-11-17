@@ -65,6 +65,51 @@ describe('subscriptionsEndpoint', () => {
 		});
 	});
 
+	// The CLI loads this endpoint too, before `subscriptions mollie-setup-webhook`
+	// has made the webhook secret a Mollie key requires.
+	test('reads the provider config at a request, not at registration', async () => {
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use(express.raw({ type: () => true }));
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: { SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1' }, database: 'database' },
+		);
+
+		expressApp.use((
+			requestError: Error,
+			_request: express.Request,
+			response: express.Response,
+			_next: express.NextFunction,
+		) => {
+			response.status(500)
+				.send(requestError.message);
+		});
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const webhookResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/webhooks/mollie`,
+			{ method: 'POST', body: 'id=tr_1' },
+		);
+
+		httpServer.close();
+
+		expect({
+			status: webhookResponse.status,
+			body: await webhookResponse.text(),
+		}).toEqual({
+			status: 500,
+			body: '"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" is required when'
+				+ ' "SUBSCRIPTIONS_MOLLIE_API_KEY" is set',
+		});
+
+		expect(receiveWebhook).not.toHaveBeenCalled();
+	});
+
 	test('passes a refused webhook to the error handler', async () => {
 		vi.mocked(receiveWebhook)
 			.mockRejectedValue(new ForbiddenError());
