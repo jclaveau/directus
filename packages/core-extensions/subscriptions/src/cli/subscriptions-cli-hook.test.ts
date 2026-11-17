@@ -24,7 +24,7 @@ describe('subscriptionsCliHook', () => {
 
 		(subscriptionsCliHook.config as (...args: unknown[]) => void)(
 			{ init },
-			{ env: { SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1' } },
+			{ env: { SUBSCRIPTIONS_MOLLIE_ACCESS_TOKEN: 'mollie_token_1' } },
 		);
 
 		expect(init).toHaveBeenCalledWith('cli.before', expect.any(Function));
@@ -42,7 +42,7 @@ describe('subscriptionsCliHook', () => {
 		expect(fetch).toHaveBeenCalledWith('https://api.mollie.com/v2/webhooks', {
 			method: 'POST',
 			headers: {
-				'Authorization': 'Bearer test_1',
+				'Authorization': 'Bearer mollie_token_1',
 				'Content-Type': 'application/json',
 			},
 			body: JSON.stringify({
@@ -74,7 +74,60 @@ describe('subscriptionsCliHook', () => {
 		expect(exitProcess).toHaveBeenCalledWith(0);
 	});
 
-	test('refuses to run without the Mollie API key', async () => {
+	test('creates a test-mode webhook with --testmode', async () => {
+		const init = vi.fn();
+		const program = new Command();
+
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+			JSON.stringify({ id: 'hook_1', webhookSecret: 'mollie_secret_new' }),
+			{ status: 201 },
+		)));
+
+		vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+		vi.spyOn(process, 'exit').mockReturnValue(undefined as never);
+
+		(subscriptionsCliHook.config as (...args: unknown[]) => void)(
+			{ init },
+			{ env: { SUBSCRIPTIONS_MOLLIE_ACCESS_TOKEN: 'mollie_token_1' } },
+		);
+
+		init.mock.calls[0]?.[1]({ program });
+
+		await program.parseAsync([
+			'node',
+			'directus',
+			'subscriptions',
+			'mollie-setup-webhook',
+			'--url',
+			'https://example.com/subscriptions/webhooks/mollie',
+			'--name',
+			'Staging subscriptions',
+			'--testmode',
+		]);
+
+		expect(fetch).toHaveBeenCalledWith('https://api.mollie.com/v2/webhooks', {
+			method: 'POST',
+			headers: {
+				'Authorization': 'Bearer mollie_token_1',
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({
+				name: 'Staging subscriptions',
+				url: 'https://example.com/subscriptions/webhooks/mollie',
+				eventTypes: [
+					'payment.paid',
+					'payment.authorized',
+					'payment.failed',
+					'payment.canceled',
+					'payment.expired',
+					'payment.pending',
+				],
+				testmode: true,
+			}),
+		});
+	});
+
+	test('refuses to run without a Mollie access token', async () => {
 		const init = vi.fn();
 		const program = new Command();
 
@@ -96,7 +149,8 @@ describe('subscriptionsCliHook', () => {
 			'https://example.com/subscriptions/webhooks/mollie',
 		]))
 			.rejects.toThrow(new Error(
-				'"SUBSCRIPTIONS_MOLLIE_API_KEY" is required to create a Mollie webhook',
+				'"SUBSCRIPTIONS_MOLLIE_ACCESS_TOKEN" is required to create a Mollie'
+				+ ' webhook: Mollie refuses an API key there',
 			));
 
 		expect(fetch).not.toHaveBeenCalled();
@@ -113,7 +167,7 @@ describe('subscriptionsCliHook', () => {
 
 		(subscriptionsCliHook.config as (...args: unknown[]) => void)(
 			{ init },
-			{ env: { SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1' } },
+			{ env: { SUBSCRIPTIONS_MOLLIE_ACCESS_TOKEN: 'mollie_token_1' } },
 		);
 
 		init.mock.calls[0]?.[1]({ program });
