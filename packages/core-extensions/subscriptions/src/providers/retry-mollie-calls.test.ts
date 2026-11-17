@@ -88,6 +88,9 @@ describe('retryMollieCall', () => {
 			resourceId: 'tr_1',
 			subscriptionId: null,
 		})],
+		['an id the client refuses before calling Mollie', new MollieApiError(
+			'The subscription id appears invalid: tr_1 (unexpected format)',
+		)],
 		['any other error', new Error('boom')],
 	])('rethrows %s at once', async (_errorCase, callError) => {
 		const mollieCall = vi.fn().mockRejectedValue(callError);

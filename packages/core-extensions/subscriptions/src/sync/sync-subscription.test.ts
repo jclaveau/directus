@@ -713,7 +713,7 @@ describe('syncSubscription', () => {
 
 		const accessService = { deleteOne: vi.fn() };
 
-		await syncSubscription({
+		const syncedSubscription = await syncSubscription({
 			trx: database,
 			subscriptionProvider: {} as SubscriptionProvider,
 			logger: { warn: vi.fn(), error: vi.fn() },
@@ -733,6 +733,12 @@ describe('syncSubscription', () => {
 				},
 			},
 			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(syncedSubscription).toEqual({
+			subscription: 1,
+			status: 'canceled',
+			access: 'unchanged',
 		});
 
 		expect(accessService.deleteOne).not.toHaveBeenCalled();

@@ -139,6 +139,87 @@ describe('runSyncBatch', () => {
 		]);
 	});
 
+	test('announces no sync a later step rolled back', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			status: 'pending',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 2,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const fetchSubscription = vi.fn().mockResolvedValue({
+			subscriptionId: 'sub_1',
+			customerId: 'cus_1',
+			status: 'active',
+			currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+			cancelAtPeriodEnd: false,
+			directusSubscription: 1,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
+		});
+
+		const accessService = { createOne: vi.fn().mockResolvedValue('access-1') };
+		const logger = { warn: vi.fn(), error: vi.fn() };
+		const emitSyncedAction = vi.fn();
+
+		expect(await runSyncBatch({
+			database,
+			enabledProviders: new Map([
+				['stripe', {
+					fetchSubscription,
+					composeResourceId: vi.fn().mockImplementation(() => {
+						throw new Error('Unreadable customer');
+					}),
+				} as unknown as SubscriptionProvider],
+			]),
+			createAccessService: () => accessService as unknown as AbstractService,
+			emitSyncedAction,
+			logger,
+		})).toBe(1);
+
+		expect(emitSyncedAction).not.toHaveBeenCalled();
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			'Subscription sync of "stripe" "sub_1" failed, attempt 3:'
+			+ ' "Unreadable customer"',
+		);
+
+		expect(await database('subscriptions').select('status'))
+			.toEqual([{ status: 'pending' }]);
+
+		expect(await database('subscription_beneficiaries')).toEqual([
+			{ id: 1, subscription: 1, user: 'user-1', access: null },
+		]);
+	});
+
 	test('announces a sync that left every access as it was', async () => {
 		await database('subscription_plans').insert({
 			code: 'monthly',

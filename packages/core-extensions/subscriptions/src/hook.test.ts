@@ -102,6 +102,42 @@ describe('subscriptionsHook', () => {
 		);
 	});
 
+	test('logs a subscriptions.synced listener that throws', async () => {
+		const schedule = vi.fn();
+		const logger = { warn: vi.fn() };
+
+		const emitter = {
+			emitAction: vi.fn().mockRejectedValue(new Error('Listener broke')),
+		};
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter: vi.fn(), init: vi.fn(), schedule },
+			{
+				env: { MAX_PAYLOAD_SIZE: '1mb' },
+				database: 'database',
+				services: { AccessService: vi.fn() },
+				getSchema: vi.fn().mockResolvedValue('schema'),
+				logger,
+				emitter,
+			},
+		);
+
+		await schedule.mock.calls[0]?.[1]();
+
+		vi.mocked(runSyncBatch).mock.calls[0]?.[0].emitSyncedAction({
+			subscription: 1,
+			provider: 'mollie',
+			status: 'active',
+			access: 'granted',
+		});
+
+		await vi.waitFor(() => {
+			expect(logger.warn).toHaveBeenCalledWith(
+				'A "subscriptions.synced" listener threw: "Listener broke"',
+			);
+		});
+	});
+
 	test('filters the writes around the plans, managers and history', () => {
 		const filter = vi.fn();
 
