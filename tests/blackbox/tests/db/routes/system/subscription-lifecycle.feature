@@ -1099,14 +1099,3 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       subscriptions.synced
       {"subscription":95,"provider":"mollie","status":"canceled","access":"revoked"}
       """
-
-  Scenario: a Mollie retry setting out of range stops the bundle, naming the variable
-    When the CLI runs subscriptions mollie-setup-webhook with these variables:
-      | variable                               | value |
-      | SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES | -1    |
-      | EXTENSIONS_MUST_LOAD                   | true  |
-    Then the CLI exited with 1, having logged:
-      """
-      "SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES" must be an integer from 0 to 10,
-      got -1
-      """

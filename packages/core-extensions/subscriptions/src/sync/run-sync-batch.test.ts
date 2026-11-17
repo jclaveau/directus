@@ -1,6 +1,7 @@
 import type { AbstractService } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { MollieApiError } from '@mollie/api-client';
 import { MissingProviderSubscriptionError } from '../errors.js';
 import {
 	createSubscriptionTables,
@@ -15,7 +16,10 @@ beforeEach(async () => {
 		client: 'sqlite3',
 		connection: { filename: ':memory:' },
 		useNullAsDefault: true,
+		// One connection, given up fast: a transaction held across a provider
+		// call starves any other query instead of hanging the test.
 		pool: { min: 1, max: 1 },
+		acquireConnectionTimeout: 1000,
 	});
 
 	await database.schema.createTable('directus_access', (table) => {
@@ -574,28 +578,18 @@ describe('runSyncBatch', () => {
 			last_error: null,
 		});
 
-		const runTransaction = database.transaction.bind(database);
-
-		vi.spyOn(database, 'transaction').mockImplementation(((
-			transactionHandler: (trx: Knex.Transaction) => Promise<void>,
-		) => {
-			return runTransaction(transactionHandler)
-				.catch(async (transactionError: unknown) => {
-					await database('subscription_sync_queue').update({
-						next_attempt_at: new Date('2026-11-05T00:00:30Z'),
-					});
-
-					throw transactionError;
-				});
-		}) as never);
-
 		await runSyncBatch({
 			database,
 			enabledProviders: new Map([[
 				'stripe',
 				{
-					fetchSubscription: vi.fn()
-						.mockRejectedValue(new Error('Stripe is down')),
+					fetchSubscription: vi.fn(async () => {
+						await database('subscription_sync_queue').update({
+							next_attempt_at: new Date('2026-11-05T00:00:30Z'),
+						});
+
+						throw new Error('Stripe is down');
+					}),
 				} as unknown as SubscriptionProvider,
 			]]),
 			createAccessService: vi.fn(),
@@ -622,28 +616,18 @@ describe('runSyncBatch', () => {
 			last_error: null,
 		});
 
-		const runTransaction = database.transaction.bind(database);
-
-		vi.spyOn(database, 'transaction').mockImplementation(((
-			transactionHandler: (trx: Knex.Transaction) => Promise<void>,
-		) => {
-			return runTransaction(transactionHandler)
-				.catch(async (transactionError: unknown) => {
-					await database('subscription_sync_queue').update({
-						next_attempt_at: new Date('2026-11-05T00:00:30Z'),
-					});
-
-					throw transactionError;
-				});
-		}) as never);
-
 		await runSyncBatch({
 			database,
 			enabledProviders: new Map([[
 				'stripe',
 				{
-					fetchSubscription: vi.fn()
-						.mockRejectedValue(new Error('Stripe is down')),
+					fetchSubscription: vi.fn(async () => {
+						await database('subscription_sync_queue').update({
+							next_attempt_at: new Date('2026-11-05T00:00:30Z'),
+						});
+
+						throw new Error('Stripe is down');
+					}),
 				} as unknown as SubscriptionProvider,
 			]]),
 			createAccessService: vi.fn(),
@@ -814,6 +798,218 @@ describe('runSyncBatch', () => {
 				next_attempt_at: 1_793_836_860_000,
 				last_error: '[object Object]',
 			}]);
+	});
+
+	test('fetches holding no connection, the row leased 5 minutes', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const leasedRows: unknown[] = [];
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{
+					fetchSubscription: vi.fn(async () => {
+						leasedRows.push(await database('subscription_sync_queue')
+							.select('next_attempt_at'));
+
+						throw new Error('Stripe is down');
+					}),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(leasedRows).toEqual([[{ next_attempt_at: 1_793_837_100_000 }]]);
+	});
+
+	test('records a Mollie 429 at once, the queue retries it', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'mollie',
+			resource_id: 'cst_1/sub_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const fetchSubscription = vi.fn()
+			.mockRejectedValue(new MollieApiError('Too many', { statusCode: 429 }));
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'mollie',
+				{ fetchSubscription } as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(fetchSubscription.mock.calls).toEqual([['cst_1/sub_1']]);
+
+		expect(await database('subscription_sync_queue')
+			.select('pending', 'attempts', 'next_attempt_at', 'last_error'))
+			.toEqual([{
+				pending: 1,
+				attempts: 1,
+				next_attempt_at: 1_793_836_860_000,
+				last_error: 'Too many',
+			}]);
+	});
+
+	test('retakes a row whose lease ran out, not before', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		// A worker that dies mid-call: its fetch never settles.
+		const stalledFetch = vi.fn(() => {
+			return new Promise(() => {});
+		});
+
+		void runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{ fetchSubscription: stalledFetch } as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		await vi.waitFor(() => {
+			expect(stalledFetch).toHaveBeenCalled();
+		});
+
+		const retakingFetch = vi.fn()
+			.mockRejectedValue(new Error('Stripe is down'));
+
+		const retakingContext = {
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{ fetchSubscription: retakingFetch } as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		};
+
+		vi.setSystemTime(new Date('2026-11-05T00:04:59Z'));
+		expect(await runSyncBatch(retakingContext)).toBe(0);
+
+		vi.setSystemTime(new Date('2026-11-05T00:05:00Z'));
+		expect(await runSyncBatch(retakingContext)).toBe(1);
+
+		expect(retakingFetch.mock.calls).toEqual([['sub_1']]);
+
+		expect(await database('subscription_sync_queue')
+			.select('pending', 'attempts', 'next_attempt_at', 'last_error'))
+			.toEqual([{
+				pending: 1,
+				attempts: 1,
+				next_attempt_at: 1_793_837_160_000,
+				last_error: 'Stripe is down',
+			}]);
+	});
+
+	test('applies nothing once another worker took the lease over', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			status: 'pending',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 2,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: 'Stripe is down',
+		});
+
+		const logger = { warn: vi.fn(), error: vi.fn() };
+		const emitSyncedAction = vi.fn();
+
+		expect(await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{
+					fetchSubscription: vi.fn(async () => {
+						await database('subscription_sync_queue').update({
+							next_attempt_at: new Date('2026-11-05T00:10:00Z'),
+						});
+
+						return {
+							subscriptionId: 'sub_1',
+							customerId: 'cus_1',
+							status: 'active',
+							currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+							cancelAtPeriodEnd: false,
+							directusSubscription: 1,
+							billing: {
+								amountCents: 1000,
+								currency: 'EUR',
+								interval: { months: 1, days: 0 },
+							},
+						};
+					}),
+					composeResourceId: vi.fn().mockReturnValue('sub_1'),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction,
+			logger,
+		})).toBe(1);
+
+		expect(emitSyncedAction).not.toHaveBeenCalled();
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).not.toHaveBeenCalled();
+
+		expect(await database('subscriptions')
+			.select('provider_subscription_id', 'status'))
+			.toEqual([{ provider_subscription_id: null, status: 'pending' }]);
+
+		expect(await database('subscription_sync_queue')).toEqual([{
+			id: 1,
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: 1,
+			attempts: 2,
+			next_attempt_at: 1_793_837_400_000,
+			last_error: 'Stripe is down',
+		}]);
 	});
 
 	test('rethrows an error raised before any row was claimed', async () => {
