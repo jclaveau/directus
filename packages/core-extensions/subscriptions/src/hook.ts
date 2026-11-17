@@ -22,6 +22,7 @@ import {
 	refuseSubscriptionStateUpdate,
 } from './plans/refuse-direct-writes.js';
 import { createProviders } from './providers/create-providers.js';
+import type { SubscriptionProviders } from './providers/types.js';
 import { enqueueReconcile } from './sync/enqueue-reconcile.js';
 import { runSyncBatch } from './sync/run-sync-batch.js';
 import {
@@ -47,7 +48,16 @@ export const subscriptionsHook = defineHook(
 		validateAccess,
 		emitter,
 	}) => {
-		const enabledProviders = createProviders(readSubscriptionsConfig(env));
+		let enabledProviders: SubscriptionProviders | undefined;
+
+		// Read at first use: the CLI loads this hook too, before
+		// `subscriptions mollie-setup-webhook` has made the webhook secret a
+		// Mollie key requires. The server refuses that env at boot already.
+		const readEnabledProviders = (): SubscriptionProviders => {
+			enabledProviders ??= createProviders(readSubscriptionsConfig(env));
+
+			return enabledProviders;
+		};
 		const maxPayloadSize = readMaxPayloadSize(env);
 		const reconcileCron = readReconcileCron(env);
 
@@ -225,7 +235,7 @@ export const subscriptionsHook = defineHook(
 
 			await runSyncBatch({
 				database,
-				enabledProviders,
+				enabledProviders: readEnabledProviders(),
 				logger,
 				createAccessService: (trx) => {
 					return new services.AccessService({
@@ -258,7 +268,7 @@ export const subscriptionsHook = defineHook(
 		});
 
 		schedule(reconcileCron, async () => {
-			await enqueueReconcile(database, enabledProviders);
+			await enqueueReconcile(database, readEnabledProviders());
 		});
 	},
 );
