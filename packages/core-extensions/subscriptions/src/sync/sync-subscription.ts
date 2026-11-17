@@ -692,6 +692,8 @@ async function revokeBeneficiaryAccesses({
 		.whereNotNull('access')
 		.orderBy('id');
 
+	let accessChange: AccessChange = 'unchanged';
+
 	for (const grantingBeneficiary of grantingBeneficiaries) {
 		await trx('subscription_beneficiaries')
 			.where('id', grantingBeneficiary.id)
@@ -703,10 +705,10 @@ async function revokeBeneficiaryAccesses({
 
 		if (sharingBeneficiary === undefined) {
 			await accessService.deleteOne(grantingBeneficiary.access);
+
+			accessChange = 'revoked';
 		}
 	}
 
-	return grantingBeneficiaries.length > 0
-		? 'revoked'
-		: 'unchanged';
+	return accessChange;
 }
