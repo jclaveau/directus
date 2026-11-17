@@ -72,19 +72,23 @@ export function readSubscriptionsConfig(
 }
 
 /**
- * The key alone, for the webhook setup: Mollie hands the webhook secret only
- * once the webhook exists, so the pair the hook requires cannot exist yet.
+ * Mollie creates a webhook only for an organization access token, never an API
+ * key: read by the webhook setup alone, the sync never needs it.
  */
-export function readMollieApiKey(env: Record<string, unknown>): string {
-	const mollieKey = readOptionalString(env, 'SUBSCRIPTIONS_MOLLIE_API_KEY');
+export function readMollieAccessToken(env: Record<string, unknown>): string {
+	const accessToken = readOptionalString(
+		env,
+		'SUBSCRIPTIONS_MOLLIE_ACCESS_TOKEN',
+	);
 
-	if (mollieKey === null) {
+	if (accessToken === null) {
 		throw new Error(
-			'"SUBSCRIPTIONS_MOLLIE_API_KEY" is required to create a Mollie webhook',
+			'"SUBSCRIPTIONS_MOLLIE_ACCESS_TOKEN" is required to create a Mollie'
+			+ ' webhook: Mollie refuses an API key there',
 		);
 	}
 
-	return mollieKey;
+	return accessToken;
 }
 
 export function readReconcileCron(env: Record<string, unknown>): string {
