@@ -45,6 +45,7 @@ export const subscriptionsHook = defineHook(
 		getSchema,
 		logger,
 		validateAccess,
+		emitter,
 	}) => {
 		const enabledProviders = createProviders(readSubscriptionsConfig(env));
 		const maxPayloadSize = readMaxPayloadSize(env);
@@ -230,6 +231,15 @@ export const subscriptionsHook = defineHook(
 					return new services.AccessService({
 						knex: trx,
 						schema: schemaOverview,
+					});
+				},
+				// The extensions' own emitter, not the global one `action()` listens
+				// on: a listener registers `emitter.onAction('subscriptions.synced')`.
+				emitSyncedAction: (syncedAction) => {
+					emitter.emitAction('subscriptions.synced', syncedAction, {
+						database,
+						schema: schemaOverview,
+						accountability: null,
 					});
 				},
 			});

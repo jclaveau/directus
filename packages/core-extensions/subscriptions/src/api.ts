@@ -1,4 +1,5 @@
 import { defineBundleApi } from '@directus/extensions-sdk/scalabus';
+import { subscriptionsCliHook } from './cli/subscriptions-cli-hook.js';
 import { subscriptionsEndpoint } from './endpoint.js';
 import { subscriptionsHook } from './hook.js';
 import {
@@ -15,6 +16,7 @@ export default defineBundleApi([
 	createSubscriptionTables,
 	createParkedSyncsPreset,
 	showSubscriptionCollections,
+	subscriptionsCliHook,
 	subscriptionsHook,
 	subscriptionsEndpoint,
 ]);
