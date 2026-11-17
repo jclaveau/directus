@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+	readMollieApiKey,
 	readReconcileCron,
 	readSubscriptionsConfig,
 } from './read-subscriptions-config.js';
@@ -18,7 +19,11 @@ describe('readSubscriptionsConfig', () => {
 		}))
 			.toEqual({
 				stripe: { secretKey: 'sk_test_1', webhookSecret: 'whsec_1' },
-				mollie: { apiKey: 'test_1', webhookSecrets: ['mollie_secret_1'] },
+				mollie: {
+					apiKey: 'test_1',
+					webhookSecrets: ['mollie_secret_1'],
+					retry: { maxRetries: 3, delayMs: 1000 },
+				},
 			});
 	});
 
@@ -32,8 +37,70 @@ describe('readSubscriptionsConfig', () => {
 				mollie: {
 					apiKey: 'test_1',
 					webhookSecrets: ['mollie_secret_new', 'mollie_secret_old'],
+					retry: { maxRetries: 3, delayMs: 1000 },
 				},
 			});
+	});
+
+	test('reads the Mollie retry settings', () => {
+		expect(readSubscriptionsConfig({
+			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1',
+			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: 'mollie_secret_1',
+			SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES: 0,
+			SUBSCRIPTIONS_MOLLIE_RETRY_DELAY_MS: 250,
+		}))
+			.toEqual({
+				stripe: null,
+				mollie: {
+					apiKey: 'test_1',
+					webhookSecrets: ['mollie_secret_1'],
+					retry: { maxRetries: 0, delayMs: 250 },
+				},
+			});
+	});
+
+	test.each([-1, 11, 1.5, '3'])(
+		'refuses %j Mollie retries',
+		(maxRetries) => {
+			expect(() => {
+				readSubscriptionsConfig({
+					SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1',
+					SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: 'mollie_secret_1',
+					SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES: maxRetries,
+				});
+			})
+				.toThrow(new Error(
+					'"SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES" must be an integer'
+					+ ` from 0 to 10, got ${JSON.stringify(maxRetries)}`,
+				));
+		},
+	);
+
+	test.each([-1, 60_001, 0.5])(
+		'refuses a Mollie retry delay of %j ms',
+		(delayMs) => {
+			expect(() => {
+				readSubscriptionsConfig({
+					SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1',
+					SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: 'mollie_secret_1',
+					SUBSCRIPTIONS_MOLLIE_RETRY_DELAY_MS: delayMs,
+				});
+			})
+				.toThrow(new Error(
+					'"SUBSCRIPTIONS_MOLLIE_RETRY_DELAY_MS" must be an integer'
+					+ ` from 0 to 60000, got ${JSON.stringify(delayMs)}`,
+				));
+		},
+	);
+
+	test('refuses a bad Mollie retry setting with Mollie disabled', () => {
+		expect(() => {
+			readSubscriptionsConfig({ SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES: -1 });
+		})
+			.toThrow(new Error(
+				'"SUBSCRIPTIONS_MOLLIE_RETRY_MAX_RETRIES" must be an integer'
+				+ ' from 0 to 10, got -1',
+			));
 	});
 
 	test.each([
@@ -138,6 +205,20 @@ describe('readReconcileCron', () => {
 		expect(() => readReconcileCron({ SUBSCRIPTIONS_RECONCILE_CRON: 15 }))
 			.toThrow(new Error(
 				'"SUBSCRIPTIONS_RECONCILE_CRON" must be a non-empty string, got 15',
+			));
+	});
+});
+
+describe('readMollieApiKey', () => {
+	test('reads the key alone, before any webhook secret exists', () => {
+		expect(readMollieApiKey({ SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1' }))
+			.toBe('test_1');
+	});
+
+	test('refuses a missing key', () => {
+		expect(() => readMollieApiKey({}))
+			.toThrow(new Error(
+				'"SUBSCRIPTIONS_MOLLIE_API_KEY" is required to create a Mollie webhook',
 			));
 	});
 });

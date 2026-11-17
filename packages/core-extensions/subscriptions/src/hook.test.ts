@@ -52,6 +52,7 @@ describe('subscriptionsHook', () => {
 		const schedule = vi.fn();
 		const logger = { warn: vi.fn() };
 		const AccessService = vi.fn();
+		const emitter = { emitAction: vi.fn() };
 
 		(subscriptionsHook.config as (...args: unknown[]) => void)(
 			{ filter: vi.fn(), init: vi.fn(), schedule },
@@ -61,6 +62,7 @@ describe('subscriptionsHook', () => {
 				services: { AccessService },
 				getSchema: vi.fn().mockResolvedValue('schema'),
 				logger,
+				emitter,
 			},
 		);
 
@@ -72,6 +74,7 @@ describe('subscriptionsHook', () => {
 			enabledProviders: new Map(),
 			logger,
 			createAccessService: expect.any(Function),
+			emitSyncedAction: expect.any(Function),
 		});
 
 		vi.mocked(runSyncBatch).mock.calls[0]?.[0].createAccessService(
@@ -79,6 +82,24 @@ describe('subscriptionsHook', () => {
 		);
 
 		expect(AccessService).toHaveBeenCalledWith({ knex: 'trx', schema: 'schema' });
+
+		vi.mocked(runSyncBatch).mock.calls[0]?.[0].emitSyncedAction({
+			subscription: 1,
+			provider: 'mollie',
+			status: 'active',
+			access: 'granted',
+		});
+
+		expect(emitter.emitAction).toHaveBeenCalledWith(
+			'subscriptions.synced',
+			{
+				subscription: 1,
+				provider: 'mollie',
+				status: 'active',
+				access: 'granted',
+			},
+			{ database: 'database', schema: 'schema', accountability: null },
+		);
 	});
 
 	test('filters the writes around the plans, managers and history', () => {
