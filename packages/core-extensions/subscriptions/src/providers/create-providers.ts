@@ -4,7 +4,6 @@ import Stripe from 'stripe';
 import type { SubscriptionsConfig } from '../config/read-subscriptions-config.js';
 import { UnknownProviderError } from '../errors.js';
 import { createMollieProvider } from './mollie-provider.js';
-import { retryMollieProvider } from './retry-mollie-calls.js';
 import { createStripeProvider } from './stripe-provider.js';
 import type { SubscriptionProvider, SubscriptionProviders } from './types.js';
 
@@ -21,12 +20,9 @@ export function createProviders(
 	}
 
 	if (subscriptionsConfig.mollie !== null) {
-		enabledProviders.set('mollie', retryMollieProvider(
-			createMollieProvider(
-				createMollieClient({ apiKey: subscriptionsConfig.mollie.apiKey }),
-				subscriptionsConfig.mollie.webhookSecrets,
-			),
-			subscriptionsConfig.mollie.retry,
+		enabledProviders.set('mollie', createMollieProvider(
+			createMollieClient({ apiKey: subscriptionsConfig.mollie.apiKey }),
+			subscriptionsConfig.mollie.webhookSecrets,
 		));
 	}
 
