@@ -588,8 +588,9 @@ async function tryEventTypes(nextGenUrl) {
 	return eventTypeVerdicts;
 }
 
-// The bundle's `mollie-setup-webhook` command holds only the API key: whether
-// that key creates a webhook, and whether the answer carries its secret.
+// Whether an API key alone creates a webhook, and whether the answer carries
+// its secret: the bundle's `mollie-setup-webhook` command uses an organization
+// access token because of this finding.
 // Printed, never compared: a value, not the secret, is the finding.
 async function describeApiKeyWebhook(nextGenUrl) {
 	let keyWebhook = null;

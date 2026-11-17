@@ -282,10 +282,10 @@ function parseMollieEvent(rawBody: Buffer): {
 	try {
 		mollieEvent = JSON.parse(rawBody.toString('utf8'));
 	}
-	catch (error) {
+	catch (parseError) {
 		throw new WebhookRefusedError(
 			{ provider: 'mollie', reason: 'the body is not JSON' },
-			{ cause: error },
+			{ cause: parseError },
 		);
 	}
 

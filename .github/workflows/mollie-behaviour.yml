@@ -98,7 +98,7 @@ jobs:
 
   rotation-check:
     if: github.repository == 'jclaveau/directus' && inputs.mode == 'rotation-check'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Check the rotation inputs

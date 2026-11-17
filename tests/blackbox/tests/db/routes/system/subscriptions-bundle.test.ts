@@ -145,6 +145,10 @@ describe.each(vendors)('%s', (vendor) => {
 			PUBLIC_URL: `http://127.0.0.1:${instancePort}`,
 			PACKAGE_FILE_LOCATION: packageDirectory,
 			LOG_STYLE: 'raw',
+			// The scenarios read warn and info lines: the default 'error' hides them.
+			LOG_LEVEL: vendorEnv['LOG_LEVEL'] === 'error'
+				? 'info'
+				: vendorEnv['LOG_LEVEL'],
 			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_blackbox',
 			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS:
 				`${MOLLIE_WEBHOOK_SECRET},${MOLLIE_OLD_WEBHOOK_SECRET}`,
