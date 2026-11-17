@@ -4,6 +4,7 @@ import {
 	UnknownProviderError,
 	WebhookIgnoredError,
 	WebhookRefusedError,
+	WebhookUnreadableError,
 } from '../errors.js';
 import {
 	createSubscriptionTables,
@@ -43,7 +44,7 @@ describe('receiveWebhook', () => {
 			providerName: 'mollie',
 			rawBody: Buffer.from('id=tr_1'),
 			requestHeaders: { 'content-type': 'application/x-www-form-urlencoded' },
-			logger: { warn: vi.fn() },
+			logger: { warn: vi.fn(), error: vi.fn() },
 		});
 
 		expect(verifyWebhook).toHaveBeenCalledWith(
@@ -68,7 +69,7 @@ describe('receiveWebhook', () => {
 			providerName: 'paypal',
 			rawBody: Buffer.from('{}'),
 			requestHeaders: {},
-			logger: { warn: vi.fn() },
+			logger: { warn: vi.fn(), error: vi.fn() },
 		})).rejects.toThrow(new UnknownProviderError({ provider: 'paypal' }));
 	});
 
@@ -88,12 +89,51 @@ describe('receiveWebhook', () => {
 			providerName: 'stripe',
 			rawBody: Buffer.from('{}'),
 			requestHeaders: {},
-			logger: { warn },
+			logger: { warn, error: vi.fn() },
 		});
 
 		expect(warn).toHaveBeenCalledWith(
 			'Webhook from "stripe" ignored: event type "charge.succeeded" is not handled',
 		);
+
+		expect(await database('subscription_sync_queue')).toEqual([]);
+	});
+
+	test('logs and keeps a signed webhook it cannot read, queues nothing', async () => {
+		vi.useFakeTimers({ now: new Date('2026-11-05T00:00:00Z'), toFake: ['Date'] });
+		const error = vi.fn();
+
+		const verifyWebhook = vi.fn().mockRejectedValue(new WebhookUnreadableError({
+			provider: 'mollie',
+			reason: 'the body is not JSON',
+		}));
+
+		await receiveWebhook({
+			database,
+			enabledProviders: new Map([
+				['mollie', { verifyWebhook } as unknown as SubscriptionProvider],
+			]),
+			providerName: 'mollie',
+			rawBody: Buffer.from('id=tr_1'),
+			requestHeaders: {},
+			logger: { warn: vi.fn(), error },
+		});
+
+		expect(error).toHaveBeenCalledWith(
+			'Webhook from "mollie" unreadable: the body is not JSON',
+		);
+
+		expect(await database('subscription_events')).toEqual([{
+			id: 1,
+			subscription: null,
+			status: null,
+			current_period_end: null,
+			cancel_at_period_end: null,
+			source: 'webhook_unreadable',
+			user: null,
+			date_created: 1_793_836_800_000,
+			payload: 'id=tr_1',
+		}]);
 
 		expect(await database('subscription_sync_queue')).toEqual([]);
 	});
@@ -114,7 +154,7 @@ describe('receiveWebhook', () => {
 			providerName: 'stripe',
 			rawBody: Buffer.from('{}'),
 			requestHeaders: {},
-			logger: { warn: vi.fn() },
+			logger: { warn: vi.fn(), error: vi.fn() },
 		})).rejects.toThrow(refusedWebhook);
 	});
 });

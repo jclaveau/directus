@@ -44,6 +44,22 @@ export const WebhookIgnoredError = createError<{
 	200,
 );
 
+/**
+ * Signed, so sent by the provider, yet unreadable: `receiveWebhook` logs it as
+ * an error, keeps its body in `subscription_events` and answers 200, since a
+ * retry would fail the same way until the provider disables the endpoint.
+ */
+export const WebhookUnreadableError = createError<{
+	provider: string;
+	reason: string;
+}>(
+	'SUBSCRIPTION_WEBHOOK_UNREADABLE',
+	({ provider, reason }) => {
+		return `Webhook from ${JSON.stringify(provider)} unreadable: ${reason}`;
+	},
+	200,
+);
+
 /** `subscriptionId` is null when a Mollie payment led to no subscription. */
 export const MissingProviderSubscriptionError = createError<{
 	resourceId: string;
