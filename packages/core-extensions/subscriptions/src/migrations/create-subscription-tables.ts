@@ -151,21 +151,22 @@ export const createSubscriptionTables = defineMigration(
 			await knex.schema.createTable('subscription_events', (table) => {
 				table.increments('id');
 
+				// Null on a `webhook_unreadable` row, which names no subscription.
 				table.integer('subscription')
 					.unsigned()
-					.notNullable()
+					.nullable()
 					.references('id')
 					.inTable('subscriptions')
 					.onDelete('RESTRICT');
 
 				table.string('status', 32)
-					.notNullable();
+					.nullable();
 
 				table.timestamp('current_period_end', { useTz: true })
 					.nullable();
 
 				table.boolean('cancel_at_period_end')
-					.notNullable();
+					.nullable();
 
 				table.string('source', 32)
 					.notNullable();
@@ -176,6 +177,10 @@ export const createSubscriptionTables = defineMigration(
 
 				table.timestamp('date_created', { useTz: true })
 					.notNullable();
+
+				// The body of a `webhook_unreadable` row, as the provider sent it.
+				table.text('payload')
+					.nullable();
 
 				table.index(['subscription']);
 			});
