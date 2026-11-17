@@ -1,6 +1,6 @@
 import { defineHook } from '@directus/extensions-sdk/scalabus';
 import type { Command } from 'commander';
-import { readMollieApiKey } from '../config/read-subscriptions-config.js';
+import { readMollieAccessToken } from '../config/read-subscriptions-config.js';
 
 const MOLLIE_WEBHOOKS_URL = 'https://api.mollie.com/v2/webhooks';
 
@@ -30,29 +30,36 @@ export const subscriptionsCliHook = defineHook(
 				.description('Create the Mollie webhook and print its secret')
 				.requiredOption('--url <url>', 'Public URL of the Mollie webhook route')
 				.option('--name <name>', 'Name shown in Mollie', 'Directus subscriptions')
-				.action(async ({ url, name }: { url: string; name: string }) => {
-					await createMollieWebhook(readMollieApiKey(env), url, name);
+				.option('--testmode', 'Create the webhook in test mode')
+				.action(async (webhookOptions: MollieWebhookOptions) => {
+					await createMollieWebhook(
+						readMollieAccessToken(env),
+						webhookOptions,
+					);
+
 					process.exit(0);
 				});
 		});
 	},
 );
 
+type MollieWebhookOptions = { url: string; name: string; testmode?: true };
+
 async function createMollieWebhook(
-	mollieKey: string,
-	webhookUrl: string,
-	webhookName: string,
+	accessToken: string,
+	{ url: webhookUrl, name: webhookName, testmode }: MollieWebhookOptions,
 ): Promise<void> {
 	const mollieAnswer = await fetch(MOLLIE_WEBHOOKS_URL, {
 		method: 'POST',
 		headers: {
-			'Authorization': `Bearer ${mollieKey}`,
+			'Authorization': `Bearer ${accessToken}`,
 			'Content-Type': 'application/json',
 		},
 		body: JSON.stringify({
 			name: webhookName,
 			url: webhookUrl,
 			eventTypes: MOLLIE_EVENT_TYPES,
+			testmode,
 		}),
 	});
 
