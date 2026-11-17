@@ -112,9 +112,11 @@ export function createMollieProvider(
 		async cancelAtPeriodEnd(resourceId) {
 			const { customerId, subscriptionId } = parseMollieResourceId(resourceId);
 
+			// Fixed, not the client's random key: a retried cancel that Mollie
+			// already applied answers the first cancel instead of a 422.
 			await mollieClient.customerSubscriptions.cancel(
 				subscriptionId,
-				{ customerId },
+				{ customerId, idempotencyKey: `cancel-${subscriptionId}` },
 			);
 		},
 

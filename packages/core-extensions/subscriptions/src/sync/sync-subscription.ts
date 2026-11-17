@@ -27,6 +27,15 @@ export type SubscriptionSync = {
 	};
 };
 
+export type AccessChange = 'granted' | 'revoked' | 'unchanged';
+
+/** What a sync left behind, for the `subscriptions.synced` action. */
+export type SyncedSubscription = {
+	subscription: number;
+	status: string;
+	access: AccessChange;
+};
+
 type StoredSubscription = {
 	id: number;
 	plan: number;
@@ -78,7 +87,7 @@ export async function syncSubscription({
 	providerSubscription,
 	syncedAt,
 	logger,
-}: SubscriptionSync): Promise<void> {
+}: SubscriptionSync): Promise<SyncedSubscription> {
 	const storedSubscription = await bindStoredSubscription(
 		trx,
 		providerName,
@@ -128,21 +137,18 @@ export async function syncSubscription({
 
 	const accessDecision = decideAccess(providerSubscription, syncedAt, logger);
 
-	if (accessDecision === 'keep') {
-		await keepBeneficiaryAccesses({
+	const accessChange: AccessChange = accessDecision === 'keep'
+		? await keepBeneficiaryAccesses({
 			trx,
 			accessService,
 			subscriptionId: storedSubscription.id,
 			planPolicy: subscribedPlan.policy,
-		});
-	}
-	else {
-		await revokeBeneficiaryAccesses({
+		})
+		: await revokeBeneficiaryAccesses({
 			trx,
 			accessService,
 			subscriptionId: storedSubscription.id,
 		});
-	}
 
 	await writeSubscriptionState({
 		trx,
@@ -160,6 +166,12 @@ export async function syncSubscription({
 			: 'sync',
 		writtenAt: syncedAt,
 	});
+
+	return {
+		subscription: storedSubscription.id,
+		status: providerSubscription.status,
+		access: accessChange,
+	};
 }
 
 /**
@@ -457,16 +469,16 @@ export async function closeMissingSubscription({
 	providerName,
 	subscriptionId,
 	closedAt,
-}: MissingSubscriptionClose): Promise<void> {
+}: MissingSubscriptionClose): Promise<SyncedSubscription | undefined> {
 	const storedSubscription = subscriptionId === null
 		? undefined
 		: await readStoredSubscription(trx, providerName, subscriptionId);
 
 	if (storedSubscription === undefined) {
-		return;
+		return undefined;
 	}
 
-	await revokeBeneficiaryAccesses({
+	const accessChange = await revokeBeneficiaryAccesses({
 		trx,
 		accessService,
 		subscriptionId: storedSubscription.id,
@@ -483,6 +495,12 @@ export async function closeMissingSubscription({
 		eventSource: 'provider_missing',
 		writtenAt: closedAt,
 	});
+
+	return {
+		subscription: storedSubscription.id,
+		status: 'canceled',
+		access: accessChange,
+	};
 }
 
 async function readStoredSubscription(
@@ -588,13 +606,18 @@ type BeneficiaryAccessKeeping = {
 	planPolicy: string;
 };
 
-/** A beneficiary whose account was deleted has no user left to grant. */
+/**
+ * A beneficiary whose account was deleted has no user left to grant. Linking
+ * the access a resumed chain already grants changes no one's access.
+ */
 async function keepBeneficiaryAccesses({
 	trx,
 	accessService,
 	subscriptionId,
 	planPolicy,
-}: BeneficiaryAccessKeeping): Promise<void> {
+}: BeneficiaryAccessKeeping): Promise<AccessChange> {
+	let accessChange: AccessChange = 'unchanged';
+
 	const grantedBeneficiaries = await trx('subscription_beneficiaries')
 		.select('id', 'user', 'access')
 		.where('subscription', subscriptionId)
@@ -626,6 +649,8 @@ async function keepBeneficiaryAccesses({
 				.where('id', grantedBeneficiary.id)
 				.update({ access: String(createdAccess) });
 
+			accessChange = 'granted';
+
 			continue;
 		}
 
@@ -641,8 +666,12 @@ async function keepBeneficiaryAccesses({
 				user: grantedBeneficiary.user,
 				policy: planPolicy,
 			});
+
+			accessChange = 'granted';
 		}
 	}
+
+	return accessChange;
 }
 
 type BeneficiaryAccessRevoke = {
@@ -656,7 +685,7 @@ async function revokeBeneficiaryAccesses({
 	trx,
 	accessService,
 	subscriptionId,
-}: BeneficiaryAccessRevoke): Promise<void> {
+}: BeneficiaryAccessRevoke): Promise<AccessChange> {
 	const grantingBeneficiaries = await trx('subscription_beneficiaries')
 		.select('id', 'access')
 		.where('subscription', subscriptionId)
@@ -676,4 +705,8 @@ async function revokeBeneficiaryAccesses({
 			await accessService.deleteOne(grantingBeneficiary.access);
 		}
 	}
+
+	return grantingBeneficiaries.length > 0
+		? 'revoked'
+		: 'unchanged';
 }
