@@ -24,6 +24,9 @@ const FIRST_RETRY_DELAY_MS = 60_000;
 
 const LONGEST_RETRY_DELAY_MS = 3_600_000;
 
+/** Longer than any provider call; a dead worker's row waits this long. */
+export const SYNC_LEASE_MS = 300_000;
+
 /** The `subscriptions.synced` action's payload. */
 export type SyncedAction = {
 	subscription: number;
@@ -43,7 +46,7 @@ export type SyncBatchContext = {
 	};
 };
 
-/** Syncs due queue rows one transaction each; resolves to the rows claimed. */
+/** Syncs due queue rows one lease each; resolves to the rows claimed. */
 export async function runSyncBatch(
 	batchContext: SyncBatchContext,
 ): Promise<number> {
@@ -65,69 +68,71 @@ async function syncNextRow({
 	emitSyncedAction,
 	logger,
 }: SyncBatchContext): Promise<boolean> {
-	const syncClaim: {
-		claimedRow: SyncQueueRow | undefined;
-		syncedSubscription: SyncedSubscription | undefined;
-	} = {
-		claimedRow: undefined,
-		syncedSubscription: undefined,
-	};
+	const leasedRow = await leaseDueSync(database);
+
+	if (leasedRow === undefined) {
+		return true;
+	}
 
 	let committedSync: SyncedSubscription | undefined;
 
 	try {
-		await database.transaction(async (trx) => {
-			const claimedRow = await selectDueSync(trx, new Date());
-			syncClaim.claimedRow = claimedRow;
+		const subscriptionProvider = findProvider(
+			enabledProviders,
+			leasedRow.provider,
+		);
 
-			if (claimedRow === undefined) {
-				return;
+		// No transaction open: a slow or throttled provider holds no connection.
+		const fetchedSubscription = await subscriptionProvider
+			.fetchSubscription(leasedRow.resource_id)
+			.catch((fetchError: unknown) => {
+				if (fetchError instanceof MissingProviderSubscriptionError) {
+					return fetchError;
+				}
+
+				throw fetchError;
+			});
+
+		committedSync = await database.transaction(async (trx) => {
+			const isLeaseHeld = await lockLeasedSync(trx, leasedRow);
+
+			// A webhook re-armed the row or another worker took it over once the
+			// lease ran out: the next claim fetches afresh.
+			if (isLeaseHeld === false) {
+				return undefined;
 			}
 
-			const subscriptionProvider = findProvider(
-				enabledProviders,
-				claimedRow.provider,
-			);
-
-			const fetchedSubscription = await subscriptionProvider
-				.fetchSubscription(claimedRow.resource_id)
-				.catch((fetchError: unknown) => {
-					if (fetchError instanceof MissingProviderSubscriptionError) {
-						return fetchError;
-					}
-
-					throw fetchError;
-				});
-
-			const claimedQueueRow = trx('subscription_sync_queue')
-				.where('id', claimedRow.id);
+			const leasedQueueRow = trx('subscription_sync_queue')
+				.where('id', leasedRow.id);
 
 			if (fetchedSubscription instanceof MissingProviderSubscriptionError) {
-				syncClaim.syncedSubscription = await closeMissingSubscription({
+				const closedSubscription = await closeMissingSubscription({
 					trx,
 					accessService: createAccessService(trx),
-					providerName: claimedRow.provider,
+					providerName: leasedRow.provider,
 					subscriptionId: fetchedSubscription.extensions.subscriptionId,
 					closedAt: new Date(),
 				});
 
-				await claimedQueueRow.delete();
+				await leasedQueueRow.delete();
 
 				logger.warn(
-					`Subscription sync of ${JSON.stringify(claimedRow.provider)}`
-					+ ` ${JSON.stringify(claimedRow.resource_id)} closed: the`
+					`Subscription sync of ${JSON.stringify(leasedRow.provider)}`
+					+ ` ${JSON.stringify(leasedRow.resource_id)} closed: the`
 					+ ' provider has no such subscription',
 				);
 
-				return;
+				return closedSubscription;
 			}
 
+			let syncedSubscription: SyncedSubscription;
+
 			try {
-				syncClaim.syncedSubscription = await syncSubscription({
+				syncedSubscription = await syncSubscription({
 					trx,
 					accessService: createAccessService(trx),
 					subscriptionProvider,
-					providerName: claimedRow.provider,
+					providerName: leasedRow.provider,
 					providerSubscription: fetchedSubscription,
 					syncedAt: new Date(),
 					logger,
@@ -138,15 +143,15 @@ async function syncNextRow({
 					throw syncError;
 				}
 
-				await claimedQueueRow.delete();
+				await leasedQueueRow.delete();
 
 				logger.error(
-					`Subscription sync of ${JSON.stringify(claimedRow.provider)}`
-					+ ` ${JSON.stringify(claimedRow.resource_id)} dropped:`
+					`Subscription sync of ${JSON.stringify(leasedRow.provider)}`
+					+ ` ${JSON.stringify(leasedRow.resource_id)} dropped:`
 					+ ` ${JSON.stringify(syncError.message)}`,
 				);
 
-				return;
+				return undefined;
 			}
 
 			const syncedResourceId = subscriptionProvider.composeResourceId({
@@ -155,33 +160,26 @@ async function syncNextRow({
 			});
 
 			// A Mollie webhook queues a payment id, which never comes up again.
-			if (syncedResourceId !== claimedRow.resource_id) {
-				await claimedQueueRow.delete();
-
-				return;
+			if (syncedResourceId !== leasedRow.resource_id) {
+				await leasedQueueRow.delete();
+			}
+			else {
+				await leasedQueueRow
+					.update({ pending: false, attempts: 0, last_error: null });
 			}
 
-			await claimedQueueRow
-				.update({ pending: false, attempts: 0, last_error: null });
+			return syncedSubscription;
 		});
-
-		committedSync = syncClaim.syncedSubscription;
 	}
 	catch (error) {
-		const failedRow = syncClaim.claimedRow;
-
-		if (failedRow === undefined) {
-			throw error;
-		}
-
-		const failedAttempts = failedRow.attempts + 1;
+		const failedAttempts = leasedRow.attempts + 1;
 		const isParked = failedAttempts >= MAX_SYNC_ATTEMPTS;
 
-		await recordSyncFailure(database, failedRow, error, isParked);
+		await recordSyncFailure(database, leasedRow, error, isParked);
 
 		const failureMessage = `Subscription sync of`
-			+ ` ${JSON.stringify(failedRow.provider)}`
-			+ ` ${JSON.stringify(failedRow.resource_id)} failed, attempt`
+			+ ` ${JSON.stringify(leasedRow.provider)}`
+			+ ` ${JSON.stringify(leasedRow.resource_id)} failed, attempt`
 			+ ` ${JSON.stringify(failedAttempts)}:`
 			+ ` ${JSON.stringify(readErrorMessage(error))}`;
 
@@ -200,13 +198,55 @@ async function syncNextRow({
 	if (committedSync !== undefined) {
 		emitSyncedAction({
 			subscription: committedSync.subscription,
-			provider: syncClaim.claimedRow!.provider,
+			provider: leasedRow.provider,
 			status: committedSync.status,
 			access: committedSync.access,
 		});
 	}
 
-	return syncClaim.claimedRow === undefined;
+	return false;
+}
+
+/**
+ * Pushes the due row's next try past the provider call, so no other worker
+ * claims it meanwhile; a worker that dies mid-call leaves it due again once
+ * the lease runs out.
+ */
+async function leaseDueSync(database: Knex): Promise<SyncQueueRow | undefined> {
+	return database.transaction(async (trx) => {
+		const dueRow = await selectDueSync(trx, new Date());
+
+		if (dueRow === undefined) {
+			return undefined;
+		}
+
+		const leasedUntil = new Date(Date.now() + SYNC_LEASE_MS);
+
+		await trx('subscription_sync_queue')
+			.where('id', dueRow.id)
+			.update({ next_attempt_at: leasedUntil });
+
+		return { ...dueRow, next_attempt_at: leasedUntil };
+	});
+}
+
+/** Row locks only exist on PG; elsewhere the transaction serialises. */
+async function lockLeasedSync(
+	trx: Knex.Transaction,
+	leasedRow: SyncQueueRow,
+): Promise<boolean> {
+	const leasedQuery = trx('subscription_sync_queue')
+		.select('id')
+		.where('id', leasedRow.id)
+		.andWhere('next_attempt_at', leasedRow.next_attempt_at)
+		.first();
+
+	// TODO(#610): MariaDB 10.6+ also locks a row FOR UPDATE.
+	if (trx.client.dialect === 'postgresql') {
+		leasedQuery.forUpdate();
+	}
+
+	return (await leasedQuery) !== undefined;
 }
 
 async function recordSyncFailure(
@@ -224,8 +264,8 @@ async function recordSyncFailure(
 		.where('id', failedRow.id)
 		.update({
 			attempts: failedRow.attempts + 1,
-			// The rollback freed the row: a webhook may have set it due since the
-			// claim, and that retry must not wait out this backoff.
+			// A webhook may have set the row due since the lease, and that retry
+			// must not wait out this backoff.
 			next_attempt_at: database.raw(
 				'CASE WHEN next_attempt_at = ? THEN ? ELSE next_attempt_at END',
 				[failedRow.next_attempt_at, retriedAt],
