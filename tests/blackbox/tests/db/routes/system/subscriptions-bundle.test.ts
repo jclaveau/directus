@@ -560,9 +560,17 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 	}
 
+	// Hundreds of lines get logged: a failure lists only the ones sharing the
+	// expected message's first word, so the diff shows what came instead.
 	function expectLoggedMessage(loggedDocString: string) {
-		return expect.poll(() => loggedMessages, SYNC_POLL)
-			.toContain(messageOfDocString(loggedDocString));
+		const expectedMessage = messageOfDocString(loggedDocString);
+		const leadingWord = expectedMessage.split(' ')[0]!;
+
+		return expect.poll(() => {
+			return loggedMessages.filter((loggedMessage) => {
+				return loggedMessage.startsWith(leadingWord);
+			});
+		}, SYNC_POLL).toContain(expectedMessage);
 	}
 
 	function expectSubscriptionEvents(
