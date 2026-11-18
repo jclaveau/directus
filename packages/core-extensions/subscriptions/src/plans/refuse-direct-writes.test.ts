@@ -5,6 +5,7 @@ import {
 	createSubscriptionTables,
 } from '../migrations/create-subscription-tables.js';
 import {
+	refuseBeneficiaryUserUpdate,
 	refuseFrozenPlanUpdate,
 	refuseLastManagerDelete,
 	refuseLastManagerMove,
@@ -306,6 +307,23 @@ describe('refuseSubscriptionStateUpdate', () => {
 
 	test('passes any other field', () => {
 		expect(refuseSubscriptionStateUpdate([
+			{ data: { user_updated: 'user-1' }, keys: [1] },
+		])).toEqual([{ data: { user_updated: 'user-1' }, keys: [1] }]);
+	});
+});
+
+describe('refuseBeneficiaryUserUpdate', () => {
+	test('refuses writing the user', () => {
+		expect(() => {
+			refuseBeneficiaryUserUpdate([{ data: { user: 'user-2' }, keys: [1] }]);
+		}).toThrow(new InvalidPayloadError({
+			reason: 'A beneficiary\'s "user" cannot change: delete the beneficiary'
+				+ ' and add the new one',
+		}));
+	});
+
+	test('passes any other field', () => {
+		expect(refuseBeneficiaryUserUpdate([
 			{ data: { user_updated: 'user-1' }, keys: [1] },
 		])).toEqual([{ data: { user_updated: 'user-1' }, keys: [1] }]);
 	});

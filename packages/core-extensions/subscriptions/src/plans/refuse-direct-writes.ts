@@ -264,6 +264,27 @@ export function refuseSubscriptionStateUpdate(
 	return updateEntries;
 }
 
+/**
+ * A changed user would keep the old one's access until the next sync, while a
+ * delete revokes it in its own transaction and an add grants the new user.
+ */
+export function refuseBeneficiaryUserUpdate(
+	updateEntries: UpdateEntries,
+): UpdateEntries {
+	const isChangingUser = updateEntries.some((updateEntry) => {
+		return 'data' in updateEntry && 'user' in updateEntry.data;
+	});
+
+	if (isChangingUser) {
+		throw new InvalidPayloadError({
+			reason: 'A beneficiary\'s "user" cannot change: delete the beneficiary'
+				+ ' and add the new one',
+		});
+	}
+
+	return updateEntries;
+}
+
 /** The bundle writes this history itself, under the sync's transaction. */
 export function refuseSubscriptionEventWrite(): never {
 	throw new InvalidPayloadError({
