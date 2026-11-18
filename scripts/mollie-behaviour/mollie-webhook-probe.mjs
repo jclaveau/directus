@@ -1180,21 +1180,6 @@ async function checkRotation() {
 				+ ` matches PATCH secret=${matchesPatch}`,
 			);
 
-			// The shape of each stored secret, never its value: tells a bad
-			// paste apart from a secret Mollie no longer signs with.
-			for (const [secretLabel, rotationSecret] of [
-				['A', rotationSecretA],
-				['B', rotationSecretB],
-			]) {
-				const hasOuterWhitespace = rotationSecret !== rotationSecret.trim();
-
-				console.log(
-					`rotation: secret ${secretLabel} length=${rotationSecret.length};`
-					+ ` starts with whsec_=${rotationSecret.startsWith('whsec_')};`
-					+ ` outer whitespace=${hasOuterWhitespace}`,
-				);
-			}
-
 			console.log(
 				`rotation: jean's webhook mode=${JSON.stringify(webhookAfterPatch.mode)};`
 				+ ` status=${JSON.stringify(webhookAfterPatch.status)}`,
