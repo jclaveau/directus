@@ -56,13 +56,18 @@ jobs:
       - name: Get changed files
         id: changed-files
         uses: tj-actions/changed-files@v47
+        with:
+          files: '**/*.{css,scss,vue}'
 
       - name: Prepare
+        if: steps.changed-files.outputs.any_changed == 'true'
         uses: ./.github/actions/prepare
         with:
           build: false
 
+      # With no file, stylelint reads stdin and fails on "Empty source".
       - name: Run Stylelinter
+        if: steps.changed-files.outputs.any_changed == 'true'
         run: pnpm exec stylelint ${{ steps.changed-files.outputs.all_changed_files }} --allow-empty-input
 
   format:

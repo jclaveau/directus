@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { connect } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Redis from 'ioredis';
@@ -281,18 +282,20 @@ function armsInRepOrder(rep: number): Arm[] {
 	return [...arms.slice(firstArm), ...arms.slice(0, firstArm)];
 }
 
+// A ceiling sits at the median paired ratio of 33 runs of unchanged code plus
+// 4 standard deviations, rounded up to 0.05, and is never lowered by that rule
+// (#742).
 const readShapes = [
 	{
 		name: 'flat',
-		// missVsOff up from 1.60: trunk alone measured 1.45 to 1.65 over five runs.
-		ceilings: { hitVsOff: 1.05, missVsOff: 1.75, hitVsFull: 1.20, missVsFull: 1.35 },
+		ceilings: { hitVsOff: 1.05, missVsOff: 1.80, hitVsFull: 1.25, missVsFull: 1.35 },
 		path: (tenant: string) =>
 			`/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=25`,
 	},
 	{
 		// Two m2o hops, so the pins come off nested rows rather than off the filter.
 		name: 'deep',
-		ceilings: { hitVsOff: 0.90, missVsOff: 1.60, hitVsFull: 1.25, missVsFull: 1.40 },
+		ceilings: { hitVsOff: 0.90, missVsOff: 1.70, hitVsFull: 1.30, missVsFull: 1.55 },
 		path: (tenant: string) => {
 			return `/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=25`
 				+ `&fields=*,author.*,author.company.*`;
@@ -301,7 +304,7 @@ const readShapes = [
 	{
 		// 200 rows, so the payload itself counts. One pin: the filtered column.
 		name: 'wide',
-		ceilings: { hitVsOff: 1.00, missVsOff: 1.65, hitVsFull: 1.25, missVsFull: 1.40 },
+		ceilings: { hitVsOff: 1.00, missVsOff: 1.70, hitVsFull: 1.30, missVsFull: 1.40 },
 		path: (tenant: string) =>
 			`/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=200`,
 	},
@@ -314,7 +317,7 @@ const readShapes = [
 		// row too, and that is the cost the shape exists to expose rather than
 		// one the ceiling should hide. The target every shape is held
 		// to stays in Headroom.
-		ceilings: { hitVsOff: 0.85, missVsOff: 2.25, hitVsFull: 1.20, missVsFull: 1.75 },
+		ceilings: { hitVsOff: 0.85, missVsOff: 2.25, hitVsFull: 1.30, missVsFull: 1.95 },
 		path: (tenant: string) => {
 			return `/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=200`
 				+ `&fields=*,author.*`;
@@ -342,6 +345,28 @@ function seriesOf(phase: string, arm: string): Summary {
 	}
 
 	return summarise(`${phase} / ${arm}`, samples);
+}
+
+/**
+ * The median of the rep-by-rep ratios, rather than the ratio of the two medians:
+ * both arms of a rep run back to back, so a slow minute on the runner slows both
+ * and cancels out of that rep's ratio, where it can land in one median and not
+ * the other. Over 33 runs of the trunk it put 3 gates over their ceilings where
+ * the ratio of medians put 5 (#742).
+ */
+function pairedRatio(measured: Summary, divisor: Summary): number {
+	if (measured.samples.length !== divisor.samples.length) {
+		throw new Error(
+			`${JSON.stringify(measured.name)} has ${measured.samples.length} samples`
+			+ ` and ${JSON.stringify(divisor.name)} ${divisor.samples.length}:`
+			+ ' no rep to pair.',
+		);
+	}
+
+	return summarise(
+		`${measured.name} vs ${divisor.name}`,
+		measured.samples.map((sample, rep) => sample / divisor.samples[rep]!),
+	).median;
 }
 
 async function api(
@@ -789,6 +814,98 @@ async function census(
 }
 
 /**
+ * A MONITOR feed read off a socket of its own, one call per command Redis runs,
+ * with the command's words and its source: a client address, or `lua` for a
+ * command a script runs. Returns the function that closes the feed.
+ *
+ * Not ioredis's `monitor()`: it switches a connection to monitoring a microtask
+ * after MONITOR's OK, so a feed line that arrives in the same read as the OK
+ * finds an empty command queue, and ioredis throws "Command queue state error".
+ * A busy server sends exactly that, and the cache bench failed on it (#742).
+ */
+async function openMonitorFeed(
+	onCommand: (args: string[], source: string) => void,
+): Promise<() => void> {
+	const target = new URL(redisUrl);
+	const socket = connect(Number(target.port || 6379), target.hostname);
+
+	const credentials = [target.username, target.password]
+		.filter((word) => word !== '')
+		.map((word) => decodeURIComponent(word));
+
+	const commands = [['MONITOR']];
+
+	if (credentials.length > 0) {
+		commands.unshift(['AUTH', ...credentials]);
+	}
+
+	let pending = '';
+	let unansweredCommands = commands.length;
+	let feedError: Error | undefined;
+
+	await new Promise<void>((ready, refuse) => {
+		socket.once('error', refuse);
+
+		socket.on('data', (chunk: Buffer) => {
+			const lines = (pending + chunk.toString('utf8')).split('\r\n');
+
+			pending = lines.pop()!;
+
+			for (const line of lines) {
+				if (line.startsWith('-')) {
+					feedError = new Error(`MONITOR feed refused: ${JSON.stringify(line)}`);
+					socket.destroy();
+					refuse(feedError);
+				}
+				else if (unansweredCommands > 0 && line === '+OK') {
+					unansweredCommands--;
+
+					if (unansweredCommands === 0) {
+						ready();
+					}
+				}
+				else {
+					// `+<time> [<db> <source>] "<command>" "<argument>" ...`
+					const sourceEnd = line.indexOf('] ');
+
+					const [, source] = line
+						.slice(line.indexOf('[') + 1, sourceEnd)
+						.split(' ');
+
+					onCommand(
+						line.slice(sourceEnd + 3, -1)
+							.split('" "')
+							.map((word) => word.replace(/\\"/g, '"')),
+						source!,
+					);
+				}
+			}
+		});
+
+		// Each command as a RESP array of bulk strings.
+		socket.write(commands.map((words) => {
+			const bulkStrings = words.map((word) => {
+				return `$${Buffer.byteLength(word)}\r\n${word}\r\n`;
+			});
+
+			return `*${words.length}\r\n${bulkStrings.join('')}`;
+		}).join(''));
+	});
+
+	socket.on('error', (error) => {
+		feedError = error;
+	});
+
+	return () => {
+		socket.destroy();
+
+		if (feedError) {
+			throw feedError;
+		}
+	};
+}
+
+/**
  * The commands one request issues, named by the keys they touch.
  *
  * The census says how many; only this says which. Four commands the response
@@ -800,11 +917,9 @@ async function traceRedisCommands(
 	label: string,
 	run: () => Promise<void>,
 ): Promise<string[]> {
-	const watcher = new Redis(redisUrl);
-	const monitor = await watcher.monitor();
 	const lines: string[] = [];
 
-	monitor.on('monitor', (_time: string, args: string[]) => {
+	const closeFeed = await openMonitorFeed((args) => {
 		lines.push(args.join(' ').slice(0, 140));
 	});
 
@@ -816,8 +931,7 @@ async function traceRedisCommands(
 		await new Promise((wake) => setTimeout(wake, 250));
 	}
 	finally {
-		monitor.disconnect();
-		watcher.disconnect();
+		closeFeed();
 	}
 
 	return [
@@ -844,11 +958,9 @@ async function countSentCommands<Result>(
 	run: () => Promise<Result>,
 ): Promise<{ result: Result; sent: number; seconds: number }> {
 	const benchAddress = /addr=(\S+)/.exec(String(await redis.client('INFO')))![1];
-	const watcher = new Redis(redisUrl);
-	const monitor = await watcher.monitor();
 	let sent = 0;
 
-	monitor.on('monitor', (_time: string, _args: string[], source: string) => {
+	const closeFeed = await openMonitorFeed((_args, source) => {
 		if (source !== 'lua' && source !== benchAddress) {
 			sent++;
 		}
@@ -867,8 +979,7 @@ async function countSentCommands<Result>(
 		return { result, sent, seconds: (performance.now() - startedAt) / 1000 };
 	}
 	finally {
-		monitor.disconnect();
-		watcher.disconnect();
+		closeFeed();
 	}
 }
 
@@ -1406,15 +1517,16 @@ test('the cache costs less than what it replaces', async () => {
 	}
 
 	for (const shape of readShapes) {
-		const uncachedMiss = seriesOf(`${shape.name}:miss`, 'off').median;
-		const scopedHit = seriesOf(`${shape.name}:hit`, 'scoped').median;
-		const scopedMiss = seriesOf(`${shape.name}:miss`, 'scoped').median;
-		const missVsOff = scopedMiss / uncachedMiss;
-		const missVsFull = scopedMiss / seriesOf(`${shape.name}:miss`, 'full').median;
+		const scopedHit = seriesOf(`${shape.name}:hit`, 'scoped');
+		const scopedMiss = seriesOf(`${shape.name}:miss`, 'scoped');
+		const uncachedMiss = seriesOf(`${shape.name}:miss`, 'off');
+		const missVsOff = pairedRatio(scopedMiss, uncachedMiss);
+		const fullMiss = seriesOf(`${shape.name}:miss`, 'full');
+		const missVsFull = pairedRatio(scopedMiss, fullMiss);
 
 		verdict(
 			`${shape.name}: a scoped HIT against no cache at all`,
-			scopedHit / uncachedMiss,
+			pairedRatio(scopedHit, uncachedMiss),
 			shape.ceilings.hitVsOff,
 		);
 
@@ -1426,7 +1538,7 @@ test('the cache costs less than what it replaces', async () => {
 
 		verdict(
 			`${shape.name}: a scoped HIT against a full-mode HIT`,
-			scopedHit / seriesOf(`${shape.name}:hit`, 'full').median,
+			pairedRatio(scopedHit, seriesOf(`${shape.name}:hit`, 'full')),
 			shape.ceilings.hitVsFull,
 		);
 

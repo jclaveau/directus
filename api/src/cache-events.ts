@@ -354,8 +354,13 @@ const ANOMALY_THROTTLE_MS = getMilliseconds('1m', 60_000);
 // restart. Seeded false; the schedule primes it before the first request.
 let cacheStatsActiveFlag = false;
 
-// Single-flight latch for the drain (see drainCacheEvents).
-let cacheEventDrainInProgress = false;
+// Single-flight latch for the drain (see drainCacheEvents), held as the running
+// drain itself so a stats read can wait for it instead of answering before it.
+let cacheEventDrainInFlight: Promise<number> | null = null;
+
+// A panel polls every second: at most one read-triggered drain per interval.
+const DRAIN_BEFORE_READ_INTERVAL = getMilliseconds('5s', 5_000);
+let drainBeforeReadStartedAt = 0;
 
 function statsNamespace(): string {
 	return `${useEnv()['CACHE_NAMESPACE']}:stats`;
@@ -365,6 +370,8 @@ const streamKey = () => `${statsNamespace()}:events`;
 const flagKey = () => `${statsNamespace()}:enabled`;
 const budgetAlertKey = () => `${statsNamespace()}:budget_alert`;
 const tombstoneKey = (redisKey: string) => `${statsNamespace()}:tomb:${redisKey}`;
+// No namespace: the stats tables a truncate empties are shared by every one.
+const truncatedAtKey = () => 'stats:truncated_at';
 
 const anomalyThrottleKey = (reason: string, cacheKey: string) =>
 	`${statsNamespace()}:anom:${reason}:${cacheKey}`;
@@ -842,17 +849,49 @@ function dbPoolSaturated(db: Knex): boolean {
  * reads through a shared consumer group (each entry to one consumer), not XRANGE.
  */
 export async function drainCacheEvents(): Promise<number> {
-	if (!cacheStatsConfigured() || cacheEventDrainInProgress) {
+	if (!cacheStatsConfigured() || cacheEventDrainInFlight) {
 		return 0;
 	}
 
-	cacheEventDrainInProgress = true;
+	cacheEventDrainInFlight = drainCacheEventStream();
 
 	try {
-		return await drainCacheEventStream();
+		return await cacheEventDrainInFlight;
 	}
 	finally {
-		cacheEventDrainInProgress = false;
+		cacheEventDrainInFlight = null;
+	}
+}
+
+/**
+ * Drain before a stats read, so the read sees events up to the request however
+ * slow CACHE_STATS_DRAIN_SCHEDULE is — a sleeping environment drains every 20m,
+ * which left a 10m window empty. A drain already running is waited for, not
+ * skipped. A failed drain never fails the read: it answers what is persisted.
+ */
+export async function drainCacheEventsBeforeRead(): Promise<void> {
+	if (!cacheStatsConfigured()) {
+		return;
+	}
+
+	try {
+		if (cacheEventDrainInFlight) {
+			await cacheEventDrainInFlight;
+			return;
+		}
+
+		if (Date.now() - drainBeforeReadStartedAt < DRAIN_BEFORE_READ_INTERVAL) {
+			return;
+		}
+
+		drainBeforeReadStartedAt = Date.now();
+		await drainCacheEvents();
+	}
+	catch (err: any) {
+		useLogger().warn(
+			err,
+			`[cache-stats] drain before read failed. ${err.message}`,
+		);
 	}
 }
 
@@ -875,6 +914,8 @@ async function drainCacheEventStream(): Promise<number> {
 			break;
 		}
 
+		const truncatedAtRead = await readTruncatedAt(redis);
+
 		// '>' = entries never handed to any consumer, so a concurrent drain on another
 		// node gets a disjoint slice, never this same batch.
 		const response = (await redis.call(
@@ -895,7 +936,7 @@ async function drainCacheEventStream(): Promise<number> {
 			break;
 		}
 
-		await persistStreamBatch(redis, db, batch);
+		await persistStreamBatch(redis, db, batch, truncatedAtRead);
 		drained += batch.length;
 
 		if (batch.length < FLUSH_BATCH) {
@@ -935,6 +976,8 @@ async function reclaimStalePending(
 			break;
 		}
 
+		const truncatedAtRead = await readTruncatedAt(redis);
+
 		const [nextCursor, batch] = (await redis.call(
 			'XAUTOCLAIM',
 			streamKey(),
@@ -947,7 +990,7 @@ async function reclaimStalePending(
 		)) as [string, [string, string[]][], string[]];
 
 		if (batch.length > 0) {
-			await persistStreamBatch(redis, db, batch);
+			await persistStreamBatch(redis, db, batch, truncatedAtRead);
 			reclaimed += batch.length;
 		}
 
@@ -1000,10 +1043,23 @@ function storedCount(streamed: string | undefined): number | null {
 		: null;
 }
 
+// Read before a batch is, so a truncate landing after the read moves it
+// whichever way the two interleave: the truncate drops the stream first.
+// Event `ts` and this time come off each node's own clock: an event emitted
+// within the skew between two nodes of a truncate may land on the wrong side.
+async function readTruncatedAt(
+	redis: ReturnType<typeof useRedis>,
+): Promise<string> {
+	return (await redis.get(truncatedAtKey())) ?? '0';
+}
+
+class TruncatedStreamBatchError extends Error {}
+
 async function persistStreamBatch(
 	redis: ReturnType<typeof useRedis>,
 	db: Knex,
 	batch: [string, string[]][],
+	truncatedAtRead: string,
 ): Promise<void> {
 	const ids = batch.map(([id]) => id);
 	const events: CacheEventRow[] = [];
@@ -1028,6 +1084,13 @@ async function persistStreamBatch(
 
 	for (const [, flat] of batch) {
 		const f = parseFields(flat);
+
+		// Emitted before the last truncate, in this namespace or another: its
+		// stream outlived the tables it was drained to. A locator has no ts.
+		if (f['ts'] && Number(f['ts']) < Number(truncatedAtRead)) {
+			continue;
+		}
+
 		const at = new Date(Number(f['ts']));
 
 		if (f['kind'] === 'p') {
@@ -1221,17 +1284,34 @@ async function persistStreamBatch(
 					);
 				}
 			}
+
+			// Last, once every table this batch writes is locked: a truncate since
+			// the read emptied them, and committing would bring back what it cleared.
+			// One that has not stamped its time yet waits on those locks to empty them.
+			if (await readTruncatedAt(redis) !== truncatedAtRead) {
+				throw new TruncatedStreamBatchError();
+			}
 		});
 	}
 	catch (err: any) {
-		// A batch that deterministically fails (bad row, constraint, dialect quirk) must
-		// not wedge the drain: without the ack/del below it is redelivered every tick
-		// forever. The transaction rolled back, so nothing landed — drop it to a warning
-		// (telemetry is lossy by design).
-		useLogger().warn(
-			err,
-			`[cache-stats] dropped ${batch.length} unpersistable events. ${err.message}`,
-		);
+		// Expected: the rollback is the point, nothing went wrong.
+		if (err instanceof TruncatedStreamBatchError) {
+			useLogger().info(
+				`[cache-stats] dropped ${JSON.stringify(batch.length)} events `
+				+ `read before a truncate`,
+			);
+		}
+		// A batch that deterministically fails (bad row, constraint, dialect quirk)
+		// must not wedge the drain: without the ack/del below it is redelivered every
+		// tick forever. The transaction rolled back, so nothing landed — drop it to a
+		// warning (telemetry is lossy by design).
+		else {
+			useLogger().warn(
+				err,
+				`[cache-stats] dropped ${JSON.stringify(batch.length)} unpersistable `
+				+ `events. ${JSON.stringify(err.message)}`,
+			);
+		}
 	}
 
 	// Outside the try so a handled failure still clears the entries. XACK settles the
@@ -2860,6 +2940,15 @@ async function deleteStatsKeysByPattern(
 
 // Drop all gathered telemetry — the fast way to reclaim space after autokill.
 export async function truncateCacheEvents(): Promise<void> {
+	// The stream goes before the tables, or a drain reading it while they empty
+	// writes what it read once they are. The time is stamped after the stream,
+	// so a drain that read a batch before the DEL sees it moved and drops the
+	// batch, and every namespace drops the events it emitted before it.
+	if (redisConfigAvailable()) {
+		await useRedis().del(streamKey());
+		await useRedis().set(truncatedAtKey(), String(Date.now()));
+	}
+
 	const db = getDatabase();
 	await db('directus_cache_stats_events').truncate();
 	await db('directus_cache_stats_descriptors').truncate();
@@ -2871,14 +2960,13 @@ export async function truncateCacheEvents(): Promise<void> {
 	await db('directus_cache_stats_scoped_purge_pins').truncate();
 	await db('directus_cache_stats_scoped_entry_pins').truncate();
 
-	// Full reset: also drop the Redis transients tied to those rows — else buffered
-	// events drain back in and a held throttle slot suppresses the next sample.
+	// Full reset: also drop the Redis transients tied to those rows — else a held
+	// throttle slot suppresses the next sample.
 	if (!redisConfigAvailable()) {
 		return;
 	}
 
 	const redis = useRedis();
-	await redis.del(streamKey());
 	await deleteStatsKeysByPattern(redis, `${statsNamespace()}:anom:*`);
 	await deleteStatsKeysByPattern(redis, `${statsNamespace()}:tomb:*`);
 }

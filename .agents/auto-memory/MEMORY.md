@@ -26,7 +26,7 @@ line appended below.
 - [PR #605 row-helpers](project_directus_pr605_row_helpers.md) — mapUpdateRows/mapCreateRows replace `.one` events
 - [PR #600 query-audit header](project_directus_pr600_query_audit.md) — counts in knex `_query`; ONE map header
 
-## scoped-cache (23) — tag derivation, pins, purges, value slices
+## scoped-cache (24) — tag derivation, pins, purges, value slices
 `.agents/auto-memory/index/scoped-cache.md`
 
 - [Scoped cache tag derivation](project_directus_scoped_cache_tag_derivation.md) — what a read gets tagged with; only stale vector = enrichment outside the AST
@@ -41,7 +41,7 @@ line appended below.
 - [Cache layers fail differently](project_directus_cache_failure_semantics.md) — ioredis raises, Keyv swallows, bus fire-and-forget
 - [Cache tier switches](project_directus_cache_tier_switches.md) — only response+schema switchable
 
-## blackbox (32) — seeds, sharding, flakes, spawned instances
+## blackbox (33) — seeds, sharding, flakes, spawned instances
 `.agents/auto-memory/index/blackbox.md`
 
 - [Directus blackbox run + logs](project_directus_blackbox_run_and_logs.md) — bb runs on every code PR; the label is NOT required and cancels the run
@@ -76,7 +76,7 @@ line appended below.
 - [processes/autoscale consolidation](project_directus_processes_autoscale_consolidation.md) — one bounded `processes/supervisor/` gateway; routes/env frozen
 - [RAM: the node flags that work](project_directus_ram_node_flags.md) — never cap old space without a measured peak
 
-## fork (21) — branches, PR naming, licensing, derived branches, worktrees
+## fork (22) — branches, PR naming, licensing, derived branches, worktrees
 `.agents/auto-memory/index/fork.md`
 
 - [New feats base on v11.10.1-hhh-dev](feedback_directus_new_feat_base_hhh_dev.md) — fetch + sync hhh-dev first

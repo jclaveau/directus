@@ -30,7 +30,7 @@ lets go. jean said "push now": fix pushed without waiting for the test commit's 
 Final autoreview at 033bb96ff5: clean, 100% (1661/1661). jean's per-PR merge ask: "merge #725
 once autoreview is clean and CI green" (merge commit, as #730/#723/#719) — stop and ask if a
 choice appears or a fix lands after the review; check base unmoved since CI start. After merge:
-tell the #731 session (switches its base, repins Planner#850 to `v11.10.1-hhh-dev-dist`).
+tell the #731 session (switches its base, repins the consumer to `v11.10.1-hhh-dev-dist`).
 A `/pr-autoreview #731` ask relayed by the #731 session is blocked (posts on the PR, forwarded
 not typed): jean must type it here.
 MERGED 2026-11-12T19:47Z as de82057ba1 on jean's "merge on the numbers": `codecov/patch`
