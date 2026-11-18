@@ -211,7 +211,8 @@ async function syncNextRow({
 /**
  * Pushes the due row's next try past the provider call, so no other worker
  * claims it meanwhile; a worker that dies mid-call leaves it due again once
- * the lease runs out.
+ * the lease runs out. The lease counts no attempt, so a row that kills its
+ * worker every time is retried every lease and never parked.
  */
 async function leaseDueSync(database: Knex): Promise<SyncQueueRow | undefined> {
 	return database.transaction(async (trx) => {
@@ -250,6 +251,10 @@ async function lockLeasedSync(
 	return (await leasedQuery) !== undefined;
 }
 
+/**
+ * Writes `attempts` and `last_error` even once the lease is lost: a worker
+ * slower than SYNC_LEASE_MS overwrites what the next lease recorded.
+ */
 async function recordSyncFailure(
 	database: Knex,
 	failedRow: SyncQueueRow,
