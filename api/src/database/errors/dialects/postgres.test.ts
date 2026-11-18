@@ -235,22 +235,20 @@ describe('foreign key violation (23503)', () => {
 	});
 
 	it('maps the restrict_violation of a RESTRICT constraint likewise', () => {
-		const error = pgError({
+		expect((extractError(pgError({
 			code: '23001',
-			table: 'student_enrollment',
-			constraint: 'student_enrollment_enrollment_foreign',
-			detail: 'Key (id)=(5) is still referenced from table "student_enrollment".',
-		});
-
-		expect((extractError(error, {}, {
-			collection: 'enrollment',
+			table: 'comments',
+			constraint: 'comments_article_foreign',
+			detail: 'Key (id)=(5) is still referenced from table "comments".',
+		}), {}, {
+			collection: 'articles',
 			operation: 'delete',
 		}) as any).extensions).toEqual({
-			collection: 'enrollment',
+			collection: 'articles',
 			field: 'id',
 			value: '5',
-			constraint: 'student_enrollment_enrollment_foreign',
-			relatedCollection: 'student_enrollment',
+			constraint: 'comments_article_foreign',
+			relatedCollection: 'comments',
 			reason: 'still_referenced',
 			operation: 'delete',
 		});
