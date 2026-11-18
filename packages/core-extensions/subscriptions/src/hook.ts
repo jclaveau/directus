@@ -13,7 +13,7 @@ import {
 	revokeDeletedBeneficiaryAccesses,
 } from './members/revoke-deleted-beneficiary-accesses.js';
 import {
-	refuseBeneficiaryUserUpdate,
+	refuseBeneficiaryMove,
 	refuseFrozenPlanUpdate,
 	refuseLastManagerDelete,
 	refuseLastManagerMove,
@@ -241,7 +241,10 @@ export const subscriptionsHook = defineHook(
 					filterContext,
 				);
 
-				return refuseBeneficiaryUserUpdate(updateEntries);
+				return await refuseBeneficiaryMove(
+					updateEntries,
+					filterContext.database,
+				);
 			},
 		);
 

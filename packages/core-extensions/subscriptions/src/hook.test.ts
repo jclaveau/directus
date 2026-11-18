@@ -5,7 +5,7 @@ import {
 	revokeDeletedBeneficiaryAccesses,
 } from './members/revoke-deleted-beneficiary-accesses.js';
 import {
-	refuseBeneficiaryUserUpdate,
+	refuseBeneficiaryMove,
 	refuseFrozenPlanUpdate,
 	refuseLastManagerDelete,
 	refuseLastManagerMove,
@@ -346,8 +346,8 @@ describe('subscriptionsHook', () => {
 				primaryKeys: [1],
 				fields: ['user'],
 			},
-			refuseBeneficiaryUserUpdate,
-			[[{ data: { user: 'user-2' }, keys: [1] }]],
+			refuseBeneficiaryMove,
+			[[{ data: { user: 'user-2' }, keys: [1] }], 'filter database'],
 		],
 	] as const;
 
