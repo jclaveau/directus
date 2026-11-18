@@ -568,6 +568,7 @@ describe.each(vendors)('%s', (vendor) => {
 			messageOfDocString(loggedDocString),
 			scenarioKeys,
 		);
+
 		const leadingWord = expectedMessage.split(' ')[0]!;
 
 		try {
