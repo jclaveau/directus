@@ -5,6 +5,7 @@ import {
 	revokeDeletedBeneficiaryAccesses,
 } from './members/revoke-deleted-beneficiary-accesses.js';
 import {
+	refuseBeneficiaryUserUpdate,
 	refuseFrozenPlanUpdate,
 	refuseLastManagerDelete,
 	refuseLastManagerMove,
@@ -156,6 +157,7 @@ describe('subscriptionsHook', () => {
 			['subscription_events.items.update', expect.any(Function)],
 			['subscription_events.items.delete', expect.any(Function)],
 			['subscription_beneficiaries.items.delete', expect.any(Function)],
+			['subscription_beneficiaries.items.update', expect.any(Function)],
 		]);
 	});
 
@@ -327,6 +329,19 @@ describe('subscriptionsHook', () => {
 			{ action: 'delete', collection: 'subscription_events' },
 			refuseSubscriptionEventWrite,
 			[],
+		],
+		[
+			'subscription_beneficiaries.items.update',
+			9,
+			[{ data: { user: 'user-2' }, keys: [1] }],
+			{
+				action: 'update',
+				collection: 'subscription_beneficiaries',
+				primaryKeys: [1],
+				fields: ['user'],
+			},
+			refuseBeneficiaryUserUpdate,
+			[[{ data: { user: 'user-2' }, keys: [1] }]],
 		],
 	] as const;
 
