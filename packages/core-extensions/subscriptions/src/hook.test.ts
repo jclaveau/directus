@@ -89,6 +89,8 @@ describe('subscriptionsHook', () => {
 			provider: 'mollie',
 			status: 'active',
 			access: 'granted',
+			granted: ['user-1'],
+			revoked: [],
 		});
 
 		expect(emitter.emitAction).toHaveBeenCalledWith(
@@ -98,6 +100,8 @@ describe('subscriptionsHook', () => {
 				provider: 'mollie',
 				status: 'active',
 				access: 'granted',
+				granted: ['user-1'],
+				revoked: [],
 			},
 			{ database: 'database', schema: 'schema', accountability: null },
 		);
@@ -130,6 +134,8 @@ describe('subscriptionsHook', () => {
 			provider: 'mollie',
 			status: 'active',
 			access: 'granted',
+			granted: ['user-1'],
+			revoked: [],
 		});
 
 		await vi.waitFor(() => {

@@ -118,6 +118,8 @@ describe('runSyncBatch', () => {
 			provider: 'stripe',
 			status: 'active',
 			access: 'granted',
+			granted: ['user-1'],
+			revoked: [],
 		}]]);
 
 		expect(fetchSubscription).toHaveBeenCalledWith('sub_1');
@@ -295,6 +297,8 @@ describe('runSyncBatch', () => {
 			provider: 'stripe',
 			status: 'active',
 			access: 'unchanged',
+			granted: [],
+			revoked: [],
 		}]]);
 	});
 
@@ -505,6 +509,8 @@ describe('runSyncBatch', () => {
 			provider: 'stripe',
 			status: 'canceled',
 			access: 'revoked',
+			granted: [],
+			revoked: ['user-1'],
 		}]]);
 
 		expect(logger.warn).toHaveBeenCalledWith(

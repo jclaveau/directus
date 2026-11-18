@@ -14,7 +14,7 @@ import {
 import {
 	closeMissingSubscription,
 	syncSubscription,
-	type AccessChange,
+	type SyncedAccess,
 	type SyncedSubscription,
 } from './sync-subscription.js';
 
@@ -32,8 +32,7 @@ export type SyncedAction = {
 	subscription: number;
 	provider: string;
 	status: string;
-	access: AccessChange;
-};
+} & SyncedAccess;
 
 export type SyncBatchContext = {
 	database: Knex;
@@ -201,6 +200,8 @@ async function syncNextRow({
 			provider: leasedRow.provider,
 			status: committedSync.status,
 			access: committedSync.access,
+			granted: committedSync.granted,
+			revoked: committedSync.revoked,
 		});
 	}
 
