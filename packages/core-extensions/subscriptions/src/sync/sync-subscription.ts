@@ -29,12 +29,21 @@ export type SubscriptionSync = {
 
 export type AccessChange = 'granted' | 'revoked' | 'unchanged';
 
+/**
+ * `granted` and `revoked` list the users who gained or lost the plan's access;
+ * a policy change grants, but moves no user.
+ */
+export type SyncedAccess = {
+	access: AccessChange;
+	granted: string[];
+	revoked: string[];
+};
+
 /** What a sync left behind, for the `subscriptions.synced` action. */
 export type SyncedSubscription = {
 	subscription: number;
 	status: string;
-	access: AccessChange;
-};
+} & SyncedAccess;
 
 type StoredSubscription = {
 	id: number;
@@ -137,7 +146,7 @@ export async function syncSubscription({
 
 	const accessDecision = decideAccess(providerSubscription, syncedAt, logger);
 
-	const accessChange: AccessChange = accessDecision === 'keep'
+	const syncedAccess = accessDecision === 'keep'
 		? await keepBeneficiaryAccesses({
 			trx,
 			accessService,
@@ -170,7 +179,7 @@ export async function syncSubscription({
 	return {
 		subscription: storedSubscription.id,
 		status: providerSubscription.status,
-		access: accessChange,
+		...syncedAccess,
 	};
 }
 
@@ -478,7 +487,7 @@ export async function closeMissingSubscription({
 		return undefined;
 	}
 
-	const accessChange = await revokeBeneficiaryAccesses({
+	const syncedAccess = await revokeBeneficiaryAccesses({
 		trx,
 		accessService,
 		subscriptionId: storedSubscription.id,
@@ -499,7 +508,7 @@ export async function closeMissingSubscription({
 	return {
 		subscription: storedSubscription.id,
 		status: 'canceled',
-		access: accessChange,
+		...syncedAccess,
 	};
 }
 
@@ -615,8 +624,12 @@ async function keepBeneficiaryAccesses({
 	accessService,
 	subscriptionId,
 	planPolicy,
-}: BeneficiaryAccessKeeping): Promise<AccessChange> {
-	let accessChange: AccessChange = 'unchanged';
+}: BeneficiaryAccessKeeping): Promise<SyncedAccess> {
+	const syncedAccess: SyncedAccess = {
+		access: 'unchanged',
+		granted: [],
+		revoked: [],
+	};
 
 	const grantedBeneficiaries = await trx('subscription_beneficiaries')
 		.select('id', 'user', 'access')
@@ -649,7 +662,8 @@ async function keepBeneficiaryAccesses({
 				.where('id', grantedBeneficiary.id)
 				.update({ access: String(createdAccess) });
 
-			accessChange = 'granted';
+			syncedAccess.access = 'granted';
+			syncedAccess.granted.push(grantedBeneficiary.user);
 
 			continue;
 		}
@@ -667,11 +681,16 @@ async function keepBeneficiaryAccesses({
 				policy: planPolicy,
 			});
 
-			accessChange = 'granted';
+			syncedAccess.access = 'granted';
+
+			if (accessRow.user !== grantedBeneficiary.user) {
+				syncedAccess.granted.push(grantedBeneficiary.user);
+				syncedAccess.revoked.push(accessRow.user);
+			}
 		}
 	}
 
-	return accessChange;
+	return syncedAccess;
 }
 
 type BeneficiaryAccessRevoke = {
@@ -685,14 +704,18 @@ async function revokeBeneficiaryAccesses({
 	trx,
 	accessService,
 	subscriptionId,
-}: BeneficiaryAccessRevoke): Promise<AccessChange> {
+}: BeneficiaryAccessRevoke): Promise<SyncedAccess> {
 	const grantingBeneficiaries = await trx('subscription_beneficiaries')
-		.select('id', 'access')
+		.select('id', 'user', 'access')
 		.where('subscription', subscriptionId)
 		.whereNotNull('access')
 		.orderBy('id');
 
-	let accessChange: AccessChange = 'unchanged';
+	const syncedAccess: SyncedAccess = {
+		access: 'unchanged',
+		granted: [],
+		revoked: [],
+	};
 
 	for (const grantingBeneficiary of grantingBeneficiaries) {
 		await trx('subscription_beneficiaries')
@@ -706,9 +729,14 @@ async function revokeBeneficiaryAccesses({
 		if (sharingBeneficiary === undefined) {
 			await accessService.deleteOne(grantingBeneficiary.access);
 
-			accessChange = 'revoked';
+			syncedAccess.access = 'revoked';
+
+			// A deleted account took its access row with it: no one loses it now.
+			if (grantingBeneficiary.user !== null) {
+				syncedAccess.revoked.push(grantingBeneficiary.user);
+			}
 		}
 	}
 
-	return accessChange;
+	return syncedAccess;
 }

@@ -73,7 +73,7 @@ describe('syncSubscription', () => {
 
 		const logger = { warn: vi.fn(), error: vi.fn() };
 
-		await syncSubscription({
+		const syncedSubscription = await syncSubscription({
 			trx: database,
 			subscriptionProvider: {} as SubscriptionProvider,
 			logger,
@@ -93,6 +93,14 @@ describe('syncSubscription', () => {
 				},
 			},
 			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(syncedSubscription).toEqual({
+			subscription: 1,
+			status: 'active',
+			access: 'granted',
+			granted: ['user-1', 'user-2'],
+			revoked: [],
 		});
 
 		expect(accessService.createOne).toHaveBeenNthCalledWith(1, {
@@ -258,7 +266,7 @@ describe('syncSubscription', () => {
 
 		const accessService = { createOne: vi.fn(), updateOne: vi.fn() };
 
-		await syncSubscription({
+		const syncedSubscription = await syncSubscription({
 			trx: database,
 			subscriptionProvider: {} as SubscriptionProvider,
 			logger: { warn: vi.fn(), error: vi.fn() },
@@ -278,6 +286,14 @@ describe('syncSubscription', () => {
 				},
 			},
 			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(syncedSubscription).toEqual({
+			subscription: 1,
+			status: 'active',
+			access: 'granted',
+			granted: [],
+			revoked: [],
 		});
 
 		expect(accessService.createOne).not.toHaveBeenCalled();
@@ -320,7 +336,7 @@ describe('syncSubscription', () => {
 
 		const accessService = { createOne: vi.fn(), updateOne: vi.fn() };
 
-		await syncSubscription({
+		const syncedSubscription = await syncSubscription({
 			trx: database,
 			subscriptionProvider: {} as SubscriptionProvider,
 			logger: { warn: vi.fn(), error: vi.fn() },
@@ -340,6 +356,14 @@ describe('syncSubscription', () => {
 				},
 			},
 			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(syncedSubscription).toEqual({
+			subscription: 1,
+			status: 'active',
+			access: 'granted',
+			granted: ['user-2'],
+			revoked: ['user-1'],
 		});
 
 		expect(accessService.createOne).not.toHaveBeenCalled();
@@ -381,7 +405,7 @@ describe('syncSubscription', () => {
 
 		const accessService = { createOne: vi.fn(), deleteOne: vi.fn() };
 
-		await syncSubscription({
+		const syncedSubscription = await syncSubscription({
 			trx: database,
 			subscriptionProvider: {} as SubscriptionProvider,
 			logger: { warn: vi.fn(), error: vi.fn() },
@@ -401,6 +425,14 @@ describe('syncSubscription', () => {
 				},
 			},
 			syncedAt: new Date('2026-11-05T00:00:00Z'),
+		});
+
+		expect(syncedSubscription).toEqual({
+			subscription: 1,
+			status: 'canceled',
+			access: 'revoked',
+			granted: [],
+			revoked: ['user-1', 'user-2'],
 		});
 
 		expect(accessService.createOne).not.toHaveBeenCalled();
@@ -741,6 +773,8 @@ describe('syncSubscription', () => {
 			subscription: 1,
 			status: 'canceled',
 			access: 'unchanged',
+			granted: [],
+			revoked: [],
 		});
 
 		expect(accessService.deleteOne).not.toHaveBeenCalled();

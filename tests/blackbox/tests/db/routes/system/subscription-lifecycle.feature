@@ -21,7 +21,8 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
   - A `<name>` stands for one uuid, the same in the tables and the requests.
   - `received these writes` reads what the providers received since it last read.
   - The instance also loads `subscriptions-synced-listener`, a hook logging
-    `subscriptions.synced <payload as JSON>` for each such action it receives.
+    `subscriptions.synced` and one `field=<value as JSON>` per payload field
+    for each such action it receives.
   - `the CLI runs <arguments> with these variables` runs `directus <arguments>`
     against the instance's database, its env plus the variables listed.
 
@@ -897,6 +898,40 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | user      |
       | <user_87> |
 
+  Scenario: a beneficiary's user cannot change, the access stays with its user
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 97 | mollie   | 97      | 1                 | active      |
+    And Mollie holds this subscription:
+      | column                | value      |
+      | payment               | tr_reuser  |
+      | customer              | cst_reuser |
+      | subscription          | sub_reuser |
+      | directus_subscription | 97         |
+      | status                | active     |
+    When Mollie sends these events:
+      | type         | entity    |
+      | payment.paid | tr_reuser |
+    Then this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_97> | <policy_97> | @scalabus/subscriptions |
+    When these requests get these responses:
+      | request                                 | response                         |
+      | method: PATCH                           | code: 400                        |+
+      | path: /items/subscription_beneficiaries | body:                            |
+      | payload:                                |   errors:                        |
+      |   query:                                |     - message: >-                |
+      |     filter:                             |         Invalid payload. A       |
+      |       subscription:                     |         beneficiary's "user"     |
+      |         _eq: 97                         |         cannot change: delete    |
+      |   data:                                 |         the beneficiary and add  |
+      |     user: <user_98>                     |         the new one.             |
+      |                                         |       extensions:                |
+      |                                         |         code: INVALID_PAYLOAD    |
+    Then this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_97> | <policy_97> | @scalabus/subscriptions |
+
   Scenario: a deleted beneficiary row keeps the access its resume still shares
     Given these pending subscriptions, each with its own plan:
       | id | provider | manager | beneficiaries_max | plan_status |
@@ -1080,8 +1115,8 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | payment.paid | tr_synced |
     Then the instance eventually logged:
       """
-      subscriptions.synced
-      {"subscription":95,"provider":"mollie","status":"active","access":"granted"}
+      subscriptions.synced subscription=95 provider="mollie" status="active"
+      access="granted" granted=["<user_95>"] revoked=[]
       """
     When Mollie holds this subscription:
       | column                | value      |
@@ -1096,8 +1131,8 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | payment.paid | tr_synced |
     Then the instance eventually logged:
       """
-      subscriptions.synced
-      {"subscription":95,"provider":"mollie","status":"canceled","access":"revoked"}
+      subscriptions.synced subscription=95 provider="mollie" status="canceled"
+      access="revoked" granted=[] revoked=["<user_95>"]
       """
 
   Scenario: the Mollie webhook setup runs before the bundle has its webhook secret

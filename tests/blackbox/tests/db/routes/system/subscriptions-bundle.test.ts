@@ -564,7 +564,10 @@ describe.each(vendors)('%s', (vendor) => {
 	// items as `[ …(61) ]`: a failure names the last lines sharing the
 	// expected message's first word, so it shows what came instead.
 	async function expectLoggedMessage(loggedDocString: string) {
-		const expectedMessage = messageOfDocString(loggedDocString);
+		const expectedMessage = withKeys(
+			messageOfDocString(loggedDocString),
+			scenarioKeys,
+		);
 		const leadingWord = expectedMessage.split(' ')[0]!;
 
 		try {
