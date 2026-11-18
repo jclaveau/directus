@@ -865,8 +865,11 @@ function describeMatch(rawBodyBytes, signatureLines, rotationSecret) {
 
 async function waitForDelivery(pathPrefix) {
 	for (let waitedSeconds = 0; waitedSeconds < listenSeconds; waitedSeconds++) {
+		// A create or a url PATCH first posts an empty body, signed with no
+		// secret the probe holds; the ping is the next, non-empty post.
 		const foundDelivery = signedDeliveries.find((signedDelivery) => {
-			return signedDelivery.path.startsWith(pathPrefix);
+			return signedDelivery.path.startsWith(pathPrefix)
+				&& signedDelivery.rawBodyBytes.length > 0;
 		});
 
 		if (foundDelivery !== undefined) {
@@ -1007,7 +1010,8 @@ async function checkRotation() {
 
 	for (let waitedSeconds = 0; waitedSeconds < listenSeconds; waitedSeconds++) {
 		const rotationDelivery = signedDeliveries.find((signedDelivery) => {
-			return signedDelivery.path.startsWith('/rotation');
+			return signedDelivery.path.startsWith('/rotation')
+				&& signedDelivery.rawBodyBytes.length > 0;
 		});
 
 		if (rotationDelivery !== undefined) {
