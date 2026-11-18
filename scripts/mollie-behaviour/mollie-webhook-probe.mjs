@@ -342,7 +342,14 @@ const receiverServer = createServer((incomingRequest, serverResponse) => {
 			+ ` signature=${capturedRequest.signatureStatus}`,
 		);
 
-		serverResponse.writeHead(200).end();
+		// The bundle cannot verify the empty post a create or url PATCH sends,
+		// so /refuse-* answers it the way the bundle would: 401.
+		const isRefusedEmptyPost = incomingRequest.url.startsWith('/refuse-')
+			&& rawBodyBytes.length === 0;
+
+		serverResponse.writeHead(isRefusedEmptyPost
+			? 401
+			: 200).end();
 	});
 });
 
@@ -924,6 +931,22 @@ async function checkPatchKeepsSecret() {
 
 			const controlDelivery = await waitForDelivery(`/${pathSuffix}`);
 
+			const emptyDelivery = signedDeliveries.find((signedDelivery) => {
+				return signedDelivery.path.startsWith(`/${pathSuffix}`)
+					&& signedDelivery.rawBodyBytes.length === 0;
+			});
+
+			console.log(
+				`rotation: control ${stepLabel} empty post`
+				+ ` matches created secret=${emptyDelivery === undefined
+					? 'no empty post'
+					: describeMatch(
+						emptyDelivery.rawBodyBytes,
+						emptyDelivery.signatureLines,
+						createdSecret,
+					)}`,
+			);
+
 			const controlMatch = controlDelivery === undefined
 				? `no delivery in ${listenSeconds} s`
 				: describeMatch(
@@ -944,6 +967,129 @@ async function checkPatchKeepsSecret() {
 		});
 
 		console.log(`  deleted control ${controlWebhook.id}`);
+	}
+}
+
+async function callMollieOutcome(method, path, body) {
+	try {
+		const mollieAnswer = await callMollie(method, path, {
+			bearerToken: accessToken,
+			body,
+		});
+
+		return { answerStatus: 'ok', mollieAnswer };
+	}
+	catch (mollieError) {
+		return {
+			answerStatus: JSON.stringify(mollieError.httpStatus ?? String(mollieError)),
+			mollieAnswer: null,
+		};
+	}
+}
+
+function countEmptyPosts(pathPrefix) {
+	return signedDeliveries.filter((signedDelivery) => {
+		return signedDelivery.path.startsWith(pathPrefix)
+			&& signedDelivery.rawBodyBytes.length === 0;
+	}).length;
+}
+
+// The bundle answers 401 to the empty post a create or a url PATCH sends:
+// does Mollie then refuse the create or PATCH, disable the webhook, retry the
+// empty post, or stop delivering?
+async function checkRefusedEmptyPost() {
+	const createOutcome = await callMollieOutcome('POST', '/webhooks', {
+		name: `${probeWebhookPrefix}-refuse-empty`,
+		url: `${tunnelUrl}/refuse-create`,
+		eventTypes: ['payment.paid'],
+		testmode: true,
+	});
+
+	console.log(`refuse-empty: create answered ${createOutcome.answerStatus}`);
+
+	if (createOutcome.mollieAnswer === null) {
+		console.log(
+			`refuse-empty: empty posts on /refuse-create=${
+				 countEmptyPosts('/refuse-create')}`,
+		);
+
+		return;
+	}
+
+	const refusedWebhook = createOutcome.mollieAnswer;
+
+	try {
+		for (const pathSuffix of ['refuse-create', 'refuse-patch']) {
+			if (pathSuffix === 'refuse-patch') {
+				const patchOutcome = await callMollieOutcome(
+					'PATCH',
+					`/webhooks/${refusedWebhook.id}`,
+					{ url: `${tunnelUrl}/${pathSuffix}`, testmode: true },
+				);
+
+				console.log(`refuse-empty: url PATCH answered ${patchOutcome.answerStatus}`);
+			}
+
+			const readOutcome = await callMollieOutcome(
+				'GET',
+				`/webhooks/${refusedWebhook.id}?testmode=true`,
+			);
+
+			console.log(
+				`refuse-empty: after /${pathSuffix} status=${
+				 JSON.stringify(readOutcome.mollieAnswer?.status ?? null)
+				 }; url ends with /${pathSuffix}=${
+				 String(readOutcome.mollieAnswer?.url?.endsWith(`/${pathSuffix}`))}`,
+			);
+
+			const pingOutcome = await callMollieOutcome(
+				'POST',
+				`/webhooks/${refusedWebhook.id}/ping`,
+				{ testmode: true },
+			);
+
+			const pingDelivery = await waitForDelivery(`/${pathSuffix}`);
+
+			console.log(
+				`refuse-empty: /${pathSuffix} ping answered ${pingOutcome.answerStatus};`
+				+ ` delivered=${pingDelivery !== undefined}`
+				+ `; matches created secret=${pingDelivery === undefined
+					? 'n/a'
+					: describeMatch(
+						pingDelivery.rawBodyBytes,
+						pingDelivery.signatureLines,
+						refusedWebhook.webhookSecret ?? '',
+					)}`,
+			);
+		}
+
+		// Mollie retries a refused event; a retried empty post shows here.
+		await waitSeconds(60);
+
+		for (const pathSuffix of ['refuse-create', 'refuse-patch']) {
+			console.log(
+				`refuse-empty: empty posts on /${pathSuffix} after 60 s=${
+				 countEmptyPosts(`/${pathSuffix}`)}`,
+			);
+		}
+
+		const finalOutcome = await callMollieOutcome(
+			'GET',
+			`/webhooks/${refusedWebhook.id}?testmode=true`,
+		);
+
+		console.log(
+			`refuse-empty: final status=${
+			 JSON.stringify(finalOutcome.mollieAnswer?.status ?? null)}`,
+		);
+	}
+	finally {
+		await callMollie('DELETE', `/webhooks/${refusedWebhook.id}`, {
+			bearerToken: accessToken,
+			body: { testmode: true },
+		});
+
+		console.log(`  deleted refuse-empty ${refusedWebhook.id}`);
 	}
 }
 
@@ -1055,6 +1201,7 @@ async function checkRotation() {
 			);
 
 			await checkPatchKeepsSecret();
+			await checkRefusedEmptyPost();
 
 			return;
 		}
