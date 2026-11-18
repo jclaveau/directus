@@ -863,6 +863,87 @@ function describeMatch(rawBodyBytes, signatureLines, rotationSecret) {
 		: 'no';
 }
 
+async function waitForDelivery(pathPrefix) {
+	for (let waitedSeconds = 0; waitedSeconds < listenSeconds; waitedSeconds++) {
+		const foundDelivery = signedDeliveries.find((signedDelivery) => {
+			return signedDelivery.path.startsWith(pathPrefix);
+		});
+
+		if (foundDelivery !== undefined) {
+			return foundDelivery;
+		}
+
+		await waitSeconds(1);
+	}
+
+	return undefined;
+}
+
+// Control: a webhook whose secret the create answer hands over. Signed with
+// it before and after a url PATCH tells whether an update rolls the secret.
+async function checkPatchKeepsSecret() {
+	const controlWebhook = await callMollie('POST', '/webhooks', {
+		bearerToken: accessToken,
+		body: {
+			name: `${probeWebhookPrefix}-rotation-control`,
+			url: `${tunnelUrl}/control-before`,
+			eventTypes: ['payment.paid'],
+			testmode: true,
+		},
+	});
+
+	try {
+		const createdSecret = typeof controlWebhook.webhookSecret === 'string'
+			? controlWebhook.webhookSecret
+			: '';
+
+		console.log(
+			`rotation: control created; mode=${JSON.stringify(controlWebhook.mode)};`
+			+ ` secret length=${createdSecret.length};`
+			+ ` starts with whsec_=${createdSecret.startsWith('whsec_')}`,
+		);
+
+		for (const [stepLabel, pathSuffix] of [
+			['before PATCH', 'control-before'],
+			['after PATCH', 'control-after'],
+		]) {
+			if (pathSuffix === 'control-after') {
+				await callMollie('PATCH', `/webhooks/${controlWebhook.id}`, {
+					bearerToken: accessToken,
+					body: { url: `${tunnelUrl}/${pathSuffix}`, testmode: true },
+				});
+			}
+
+			await callMollie('POST', `/webhooks/${controlWebhook.id}/ping`, {
+				bearerToken: accessToken,
+				body: { testmode: true },
+			});
+
+			const controlDelivery = await waitForDelivery(`/${pathSuffix}`);
+
+			const controlMatch = controlDelivery === undefined
+				? `no delivery in ${listenSeconds} s`
+				: describeMatch(
+					controlDelivery.rawBodyBytes,
+					controlDelivery.signatureLines,
+					createdSecret,
+				);
+
+			console.log(
+				`rotation: control ${stepLabel} matches created secret=${controlMatch}`,
+			);
+		}
+	}
+	finally {
+		await callMollie('DELETE', `/webhooks/${controlWebhook.id}`, {
+			bearerToken: accessToken,
+			body: { testmode: true },
+		});
+
+		console.log(`  deleted control ${controlWebhook.id}`);
+	}
+}
+
 async function checkRotation() {
 	const rotationUrl = `${tunnelUrl}/rotation`;
 
@@ -963,6 +1044,13 @@ async function checkRotation() {
 					+ ` outer whitespace=${hasOuterWhitespace}`,
 				);
 			}
+
+			console.log(
+				`rotation: jean's webhook mode=${JSON.stringify(webhookAfterPatch.mode)};`
+				+ ` status=${JSON.stringify(webhookAfterPatch.status)}`,
+			);
+
+			await checkPatchKeepsSecret();
 
 			return;
 		}
