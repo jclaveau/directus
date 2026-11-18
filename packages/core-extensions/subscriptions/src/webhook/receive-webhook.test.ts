@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
@@ -99,7 +100,9 @@ describe('receiveWebhook', () => {
 		expect(await database('subscription_sync_queue')).toEqual([]);
 	});
 
-	test('logs and keeps a signed webhook it cannot read, queues nothing', async () => {
+	test(oneLine`
+		logs and keeps a signed webhook it cannot read, queues nothing
+	`, async () => {
 		vi.useFakeTimers({ now: new Date('2026-11-05T00:00:00Z'), toFake: ['Date'] });
 		const error = vi.fn();
 
