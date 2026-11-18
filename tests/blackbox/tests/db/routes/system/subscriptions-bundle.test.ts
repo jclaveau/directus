@@ -560,17 +560,28 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 	}
 
-	// Hundreds of lines get logged: a failure lists only the ones sharing the
-	// expected message's first word, so the diff shows what came instead.
-	function expectLoggedMessage(loggedDocString: string) {
+	// Hundreds of lines get logged and vitest prints an array past a few
+	// items as `[ …(61) ]`: a failure names the last lines sharing the
+	// expected message's first word, so it shows what came instead.
+	async function expectLoggedMessage(loggedDocString: string) {
 		const expectedMessage = messageOfDocString(loggedDocString);
 		const leadingWord = expectedMessage.split(' ')[0]!;
 
-		return expect.poll(() => {
-			return loggedMessages.filter((loggedMessage) => {
+		try {
+			await expect.poll(() => loggedMessages, SYNC_POLL)
+				.toContain(expectedMessage);
+		}
+		catch {
+			const sameWordMessages = loggedMessages.filter((loggedMessage) => {
 				return loggedMessage.startsWith(leadingWord);
 			});
-		}, SYNC_POLL).toContain(expectedMessage);
+
+			throw new Error(
+				`${JSON.stringify(expectedMessage)} was never logged; the last`
+				+ ` ${JSON.stringify(leadingWord)} lines:`
+				+ ` ${JSON.stringify(sameWordMessages.slice(-8), null, 2)}`,
+			);
+		}
 	}
 
 	function expectSubscriptionEvents(
