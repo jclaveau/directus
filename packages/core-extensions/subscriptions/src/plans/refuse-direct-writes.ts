@@ -265,21 +265,47 @@ export function refuseSubscriptionStateUpdate(
 }
 
 /**
- * A changed user would keep the old one's access until the next sync, while a
- * delete revokes it in its own transaction and an add grants the new user.
+ * A moved beneficiary would keep its old access until the next sync, while a
+ * delete revokes it in its own transaction and an add grants the new one. A
+ * write of the stored value, as a client sending the whole row back, passes.
  */
-export function refuseBeneficiaryUserUpdate(
+export async function refuseBeneficiaryMove(
 	updateEntries: UpdateEntries,
-): UpdateEntries {
-	const isChangingUser = updateEntries.some((updateEntry) => {
-		return 'data' in updateEntry && 'user' in updateEntry.data;
-	});
+	database: Knex,
+): Promise<UpdateEntries> {
+	for (const updateEntry of updateEntries) {
+		if (!('data' in updateEntry)) {
+			continue;
+		}
 
-	if (isChangingUser) {
-		throw new InvalidPayloadError({
-			reason: 'A beneficiary\'s "user" cannot change: delete the beneficiary'
-				+ ' and add the new one',
-		});
+		for (const movedColumn of ['user', 'subscription']) {
+			if (!(movedColumn in updateEntry.data)) {
+				continue;
+			}
+
+			const writtenValue = updateEntry.data[movedColumn];
+
+			const movedBeneficiary = await database('subscription_beneficiaries')
+				.select('id')
+				.whereIn('id', updateEntry.keys)
+				.where((changedQuery) => {
+					if (writtenValue === null) {
+						changedQuery.whereNotNull(movedColumn);
+					}
+					else {
+						changedQuery.whereNot(movedColumn, writtenValue)
+							.orWhereNull(movedColumn);
+					}
+				})
+				.first();
+
+			if (movedBeneficiary !== undefined) {
+				throw new InvalidPayloadError({
+					reason: `A beneficiary's ${JSON.stringify(movedColumn)} cannot`
+						+ ' change: delete the beneficiary and add the new one',
+				});
+			}
+		}
 	}
 
 	return updateEntries;
