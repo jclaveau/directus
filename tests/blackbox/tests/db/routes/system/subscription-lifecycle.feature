@@ -932,6 +932,43 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | user      | policy      | managed_by              |
       | <user_97> | <policy_97> | @scalabus/subscriptions |
 
+  Scenario: a PATCH cannot move a beneficiary to another subscription
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 98 | mollie   | 98      | 1                 | active      |
+      | 99 | mollie   | 99      | 2                 | active      |
+    When these requests get these responses:
+      | request                                 | response                         |
+      | method: PATCH                           | code: 400                        |+
+      | path: /items/subscription_beneficiaries | body:                            |
+      | payload:                                |   errors:                        |
+      |   query:                                |     - message: >-                |
+      |     filter:                             |         Invalid payload. A       |
+      |       subscription:                     |         beneficiary's            |
+      |         _eq: 98                         |         "subscription" cannot    |
+      |   data:                                 |         change: delete the       |
+      |     subscription: 99                    |         beneficiary and add the  |
+      |                                         |         new one.                 |
+      |                                         |       extensions:                |
+      |                                         |         code: INVALID_PAYLOAD    |
+
+  Scenario: a client sends a beneficiary back whole, its user unchanged
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 96 | mollie   | 96      | 1                 | active      |
+    When these requests get these responses:
+      | request                                 | response  |
+      | method: PATCH                           | code: 200 |+
+      | path: /items/subscription_beneficiaries |           |
+      | payload:                                |           |
+      |   query:                                |           |
+      |     filter:                             |           |
+      |       subscription:                     |           |
+      |         _eq: 96                         |           |
+      |   data:                                 |           |
+      |     subscription: 96                    |           |
+      |     user: <user_96>                     |           |
+
   Scenario: a deleted beneficiary row keeps the access its resume still shares
     Given these pending subscriptions, each with its own plan:
       | id | provider | manager | beneficiaries_max | plan_status |

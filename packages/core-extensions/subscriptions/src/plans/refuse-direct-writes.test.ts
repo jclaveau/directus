@@ -5,7 +5,7 @@ import {
 	createSubscriptionTables,
 } from '../migrations/create-subscription-tables.js';
 import {
-	refuseBeneficiaryUserUpdate,
+	refuseBeneficiaryMove,
 	refuseFrozenPlanUpdate,
 	refuseLastManagerDelete,
 	refuseLastManagerMove,
@@ -312,20 +312,44 @@ describe('refuseSubscriptionStateUpdate', () => {
 	});
 });
 
-describe('refuseBeneficiaryUserUpdate', () => {
-	test('refuses writing the user', () => {
-		expect(() => {
-			refuseBeneficiaryUserUpdate([{ data: { user: 'user-2' }, keys: [1] }]);
-		}).toThrow(new InvalidPayloadError({
-			reason: 'A beneficiary\'s "user" cannot change: delete the beneficiary'
-				+ ' and add the new one',
+describe('refuseBeneficiaryMove', () => {
+	beforeEach(async () => {
+		await database('subscription_beneficiaries').insert([
+			{ subscription: 1, user: 'user-1' },
+			{ subscription: 1, user: null },
+		]);
+	});
+
+	test.each([
+		[{ data: { user: 'user-2' }, keys: [1] }],
+		[{ data: { user: null }, keys: [1] }],
+		[{ data: { user: 'user-2' }, keys: [2] }],
+	])('refuses moving the user: %j', async (updateEntry) => {
+		await expect(refuseBeneficiaryMove([updateEntry], database))
+			.rejects.toThrow(new InvalidPayloadError({
+				reason: 'A beneficiary\'s "user" cannot change: delete the'
+					+ ' beneficiary and add the new one',
+			}));
+	});
+
+	test('refuses moving the subscription', async () => {
+		await expect(refuseBeneficiaryMove(
+			[{ data: { subscription: 2 }, keys: [1] }],
+			database,
+		)).rejects.toThrow(new InvalidPayloadError({
+			reason: 'A beneficiary\'s "subscription" cannot change: delete the'
+				+ ' beneficiary and add the new one',
 		}));
 	});
 
-	test('passes any other field', () => {
-		expect(refuseBeneficiaryUserUpdate([
-			{ data: { user_updated: 'user-1' }, keys: [1] },
-		])).toEqual([{ data: { user_updated: 'user-1' }, keys: [1] }]);
+	test.each([
+		[{ data: { user: 'user-1', subscription: 1 }, keys: [1] }],
+		[{ data: { user: null }, keys: [2] }],
+		[{ data: { user_updated: 'user-1' }, keys: [1] }],
+		[{ key: 1 }],
+	])('passes %j', async (updateEntry) => {
+		await expect(refuseBeneficiaryMove([updateEntry], database))
+			.resolves.toEqual([updateEntry]);
 	});
 });
 
