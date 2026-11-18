@@ -866,11 +866,54 @@ function describeMatch(rawBodyBytes, signatureLines, rotationSecret) {
 async function checkRotation() {
 	const rotationUrl = `${tunnelUrl}/rotation`;
 
+	const webhookBeforePatch = await callMollie(
+		'GET',
+		`/webhooks/${rotationWebhookId}?testmode=true`,
+		{ bearerToken: accessToken },
+	);
+
 	// Only the url changes: the webhook, its event types and secret stay jean's.
-	await callMollie('PATCH', `/webhooks/${rotationWebhookId}`, {
-		bearerToken: accessToken,
-		body: { url: rotationUrl, testmode: true },
-	});
+	const webhookAfterPatch = await callMollie(
+		'PATCH',
+		`/webhooks/${rotationWebhookId}`,
+		{
+			bearerToken: accessToken,
+			body: { url: rotationUrl, testmode: true },
+		},
+	);
+
+	// Does an update hand out (or roll) the secret? Key names and shapes
+	// only, never a value.
+	for (const [answerLabel, webhookAnswer] of [
+		['GET', webhookBeforePatch],
+		['PATCH', webhookAfterPatch],
+	]) {
+		const answerSecret = webhookAnswer?.webhookSecret;
+
+		console.log(
+			`rotation: ${answerLabel} answer keys=`
+			+ `${JSON.stringify(Object.keys(webhookAnswer ?? {}).sort())};`
+			+ ` webhookSecret type=${typeof answerSecret}`
+			+ (typeof answerSecret === 'string'
+				? `; length=${answerSecret.length};`
+					+ ` starts with whsec_=${answerSecret.startsWith('whsec_')};`
+					+ ` equals A=${answerSecret === rotationSecretA};`
+					+ ` equals B=${answerSecret === rotationSecretB}`
+				: ''),
+		);
+	}
+
+	const [getSecret, patchSecret] = [webhookBeforePatch, webhookAfterPatch]
+		.map((webhookAnswer) => {
+			return typeof webhookAnswer?.webhookSecret === 'string'
+				? webhookAnswer.webhookSecret
+				: '';
+		});
+
+	console.log(
+		'rotation: GET and PATCH secrets equal='
+		+ `${getSecret !== '' && getSecret === patchSecret}`,
+	);
 
 	console.log(`  ${rotationWebhookId} now posts to the tunnel`);
 
@@ -894,9 +937,16 @@ async function checkRotation() {
 					return describeMatch(rawBodyBytes, signatureLines, rotationSecret);
 				});
 
+			const [matchesGet, matchesPatch] = [getSecret, patchSecret]
+				.map((answerSecret) => {
+					return describeMatch(rawBodyBytes, signatureLines, answerSecret);
+				});
+
 			console.log(
 				`rotation: header lines=${signatureLines.length};`
-				+ ` matches A=${matchesA}; matches B=${matchesB}`,
+				+ ` matches A=${matchesA}; matches B=${matchesB};`
+				+ ` matches GET secret=${matchesGet};`
+				+ ` matches PATCH secret=${matchesPatch}`,
 			);
 
 			// The shape of each stored secret, never its value: tells a bad
