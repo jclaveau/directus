@@ -235,7 +235,10 @@ function readRemainingTimes(canceledSubscription: {
 
 /**
  * Mollie signs the raw body: `sha256=` and the lowercase hex HMAC-SHA256. Any
- * listed secret verifies, so a rotated one still does until it is dropped.
+ * listed secret verifies, which covers a move between two webhooks. A "Roll
+ * secret" in the dashboard switches the signature at once (probe run
+ * 44284543852): until the new secret is deployed each event gets 401 and only
+ * arrives through Mollie's retries.
  */
 function verifyMollieSignature(
 	rawBody: Buffer,
