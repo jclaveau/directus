@@ -617,23 +617,23 @@ Feature: The role stamps list the member roles that allowed the write
       |                                   |         user can hold several roles, use  |
       |                                   |         "roles-updated" on a json field.  |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete | alter |
-      | 1       | directus_access       | 2      | 0      | 0      | 0      | 0     |
-      | 1       | directus_fields       | 2      | 0      | 0      | 0      | 0     |
-      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0     |
-      | 1       | directus_roles        | 1      | 0      | 0      | 0      | 0     |
-      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0     |
-      | 1       | stamp_refused_notes   | 0      | 0      | 0      | 0      | 1     |
-      | 2       | directus_access       | 2      | 0      | 0      | 0      | 0     |
-      | 2       | directus_collections  | 1      | 0      | 0      | 0      | 0     |
-      | 2       | directus_fields       | 3      | 0      | 0      | 0      | 0     |
-      | 2       | directus_relations    | 1      | 0      | 0      | 0      | 0     |
-      | 2       | directus_role_members | 1      | 0      | 0      | 0      | 0     |
-      | 2       | directus_roles        | 1      | 0      | 0      | 0      | 0     |
-      | 2       | directus_users        | 1      | 0      | 0      | 0      | 0     |
-      | 2       | geometry_columns      | 0      | 0      | 0      | 0      | 0     |
-      | 2       | information_schema    | 1      | 0      | 0      | 0      | 0     |
-      | 2       | pg_constraint         | 1      | 0      | 0      | 0      | 0     |
-      | 2       | pg_index              | 2      | 0      | 0      | 0      | 0     |
-      | 2       | pg_proc               | 1      | 0      | 0      | 0      | 0     |
-      | 2       | stamp_refused_notes   | 0      | 0      | 0      | 0      | 1     |
+    | request | table                 | select | insert | update | delete | alter | with |
+    | 1       | directus_access       | 2      | 0      | 0      | 0      | 0     | 0    |
+    | 1       | directus_fields       | 2      | 0      | 0      | 0      | 0     | 0    |
+    | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0     | 0    |
+    | 1       | directus_roles        | 1      | 0      | 0      | 0      | 0     | 0    |
+    | 1       | directus_users        | 1      | 0      | 0      | 0      | 0     | 0    |
+    | 1       | stamp_refused_notes   | 0      | 0      | 0      | 0      | 1     | 0    |
+    | 2       | directus_access       | 2      | 0      | 0      | 0      | 0     | 0    |
+    | 2       | directus_collections  | 1      | 0      | 0      | 0      | 0     | 0    |
+    | 2       | directus_fields       | 3      | 0      | 0      | 0      | 0     | 0    |
+    | 2       | directus_relations    | 1      | 0      | 0      | 0      | 0     | 0    |
+    | 2       | directus_role_members | 1      | 0      | 0      | 0      | 0     | 0    |
+    | 2       | directus_roles        | 1      | 0      | 0      | 0      | 0     | 0    |
+    | 2       | directus_users        | 1      | 0      | 0      | 0      | 0     | 0    |
+    | 2       | geometry_columns      | 0      | 0      | 0      | 0      | 0     | 1    |
+    | 2       | information_schema    | 1      | 0      | 0      | 0      | 0     | 0    |
+    | 2       | pg_constraint         | 1      | 0      | 0      | 0      | 0     | 0    |
+    | 2       | pg_index              | 2      | 0      | 0      | 0      | 0     | 0    |
+    | 2       | pg_proc               | 1      | 0      | 0      | 0      | 0     | 0    |
+    | 2       | stamp_refused_notes   | 0      | 0      | 0      | 0      | 1     | 0    |
