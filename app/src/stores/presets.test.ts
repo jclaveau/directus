@@ -22,10 +22,10 @@ afterEach(() => {
 });
 
 describe('hydrate', () => {
-	test('fetches the user, role and global presets', async () => {
+	test('fetches the user, member roles and global presets', async () => {
 		useUserStore().currentUser = {
 			id: 'user-1',
-			role: { id: 'role-1' },
+			roles: [{ role: { id: 'role-1' } }, { role: { id: 'role-2' } }],
 		} as any;
 
 		vi.mocked(fetchAll).mockResolvedValue([]);
@@ -45,7 +45,7 @@ describe('hydrate', () => {
 				'/presets',
 				{
 					params: {
-						'filter[role][_eq]': 'role-1',
+						'filter[role][_in]': 'role-1,role-2',
 						'filter[user][_null]': true,
 					},
 				},
@@ -62,10 +62,10 @@ describe('hydrate', () => {
 		]);
 	});
 
-	test('skips the role presets of a user with no role', async () => {
+	test('skips the role presets of a user with no membership', async () => {
 		useUserStore().currentUser = {
 			id: 'user-1',
-			role: null,
+			roles: [],
 		} as any;
 
 		vi.mocked(fetchAll).mockResolvedValue([]);
@@ -98,7 +98,7 @@ describe('getPresetForCollection', () => {
 	test('prefers the role preset to the global one', () => {
 		useUserStore().currentUser = {
 			id: 'user-1',
-			role: { id: 'role-1' },
+			roles: [{ role: { id: 'role-1' } }],
 		} as any;
 
 		const presetsStore = usePresetsStore();
@@ -139,7 +139,7 @@ describe('getPresetForCollection', () => {
 	test('prefers the user preset to the role one', () => {
 		useUserStore().currentUser = {
 			id: 'user-1',
-			role: { id: 'role-1' },
+			roles: [{ role: { id: 'role-1' } }],
 		} as any;
 
 		const presetsStore = usePresetsStore();
@@ -166,6 +166,40 @@ describe('getPresetForCollection', () => {
 			collection: 'articles',
 			user: 'user-1',
 			role: null,
+			bookmark: null,
+		});
+	});
+
+	test('prefers the preset of the later membership', () => {
+		useUserStore().currentUser = {
+			id: 'user-1',
+			roles: [{ role: { id: 'role-1' } }, { role: { id: 'role-2' } }],
+		} as any;
+
+		const presetsStore = usePresetsStore();
+
+		presetsStore.collectionPresets = [
+			{
+				id: 1,
+				collection: 'articles',
+				user: null,
+				role: 'role-2',
+				bookmark: null,
+			},
+			{
+				id: 2,
+				collection: 'articles',
+				user: null,
+				role: 'role-1',
+				bookmark: null,
+			},
+		] as any;
+
+		expect(presetsStore.getPresetForCollection('articles')).toEqual({
+			id: 1,
+			collection: 'articles',
+			user: null,
+			role: 'role-2',
 			bookmark: null,
 		});
 	});
