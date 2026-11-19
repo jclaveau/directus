@@ -39,17 +39,17 @@ Feature: The presets of several member roles apply parents first, then leaves
       | <alice> | <press>   | 1    |
       | <alice> | <editors> | 2    |
     Then these requests get these responses:
-      | request                                    | response           |
-      | as: alice-<run>                            | code: 200          |+
-      | method: POST                               |                    |
-      | path: /items/role_order_notes              |                    |
-      | payload: {}                                |                    |
-      | remember: alice-note                       |                    |
-      | as: alice-<run>                            | code: 200          |+
-      | method: GET                                | body:              |
-      | path: /items/role_order_notes/<alice-note> | data:              |
-      | query:                                     | visibility: public |
-      | fields: visibility,lang                    | lang: fr           |
+      | request                                    | response               |
+      | as: alice-<run>                            | code: 200              |+
+      | method: POST                               |                        |
+      | path: /items/role_order_notes              |                        |
+      | payload: {}                                |                        |
+      | remember: alice-note                       |                        |
+      | as: alice-<run>                            | code: 200              |+
+      | method: GET                                | body:                  |
+      | path: /items/role_order_notes/<alice-note> |   data:                |
+      | query:                                     |     visibility: public |
+      |   fields: visibility,lang                  |     lang: fr           |
     And on postgres the requests ran these statements:
       | request | table  | select | insert | update | delete |
       | 1       | (none) | 0      | 0      | 0      | 0      |
@@ -81,17 +81,17 @@ Feature: The presets of several member roles apply parents first, then leaves
       | <bob> | <editors> | 1    |
       | <bob> | <staff>   | 2    |
     Then these requests get these responses:
-      | request                                  | response             |
-      | as: bob-<run>                            | code: 200            |+
-      | method: POST                             |                      |
-      | path: /items/role_order_notes            |                      |
-      | payload: {}                              |                      |
-      | remember: bob-note                       |                      |
-      | as: bob-<run>                            | code: 200            |+
-      | method: GET                              | body:                |
-      | path: /items/role_order_notes/<bob-note> | data:                |
-      | query:                                   | visibility: external |
-      | fields: visibility                       |                      |
+      | request                                  | response                 |
+      | as: bob-<run>                            | code: 200                |+
+      | method: POST                             |                          |
+      | path: /items/role_order_notes            |                          |
+      | payload: {}                              |                          |
+      | remember: bob-note                       |                          |
+      | as: bob-<run>                            | code: 200                |+
+      | method: GET                              | body:                    |
+      | path: /items/role_order_notes/<bob-note> |   data:                  |
+      | query:                                   |     visibility: external |
+      |   fields: visibility                     |                          |
     And on postgres the requests ran these statements:
       | request | table  | select | insert | update | delete |
       | 1       | (none) | 0      | 0      | 0      | 0      |
@@ -125,17 +125,17 @@ Feature: The presets of several member roles apply parents first, then leaves
       | <carol> | <editors> | 1    |
       | <carol> | <press>   | 2    |
     Then these requests get these responses:
-      | request                                    | response           |
-      | as: carol-<run>                            | code: 200          |+
-      | method: POST                               |                    |
-      | path: /items/role_order_notes              |                    |
-      | payload: {}                                |                    |
-      | remember: carol-note                       |                    |
-      | as: carol-<run>                            | code: 200          |+
-      | method: GET                                | body:              |
-      | path: /items/role_order_notes/<carol-note> | data:              |
-      | query:                                     | visibility: public |
-      | fields: visibility                         |                    |
+      | request                                    | response               |
+      | as: carol-<run>                            | code: 200              |+
+      | method: POST                               |                        |
+      | path: /items/role_order_notes              |                        |
+      | payload: {}                                |                        |
+      | remember: carol-note                       |                        |
+      | as: carol-<run>                            | code: 200              |+
+      | method: GET                                | body:                  |
+      | path: /items/role_order_notes/<carol-note> |   data:                |
+      | query:                                     |     visibility: public |
+      |   fields: visibility                       |                        |
     And on postgres the requests ran these statements:
       | request | table  | select | insert | update | delete |
       | 1       | (none) | 0      | 0      | 0      | 0      |
