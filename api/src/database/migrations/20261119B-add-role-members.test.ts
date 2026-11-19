@@ -136,8 +136,10 @@ describe('the migration', () => {
 			+ ' hold several roles; back up and remove the extra memberships first',
 		));
 
-		expect(tracker.history.any.map(({ method }) => method)).toEqual([
-			'select',
-		]);
+		expect(tracker.history.select).toHaveLength(1);
+		expect(tracker.history.insert).toEqual([]);
+		expect(tracker.history.update).toEqual([]);
+		expect(tracker.history.delete).toEqual([]);
+		expect(tracker.history.any).toEqual([]);
 	});
 });
