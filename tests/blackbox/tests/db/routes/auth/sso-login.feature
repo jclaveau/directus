@@ -10,7 +10,9 @@ Feature: A first SSO login creates the user, a later one updates it
     the ones that subject got. Directus stores the one a login brings, then
     trades it at once, and again on every refresh: it keeps the last one.
   - `mockoauth` gives the group "staff" the role 5b3e8f0a-... (sso_staff),
-    anyone else the default role d70c0943-...; `mockopenid` maps no group.
+    the group "auditors" the role 0c6f2a9d-... (sso_auditors), anyone else
+    the default role d70c0943-...; `mockopenid` maps no group. A user in
+    several mapped groups gets one role: the first the mapping lists.
   - Any other row is a request as the admin.
 
   Scenario: an OAuth2 login creates the user, a later one updates it
@@ -124,3 +126,35 @@ Feature: A first SSO login creates the user, a later one updates it
       |     - auth_data                    |       refreshToken: grace-openid-refresh-5 |
       |   filter[email][_eq]: >-           |                                            |
       |     grace@sso.example.com          |                                            |
+
+  Scenario: an OAuth2 user in two mapped groups gets the role mapped first
+    Then these requests get these responses:
+      | request                      | response                                   |
+      | login: mockoauth             | code: 200                                  |+
+      | profile:                     |                                            |
+      |   sub: kay-oauth             |                                            |
+      |   email: kay@sso.example.com |                                            |
+      |   given_name: Kay            |                                            |
+      |   family_name: Antonelli     |                                            |
+      |   groups: [auditors, staff]  |                                            |
+      | method: GET                  | code: 200                                  |+
+      | path: /users                 | body:                                      |
+      | query:                       |   data:                                    |
+      |   fields:                    |   - role: >-                               |
+      |     - role                   |       5b3e8f0a-9c41-4d6e-8a2f-1c7d3e9b6a04 |
+      |   filter[email][_eq]: >-     |                                            |
+      |     kay@sso.example.com      |                                            |
+      | login: mockoauth             | code: 200                                  |+
+      | profile:                     |                                            |
+      |   sub: kay-oauth             |                                            |
+      |   email: kay@sso.example.com |                                            |
+      |   given_name: Kay            |                                            |
+      |   family_name: Antonelli     |                                            |
+      |   groups: [auditors]         |                                            |
+      | method: GET                  | code: 200                                  |+
+      | path: /users                 | body:                                      |
+      | query:                       |   data:                                    |
+      |   fields:                    |   - role: >-                               |
+      |     - role                   |       0c6f2a9d-3e18-4b57-9d40-7a1e5c8b2f63 |
+      |   filter[email][_eq]: >-     |                                            |
+      |     kay@sso.example.com      |                                            |

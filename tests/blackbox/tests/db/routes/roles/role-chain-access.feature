@@ -1,0 +1,153 @@
+Feature: A user holds one role and gets the policies of its whole parent chain
+
+  - Pins today's single-role contract (#746): `directus_users.role` is one
+    role, and the user gets that role's policies plus those of every parent
+    above it. `/roles/me` lists every role of that chain.
+  - Admin and app access are recomputed on every request from the chain.
+  - A user with no role is still logged in: the `/me` endpoints answer them,
+    and refuse only a request sending no credentials (`as: public`).
+  - A request authenticates as the admin, unless it names the token it sends
+    `as`. `<run>` stands for a value unique to the scenario, and any other
+    `<name>` for a uuid of its own. A response cell states the keys it checks.
+
+  Scenario: a user of a child role reads with the policy of the parent role
+    Given these requests are sent:
+      | request                                   | response  |
+      | method: POST                              | code: 200 |+
+      | path: /collections                        |           |
+      | payload:                                  |           |
+      |   collection: role_chain_parent_notes     |           |
+      |   schema: {}                              |           |
+      |   meta: {}                                |           |
+      |   fields:                                 |           |
+      |     - field: label                        |           |
+      |       type: string                        |           |
+      |       meta: {}                            |           |
+      | method: POST                              | code: 200 |+
+      | path: /items/role_chain_parent_notes      |           |
+      | payload:                                  |           |
+      |   label: read through the parent          |           |
+      | method: POST                              | code: 200 |+
+      | path: /policies                           |           |
+      | payload:                                  |           |
+      |   id: <parent-policy>                     |           |
+      |   name: parent-<run>                      |           |
+      |   app_access: true                        |           |
+      |   admin_access: false                     |           |
+      |   permissions:                            |           |
+      |     - collection: role_chain_parent_notes |           |
+      |       action: read                        |           |
+      |       fields: ['*']                       |           |
+      | method: POST                              | code: 200 |+
+      | path: /roles                              |           |
+      | payload:                                  |           |
+      |   id: <parent-role>                       |           |
+      |   name: parent-<run>                      |           |
+      |   policies:                               |           |
+      |     - policy: <parent-policy>             |           |
+      | method: POST                              | code: 200 |+
+      | path: /roles                              |           |
+      | payload:                                  |           |
+      |   id: <child-role>                        |           |
+      |   name: child-<run>                       |           |
+      |   parent: <parent-role>                   |           |
+      | method: POST                              | code: 200 |+
+      | path: /users                              |           |
+      | payload:                                  |           |
+      |   email: child-<run>@example.com          |           |
+      |   role: <child-role>                      |           |
+      |   token: child-<run>                      |           |
+    Then these requests get these responses:
+      | request                              | response                             |
+      | as: child-<run>                      | code: 200                            |+
+      | method: GET                          | body:                                |
+      | path: /items/role_chain_parent_notes |   data:                              |
+      | query:                               |     - label: read through the parent |
+      |   fields: label                      |                                      |
+      | as: child-<run>                      | code: 200                            |+
+      | method: GET                          | body:                                |
+      | path: /roles/me                      |   data:                              |
+      | query:                               |     - name: child-<run>              |
+      |   fields: name                       |     - name: parent-<run>             |
+      |   sort: name                         |                                      |
+      | as: child-<run>                      | code: 200                            |+
+      | method: GET                          | body:                                |
+      | path: /policies/me/globals           |   data:                              |
+      |                                      |     app_access: true                 |
+      |                                      |     admin_access: false              |
+
+  Scenario: a user of a child role is an admin when the parent role is
+    Given these requests are sent:
+      | request                          | response  |
+      | method: POST                     | code: 200 |+
+      | path: /policies                  |           |
+      | payload:                         |           |
+      |   id: <admin-policy>             |           |
+      |   name: admin-<run>              |           |
+      |   app_access: true               |           |
+      |   admin_access: true             |           |
+      | method: POST                     | code: 200 |+
+      | path: /roles                     |           |
+      | payload:                         |           |
+      |   id: <admin-role>               |           |
+      |   name: admin-<run>              |           |
+      |   policies:                      |           |
+      |     - policy: <admin-policy>     |           |
+      | method: POST                     | code: 200 |+
+      | path: /roles                     |           |
+      | payload:                         |           |
+      |   id: <child-role>               |           |
+      |   name: child-<run>              |           |
+      |   parent: <admin-role>           |           |
+      | method: POST                     | code: 200 |+
+      | path: /users                     |           |
+      | payload:                         |           |
+      |   id: <child-user>               |           |
+      |   email: child-<run>@example.com |           |
+      |   role: <child-role>             |           |
+      |   token: child-<run>             |           |
+    Then these requests get these responses:
+      | request                    | response               |
+      | as: child-<run>            | code: 200              |+
+      | method: GET                | body:                  |
+      | path: /policies/me/globals |   data:                |
+      |                            |     app_access: true   |
+      |                            |     admin_access: true |
+      | as: child-<run>            | code: 200              |+
+      | method: GET                | body:                  |
+      | path: /users/<child-user>  |   data:                |
+      | query:                     |     role: <child-role> |
+      |   fields: role             |                        |
+
+  Scenario: a user with no role reaches the me endpoints, no credentials do not
+    Then these requests get these responses:
+      | request                    | response                 |
+      | as: NoRoleToken            | code: 200                |+
+      | method: GET                | body:                    |
+      | path: /roles/me            |   data: []               |
+      | as: NoRoleToken            | code: 200                |+
+      | method: GET                |                          |
+      | path: /permissions/me      |                          |
+      | as: NoRoleToken            | code: 200                |+
+      | method: GET                | body:                    |
+      | path: /policies/me/globals |   data:                  |
+      |                            |     app_access: false    |
+      |                            |     admin_access: false  |
+      | as: public                 | code: 403                |+
+      | method: GET                | body:                    |
+      | path: /roles/me            |   errors:                |
+      |                            |     - message: >-        |
+      |                            |         Can't access /me |
+      |                            |         without being    |
+      |                            |         logged in        |
+      | as: public                 | code: 403                |+
+      | method: GET                | body:                    |
+      | path: /permissions/me      |   errors:                |
+      |                            |     - message: >-        |
+      |                            |         Can't access /me |
+      |                            |         without being    |
+      |                            |         logged in        |
+      | as: public                 | code: 200                |+
+      | method: GET                | body:                    |
+      | path: /policies/me/globals |   data:                  |
+      |                            |     app_access: false    |
