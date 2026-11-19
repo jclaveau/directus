@@ -771,11 +771,16 @@ describe.each(vendors)('%s', (vendor) => {
 	function expectNoProviderQueueRow(
 		rowsTable: { provider: string; resource_id: string }[],
 	) {
-		const [{ resource_id: resourceId }] = keepProviderRows(rowsTable) as [
-			{ resource_id: string },
-		];
+		const providerRows = keepProviderRows(rowsTable);
 
-		return expectNoQueueRow(resourceId);
+		if (providerRows.length !== 1) {
+			throw new Error(
+				'Expected one resource for the scenario\'s provider, got'
+				+ ` ${JSON.stringify(providerRows)}`,
+			);
+		}
+
+		return expectNoQueueRow(providerRows[0]!.resource_id);
 	}
 
 	// A `write` cell is the YAML of one write, a write without `body` having none.
