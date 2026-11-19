@@ -1,0 +1,135 @@
+{
+	"apiVersion": "2026-10-28.endive",
+	"subscriptionAfter": {
+		"subscription created": {
+			"status": "active",
+			"cancel_at_period_end": false,
+			"customer": "string",
+			"metadata": {
+				"directus_subscription": "424242"
+			},
+			"items.data": "1 item(s)",
+			"items.data[0].current_period_end": "number",
+			"items.data[0].current_period_end months after the first": 0,
+			"items.data[0].price": {
+				"unit_amount": 1000,
+				"currency": "eur",
+				"recurring": {
+					"interval": "month",
+					"interval_count": 1
+				}
+			}
+		},
+		"cancel_at_period_end true": {
+			"status": "active",
+			"cancel_at_period_end": true,
+			"customer": "string",
+			"metadata": {
+				"directus_subscription": "424242"
+			},
+			"items.data": "1 item(s)",
+			"items.data[0].current_period_end": "number",
+			"items.data[0].current_period_end months after the first": 0,
+			"items.data[0].price": {
+				"unit_amount": 1000,
+				"currency": "eur",
+				"recurring": {
+					"interval": "month",
+					"interval_count": 1
+				}
+			}
+		},
+		"cancel_at_period_end false": {
+			"status": "active",
+			"cancel_at_period_end": false,
+			"customer": "string",
+			"metadata": {
+				"directus_subscription": "424242"
+			},
+			"items.data": "1 item(s)",
+			"items.data[0].current_period_end": "number",
+			"items.data[0].current_period_end months after the first": 0,
+			"items.data[0].price": {
+				"unit_amount": 1000,
+				"currency": "eur",
+				"recurring": {
+					"interval": "month",
+					"interval_count": 1
+				}
+			}
+		},
+		"renewal (test clock past the period end)": {
+			"status": "active",
+			"cancel_at_period_end": false,
+			"customer": "string",
+			"metadata": {
+				"directus_subscription": "424242"
+			},
+			"items.data": "1 item(s)",
+			"items.data[0].current_period_end": "number",
+			"items.data[0].current_period_end months after the first": 1,
+			"items.data[0].price": {
+				"unit_amount": 1000,
+				"currency": "eur",
+				"recurring": {
+					"interval": "month",
+					"interval_count": 1
+				}
+			}
+		},
+		"canceled now": {
+			"status": "canceled",
+			"cancel_at_period_end": false,
+			"customer": "string",
+			"metadata": {
+				"directus_subscription": "424242"
+			},
+			"items.data": "1 item(s)",
+			"items.data[0].current_period_end": "number",
+			"items.data[0].current_period_end months after the first": 1,
+			"items.data[0].price": {
+				"unit_amount": 1000,
+				"currency": "eur",
+				"recurring": {
+					"interval": "month",
+					"interval_count": 1
+				}
+			}
+		}
+	},
+	"missingSubscription": {
+		"httpStatus": 404,
+		"errorCode": "resource_missing",
+		"errorType": "invalid_request_error"
+	},
+	"events": {
+		"subscription created": [
+			"customer.subscription.created; subscription at data.object.id; signature valid",
+			"invoice.created; subscription at data.object.parent.subscription_details.subscription; signature valid",
+			"invoice.finalized; subscription at data.object.parent.subscription_details.subscription; signature valid",
+			"invoice.paid; subscription at data.object.parent.subscription_details.subscription; signature valid",
+			"invoice.payment_succeeded; subscription at data.object.parent.subscription_details.subscription; signature valid"
+		],
+		"cancel_at_period_end true": [
+			"customer.subscription.updated; subscription at data.object.id; signature valid"
+		],
+		"cancel_at_period_end false": [
+			"customer.subscription.updated; subscription at data.object.id; signature valid"
+		],
+		"renewal (test clock past the period end)": [
+			"customer.subscription.updated; subscription at data.object.id; signature valid",
+			"invoice.created; subscription at data.object.parent.subscription_details.subscription; signature valid",
+			"invoice.finalized; subscription at data.object.parent.subscription_details.subscription; signature valid",
+			"invoice.paid; subscription at data.object.parent.subscription_details.subscription; signature valid",
+			"invoice.payment_succeeded; subscription at data.object.parent.subscription_details.subscription; signature valid",
+			"invoice.upcoming; subscription at data.object.parent.subscription_details.subscription; signature valid",
+			"invoice.updated; subscription at data.object.parent.subscription_details.subscription; signature valid"
+		],
+		"canceled now": [
+			"customer.subscription.deleted; subscription at data.object.id; signature valid"
+		]
+	},
+	"envelopes": [
+		"application/json; charset=utf-8; api_version,created,data,id,livemode,object,pending_webhooks,request,type; api_version 2026-10-28.endive; Stripe/1.0 (+https://stripe.com/docs/webhooks)"
+	]
+}
