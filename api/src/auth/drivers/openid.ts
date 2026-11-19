@@ -39,7 +39,8 @@ import { LocalAuthDriver } from './local.js';
 import {
 	providerMemberships,
 	syncProviderMemberships,
-	takeProviderRole,
+	takeProviderRoles,
+	withProviderRoles,
 } from '../utils/provider-memberships.js';
 
 export class OpenIDAuthDriver extends LocalAuthDriver {
@@ -272,6 +273,10 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			logger.debug(`[OpenID] Configured group claim with name "${groupClaimName}" does not exist or is empty.`);
 		}
 
+		const grantedRoles: string[] = role
+			? [role]
+			: [];
+
 		// Flatten response to support dot indexes
 		userInfo = flatten(userInfo) as Record<string, unknown>;
 
@@ -292,7 +297,6 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			last_name: userInfo['family_name'],
 			email: email,
 			external_identifier: identifier,
-			role: role,
 			auth_data: tokenSet.refresh_token && JSON.stringify({ refreshToken: tokenSet.refresh_token }),
 		};
 
@@ -306,9 +310,9 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			};
 
 			// Make sure a user's role gets updated if their openid group or role mapping changes
-			if (this.config['roleMapping']) {
-				emitPayload['role'] = role;
-			}
+			const syncedRoles = this.config['roleMapping']
+				? grantedRoles
+				: undefined;
 
 			if (syncUserInfo) {
 				emitPayload = {
@@ -321,7 +325,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 
 			const updatedUserPayload = await emitter.emitFilter(
 				`auth.update`,
-				emitPayload,
+				withProviderRoles('auth.update', emitPayload, syncedRoles),
 				{
 					identifier,
 					provider: this.config['provider'],
@@ -330,7 +334,8 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 				{ database: getDatabase(), schema: this.schema, accountability: null },
 			);
 
-			const { userPayload: updatedUser, providerRole } = takeProviderRole(
+			const { userPayload: updatedUser, providerRoles } = takeProviderRoles(
+				'auth.update',
 				updatedUserPayload,
 			);
 
@@ -339,8 +344,8 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 				await this.usersService.updateOne(userId, updatedUser);
 			}
 
-			if (providerRole !== undefined) {
-				await syncProviderMemberships(userId, provider, providerRole ?? null, {
+			if (providerRoles !== undefined) {
+				await syncProviderMemberships(userId, provider, providerRoles, {
 					knex: this.knex,
 					schema: this.schema,
 				});
@@ -361,7 +366,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		// user that is about to be created
 		const updatedUserPayload = await emitter.emitFilter(
 			`auth.create`,
-			userPayload,
+			withProviderRoles('auth.create', userPayload, grantedRoles),
 			{
 				identifier,
 				provider: this.config['provider'],
@@ -370,14 +375,19 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			{ database: getDatabase(), schema: this.schema, accountability: null },
 		);
 
-		const { userPayload: createdUser, providerRole } = takeProviderRole(
+		const { userPayload: createdUser, providerRoles } = takeProviderRoles(
+			'auth.create',
 			updatedUserPayload,
 		);
 
 		try {
 			await this.usersService.createOne({
 				...createdUser,
-				roles: providerMemberships(provider, providerRole),
+				roles: providerMemberships(
+					provider,
+					providerRoles,
+					Boolean(this.config['roleMapping']),
+				),
 			});
 		} catch (e) {
 			if (isDirectusError(e, ErrorCode.RecordNotUnique)) {

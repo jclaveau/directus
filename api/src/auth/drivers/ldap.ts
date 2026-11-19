@@ -29,7 +29,8 @@ import { AuthDriver } from '../auth.js';
 import {
 	providerMemberships,
 	syncProviderMemberships,
-	takeProviderRole,
+	takeProviderRoles,
+	withProviderRoles,
 } from '../utils/provider-memberships.js';
 
 interface UserInfo {
@@ -290,19 +291,19 @@ export class LDAPAuthDriver extends AuthDriver {
 			}
 		}
 
+		// TODO(#619): no blackbox LDAP server covers these roles yet.
+		const grantedRole = userRole?.id ?? defaultRoleId;
+
+		const grantedRoles: string[] = grantedRole
+			? [grantedRole]
+			: [];
+
 		const userId = await this.fetchUserId(userInfo.dn);
 
 		if (userId) {
 			// Run hook so the end user has the chance to augment the
 			// user that is about to be updated
 			let emitPayload = {};
-
-			// Only sync roles if the AD groups are configured
-			if (groupDn) {
-				emitPayload = {
-					role: userRole?.id ?? defaultRoleId ?? null,
-				};
-			}
 
 			if (syncUserInfo) {
 				emitPayload = {
@@ -313,25 +314,31 @@ export class LDAPAuthDriver extends AuthDriver {
 				};
 			}
 
+			// Only sync roles if the AD groups are configured
+			const syncedRoles = groupDn
+				? grantedRoles
+				: undefined;
+
 			const updatedUserPayload = await emitter.emitFilter(
 				`auth.update`,
-				emitPayload,
+				withProviderRoles('auth.update', emitPayload, syncedRoles),
 				{ identifier: userInfo.dn, provider: this.config['provider'], providerPayload: { userInfo, userRole } },
 				{ database: getDatabase(), schema: this.schema, accountability: null },
 			);
 
-			const { userPayload: updatedUser, providerRole } = takeProviderRole(
+			const { userPayload: updatedUser, providerRoles } = takeProviderRoles(
+				'auth.update',
 				updatedUserPayload,
 			);
 
 			// Update user to update properties that might have changed
 			await this.usersService.updateOne(userId, updatedUser);
 
-			if (providerRole !== undefined) {
+			if (providerRoles !== undefined) {
 				await syncProviderMemberships(
 					userId,
 					this.config['provider'],
-					providerRole ?? null,
+					providerRoles,
 					{ knex: this.knex, schema: this.schema },
 				);
 			}
@@ -349,26 +356,30 @@ export class LDAPAuthDriver extends AuthDriver {
 			last_name: userInfo.lastName,
 			email: userInfo.email,
 			external_identifier: userInfo.dn,
-			role: userRole?.id ?? defaultRoleId,
 		};
 
 		// Run hook so the end user has the chance to augment the
 		// user that is about to be created
 		const updatedUserPayload = await emitter.emitFilter(
 			`auth.create`,
-			userPayload,
+			withProviderRoles('auth.create', userPayload, grantedRoles),
 			{ identifier: userInfo.dn, provider: this.config['provider'], providerPayload: { userInfo, userRole } },
 			{ database: getDatabase(), schema: this.schema, accountability: null },
 		);
 
-		const { userPayload: createdUser, providerRole } = takeProviderRole(
+		const { userPayload: createdUser, providerRoles } = takeProviderRoles(
+			'auth.create',
 			updatedUserPayload,
 		);
 
 		try {
 			await this.usersService.createOne({
 				...createdUser,
-				roles: providerMemberships(this.config['provider'], providerRole),
+				roles: providerMemberships(
+					this.config['provider'],
+					providerRoles,
+					Boolean(groupDn),
+				),
 			});
 		} catch (e) {
 			if (isDirectusError(e, ErrorCode.RecordNotUnique)) {

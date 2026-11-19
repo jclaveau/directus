@@ -24,7 +24,8 @@ import { LocalAuthDriver } from './local.js';
 import { isLoginRedirectAllowed } from '../../utils/is-login-redirect-allowed.js';
 import {
 	providerMemberships,
-	takeProviderRole,
+	takeProviderRoles,
+	withProviderRoles,
 } from '../utils/provider-memberships.js';
 
 // Register the samlify schema validator
@@ -87,26 +88,32 @@ export class SAMLAuthDriver extends LocalAuthDriver {
 			last_name: lastName,
 			email: email,
 			external_identifier: identifier.toLowerCase(),
-			role: this.config['defaultRoleId'],
 		};
+
+		const defaultRoleId: string | undefined = this.config['defaultRoleId'];
+
+		const grantedRoles: string[] = defaultRoleId
+			? [defaultRoleId]
+			: [];
 
 		// Run hook so the end user has the chance to augment the
 		// user that is about to be created
 		const updatedUserPayload = await emitter.emitFilter(
 			`auth.create`,
-			userPayload,
+			withProviderRoles('auth.create', userPayload, grantedRoles),
 			{ identifier: identifier.toLowerCase(), provider: this.config['provider'], providerPayload: { ...payload } },
 			{ database: getDatabase(), schema: this.schema, accountability: null },
 		);
 
-		const { userPayload: createdUser, providerRole } = takeProviderRole(
+		const { userPayload: createdUser, providerRoles } = takeProviderRoles(
+			'auth.create',
 			updatedUserPayload,
 		);
 
 		try {
 			return await this.usersService.createOne({
 				...createdUser,
-				roles: providerMemberships(provider, providerRole),
+				roles: providerMemberships(provider, providerRoles, false),
 			});
 		} catch (error) {
 			if (isDirectusError(error, ErrorCode.RecordNotUnique)) {
