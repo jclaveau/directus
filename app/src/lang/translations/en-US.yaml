@@ -1259,6 +1259,11 @@ page_help_settings_translations_item: '**Custom Translations Detail** — A form
 page_help_users_collection: '**User Directory** — Lists all system users within this project.'
 page_help_users_item: >-
   **User Detail** — Manage your account information, or view the details of other users.
+user_policy_sources: Policies and Sources
+user_policy_sources_none: This user holds no policy
+policy_source_direct: Attached to the user
+policy_source_role: 'Role: {role}'
+policy_source_ancestor: 'Role: {role}, parent of {memberRole}'
 page_help_insights_overview: '**Insights** — List of dashboards you have access to.'
 page_help_insights_dashboard: '**Dashboard** — Workspace for managing one or more panels'
 page_help_marketplace_account: '**Account** — Publisher or maintainer of a published extension.'

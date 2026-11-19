@@ -19,6 +19,8 @@ import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import UsersNavigation from '../components/navigation.vue';
 import UserInfoSidebarDetail from '../components/user-info-sidebar-detail.vue';
+import UserPoliciesSidebarDetail
+	from '../components/user-policies-sidebar-detail.vue';
 
 const props = defineProps<{
 	primaryKey: string;
@@ -84,6 +86,8 @@ const user = computed(() => {
 const memberRoles = computed(() => {
 	return (item.value?.roles ?? []).map((membership) => membership.role as Role);
 });
+
+const memberRoleIds = computed(() => memberRoles.value.map((role) => role.id));
 
 if (props.role) {
 	edits.value = {
@@ -458,6 +462,11 @@ function revert(values: Record<string, any>) {
 
 		<template #sidebar>
 			<user-info-sidebar-detail :is-new="isNew" :user="item" />
+			<user-policies-sidebar-detail
+				v-if="isNew === false"
+				:user-id="primaryKey"
+				:member-role-ids="memberRoleIds"
+			/>
 			<revisions-drawer-detail
 				v-if="isNew === false && revisionsAllowed"
 				ref="revisionsDrawerDetail"
