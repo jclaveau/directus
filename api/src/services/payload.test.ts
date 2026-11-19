@@ -282,6 +282,7 @@ describe('Integration Tests', () => {
 						accountability,
 						specials: [],
 						helpers,
+						writtenFields: ['label'],
 					});
 
 					expect(result).toEqual(['editors']);
@@ -292,6 +293,7 @@ describe('Integration Tests', () => {
 							action: 'create',
 							collection: 'test',
 							primaryKeys: [],
+							fields: ['label'],
 						},
 						{ knex: db, schema: { collections: {}, relations: [] } },
 					);
@@ -340,6 +342,7 @@ describe('Integration Tests', () => {
 						specials: [],
 						helpers,
 						primaryKeys: [7],
+						writtenFields: ['label', 'note'],
 					});
 
 					expect(result).toEqual(['reviewers']);
@@ -350,6 +353,7 @@ describe('Integration Tests', () => {
 							action: 'update',
 							collection: 'test',
 							primaryKeys: [7],
+							fields: ['label', 'note'],
 						},
 						{ knex: db, schema: { collections: {}, relations: [] } },
 					);
@@ -375,9 +379,32 @@ describe('Integration Tests', () => {
 							action: 'update',
 							collection: 'test',
 							primaryKeys: [],
+							fields: [],
 						},
 						{ knex: db, schema: { collections: {}, relations: [] } },
 					);
+				});
+
+				test('roles-updated stamps the roles worked out for the rows', async () => {
+					const result = await new PayloadService('test', {
+						knex: db,
+						schema: { collections: {}, relations: [] },
+						memberRoleStamps: new Map([
+							[JSON.stringify([['7', '8'], ['label']]), ['editors']],
+						]),
+					}).transformers['roles-updated']!({
+						value: null,
+						action: 'update',
+						payload: {},
+						accountability: { user: 'user-a' } as Accountability,
+						specials: [],
+						helpers,
+						primaryKeys: [8, 7],
+						writtenFields: ['label'],
+					});
+
+					expect(result).toEqual(['editors']);
+					expect(fetchAllowingMemberRoles).not.toHaveBeenCalled();
 				});
 
 				test('roles-updated stamps null without a user on update', async () => {
@@ -962,6 +989,7 @@ describe('Integration Tests', () => {
 				const stampSchema = new SchemaBuilder()
 					.collection('test', (c) => {
 						c.field('id').id();
+						c.field('label').string();
 
 						c.field('changed_by_roles')
 							.json()
@@ -975,9 +1003,9 @@ describe('Integration Tests', () => {
 					knex: db,
 					schema: stampSchema,
 					accountability,
-				}).processValues('update', { changed_by_roles: null }, {}, {}, [7, 8]);
+				}).processValues('update', { label: 'a' }, {}, {}, [7, 8]);
 
-				expect(result).toEqual({ changed_by_roles: '["reviewers"]' });
+				expect(result).toEqual({ label: 'a', changed_by_roles: '["reviewers"]' });
 
 				expect(fetchAllowingMemberRoles).toHaveBeenCalledWith(
 					{
@@ -985,6 +1013,7 @@ describe('Integration Tests', () => {
 						action: 'update',
 						collection: 'test',
 						primaryKeys: [7, 8],
+						fields: ['label'],
 					},
 					{ knex: db, schema: stampSchema },
 				);

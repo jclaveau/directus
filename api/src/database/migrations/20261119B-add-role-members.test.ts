@@ -102,11 +102,10 @@ describe('the migration', () => {
 		);
 	});
 
-	test('down gives each user the role of its first membership by sort', async () => {
+	test('down gives each user the role of its one membership', async () => {
 		tracker.on.select('directus_role_members').response([
 			{ user: 'user-1', role: 'role-b' },
 			{ user: 'user-2', role: 'role-c' },
-			{ user: 'user-1', role: 'role-a' },
 		]);
 
 		tracker.on.update('directus_users').response(1);
@@ -121,5 +120,24 @@ describe('the migration', () => {
 		expect(tracker.history.any.map(({ sql }) => sql).at(-1)).toEqual(
 			'drop table "directus_role_members"',
 		);
+	});
+
+	test('down refuses users holding several roles, changing nothing', async () => {
+		tracker.on.select('directus_role_members').response([
+			{ user: 'user-1', role: 'role-b' },
+			{ user: 'user-2', role: 'role-c' },
+			{ user: 'user-1', role: 'role-a' },
+			{ user: 'user-3', role: 'role-a' },
+			{ user: 'user-3', role: 'role-c' },
+		]);
+
+		await expect(down(db)).rejects.toThrow(new Error(
+			'Cannot roll back the multi-role migration: users "user-1", "user-3"'
+			+ ' hold several roles; back up and remove the extra memberships first',
+		));
+
+		expect(tracker.history.any.map(({ method }) => method)).toEqual([
+			'select',
+		]);
 	});
 });

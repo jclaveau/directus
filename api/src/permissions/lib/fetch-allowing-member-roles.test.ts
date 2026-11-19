@@ -1,19 +1,20 @@
 import type { Accountability, Permission, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
 import { afterEach, expect, test, vi } from 'vitest';
-import {
-	fetchPermittedAstRootFields,
-} from '../../database/run-ast/modules/fetch-permitted-ast-root-fields.js';
+import { getDBQuery } from '../../database/run-ast/lib/get-db-query.js';
 import { fetchPermissions } from './fetch-permissions.js';
-import { fetchPolicyAccessRows } from './fetch-policies.js';
+import { fetchPolicies, fetchPolicyAccessRows } from './fetch-policies.js';
 import { fetchRolesTree } from './fetch-roles-tree.js';
 import { fetchRawPermissions } from '../utils/fetch-raw-permissions.js';
 import {
 	fetchGlobalAccessForRoles,
 } from '../modules/fetch-global-access/lib/fetch-global-access-for-roles.js';
-import { fetchAllowingMemberRoles } from './fetch-allowing-member-roles.js';
+import {
+	fetchAllowingMemberRoles,
+	fetchAllowingMemberRolesByRow,
+} from './fetch-allowing-member-roles.js';
 
-vi.mock('../../database/run-ast/modules/fetch-permitted-ast-root-fields.js');
+vi.mock('../../database/run-ast/lib/get-db-query.js');
 vi.mock('./fetch-permissions.js');
 vi.mock('./fetch-policies.js');
 vi.mock('./fetch-roles-tree.js');
@@ -48,7 +49,13 @@ test('gives an admin the member roles granting admin access', async () => {
 	} as unknown as Accountability;
 
 	await expect(fetchAllowingMemberRoles(
-		{ accountability, action: 'create', collection: 'articles', primaryKeys: [] },
+		{
+			accountability,
+			action: 'create',
+			collection: 'articles',
+			primaryKeys: [],
+			fields: ['label'],
+		},
 		{ knex, schema },
 	)).resolves.toEqual(['staff-admin']);
 
@@ -78,8 +85,8 @@ test('counts an inherited create policy as the member role', async () => {
 	]);
 
 	vi.mocked(fetchRawPermissions).mockResolvedValue([
-		{ policy: 'policy-staff' },
-		{ policy: null },
+		{ policy: 'policy-staff', fields: ['*'] },
+		{ policy: null, fields: ['*'] },
 	] as Permission[]);
 
 	vi.mocked(fetchRolesTree)
@@ -95,7 +102,13 @@ test('counts an inherited create policy as the member role', async () => {
 	} as unknown as Accountability;
 
 	await expect(fetchAllowingMemberRoles(
-		{ accountability, action: 'create', collection: 'articles', primaryKeys: [] },
+		{
+			accountability,
+			action: 'create',
+			collection: 'articles',
+			primaryKeys: [],
+			fields: ['label'],
+		},
 		{ knex, schema },
 	)).resolves.toEqual(['editors']);
 
@@ -122,7 +135,7 @@ test('gives no role for a create allowed by a policy of the user', async () => {
 	]);
 
 	vi.mocked(fetchRawPermissions).mockResolvedValue([
-		{ policy: 'policy-user' },
+		{ policy: 'policy-user', fields: ['*'] },
 	] as Permission[]);
 
 	vi.mocked(fetchRolesTree).mockResolvedValueOnce(['editors']);
@@ -136,24 +149,27 @@ test('gives no role for a create allowed by a policy of the user', async () => {
 	} as unknown as Accountability;
 
 	await expect(fetchAllowingMemberRoles(
-		{ accountability, action: 'create', collection: 'articles', primaryKeys: [] },
+		{
+			accountability,
+			action: 'create',
+			collection: 'articles',
+			primaryKeys: [],
+			fields: ['label'],
+		},
 		{ knex, schema },
 	)).resolves.toEqual([]);
 });
 
-test('leaves out the role whose update rule misses a written row', async () => {
+test('leaves out a role whose create sets none of the fields', async () => {
 	vi.mocked(fetchPolicyAccessRows).mockResolvedValue([
 		{ policy: { id: 'policy-editors', ip_access: null }, role: 'editors' },
 		{ policy: { id: 'policy-reviewers', ip_access: null }, role: 'reviewers' },
 	]);
 
-	vi.mocked(fetchPermissions).mockResolvedValue([
-		{ policy: 'policy-editors', permissions: { status: { _eq: 'draft' } } },
-		{ policy: 'policy-reviewers', permissions: {} },
-		{ policy: null, permissions: { status: { _eq: 'draft' } } },
+	vi.mocked(fetchRawPermissions).mockResolvedValue([
+		{ policy: 'policy-editors', fields: ['label'] },
+		{ policy: 'policy-reviewers', fields: ['note'] },
 	] as Permission[]);
-
-	vi.mocked(fetchPermittedAstRootFields).mockResolvedValue([]);
 
 	vi.mocked(fetchRolesTree)
 		.mockResolvedValueOnce(['editors'])
@@ -168,11 +184,70 @@ test('leaves out the role whose update rule misses a written row', async () => {
 	} as unknown as Accountability;
 
 	await expect(fetchAllowingMemberRoles(
-		{ accountability, action: 'update', collection: 'articles', primaryKeys: [7] },
+		{
+			accountability,
+			action: 'create',
+			collection: 'articles',
+			primaryKeys: [],
+			fields: ['label', 'status'],
+		},
+		{ knex, schema },
+	)).resolves.toEqual(['editors']);
+});
+
+test('leaves out the role whose update rule misses a written row', async () => {
+	vi.mocked(fetchPolicyAccessRows).mockResolvedValue([
+		{ policy: { id: 'policy-editors', ip_access: null }, role: 'editors' },
+		{ policy: { id: 'policy-reviewers', ip_access: null }, role: 'reviewers' },
+	]);
+
+	vi.mocked(fetchPolicies).mockResolvedValue([
+		'policy-editors',
+		'policy-reviewers',
+	]);
+
+	const updatePermissions = [
+		{
+			policy: 'policy-editors',
+			fields: ['*'],
+			permissions: { status: { _eq: 'draft' } },
+		},
+		{ policy: 'policy-reviewers', fields: ['*'], permissions: {} },
+		{
+			policy: null,
+			fields: ['*'],
+			permissions: { status: { _eq: 'draft' } },
+		},
+	] as Permission[];
+
+	vi.mocked(fetchPermissions).mockResolvedValue(updatePermissions);
+	vi.mocked(getDBQuery).mockResolvedValue([] as never);
+
+	vi.mocked(fetchRolesTree)
+		.mockResolvedValueOnce(['editors'])
+		.mockResolvedValueOnce(['reviewers']);
+
+	const accountability = {
+		user: 'user-1',
+		admin: false,
+		memberRoles: ['editors', 'reviewers'],
+		roles: ['editors', 'reviewers'],
+		ip: null,
+	} as unknown as Accountability;
+
+	await expect(fetchAllowingMemberRoles(
+		{
+			accountability,
+			action: 'update',
+			collection: 'articles',
+			primaryKeys: [7],
+			fields: ['label'],
+		},
 		{ knex, schema },
 	)).resolves.toEqual(['reviewers']);
 
-	expect(fetchPermissions).toHaveBeenCalledWith(
+	expect(fetchPermissions).toHaveBeenNthCalledWith(
+		1,
 		{
 			action: 'update',
 			policies: ['policy-editors', 'policy-reviewers'],
@@ -182,17 +257,34 @@ test('leaves out the role whose update rule misses a written row', async () => {
 		{ knex, schema },
 	);
 
-	expect(fetchPermittedAstRootFields).toHaveBeenCalledTimes(1);
-
-	expect(fetchPermittedAstRootFields).toHaveBeenCalledWith(
+	expect(fetchPermissions).toHaveBeenNthCalledWith(
+		2,
 		{
-			type: 'root',
-			name: 'articles',
-			query: { limit: 1, filter: { id: { _in: [7] } } },
-			children: [],
-			cases: [{ status: { _eq: 'draft' } }],
+			action: 'update',
+			accountability,
+			policies: ['policy-editors', 'policy-reviewers'],
 		},
-		{ schema, accountability, knex, action: 'update' },
+		{ knex, schema },
+	);
+
+	expect(getDBQuery).toHaveBeenCalledTimes(1);
+
+	expect(getDBQuery).toHaveBeenCalledWith(
+		{
+			table: 'articles',
+			fieldNodes: [{
+				type: 'field',
+				name: 'id',
+				fieldKey: 'id',
+				whenCase: [],
+				alias: false,
+			}],
+			o2mNodes: [],
+			query: { limit: 1, filter: { id: { _in: [7] } } },
+			cases: [{ status: { _eq: 'draft' } }],
+			permissions: updatePermissions,
+		},
+		{ knex, schema },
 	);
 });
 
@@ -202,14 +294,14 @@ test('keeps the role whose update rule matches every written row', async () => {
 	]);
 
 	vi.mocked(fetchPermissions).mockResolvedValue([
-		{ policy: 'policy-editors', permissions: { status: { _eq: 'draft' } } },
+		{
+			policy: 'policy-editors',
+			fields: ['*'],
+			permissions: { status: { _eq: 'draft' } },
+		},
 	] as unknown as Permission[]);
 
-	vi.mocked(fetchPermittedAstRootFields).mockResolvedValue([
-		{ id: 7 },
-		{ id: 8 },
-	]);
-
+	vi.mocked(getDBQuery).mockResolvedValue([{ id: 7 }, { id: 8 }] as never);
 	vi.mocked(fetchRolesTree).mockResolvedValueOnce(['editors']);
 
 	const accountability = {
@@ -226,9 +318,99 @@ test('keeps the role whose update rule matches every written row', async () => {
 			action: 'update',
 			collection: 'articles',
 			primaryKeys: [7, 8],
+			fields: ['label'],
 		},
 		{ knex, schema },
 	)).resolves.toEqual(['editors']);
+});
+
+test('gives each written row the roles whose update rule matches it', async () => {
+	vi.mocked(fetchPolicyAccessRows).mockResolvedValue([
+		{ policy: { id: 'policy-editors', ip_access: null }, role: 'editors' },
+		{ policy: { id: 'policy-reviewers', ip_access: null }, role: 'reviewers' },
+	]);
+
+	vi.mocked(fetchPermissions).mockResolvedValue([
+		{
+			policy: 'policy-editors',
+			fields: ['*'],
+			permissions: { status: { _eq: 'draft' } },
+		},
+		{
+			policy: 'policy-reviewers',
+			fields: ['*'],
+			permissions: { status: { _eq: 'review' } },
+		},
+	] as unknown as Permission[]);
+
+	vi.mocked(getDBQuery)
+		.mockResolvedValueOnce([{ id: 1 }] as never)
+		.mockResolvedValueOnce([{ id: 2 }] as never);
+
+	vi.mocked(fetchRolesTree)
+		.mockResolvedValueOnce(['editors'])
+		.mockResolvedValueOnce(['reviewers']);
+
+	const accountability = {
+		user: 'user-1',
+		admin: false,
+		memberRoles: ['editors', 'reviewers'],
+		roles: ['editors', 'reviewers'],
+		ip: null,
+	} as unknown as Accountability;
+
+	await expect(fetchAllowingMemberRolesByRow(
+		{
+			accountability,
+			action: 'update',
+			collection: 'articles',
+			primaryKeys: [1, 2],
+			fields: ['label'],
+		},
+		{ knex, schema },
+	)).resolves.toEqual(new Map([
+		['1', ['editors']],
+		['2', ['reviewers']],
+	]));
+
+	expect(getDBQuery).toHaveBeenCalledTimes(2);
+});
+
+test('leaves out a role whose update sets none of the fields', async () => {
+	vi.mocked(fetchPolicyAccessRows).mockResolvedValue([
+		{ policy: { id: 'policy-editors', ip_access: null }, role: 'editors' },
+		{ policy: { id: 'policy-reviewers', ip_access: null }, role: 'reviewers' },
+	]);
+
+	vi.mocked(fetchPermissions).mockResolvedValue([
+		{ policy: 'policy-editors', fields: ['label'], permissions: {} },
+		{ policy: 'policy-reviewers', fields: ['note'], permissions: {} },
+	] as unknown as Permission[]);
+
+	vi.mocked(fetchRolesTree)
+		.mockResolvedValueOnce(['editors'])
+		.mockResolvedValueOnce(['reviewers']);
+
+	const accountability = {
+		user: 'user-1',
+		admin: false,
+		memberRoles: ['editors', 'reviewers'],
+		roles: ['editors', 'reviewers'],
+		ip: null,
+	} as unknown as Accountability;
+
+	await expect(fetchAllowingMemberRolesByRow(
+		{
+			accountability,
+			action: 'update',
+			collection: 'articles',
+			primaryKeys: [1],
+			fields: ['note'],
+		},
+		{ knex, schema },
+	)).resolves.toEqual(new Map([['1', ['reviewers']]]));
+
+	expect(getDBQuery).not.toHaveBeenCalled();
 });
 
 test('refuses an update naming no row', async () => {
@@ -243,7 +425,13 @@ test('refuses an update naming no row', async () => {
 	} as unknown as Accountability;
 
 	await expect(fetchAllowingMemberRoles(
-		{ accountability, action: 'update', collection: 'articles', primaryKeys: [] },
+		{
+			accountability,
+			action: 'update',
+			collection: 'articles',
+			primaryKeys: [],
+			fields: ['label'],
+		},
 		{ knex, schema },
 	)).rejects.toEqual(new Error(
 		'An update of "articles" names no row to check the permissions of',

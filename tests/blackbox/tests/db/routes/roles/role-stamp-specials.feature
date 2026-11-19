@@ -7,7 +7,8 @@ Feature: The role stamps list the member roles that allowed the write
     directly counts as no role's. An admin's are the member roles giving it
     admin access.
   - An update counts a role only when its policy's item rule matches the row
-    as it was before the write.
+    as it was before the write, and lets it set at least one written field.
+    Each row is stamped with the roles allowing it, a batch update too.
   - The `role-created` and `role-updated` specials are removed: a field
     written with one is refused.
   - A request authenticates as the admin, unless it names the token it sends
@@ -233,6 +234,208 @@ Feature: The role stamps list the member roles that allowed the write
       | payload:                                           |     updated_roles:       |
       |   label: edited                                    |       - <editors-role>   |
       |                                                    |       - <reviewers-role> |
+
+  Scenario: an update stamps each row with the roles whose rule matches it
+    Given these requests are sent:
+      | request                             | response  |
+      | method: POST                        | code: 200 |+
+      | path: /collections                  |           |
+      | payload:                            |           |
+      |   collection: stamp_split_notes     |           |
+      |   schema: {}                        |           |
+      |   meta: {}                          |           |
+      |   fields:                           |           |
+      |     - field: label                  |           |
+      |       type: string                  |           |
+      |       meta: {}                      |           |
+      |     - field: status                 |           |
+      |       type: string                  |           |
+      |       meta: {}                      |           |
+      |     - field: updated_roles          |           |
+      |       type: json                    |           |
+      |       meta:                         |           |
+      |         special:                    |           |
+      |           - cast-json               |           |
+      |           - roles-updated           |           |
+      | method: POST                        | code: 200 |+
+      | path: /items/stamp_split_notes      |           |
+      | remember: draft-note                |           |
+      | payload:                            |           |
+      |   label: draft                      |           |
+      |   status: draft                     |           |
+      | method: POST                        | code: 200 |+
+      | path: /items/stamp_split_notes      |           |
+      | remember: review-note               |           |
+      | payload:                            |           |
+      |   label: review                     |           |
+      |   status: review                    |           |
+      | method: POST                        | code: 200 |+
+      | path: /policies                     |           |
+      | payload:                            |           |
+      |   id: <editors-policy>              |           |
+      |   name: editors-<run>               |           |
+      |   app_access: false                 |           |
+      |   admin_access: false               |           |
+      |   permissions:                      |           |
+      |     - collection: stamp_split_notes |           |
+      |       action: update                |           |
+      |       fields: ['*']                 |           |
+      |       permissions:                  |           |
+      |         status:                     |           |
+      |           _eq: draft                |           |
+      |     - collection: stamp_split_notes |           |
+      |       action: read                  |           |
+      |       fields: ['*']                 |           |
+      | method: POST                        | code: 200 |+
+      | path: /policies                     |           |
+      | payload:                            |           |
+      |   id: <reviewers-policy>            |           |
+      |   name: reviewers-<run>             |           |
+      |   app_access: false                 |           |
+      |   admin_access: false               |           |
+      |   permissions:                      |           |
+      |     - collection: stamp_split_notes |           |
+      |       action: update                |           |
+      |       fields: ['*']                 |           |
+      |       permissions:                  |           |
+      |         status:                     |           |
+      |           _eq: review               |           |
+      | method: POST                        | code: 200 |+
+      | path: /roles                        |           |
+      | payload:                            |           |
+      |   id: <editors-role>                |           |
+      |   name: editors-<run>               |           |
+      |   policies:                         |           |
+      |     - policy: <editors-policy>      |           |
+      | method: POST                        | code: 200 |+
+      | path: /roles                        |           |
+      | payload:                            |           |
+      |   id: <reviewers-role>              |           |
+      |   name: reviewers-<run>             |           |
+      |   policies:                         |           |
+      |     - policy: <reviewers-policy>    |           |
+      | method: POST                        | code: 200 |+
+      | path: /users                        |           |
+      | payload:                            |           |
+      |   email: split-<run>@example.com    |           |
+      |   token: split-<run>                |           |
+      |   roles:                            |           |
+      |     - role: <editors-role>          |           |
+      |       sort: 1                       |           |
+      |     - role: <reviewers-role>        |           |
+      |       sort: 2                       |           |
+    Then these requests get these responses:
+      | request                              | response                   |
+      | as: split-<run>                      | code: 200                  |+
+      | method: PATCH                        |                            |
+      | path: /items/stamp_split_notes       |                            |
+      | payload:                             |                            |
+      |   keys:                              |                            |
+      |     - <draft-note>                   |                            |
+      |     - <review-note>                  |                            |
+      |   data:                              |                            |
+      |     label: checked                   |                            |
+      | method: GET                          | code: 200                  |+
+      | path: /items/stamp_split_notes       | body:                      |
+      | query:                               |   data:                    |
+      |   fields: label,status,updated_roles |     - label: checked       |
+      |   sort: status                       |       status: draft        |
+      |                                      |       updated_roles:       |
+      |                                      |         - <editors-role>   |
+      |                                      |     - label: checked       |
+      |                                      |       status: review       |
+      |                                      |       updated_roles:       |
+      |                                      |         - <reviewers-role> |
+
+  Scenario: an update counts only the roles allowed to set a written field
+    Given these requests are sent:
+      | request                             | response  |
+      | method: POST                        | code: 200 |+
+      | path: /collections                  |           |
+      | payload:                            |           |
+      |   collection: stamp_field_notes     |           |
+      |   schema: {}                        |           |
+      |   meta: {}                          |           |
+      |   fields:                           |           |
+      |     - field: label                  |           |
+      |       type: string                  |           |
+      |       meta: {}                      |           |
+      |     - field: note                   |           |
+      |       type: string                  |           |
+      |       meta: {}                      |           |
+      |     - field: updated_roles          |           |
+      |       type: json                    |           |
+      |       meta:                         |           |
+      |         special:                    |           |
+      |           - cast-json               |           |
+      |           - roles-updated           |           |
+      | method: POST                        | code: 200 |+
+      | path: /items/stamp_field_notes      |           |
+      | remember: field-note                |           |
+      | payload:                            |           |
+      |   label: first                      |           |
+      | method: POST                        | code: 200 |+
+      | path: /policies                     |           |
+      | payload:                            |           |
+      |   id: <editors-policy>              |           |
+      |   name: editors-<run>               |           |
+      |   app_access: false                 |           |
+      |   admin_access: false               |           |
+      |   permissions:                      |           |
+      |     - collection: stamp_field_notes |           |
+      |       action: update                |           |
+      |       fields: [label]               |           |
+      |     - collection: stamp_field_notes |           |
+      |       action: read                  |           |
+      |       fields: ['*']                 |           |
+      | method: POST                        | code: 200 |+
+      | path: /policies                     |           |
+      | payload:                            |           |
+      |   id: <reviewers-policy>            |           |
+      |   name: reviewers-<run>             |           |
+      |   app_access: false                 |           |
+      |   admin_access: false               |           |
+      |   permissions:                      |           |
+      |     - collection: stamp_field_notes |           |
+      |       action: update                |           |
+      |       fields: [note]                |           |
+      | method: POST                        | code: 200 |+
+      | path: /roles                        |           |
+      | payload:                            |           |
+      |   id: <editors-role>                |           |
+      |   name: editors-<run>               |           |
+      |   policies:                         |           |
+      |     - policy: <editors-policy>      |           |
+      | method: POST                        | code: 200 |+
+      | path: /roles                        |           |
+      | payload:                            |           |
+      |   id: <reviewers-role>              |           |
+      |   name: reviewers-<run>             |           |
+      |   policies:                         |           |
+      |     - policy: <reviewers-policy>    |           |
+      | method: POST                        | code: 200 |+
+      | path: /users                        |           |
+      | payload:                            |           |
+      |   email: field-<run>@example.com    |           |
+      |   token: field-<run>                |           |
+      |   roles:                            |           |
+      |     - role: <editors-role>          |           |
+      |       sort: 1                       |           |
+      |     - role: <reviewers-role>        |           |
+      |       sort: 2                       |           |
+    Then these requests get these responses:
+      | request                                     | response                 |
+      | as: field-<run>                             | code: 200                |+
+      | method: PATCH                               | body:                    |
+      | path: /items/stamp_field_notes/<field-note> |   data:                  |
+      | payload:                                    |     updated_roles:       |
+      |   label: labelled                           |       - <editors-role>   |
+      |   note: noted                               |       - <reviewers-role> |
+      | as: field-<run>                             | code: 200                |+
+      | method: PATCH                               | body:                    |
+      | path: /items/stamp_field_notes/<field-note> |   data:                  |
+      | payload:                                    |     updated_roles:       |
+      |   label: relabelled                         |       - <editors-role>   |
 
   Scenario: an admin records the member roles giving it admin access
     Given these requests are sent:

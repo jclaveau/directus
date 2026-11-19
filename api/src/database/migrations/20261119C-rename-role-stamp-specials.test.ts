@@ -99,8 +99,17 @@ describe('the migration', () => {
 					bindings: ['articles', 'made_by_role'],
 				},
 				{
-					sql: 'update "directus_fields" set "special" = $1 where "id" = $2',
-					bindings: ['roles-created,cast-json', 3],
+					sql: 'update "directus_fields" set "special" = $1, "interface" = $2,'
+						+ ' "options" = $3, "display" = $4, "display_options" = $5'
+						+ ' where "id" = $6',
+					bindings: [
+						'roles-created,cast-json',
+						'tags',
+						null,
+						'labels',
+						null,
+						3,
+					],
 				},
 				{
 					sql: 'alter table "articles" alter column "changed_by_role" type json'
@@ -114,8 +123,17 @@ describe('the migration', () => {
 					bindings: ['articles', 'changed_by_role'],
 				},
 				{
-					sql: 'update "directus_fields" set "special" = $1 where "id" = $2',
-					bindings: ['cast-json,roles-updated', 5],
+					sql: 'update "directus_fields" set "special" = $1, "interface" = $2,'
+						+ ' "options" = $3, "display" = $4, "display_options" = $5'
+						+ ' where "id" = $6',
+					bindings: [
+						'cast-json,roles-updated',
+						'tags',
+						null,
+						'labels',
+						null,
+						5,
+					],
 				},
 			]);
 
@@ -170,7 +188,13 @@ describe('the migration', () => {
 		expect(tracker.history.all).toHaveLength(1);
 	});
 
-	test('down turns each list back into the uuid of its first role', async () => {
+	test('down turns each list of one role back into its uuid', async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			primary: vi.fn().mockResolvedValue('id'),
+		} as any);
+
+		tracker.on.select('articles').response([]);
+
 		tracker.on.select('directus_fields').response([
 			{
 				id: 3,
@@ -190,6 +214,11 @@ describe('the migration', () => {
 					bindings: [],
 				},
 				{
+					sql: 'select "id" from "articles" where'
+						+ ' json_array_length("made_by_role") > 1 order by "id" asc',
+					bindings: [],
+				},
+				{
 					sql: 'alter table "articles" alter column "made_by_role" type uuid'
 						+ ' using ("made_by_role" ->> 0)::uuid',
 					bindings: [],
@@ -206,16 +235,77 @@ describe('the migration', () => {
 					bindings: ['articles', 'made_by_role', 'directus_roles'],
 				},
 				{
-					sql: 'update "directus_fields" set "special" = $1 where "id" = $2',
-					bindings: ['role-created', 3],
+					sql: 'update "directus_fields" set "special" = $1, "interface" = $2,'
+						+ ' "options" = $3, "display" = $4, "display_options" = $5'
+						+ ' where "id" = $6',
+					bindings: [
+						'role-created',
+						'select-dropdown-m2o',
+						null,
+						'related-values',
+						null,
+						3,
+					],
 				},
 			]);
 
 		expect(logger.info).toHaveBeenCalledWith(
 			'Turned the role stamp fields "articles"."made_by_role" back into one'
-			+ ' role uuid related to "directus_roles", keeping the first role of'
-			+ ' each list',
+			+ ' role uuid related to "directus_roles"',
 		);
+	});
+
+	test('down refuses stamps listing several roles, changing nothing', async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			primary: vi.fn().mockImplementation(async (collection: string) => {
+				return collection === 'articles'
+					? 'id'
+					: 'code';
+			}),
+		} as any);
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 3,
+				collection: 'articles',
+				field: 'made_by_role',
+				special: 'roles-created,cast-json',
+			},
+			{
+				id: 4,
+				collection: 'articles',
+				field: 'changed_by_role',
+				special: 'roles-updated,cast-json',
+			},
+			{
+				id: 5,
+				collection: 'notes',
+				field: 'changed_by_role',
+				special: 'cast-json,roles-updated',
+			},
+		]);
+
+		tracker.on.select(/json_array_length\("made_by_role"\)/)
+			.response([{ id: 1 }, { id: 7 }]);
+
+		tracker.on.select(/from "articles" where json_array_length\("changed/)
+			.response([]);
+
+		tracker.on.select('notes').response([{ code: 'n-1' }]);
+
+		await expect(down(db)).rejects.toEqual(new Error(
+			'Cannot roll back the multi-role migration: role stamps list several'
+			+ ' roles in "articles"."made_by_role" rows 1, 7 and'
+			+ ' "notes"."changed_by_role" rows "n-1"; back up and keep one role per'
+			+ ' stamp first',
+		));
+
+		expect(tracker.history.all.map(({ method }) => method)).toEqual([
+			'select',
+			'select',
+			'select',
+			'select',
+		]);
 	});
 
 	test('down changes nothing without a role list field', async () => {
