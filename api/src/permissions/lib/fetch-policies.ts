@@ -16,15 +16,23 @@ export const fetchPolicyAccessRows = withCache(
 );
 
 /**
- * Fetch the policies associated with the current user accountability
+ * The policies of the accountability, by priority, each once: a policy
+ * reached through several member roles counts at its last place, so its
+ * presets win where the last role holding it would.
+ * staff → p-pub, editors → p-rev, press → p-pub: p-rev, p-pub
  */
 export async function fetchPolicies(
 	accountability: Pick<Accountability, 'user' | 'roles' | 'ip'>,
 	context: Context,
 ): Promise<string[]> {
 	const accessRows = await fetchPolicyAccessRows(accountability, context);
+	const policyIds = accessRows.map(({ policy }) => policy.id);
 
-	return accessRows.map(({ policy }) => policy.id);
+	// The access rows keep every role a policy came through, for the role
+	// stamps; only the policy list drops the earlier places.
+	return policyIds.filter((policyId, position) => {
+		return policyIds.lastIndexOf(policyId) === position;
+	});
 }
 
 /**

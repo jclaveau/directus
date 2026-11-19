@@ -4,8 +4,9 @@ import { randomUUID } from 'node:crypto';
 
 /**
  * A user holds several roles (#746): `directus_role_members` replaces
- * `directus_users.role`. Each user's role becomes their one membership, then
- * the column goes. `down` puts each user's one membership back in the column,
+ * `directus_users.role`. Each user's role becomes their one membership,
+ * managed by `auth:<provider>` for a user of a provider other than "default",
+ * then the column goes. `down` puts each user's one membership back in the column,
  * and refuses, changing nothing, while a user holds several roles.
  */
 export async function up(knex: Knex): Promise<void> {
@@ -29,17 +30,26 @@ export async function up(knex: Knex): Promise<void> {
 		table.index(['user']);
 	});
 
-	const usersWithRole: { id: string; role: string }[] = await knex
-		.select('id', 'role')
+	const usersWithRole: {
+		id: string;
+		role: string;
+		provider: string | null;
+	}[] = await knex
+		.select('id', 'role', 'provider')
 		.from('directus_users')
 		.whereNotNull('role');
 
-	const memberships = usersWithRole.map(({ id, role }) => {
+	// An SSO user's role came from its provider: managing the membership by
+	// that provider lets the next mapped login replace it.
+	const memberships = usersWithRole.map(({ id, role, provider }) => {
 		return {
 			id: randomUUID(),
 			user: id,
 			role,
 			sort: 1,
+			managed_by: provider === null || provider === 'default'
+				? null
+				: `auth:${provider}`,
 		};
 	});
 

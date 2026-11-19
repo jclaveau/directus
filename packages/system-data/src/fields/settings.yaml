@@ -545,19 +545,19 @@ fields:
               field: location
               key: user.location
               path: user.location
-        - name: Role
-          field: role
-          key: role
-          path: role
+        - name: Roles
+          field: roles
+          key: roles
+          path: roles
           children:
             - name: ID
               field: id
-              key: role.id
-              path: role.id
+              key: roles[0].id
+              path: roles[0].id
             - name: Name
               field: name
-              key: role.name
-              path: role.name
+              key: roles[0].name
+              path: roles[0].name
     width: full
 
   - field: map_divider

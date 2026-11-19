@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import api from '@/api';
+import { useUserStore } from '@/stores/user';
 import { unexpectedError } from '@/utils/unexpected-error';
 import { ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -17,6 +18,9 @@ const props = defineProps<{
 
 const { t } = useI18n();
 
+// Reading `directus_access` is an admin's right: anyone else would get a 403.
+const userStore = useUserStore();
+
 const policySources = ref<PolicySource[]>([]);
 const loading = ref(false);
 
@@ -27,6 +31,10 @@ watch(
 );
 
 async function fetchPolicySources() {
+	if (!userStore.isAdmin) {
+		return;
+	}
+
 	loading.value = true;
 
 	try {
@@ -103,7 +111,11 @@ function describeSource(policySource: PolicySource) {
 </script>
 
 <template>
-	<sidebar-detail icon="policy" :title="t('user_policy_sources')">
+	<sidebar-detail
+		v-if="userStore.isAdmin"
+		icon="policy"
+		:title="t('user_policy_sources')"
+	>
 		<v-progress-linear v-if="loading" indeterminate />
 		<p v-else-if="policySources.length === 0" class="no-policies">
 			{{ t('user_policy_sources_none') }}
