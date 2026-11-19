@@ -47,15 +47,6 @@ class SingleRoleFieldError extends InvalidPayloadError {
 	}
 }
 
-class InviterMissingError extends InvalidPayloadError {
-	constructor() {
-		super({
-			reason: 'An invitation is managed by its inviter,'
-				+ ' and this request names no user',
-		});
-	}
-}
-
 // Bounds the bind parameters of one update and the rows one cache snapshot holds.
 const UNLINK_CHUNK_SIZE = 10_000;
 
@@ -481,7 +472,8 @@ export class UsersService extends ItemsService {
 
 	/**
 	 * The memberships an invite grants are its inviter's: `managed_by` is
-	 * `invite:<inviter id>`. A re-invite by the same inviter replaces them,
+	 * `invite:<inviter id>`, or `invite:system` from a service naming no user
+	 * (an extension, a flow). A re-invite by the same inviter replaces them,
 	 * one by another inviter adds its own (D8 of #746).
 	 */
 	async inviteUser(
@@ -496,15 +488,11 @@ export class UsersService extends ItemsService {
 			if (url && isUrlAllowed(url, env['USER_INVITE_URL_ALLOW_LIST'] as string) === false) {
 				throw new InvalidPayloadError({ reason: `URL "${url}" can't be used to invite users` });
 			}
-
-			if (!this.accountability?.user) {
-				throw new InviterMissingError();
-			}
 		} catch (err: any) {
 			opts.preMutationError = err;
 		}
 
-		const inviteManager = `invite:${this.accountability?.user}`;
+		const inviteManager = `invite:${this.accountability?.user ?? 'system'}`;
 
 		const invitedMemberships = roles.map((role) => {
 			return { role, managed_by: inviteManager };
