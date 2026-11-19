@@ -1,5 +1,5 @@
 ---
-name: reference_directus_withcache_no_inflight_dedupe
+name: reference_directus_withcache_inflight_dedupe
 description: withCache shares a running read per process since #747; before, two concurrent same-key reads both queried and a blackbox statement count over them flaked 3-or-4
 metadata:
   author: Jean Claveau
