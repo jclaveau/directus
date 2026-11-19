@@ -2,26 +2,41 @@ import knex from 'knex';
 import { expect, test } from 'vitest';
 import { getUserCountQuery } from './get-user-count-query.js';
 
-// A user's role is the one `role` column of `directus_users` (#746).
-test('counts the active users of the included roles but the excluded ids', () => {
+// A user's roles are its rows of `directus_role_members` (#746).
+test('counts active users in the included roles, but the excluded ids', () => {
 	expect(getUserCountQuery(knex({ client: 'pg' }), {
 		includeRoles: ['role-admin'],
 		excludeIds: ['user-direct'],
 	}).toString()).toEqual(
 		'select count(*) as "count" from "directus_users"'
 		+ ' where "status" = \'active\' and "id" not in (\'user-direct\')'
-		+ ' and "role" in (\'role-admin\') limit 1',
+		+ ' and exists (select 1 from "directus_role_members"'
+		+ ' where "directus_role_members"."user" = "directus_users"."id"'
+		+ ' and "directus_role_members"."role" in (\'role-admin\')) limit 1',
 	);
 });
 
-test('counts the active users out of the excluded roles', () => {
+test('counts the active users with no membership in the excluded roles', () => {
 	expect(getUserCountQuery(knex({ client: 'pg' }), {
-		includeRoles: ['role-app'],
+		includeRoles: ['role-app', 'role-app-child'],
 		excludeRoles: ['role-admin'],
 	}).toString()).toEqual(
 		'select count(*) as "count" from "directus_users"'
-		+ ' where "status" = \'active\' and "role" not in (\'role-admin\')'
-		+ ' and "role" in (\'role-app\') limit 1',
+		+ ' where "status" = \'active\' and not exists (select 1'
+		+ ' from "directus_role_members"'
+		+ ' where "directus_role_members"."user" = "directus_users"."id"'
+		+ ' and "directus_role_members"."role" in (\'role-admin\'))'
+		+ ' and exists (select 1 from "directus_role_members"'
+		+ ' where "directus_role_members"."user" = "directus_users"."id"'
+		+ ' and "directus_role_members"."role" in (\'role-app\', \'role-app-child\'))'
+		+ ' limit 1',
+	);
+});
+
+test('counts every active user when no role is given', () => {
+	expect(getUserCountQuery(knex({ client: 'pg' }), {}).toString()).toEqual(
+		'select count(*) as "count" from "directus_users"'
+		+ ' where "status" = \'active\' limit 1',
 	);
 });
 

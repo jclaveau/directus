@@ -29,13 +29,13 @@ import { generateSchema } from './index.js';
 
 describe('generateSchema', () => {
 	test(oneLine`
-		serves the schema cached under the builder's scope, type, role and user
+		serves the schema cached under the builder's scope, type, member roles and user
 	`, async () => {
-		cache.set('items_schema_role-a_user-a', 'schema of user-a');
+		cache.set('items_schema_role-a,role-b_user-a', 'schema of user-a');
 
 		const schema = await generateSchema({
 			scope: 'items',
-			accountability: { role: 'role-a', user: 'user-a' },
+			accountability: { memberRoles: ['role-a', 'role-b'], user: 'user-a' },
 		} as unknown as GraphQLService);
 
 		expect(schema).toBe('schema of user-a');

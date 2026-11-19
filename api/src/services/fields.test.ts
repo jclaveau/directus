@@ -25,8 +25,8 @@ const schema = new SchemaBuilder()
 	})
 	.build();
 
-const nonAdmin = { role: 'test', user: 'user-1', admin: false } as Accountability;
-const admin = { role: 'admin', user: 'admin-1', admin: true } as Accountability;
+const nonAdmin = { user: 'user-1', admin: false } as Accountability;
+const admin = { user: 'admin-1', admin: true } as Accountability;
 
 class Client_PG extends MockClient {}
 

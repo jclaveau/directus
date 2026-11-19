@@ -49,7 +49,7 @@ describe('Integration Tests', () => {
 						value: 123,
 						action: 'read',
 						payload: {},
-						accountability: { role: null } as Accountability,
+						accountability: { user: null } as Accountability,
 						specials: [],
 						helpers,
 					});
@@ -62,7 +62,7 @@ describe('Integration Tests', () => {
 						value: '',
 						action: 'read',
 						payload: {},
-						accountability: { role: null } as Accountability,
+						accountability: { user: null } as Accountability,
 						specials: [],
 						helpers,
 					});
@@ -75,7 +75,7 @@ describe('Integration Tests', () => {
 						value: ['test', 'directus'],
 						action: 'read',
 						payload: {},
-						accountability: { role: null } as Accountability,
+						accountability: { user: null } as Accountability,
 						specials: [],
 						helpers,
 					});
@@ -88,7 +88,7 @@ describe('Integration Tests', () => {
 						value: 'test,directus',
 						action: 'read',
 						payload: {},
-						accountability: { role: null } as Accountability,
+						accountability: { user: null } as Accountability,
 						specials: [],
 						helpers,
 					});
@@ -101,7 +101,7 @@ describe('Integration Tests', () => {
 						value: ['test', 'directus'],
 						action: 'create',
 						payload: {},
-						accountability: { role: null } as Accountability,
+						accountability: { user: null } as Accountability,
 						specials: [],
 						helpers,
 					});
@@ -114,7 +114,7 @@ describe('Integration Tests', () => {
 						value: 'test,directus',
 						action: 'create',
 						payload: {},
-						accountability: { role: null } as Accountability,
+						accountability: { user: null } as Accountability,
 						specials: [],
 						helpers,
 					});
@@ -177,13 +177,13 @@ describe('Integration Tests', () => {
 				});
 			});
 
-			describe('user and role stamps', () => {
+			describe('user stamps', () => {
 				test('user-created stamps the user on create', async () => {
 					const result = await service.transformers['user-created']!({
 						value: 'someone-else',
 						action: 'create',
 						payload: {},
-						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
+						accountability: { user: 'user-a' } as Accountability,
 						specials: [],
 						helpers,
 					});
@@ -209,7 +209,7 @@ describe('Integration Tests', () => {
 						value: 'someone-else',
 						action: 'update',
 						payload: {},
-						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
+						accountability: { user: 'user-a' } as Accountability,
 						specials: [],
 						helpers,
 					});
@@ -222,7 +222,7 @@ describe('Integration Tests', () => {
 						value: 'someone-else',
 						action: 'update',
 						payload: {},
-						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
+						accountability: { user: 'user-a' } as Accountability,
 						specials: [],
 						helpers,
 					});
@@ -248,90 +248,12 @@ describe('Integration Tests', () => {
 						value: 'someone-else',
 						action: 'create',
 						payload: {},
-						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
+						accountability: { user: 'user-a' } as Accountability,
 						specials: [],
 						helpers,
 					});
 
 					expect(result).toBe('someone-else');
-				});
-
-				test('role-created stamps the role on create', async () => {
-					const result = await service.transformers['role-created']!({
-						value: 'other-role',
-						action: 'create',
-						payload: {},
-						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
-						specials: [],
-						helpers,
-					});
-
-					expect(result).toBe('role-a');
-				});
-
-				test('role-created stamps null without a role on create', async () => {
-					const result = await service.transformers['role-created']!({
-						value: 'other-role',
-						action: 'create',
-						payload: {},
-						accountability: null,
-						specials: [],
-						helpers,
-					});
-
-					expect(result).toBe(null);
-				});
-
-				test('role-created keeps the value on update', async () => {
-					const result = await service.transformers['role-created']!({
-						value: 'other-role',
-						action: 'update',
-						payload: {},
-						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
-						specials: [],
-						helpers,
-					});
-
-					expect(result).toBe('other-role');
-				});
-
-				test('role-updated stamps the role on update', async () => {
-					const result = await service.transformers['role-updated']!({
-						value: 'other-role',
-						action: 'update',
-						payload: {},
-						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
-						specials: [],
-						helpers,
-					});
-
-					expect(result).toBe('role-a');
-				});
-
-				test('role-updated stamps null without a role on update', async () => {
-					const result = await service.transformers['role-updated']!({
-						value: 'other-role',
-						action: 'update',
-						payload: {},
-						accountability: null,
-						specials: [],
-						helpers,
-					});
-
-					expect(result).toBe(null);
-				});
-
-				test('role-updated keeps the value on create', async () => {
-					const result = await service.transformers['role-updated']!({
-						value: 'other-role',
-						action: 'create',
-						payload: {},
-						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
-						specials: [],
-						helpers,
-					});
-
-					expect(result).toBe('other-role');
 				});
 			});
 

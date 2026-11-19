@@ -83,7 +83,6 @@ singletonSchema.collections['settings']!.singleton = true;
 
 const nonAdmin: Accountability = {
 	user: 'u',
-	role: null,
 	roles: [],
 	admin: false,
 	app: true,

@@ -53,7 +53,7 @@ describe('system resolvers feed the request aggregate', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'user-1', role: null, roles: [] } as any,
+			accountability: { user: 'user-1', roles: [] } as any,
 			scope: 'system',
 		});
 

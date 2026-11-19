@@ -5,12 +5,22 @@ import type { Context } from '../types.js';
 import { SchemaBuilder } from '@directus/schema-builder';
 
 vi.mock('../modules/fetch-global-access/fetch-global-access.js', () => ({
-	fetchGlobalAccess: vi.fn().mockImplementation((accountability: Accountability) => {
-		return {
-			admin: accountability.user === 'admin' || accountability.role === 'admin',
-		};
-	}),
+	fetchGlobalAccess: vi.fn()
+		.mockImplementation((accountability: Accountability) => {
+			return {
+				admin: accountability.user === 'admin'
+					|| accountability.memberRoles.includes('admin'),
+			};
+		}),
 }));
+
+vi.mock('../lib/fetch-member-roles.js', () => {
+	return {
+		fetchUserRoles: vi.fn().mockImplementation((user: string) => {
+			return { memberRoles: [user], roles: [user] };
+		}),
+	};
+});
 
 vi.mock('../lib/fetch-roles-tree.js', () => ({
 	fetchRolesTree: vi.fn().mockImplementation((start: string | null) => {
@@ -25,15 +35,22 @@ vi.mock('../lib/fetch-policies.js', () => ({
 }));
 
 vi.mock('../lib/fetch-permissions.js', () => ({
-	fetchPermissions: vi.fn().mockImplementation(({ accountability }: { policy: any; accountability: any }) => {
-		if (accountability.user === 'admin' || accountability.role === 'admin') {
-			return [];
-		} else if (accountability.role === 'manager') {
-			return [];
-		} else {
-			return [];
-		}
-	}),
+	fetchPermissions: vi.fn().mockImplementation(
+		({ accountability }: { policy: any; accountability: any }) => {
+			if (
+				accountability.user === 'admin'
+				|| accountability.memberRoles.includes('admin')
+			) {
+				return [];
+			}
+			else if (accountability.memberRoles.includes('manager')) {
+				return [];
+			}
+			else {
+				return [];
+			}
+		},
+	),
 }));
 
 vi.mock('./fetch-share-info.js', () => ({
@@ -45,7 +62,6 @@ vi.mock('./fetch-share-info.js', () => ({
 				role: null,
 				user_created: {
 					id: 'admin',
-					role: 'admin',
 				},
 			};
 		} else if (id === '2') {
@@ -55,7 +71,6 @@ vi.mock('./fetch-share-info.js', () => ({
 				role: null,
 				user_created: {
 					id: 'manager',
-					role: 'manager',
 				},
 			};
 		} else if (id === '3') {
@@ -65,7 +80,6 @@ vi.mock('./fetch-share-info.js', () => ({
 				role: null,
 				user_created: {
 					id: 'user',
-					role: 'user',
 				},
 			};
 		} else if (id === '4') {
@@ -75,7 +89,6 @@ vi.mock('./fetch-share-info.js', () => ({
 				role: 'admin',
 				user_created: {
 					id: 'admin',
-					role: 'admin',
 				},
 			};
 		} else if (id === '5') {
@@ -85,7 +98,6 @@ vi.mock('./fetch-share-info.js', () => ({
 				role: 'manager',
 				user_created: {
 					id: 'manager',
-					role: 'manager',
 				},
 			};
 		} else {
@@ -95,7 +107,6 @@ vi.mock('./fetch-share-info.js', () => ({
 				role: 'user',
 				user_created: {
 					id: 'user',
-					role: 'user',
 				},
 			};
 		}
@@ -104,15 +115,20 @@ vi.mock('./fetch-share-info.js', () => ({
 
 vi.mock('../modules/fetch-allowed-field-map/fetch-allowed-field-map.js', () => ({
 	fetchAllowedFieldMap: vi.fn().mockImplementation((accountability) => {
-		if (accountability.user === 'admin' || accountability.role === 'admin') {
+		if (
+			accountability.user === 'admin'
+			|| accountability.memberRoles.includes('admin')
+		) {
 			return {
 				articles: ['id', 'title', 'authors'],
 				authors: ['id', 'name', 'article'],
 				super_secret_table: ['id', 'secret'],
 			};
-		} else if (accountability.role === 'manager') {
+		}
+		else if (accountability.memberRoles.includes('manager')) {
 			return { articles: ['id', 'title'] };
-		} else {
+		}
+		else {
 			return {};
 		}
 	}),
@@ -131,7 +147,7 @@ describe('getPermissionsForShare', () => {
 	test('no role selected and created by admin user', async () => {
 		const accountability: Accountability = {
 			user: 'admin',
-			role: 'admin',
+			memberRoles: ['admin'],
 			admin: false,
 			app: false,
 			ip: '',
@@ -162,7 +178,7 @@ describe('getPermissionsForShare', () => {
 	test('no role selected and created by manager', async () => {
 		const accountability: Accountability = {
 			user: 'manager',
-			role: 'manager',
+			memberRoles: ['manager'],
 			admin: false,
 			app: false,
 			ip: '',
@@ -193,7 +209,7 @@ describe('getPermissionsForShare', () => {
 	test('no role selected and created by user', async () => {
 		const accountability: Accountability = {
 			user: 'user',
-			role: 'user',
+			memberRoles: ['user'],
 			admin: false,
 			app: false,
 			ip: '',
@@ -224,7 +240,7 @@ describe('getPermissionsForShare', () => {
 	test('admin role selected and created by admin', async () => {
 		const accountability: Accountability = {
 			user: 'admin',
-			role: 'admin',
+			memberRoles: ['admin'],
 			admin: false,
 			app: false,
 			ip: '',
@@ -281,7 +297,7 @@ describe('getPermissionsForShare', () => {
 	test('admin role selected and created by manager', async () => {
 		const accountability: Accountability = {
 			user: 'manager',
-			role: 'manager',
+			memberRoles: ['manager'],
 			admin: false,
 			app: false,
 			ip: '',
@@ -312,7 +328,7 @@ describe('getPermissionsForShare', () => {
 	test('admin role selected and created by user', async () => {
 		const accountability: Accountability = {
 			user: 'user',
-			role: 'user',
+			memberRoles: ['user'],
 			admin: false,
 			app: false,
 			ip: '',

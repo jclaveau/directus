@@ -740,7 +740,7 @@ describe('purge', () => {
 		accountabilities, each handed its own
 	`, async () => {
 		const cache = {} as Keyv;
-		const editor = { user: 'editor', role: 'editor-role' } as Accountability;
+		const editor = { user: 'editor' } as Accountability;
 
 		await transaction(db, async (trx) => {
 			await new ItemScopedCacheService('item', schema, trx, cache, null)
@@ -765,7 +765,7 @@ describe('purge', () => {
 				{
 					database: db,
 					schema,
-					accountability: { user: 'editor', role: 'editor-role' },
+					accountability: { user: 'editor' },
 				},
 				{ declaredFingerprints: [], changedCollections: [] },
 			],

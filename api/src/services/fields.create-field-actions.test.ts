@@ -65,7 +65,6 @@ schema.collections['directus_fields']!.accountability = 'activity';
 
 const adminAccountability = {
 	user: 'u1',
-	role: null,
 	roles: [],
 	admin: true,
 	app: true,

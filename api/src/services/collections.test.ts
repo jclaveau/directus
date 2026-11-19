@@ -101,7 +101,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-const nonAdmin = { role: 'test', admin: false, user: 'test-user' } as Accountability;
+const nonAdmin = { admin: false, user: 'test-user' } as Accountability;
 
 describe('Services / Collections', () => {
 	describe('createOne', () => {
@@ -272,7 +272,7 @@ describe('Services / Collections', () => {
 	});
 });
 
-const admin = { role: 'admin', admin: true, user: 'admin-user' } as Accountability;
+const admin = { admin: true, user: 'admin-user' } as Accountability;
 
 describe('Services / Collections / createOne payload checks', () => {
 	it.each([

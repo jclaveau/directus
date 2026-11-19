@@ -91,7 +91,7 @@ describe('SAMLAuthDriver getUserID', () => {
 		knexTracker.on.select('directus_users').response(undefined);
 		mockedDeps.createOne.mockResolvedValue('user-1');
 
-		const samlDriver = new SAMLAuthDriver(
+		const userId = await new SAMLAuthDriver(
 			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
 			{
 				provider: 'saml',
@@ -102,9 +102,7 @@ describe('SAMLAuthDriver getUserID', () => {
 				givenNameKey: 'givenName',
 				familyNameKey: 'sn',
 			},
-		);
-
-		const userId = await samlDriver.getUserID({
+		).getUserID({
 			uid: 'Ada',
 			mail: 'ada@example.com',
 			givenName: 'Ada',
@@ -119,14 +117,14 @@ describe('SAMLAuthDriver getUserID', () => {
 			last_name: 'Lovelace',
 			email: 'ada@example.com',
 			external_identifier: 'ada',
-			role: 'role-default',
+			roles: [{ role: 'role-default', managed_by: 'auth:saml' }],
 		}]]);
 	});
 
 	test('logs in a known user without touching their role', async () => {
 		knexTracker.on.select('directus_users').response({ id: 'user-1' });
 
-		const samlDriver = new SAMLAuthDriver(
+		const userId = await new SAMLAuthDriver(
 			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
 			{
 				provider: 'saml',
@@ -134,9 +132,7 @@ describe('SAMLAuthDriver getUserID', () => {
 				defaultRoleId: 'role-default',
 				identifierKey: 'uid',
 			},
-		);
-
-		const userId = await samlDriver.getUserID({ uid: 'Ada' });
+		).getUserID({ uid: 'Ada' });
 
 		expect(userId).toBe('user-1');
 		expect(mockedDeps.createOne).not.toHaveBeenCalled();

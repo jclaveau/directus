@@ -50,8 +50,10 @@ vi.mock('../cache.js', () => {
 	};
 });
 
-vi.mock('../permissions/lib/fetch-roles-tree.js', () => {
-	return { fetchRolesTree: vi.fn().mockResolvedValue([]) };
+vi.mock('../permissions/lib/fetch-member-roles.js', () => {
+	return {
+		fetchUserRoles: vi.fn().mockResolvedValue({ memberRoles: [], roles: [] }),
+	};
 });
 
 vi.mock(
@@ -107,9 +109,9 @@ schema.collections['directus_notifications']!.accountability = null;
 
 const commentAuthor: Accountability = {
 	user: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-	role: null,
 	admin: true,
 	app: true,
+	memberRoles: [],
 	roles: [],
 	ip: null,
 };
@@ -150,7 +152,6 @@ describe('a comment mention in its caller\'s transaction', () => {
 				last_name: 'Doe',
 				email: 'jane@example.com',
 				email_notifications: true,
-				role: null,
 			}, { scopedCacheFingerprints: [] }));
 	});
 
@@ -211,9 +212,9 @@ describe('a comment mention in its caller\'s transaction', () => {
 				knex: callerTransaction,
 				accountability: {
 					user: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-					role: null,
 					admin: true,
 					app: false,
+					memberRoles: [],
 					roles: [],
 					ip: null,
 				},

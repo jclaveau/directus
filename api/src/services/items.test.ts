@@ -3436,7 +3436,6 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				schema: nestingSchema,
 				accountability: {
 					user: 'u1',
-					role: 'r1',
 					admin: true,
 					app: true,
 				} as any,

@@ -39,6 +39,7 @@ const mockedDeps = vi.hoisted(() => {
 		updateOne: vi.fn(),
 		createOne: vi.fn(),
 		login: vi.fn(),
+		syncProviderMemberships: vi.fn(),
 	};
 });
 
@@ -84,6 +85,13 @@ vi.mock('../../services/authentication.js', () => {
 		AuthenticationService: vi.fn(function () {
 			return { login: mockedDeps.login };
 		}),
+	};
+});
+
+vi.mock('../utils/provider-memberships.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../utils/provider-memberships.js')>(),
+		syncProviderMemberships: mockedDeps.syncProviderMemberships,
 	};
 });
 
@@ -884,9 +892,14 @@ describe('LDAPAuthDriver.getUserID', () => {
 				1,
 			]);
 
-			expect(mockedDeps.updateOne).toHaveBeenCalledWith('user-1', {
-				role: 'role-editor',
-			});
+			expect(mockedDeps.updateOne).toHaveBeenCalledWith('user-1', {});
+
+			expect(mockedDeps.syncProviderMemberships).toHaveBeenCalledWith(
+				'user-1',
+				'ldap',
+				'role-editor',
+				{ knex: mockedKnex, schema: { collections: {}, relations: [] } },
+			);
 		});
 
 		test('matches groups by uid when groupAttribute is memberUid', async () => {
@@ -1003,9 +1016,14 @@ describe('LDAPAuthDriver.getUserID', () => {
 
 			expect(knexTracker.history.select).toHaveLength(1);
 
-			expect(mockedDeps.updateOne).toHaveBeenCalledWith('user-1', {
-				role: 'role-default',
-			});
+			expect(mockedDeps.updateOne).toHaveBeenCalledWith('user-1', {});
+
+			expect(mockedDeps.syncProviderMemberships).toHaveBeenCalledWith(
+				'user-1',
+				'ldap',
+				'role-default',
+				{ knex: mockedKnex, schema: { collections: {}, relations: [] } },
+			);
 		});
 
 		test('clears the role when no group matches and no default exists', async () => {
@@ -1033,7 +1051,14 @@ describe('LDAPAuthDriver.getUserID', () => {
 
 			await ldapDriver.getUserID({ identifier: 'jdoe' });
 
-			expect(mockedDeps.updateOne).toHaveBeenCalledWith('user-1', { role: null });
+			expect(mockedDeps.updateOne).toHaveBeenCalledWith('user-1', {});
+
+			expect(mockedDeps.syncProviderMemberships).toHaveBeenCalledWith(
+				'user-1',
+				'ldap',
+				null,
+				{ knex: mockedKnex, schema: { collections: {}, relations: [] } },
+			);
 		});
 
 		test('refuses when the group search is rejected', async () => {
@@ -1178,7 +1203,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 				last_name: 'Doe',
 				email: 'john@example.com',
 				external_identifier: 'cn=jdoe,ou=users,dc=example',
-				role: 'role-editor',
+				roles: [{ role: 'role-editor', managed_by: 'auth:ldap' }],
 			});
 
 			expect(mockedDeps.updateOne).not.toHaveBeenCalled();
@@ -1214,7 +1239,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 				last_name: undefined,
 				email: undefined,
 				external_identifier: 'cn=jdoe,ou=users,dc=example',
-				role: 'role-default',
+				roles: [{ role: 'role-default', managed_by: 'auth:ldap' }],
 			});
 		});
 
@@ -1249,6 +1274,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 			expect(mockedDeps.createOne).toHaveBeenCalledWith({
 				external_identifier: 'cn=jdoe,ou=users,dc=example',
 				status: 'draft',
+				roles: [],
 			});
 		});
 
@@ -1710,7 +1736,6 @@ describe('createLDAPAuthRouter', () => {
 
 		expect(AuthenticationService).toHaveBeenCalledWith({
 			accountability: {
-				role: null,
 				user: null,
 				roles: [],
 				admin: false,

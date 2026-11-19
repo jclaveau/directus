@@ -1152,7 +1152,7 @@ describe('narrowing the sweep', () => {
 			descriptor({ redisKey: 'rk3', cacheKey: 'ck3', collection: 'authors' }),
 		);
 
-		users.set('user-2', { id: 'user-2', role: null });
+		users.set('user-2', { id: 'user-2' });
 	});
 
 	test(oneLine`

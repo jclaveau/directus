@@ -10,7 +10,7 @@ import { getExpiresAtForToken } from './utils/get-expires-at-for-token.js';
 
 vi.mock('../utils/get-accountability-for-token', () => ({
 	getAccountabilityForToken: vi.fn().mockReturnValue({
-		role: null, // minimum viable accountability
+		user: null,
 	} as Accountability),
 }));
 
@@ -56,7 +56,7 @@ describe('authenticateConnection', () => {
 		} as WebSocketAuthMessage);
 
 		expect(result).toStrictEqual({
-			accountability: { role: null },
+			accountability: { user: null },
 			expires_at: TIMESTAMP,
 			refresh_token: 'refresh',
 		});
@@ -72,7 +72,7 @@ describe('authenticateConnection', () => {
 		} as WebSocketAuthMessage);
 
 		expect(result).toStrictEqual({
-			accountability: { role: null },
+			accountability: { user: null },
 			expires_at: TIMESTAMP,
 			refresh_token: 'refresh',
 		});
@@ -88,7 +88,7 @@ describe('authenticateConnection', () => {
 		} as WebSocketAuthMessage);
 
 		expect(result).toStrictEqual({
-			accountability: { role: null },
+			accountability: { user: null },
 			expires_at: TIMESTAMP,
 			refresh_token: undefined,
 		});
