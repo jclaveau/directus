@@ -313,8 +313,11 @@ export async function startFakeProviders() {
 			return undefined;
 		}
 
-		if (requestBody === 'cancel_at_period_end=true') {
-			stripeHolding.cancel_at_period_end = true;
+		const cancelUpdate = /^cancel_at_period_end=(true|false)$/
+			.exec(requestBody ?? '');
+
+		if (cancelUpdate !== null) {
+			stripeHolding.cancel_at_period_end = cancelUpdate[1] === 'true';
 		}
 
 		return {
