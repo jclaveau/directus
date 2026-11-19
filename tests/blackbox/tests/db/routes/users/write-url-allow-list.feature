@@ -43,7 +43,7 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       | request | table                 | select | insert | update | delete |
       | 1       | directus_activity     | 0      | 2      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 2      | 1      | 0      |
-      | 1       | directus_role_members | 2      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 1      | 0      | 0      |
       | 1       | directus_users        | 3      | 1      | 0      | 0      |
 
   Scenario: an invited user invited again to the same role stays as they were

@@ -7627,8 +7627,6 @@ describe('Services / Items / a batched upsert', () => {
 				table.uuid('id').primary();
 				table.uuid('user');
 				table.uuid('role');
-				table.integer('sort');
-				table.string('managed_by');
 			});
 
 			await database.schema.createTable('directus_roles', (table) => {

@@ -114,12 +114,17 @@ describe('providerMemberships', () => {
 
 describe('syncProviderMemberships', () => {
 	let knexMock: Knex;
-	let managedRows: { id: string; role: string }[];
+	let userRows: {
+		id: string;
+		role: string;
+		managed_by: string | null;
+		sort: number | null;
+	}[];
 	let deleteMany: ReturnType<typeof vi.fn>;
 	let createMany: ReturnType<typeof vi.fn>;
 
 	beforeEach(() => {
-		managedRows = [];
+		userRows = [];
 		deleteMany = vi.fn();
 		createMany = vi.fn();
 
@@ -137,27 +142,47 @@ describe('syncProviderMemberships', () => {
 		knexMock = {
 			select: vi.fn().mockReturnThis(),
 			from: vi.fn().mockReturnThis(),
-			where: vi.fn().mockImplementation(async () => managedRows),
+			where: vi.fn().mockImplementation(async () => userRows),
 		} as unknown as Knex;
 	});
 
-	test('reads only the rows managed by the provider', async () => {
+	test('reads the user\'s rows in one select', async () => {
 		await syncProviderMemberships('user-1', 'github', [], {
 			knex: knexMock,
 			schema: {} as SchemaOverview,
 		});
 
-		expect(knexMock.select).toHaveBeenCalledWith('id', 'role');
-		expect(knexMock.from).toHaveBeenCalledWith('directus_role_members');
+		expect(knexMock.select)
+			.toHaveBeenCalledWith('id', 'role', 'managed_by', 'sort');
 
-		expect(knexMock.where).toHaveBeenCalledWith({
-			user: 'user-1',
-			managed_by: 'auth:github',
+		expect(knexMock.from).toHaveBeenCalledWith('directus_role_members');
+		expect(knexMock.where).toHaveBeenCalledWith({ user: 'user-1' });
+	});
+
+	test('puts the mapped roles after the user\'s others', async () => {
+		userRows = [
+			{ id: 'row-1', role: 'role-hand', managed_by: null, sort: 1 },
+			{ id: 'row-2', role: 'role-press', managed_by: 'invite:a', sort: 3 },
+			{ id: 'row-3', role: 'role-gitlab', managed_by: 'auth:gitlab', sort: null },
+		];
+
+		await syncProviderMemberships('user-1', 'github', ['role-a', 'role-b'], {
+			knex: knexMock,
+			schema: {} as SchemaOverview,
 		});
+
+		expect(createMany).toHaveBeenCalledWith([
+			{ role: 'role-a', managed_by: 'auth:github', user: 'user-1', sort: 4 },
+			{ role: 'role-b', managed_by: 'auth:github', user: 'user-1', sort: 5 },
+		]);
+
+		expect(deleteMany).not.toHaveBeenCalled();
 	});
 
 	test('writes nothing when the mapped role is already granted', async () => {
-		managedRows = [{ id: 'row-1', role: 'role-a' }];
+		userRows = [
+			{ id: 'row-1', role: 'role-a', managed_by: 'auth:github', sort: 1 },
+		];
 
 		await syncProviderMemberships('user-1', 'github', ['role-a'], {
 			knex: knexMock,
@@ -185,14 +210,14 @@ describe('syncProviderMemberships', () => {
 		expect(deleteMany).not.toHaveBeenCalled();
 
 		expect(createMany).toHaveBeenCalledWith([
-			{ role: 'role-a', managed_by: 'auth:github', user: 'user-1' },
+			{ role: 'role-a', managed_by: 'auth:github', user: 'user-1', sort: 1 },
 		]);
 	});
 
 	test('deletes only the rows whose role is no longer mapped', async () => {
-		managedRows = [
-			{ id: 'row-1', role: 'role-a' },
-			{ id: 'row-2', role: 'role-b' },
+		userRows = [
+			{ id: 'row-1', role: 'role-a', managed_by: 'auth:github', sort: 1 },
+			{ id: 'row-2', role: 'role-b', managed_by: 'auth:github', sort: 2 },
 		];
 
 		await syncProviderMemberships('user-1', 'github', ['role-b'], {
@@ -205,9 +230,9 @@ describe('syncProviderMemberships', () => {
 	});
 
 	test('writes nothing when the mapped roles come in another order', async () => {
-		managedRows = [
-			{ id: 'row-1', role: 'role-a' },
-			{ id: 'row-2', role: 'role-b' },
+		userRows = [
+			{ id: 'row-1', role: 'role-a', managed_by: 'auth:github', sort: 1 },
+			{ id: 'row-2', role: 'role-b', managed_by: 'auth:github', sort: 2 },
 		];
 
 		await syncProviderMemberships('user-1', 'github', ['role-b', 'role-a'], {
@@ -219,9 +244,9 @@ describe('syncProviderMemberships', () => {
 	});
 
 	test('deletes a second row of a role still mapped', async () => {
-		managedRows = [
-			{ id: 'row-1', role: 'role-a' },
-			{ id: 'row-2', role: 'role-a' },
+		userRows = [
+			{ id: 'row-1', role: 'role-a', managed_by: 'auth:github', sort: 1 },
+			{ id: 'row-2', role: 'role-a', managed_by: 'auth:github', sort: 2 },
 		];
 
 		await syncProviderMemberships('user-1', 'github', ['role-a'], {
@@ -234,7 +259,9 @@ describe('syncProviderMemberships', () => {
 	});
 
 	test('creates the new role before deleting the old one, in one trx', async () => {
-		managedRows = [{ id: 'row-1', role: 'role-a' }];
+		userRows = [
+			{ id: 'row-1', role: 'role-a', managed_by: 'auth:github', sort: 1 },
+		];
 
 		await syncProviderMemberships('user-1', 'github', ['role-b'], {
 			knex: knexMock,
@@ -249,7 +276,7 @@ describe('syncProviderMemberships', () => {
 		});
 
 		expect(createMany).toHaveBeenCalledWith([
-			{ role: 'role-b', managed_by: 'auth:github', user: 'user-1' },
+			{ role: 'role-b', managed_by: 'auth:github', user: 'user-1', sort: 2 },
 		]);
 
 		expect(deleteMany).toHaveBeenCalledWith(['row-1']);
@@ -259,7 +286,9 @@ describe('syncProviderMemberships', () => {
 	});
 
 	test('only deletes when no role is mapped any more', async () => {
-		managedRows = [{ id: 'row-1', role: 'role-old' }];
+		userRows = [
+			{ id: 'row-1', role: 'role-old', managed_by: 'auth:github', sort: 1 },
+		];
 
 		await syncProviderMemberships('user-1', 'github', [], {
 			knex: knexMock,

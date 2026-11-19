@@ -91,6 +91,11 @@ export function providerMemberships(
  * is still mapped stays too, so a login mapping the same roles again, in any
  * order, writes nothing and clears no cache.
  *
+ * A new row goes after the user's other roles, its `sort` one past the
+ * highest (C3 of #749), read from the same select as the provider's rows.
+ * user-1 holds sort 1 (hand) and 3 (invite:a); login maps [sso-a, sso-b]
+ * → sso-a sort 4, sso-b sort 5
+ *
  * The new rows go in before the old ones go, in one transaction: a user moved
  * from one admin role to another never holds zero roles in between, which the
  * last-admin check would refuse, and a refused create leaves the old rows.
@@ -104,10 +109,21 @@ export async function syncProviderMemberships(
 	providerRoles: string[],
 	context: { knex: Knex; schema: SchemaOverview },
 ): Promise<void> {
-	const managedRows: { id: string; role: string }[] = await context.knex
-		.select('id', 'role')
+	const userRows: {
+		id: string;
+		role: string;
+		managed_by: string | null;
+		sort: number | null;
+	}[] = await context.knex
+		.select('id', 'role', 'managed_by', 'sort')
 		.from('directus_role_members')
-		.where({ user, managed_by: providerManager(provider) });
+		.where({ user });
+
+	const managedRows = userRows.filter(({ managed_by }) => {
+		return managed_by === providerManager(provider);
+	});
+
+	const lastSort = Math.max(0, ...userRows.map(({ sort }) => sort ?? 0));
 
 	const keptRoles = new Set<string>();
 
@@ -137,7 +153,9 @@ export async function syncProviderMemberships(
 		if (missingRoles.length > 0) {
 			await roleMembersService.createMany(
 				providerMemberships(provider, missingRoles, true)
-					.map((membership) => ({ ...membership, user })),
+					.map((membership, position) => {
+						return { ...membership, user, sort: lastSort + position + 1 };
+					}),
 			);
 		}
 

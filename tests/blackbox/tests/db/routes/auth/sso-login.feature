@@ -164,7 +164,7 @@ Feature: A first SSO login creates the user, a later one updates it
       | request | table                 | select | insert | update | delete | with |
       | 1       | directus_access       | 2      | 0      | 0      | 0      | 0    |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_role_members | 3      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 2      | 1      | 0      | 0      | 0    |
       | 1       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_sessions     | 0      | 1      | 0      | 1      | 0    |
       | 1       | directus_settings     | 1      | 0      | 0      | 0      | 0    |
@@ -183,7 +183,7 @@ Feature: A first SSO login creates the user, a later one updates it
       | 2       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
       | 3       | directus_access       | 3      | 0      | 0      | 0      | 0    |
       | 3       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
-      | 3       | directus_role_members | 3      | 1      | 0      | 1      | 0    |
+      | 3       | directus_role_members | 2      | 1      | 0      | 1      | 0    |
       | 3       | directus_roles        | 2      | 0      | 0      | 0      | 0    |
       | 3       | directus_sessions     | 0      | 1      | 0      | 2      | 0    |
       | 3       | directus_settings     | 1      | 0      | 0      | 0      | 0    |
@@ -248,11 +248,11 @@ Feature: A first SSO login creates the user, a later one updates it
       | 1       | directus_access       | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_activity     | 0      | 2      | 0      | 0      | 0    |
       | 1       | directus_revisions    | 0      | 2      | 1      | 0      | 0    |
-      | 1       | directus_role_members | 3      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 2      | 1      | 0      | 0      | 0    |
       | 1       | directus_users        | 3      | 1      | 0      | 0      | 0    |
       | 2       | directus_access       | 2      | 0      | 0      | 0      | 0    |
       | 2       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_role_members | 3      | 1      | 0      | 0      | 0    |
+      | 2       | directus_role_members | 2      | 1      | 0      | 0      | 0    |
       | 2       | directus_roles        | 2      | 0      | 0      | 0      | 0    |
       | 2       | directus_sessions     | 0      | 1      | 0      | 2      | 0    |
       | 2       | directus_settings     | 1      | 0      | 0      | 0      | 0    |
@@ -271,7 +271,7 @@ Feature: A first SSO login creates the user, a later one updates it
       | 3       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
       | 4       | directus_access       | 3      | 0      | 0      | 0      | 0    |
       | 4       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
-      | 4       | directus_role_members | 3      | 1      | 0      | 1      | 0    |
+      | 4       | directus_role_members | 2      | 1      | 0      | 1      | 0    |
       | 4       | directus_roles        | 3      | 0      | 0      | 0      | 0    |
       | 4       | directus_sessions     | 0      | 1      | 0      | 2      | 0    |
       | 4       | directus_settings     | 1      | 0      | 0      | 0      | 0    |
@@ -324,7 +324,7 @@ Feature: A first SSO login creates the user, a later one updates it
       | request | table                 | select | insert | update | delete | with |
       | 1       | directus_access       | 2      | 0      | 0      | 0      | 0    |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_role_members | 3      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 2      | 1      | 0      | 0      | 0    |
       | 1       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_sessions     | 0      | 1      | 0      | 1      | 0    |
       | 1       | directus_settings     | 1      | 0      | 0      | 0      | 0    |
@@ -343,7 +343,7 @@ Feature: A first SSO login creates the user, a later one updates it
       | 2       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
       | 3       | directus_access       | 3      | 0      | 0      | 0      | 0    |
       | 3       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
-      | 3       | directus_role_members | 3      | 1      | 0      | 1      | 0    |
+      | 3       | directus_role_members | 2      | 1      | 0      | 1      | 0    |
       | 3       | directus_roles        | 2      | 0      | 0      | 0      | 0    |
       | 3       | directus_sessions     | 0      | 1      | 0      | 2      | 0    |
       | 3       | directus_settings     | 1      | 0      | 0      | 0      | 0    |
@@ -395,11 +395,11 @@ Feature: A first SSO login creates the user, a later one updates it
       | 1       | directus_access       | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_activity     | 0      | 2      | 0      | 0      | 0    |
       | 1       | directus_revisions    | 0      | 2      | 1      | 0      | 0    |
-      | 1       | directus_role_members | 3      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 2      | 1      | 0      | 0      | 0    |
       | 1       | directus_users        | 3      | 1      | 0      | 0      | 0    |
       | 2       | directus_access       | 2      | 0      | 0      | 0      | 0    |
       | 2       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_role_members | 3      | 1      | 0      | 0      | 0    |
+      | 2       | directus_role_members | 2      | 1      | 0      | 0      | 0    |
       | 2       | directus_roles        | 2      | 0      | 0      | 0      | 0    |
       | 2       | directus_sessions     | 0      | 1      | 0      | 2      | 0    |
       | 2       | directus_settings     | 1      | 0      | 0      | 0      | 0    |

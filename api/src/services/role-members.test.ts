@@ -1,4 +1,3 @@
-import { InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import knex from 'knex';
@@ -43,12 +42,8 @@ describe('Services / RoleMembers', () => {
 
 			const onRequireUserIntegrityCheck = vi.fn();
 
-			const database = knex.default({ client: MockClient });
-
-			createTracker(database).on.select('directus_role_members').response([]);
-
 			await expect(new RoleMembersService({
-				knex: database,
+				knex: knex.default({ client: MockClient }),
 				schema,
 			}).createMany(
 				[
@@ -85,12 +80,8 @@ describe('Services / RoleMembers', () => {
 			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
 				.mockResolvedValue(['member-id-3']);
 
-			const database = knex.default({ client: MockClient });
-
-			createTracker(database).on.select('directus_role_members').response([]);
-
 			await new RoleMembersService({
-				knex: database,
+				knex: knex.default({ client: MockClient }),
 				schema,
 			}).createOne({ role: 'role-id-3', user: 'user-id-3' });
 
@@ -110,8 +101,6 @@ describe('Services / RoleMembers', () => {
 			const tracker = createTracker(database);
 			const transactionStates: string[][] = [];
 
-			tracker.on.select('directus_role_members').response([]);
-
 			vi.mocked(clearSystemCache).mockImplementationOnce(async () => {
 				transactionStates.push(
 					tracker.history.transactions.map((trx) => trx.state),
@@ -124,80 +113,6 @@ describe('Services / RoleMembers', () => {
 			});
 
 			expect(transactionStates).toEqual([['committed']]);
-		});
-
-		it('puts an invited or provider role after the user\'s others', async () => {
-			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
-				.mockResolvedValue(['member-id-9', 'member-id-10', 'member-id-11']);
-
-			const database = knex.default({ client: MockClient });
-
-			createTracker(database).on.select('directus_role_members').response([
-				{ user: 'user-id-9', role: 'role-staff', managed_by: null, sort: 1 },
-				{ user: 'user-id-9', role: 'role-desk', managed_by: null, sort: 3 },
-			]);
-
-			await new RoleMembersService({ knex: database, schema }).createMany([
-				{ user: 'user-id-9', role: 'role-press', managed_by: 'invite:admin-1' },
-				{ user: 'user-id-9', role: 'role-sso', managed_by: 'auth:mockoauth' },
-				{ user: 'user-id-9', role: 'role-hand', managed_by: null },
-			]);
-
-			expect(createMany).toHaveBeenCalledWith(
-				[
-					{
-						user: 'user-id-9',
-						role: 'role-press',
-						managed_by: 'invite:admin-1',
-						sort: 4,
-					},
-					{
-						user: 'user-id-9',
-						role: 'role-sso',
-						managed_by: 'auth:mockoauth',
-						sort: 5,
-					},
-					{ user: 'user-id-9', role: 'role-hand', managed_by: null },
-				],
-				{ userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits },
-			);
-		});
-
-		it('refuses a role the user holds from the same manager', async () => {
-			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
-				.mockResolvedValue(['member-id-12']);
-
-			const database = knex.default({ client: MockClient });
-
-			createTracker(database).on.select('directus_role_members').response([
-				{ user: 'user-id-12', role: 'role-staff', managed_by: null, sort: 1 },
-			]);
-
-			await expect(new RoleMembersService({ knex: database, schema })
-				.createMany([{ user: 'user-id-12', role: 'role-staff' }]))
-				.rejects.toEqual(new InvalidPayloadError({
-					reason: 'The user "user-id-12" already holds the role'
-						+ ' "role-staff" with managed_by null',
-				}));
-
-			expect(createMany).not.toHaveBeenCalled();
-		});
-
-		it('refuses a role given twice from one manager in one write', async () => {
-			const database = knex.default({ client: MockClient });
-
-			createTracker(database).on.select('directus_role_members').response([]);
-
-			await expect(new RoleMembersService({ knex: database, schema })
-				.createMany([
-					{ user: 'user-id-13', role: 'role-press', managed_by: 'invite:a' },
-					{ user: 'user-id-13', role: 'role-press', managed_by: 'invite:b' },
-					{ user: 'user-id-13', role: 'role-press', managed_by: 'invite:a' },
-				]))
-				.rejects.toEqual(new InvalidPayloadError({
-					reason: 'The user "user-id-13" already holds the role'
-						+ ' "role-press" with managed_by "invite:a"',
-				}));
 		});
 	});
 

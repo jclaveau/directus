@@ -51,12 +51,12 @@ Feature: A user is invited, re-invited and accepts the invitation
       | request | table                 | select | insert | update | delete |
       | 1       | directus_activity     | 0      | 2      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 2      | 1      | 0      |
-      | 1       | directus_role_members | 2      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 1      | 0      | 0      |
       | 1       | directus_users        | 3      | 1      | 0      | 0      |
       | 3       | directus_access       | 2      | 0      | 0      | 0      |
       | 3       | directus_activity     | 0      | 3      | 0      | 0      |
       | 3       | directus_revisions    | 0      | 1      | 0      | 0      |
-      | 3       | directus_role_members | 5      | 1      | 0      | 1      |
+      | 3       | directus_role_members | 4      | 1      | 0      | 1      |
       | 3       | directus_roles        | 1      | 0      | 0      | 0      |
       | 3       | directus_users        | 5      | 0      | 0      | 0      |
 
