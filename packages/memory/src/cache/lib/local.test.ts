@@ -65,3 +65,26 @@ describe('has', () => {
 		expect(res).toBe(true);
 	});
 });
+
+describe('setUnlessCleared', () => {
+	test('Sets the value when no clear came since the generation read', async () => {
+		const generation = await cache.readGeneration();
+
+		await expect(
+			cache.setUnlessCleared(mockKey, mockValue, generation),
+		).resolves.toBe(true);
+
+		expect(cache['store'].set).toHaveBeenCalledWith(mockKey, mockValue);
+	});
+
+	test('Refuses the value when a clear came since the generation read', async () => {
+		const generation = await cache.readGeneration();
+		await cache.clear();
+
+		await expect(
+			cache.setUnlessCleared(mockKey, mockValue, generation),
+		).resolves.toBe(false);
+
+		expect(cache['store'].set).not.toHaveBeenCalled();
+	});
+});

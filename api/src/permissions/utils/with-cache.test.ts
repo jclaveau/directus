@@ -6,7 +6,8 @@ import { withCache } from './with-cache.js';
 vi.mock('../cache.js', () => {
 	const cacheStore = {
 		get: vi.fn(),
-		set: vi.fn(),
+		readGeneration: vi.fn(),
+		setUnlessCleared: vi.fn(),
 	};
 
 	return { useCache: () => cacheStore };
@@ -14,7 +15,14 @@ vi.mock('../cache.js', () => {
 
 beforeEach(() => {
 	vi.mocked(useCache().get).mockReset();
-	vi.mocked(useCache().set).mockReset();
+
+	vi.mocked(useCache().readGeneration)
+		.mockReset()
+		.mockResolvedValue(0);
+
+	vi.mocked(useCache().setUnlessCleared)
+		.mockReset()
+		.mockResolvedValue(true);
 });
 
 test('two concurrent calls on one key run the handler once', async () => {
@@ -123,4 +131,58 @@ test('a call made after the running reads were cleared queries again', async () 
 	]);
 
 	expect(cachedHandler).toHaveBeenCalledTimes(2);
+});
+
+test('a read stores its result under the generation read before it', async () => {
+	vi.mocked(useCache().readGeneration).mockResolvedValue(3);
+
+	const cachedHandler = vi.fn(async (_options: object) => ['row']);
+
+	await withCache('rows', cachedHandler)({ policies: ['a'] });
+
+	expect(useCache().setUnlessCleared).toHaveBeenCalledWith(
+		expect.stringMatching(/^rows-/),
+		['row'],
+		3,
+	);
+
+	// A clear landing between the handler and the generation read would let
+	// the stale result through: the generation has to come first.
+	expect(
+		vi.mocked(useCache().readGeneration).mock.invocationCallOrder[0],
+	).toBeLessThan(cachedHandler.mock.invocationCallOrder[0]!);
+});
+
+test('a call waiting on a read a clear crossed reads on its own', async () => {
+	vi.mocked(useCache().setUnlessCleared)
+		.mockResolvedValueOnce(false)
+		.mockResolvedValueOnce(true);
+
+	const cachedHandler = vi.fn()
+		.mockResolvedValueOnce(['stale row'])
+		.mockResolvedValueOnce(['fresh row']);
+
+	const cachedRead = withCache('rows', cachedHandler);
+
+	await expect(Promise.all([
+		cachedRead({ policies: ['a'] }),
+		cachedRead({ policies: ['a'] }),
+	])).resolves.toEqual([
+		['stale row'],
+		['fresh row'],
+	]);
+
+	expect(cachedHandler).toHaveBeenCalledTimes(2);
+});
+
+test('a read fails when the cache cannot store its result', async () => {
+	vi.mocked(useCache().setUnlessCleared).mockRejectedValue(
+		new Error('Connection is closed.'),
+	);
+
+	await expect(
+		withCache('rows', async (_options: object) => ['row'])({ policies: ['a'] }),
+	).rejects.toEqual(
+		new Error('Connection is closed.'),
+	);
 });
