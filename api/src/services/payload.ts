@@ -26,6 +26,9 @@ import { parse as wktToGeoJSON } from 'wellknown';
 import type { Helpers } from '../database/helpers/index.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase from '../database/index.js';
+import {
+	fetchAllowingMemberRoles,
+} from '../permissions/lib/fetch-allowing-member-roles.js';
 import { format, isValid, parseISO } from '../utils/date-fns-used.js';
 import { generateHash } from '../utils/generate-hash.js';
 import { isMissingPrimaryKey, isPrimaryKey } from '../utils/is-primary-key.js';
@@ -66,6 +69,8 @@ type Transformers = {
 		accountability: Accountability | null;
 		specials: string[];
 		helpers: Helpers;
+		// the rows an update writes
+		primaryKeys?: PrimaryKey[];
 	}) => Promise<any>;
 };
 
@@ -147,7 +152,24 @@ export class PayloadService {
 			if (action === 'update') return accountability?.user || null;
 			return value;
 		},
-		// TODO(#746 D9): `roles-created` / `roles-updated` replace these two.
+		'roles-created': async ({ action, value, accountability }) => {
+			if (action !== 'create') {
+				return value;
+			}
+
+			return await this.allowingMemberRoles('create', accountability, []);
+		},
+		'roles-updated': async ({ action, value, accountability, primaryKeys }) => {
+			if (action !== 'update') {
+				return value;
+			}
+
+			return await this.allowingMemberRoles(
+				'update',
+				accountability,
+				primaryKeys ?? [],
+			);
+		},
 		async 'date-created'({ action, value, helpers }) {
 			if (action === 'create') return new Date(helpers.date.writeTimestamp(new Date().toISOString()));
 			return value;
@@ -182,6 +204,7 @@ export class PayloadService {
 		payloads: Partial<Item>[],
 		aliasMap: Record<string, string>,
 		aggregate: Aggregate,
+		primaryKeys?: PrimaryKey[],
 	): Promise<Partial<Item>[]>;
 
 	processValues(
@@ -189,6 +212,7 @@ export class PayloadService {
 		payload: Partial<Item>,
 		aliasMap: Record<string, string>,
 		aggregate: Aggregate,
+		primaryKeys?: PrimaryKey[],
 	): Promise<Partial<Item>>;
 
 	async processValues(
@@ -196,6 +220,7 @@ export class PayloadService {
 		payload: Partial<Item> | Partial<Item>[],
 		aliasMap: Record<string, string> = {},
 		aggregate: Aggregate = {},
+		primaryKeys: PrimaryKey[] = [],
 	): Promise<Partial<Item> | Partial<Item>[]> {
 		const processedPayload = toArray(payload);
 
@@ -227,7 +252,14 @@ export class PayloadService {
 
 		for (const record of processedPayload) {
 			for (const [name, field] of specialFields) {
-				const newValue = await this.processField(field, record, action, this.accountability);
+				const newValue = await this.processField(
+					field,
+					record,
+					action,
+					this.accountability,
+					primaryKeys,
+				);
+
 				if (newValue !== undefined) record[name] = newValue;
 			}
 		}
@@ -289,6 +321,7 @@ export class PayloadService {
 		payload: Partial<Item>,
 		action: PayloadAction,
 		accountability: Accountability | null,
+		primaryKeys: PrimaryKey[] = [],
 	): Promise<any> {
 		if (!field.special) return payload[field.field];
 		const fieldSpecials = field.special ? toArray(field.special) : [];
@@ -304,11 +337,36 @@ export class PayloadService {
 					accountability,
 					specials: fieldSpecials,
 					helpers: this.helpers,
+					primaryKeys,
 				});
 			}
 		}
 
 		return value;
+	}
+
+	/**
+	 * What `roles-created` and `roles-updated` stamp: null without a user, like
+	 * `user-created`, else the member roles whose policies allowed the write.
+	 */
+	async allowingMemberRoles(
+		action: 'create' | 'update',
+		accountability: Accountability | null,
+		primaryKeys: PrimaryKey[],
+	): Promise<string[] | null> {
+		if (!accountability?.user) {
+			return null;
+		}
+
+		return await fetchAllowingMemberRoles(
+			{
+				accountability,
+				action,
+				collection: this.collection,
+				primaryKeys,
+			},
+			{ knex: this.knex, schema: this.schema },
+		);
 	}
 
 	/**

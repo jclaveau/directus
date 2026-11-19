@@ -2,7 +2,17 @@ import type { Accountability } from '@directus/types';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { AccessService } from '../../services/access.js';
 import type { Context } from '../types.js';
-import { _fetchPolicies as fetchPolicies, type AccessRow } from './fetch-policies.js';
+import {
+	fetchPolicies,
+	fetchPolicyAccessRows,
+	type AccessRow,
+} from './fetch-policies.js';
+
+vi.mock('../utils/with-cache.js', () => {
+	return {
+		withCache: (_namespace: string, handler: unknown) => handler,
+	};
+});
 
 vi.mock('../../services/access.js', () => ({
 	AccessService: vi.fn(),
@@ -182,4 +192,20 @@ test('Sorts policies by priority', async () => {
 	const policies = await fetchPolicies(acc, {} as Context);
 
 	expect(policies).toEqual(['policy-a', 'policy-b', 'policy-c', 'policy-d']);
+});
+
+test('keeps the role of each policy, null for the user\'s own', async () => {
+	const acc = { roles: ['role-a'], user: 'user-a' } as unknown as Accountability;
+
+	rows.push(
+		{ policy: { id: 'policy-u', ip_access: null }, role: null },
+		{ policy: { id: 'policy-a', ip_access: null }, role: 'role-a' },
+	);
+
+	const accessRows = await fetchPolicyAccessRows(acc, {} as Context);
+
+	expect(accessRows).toEqual([
+		{ policy: { id: 'policy-a', ip_access: null }, role: 'role-a' },
+		{ policy: { id: 'policy-u', ip_access: null }, role: null },
+	]);
 });

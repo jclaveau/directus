@@ -1,0 +1,159 @@
+import { createInspector } from '@directus/schema';
+import type { Knex } from 'knex';
+import { useLogger } from '../../logger/index.js';
+import { getDatabaseClient } from '../index.js';
+
+const RENAMED_SPECIALS = new Map([
+	['role-created', 'roles-created'],
+	['role-updated', 'roles-updated'],
+]);
+
+const FORMER_SPECIALS = new Map(
+	[...RENAMED_SPECIALS].map(([former, renamed]) => [renamed, former]),
+);
+
+interface StampFieldRow {
+	id: number;
+	collection: string;
+	field: string;
+	special: string;
+}
+
+async function readStampFields(
+	knex: Knex,
+	specialNames: string[],
+): Promise<StampFieldRow[]> {
+	const fieldRows: StampFieldRow[] = await knex
+		.select('id', 'collection', 'field', 'special')
+		.from('directus_fields')
+		.whereNotNull('special')
+		.orderBy('id');
+
+	return fieldRows.filter(({ special }) => {
+		return special.split(',').some((name) => specialNames.includes(name));
+	});
+}
+
+function namedFields(fieldRows: StampFieldRow[]) {
+	return fieldRows
+		.map(({ collection, field }) => {
+			return `${JSON.stringify(collection)}.${JSON.stringify(field)}`;
+		})
+		.join(', ');
+}
+
+// TODO(#610): sqlite, mariadb and cockroachdb need their own column rewrite.
+function refuseNonPostgres(knex: Knex, fieldRows: StampFieldRow[]) {
+	const databaseClient = getDatabaseClient(knex);
+
+	if (databaseClient !== 'postgres') {
+		throw new Error(
+			`The role stamp fields ${namedFields(fieldRows)} can only be`
+			+ ` converted on postgres, not on ${JSON.stringify(databaseClient)}`,
+		);
+	}
+}
+
+/**
+ * A user holds several roles (#746): `role-created` / `role-updated` become
+ * `roles-created` / `roles-updated`, stamping a json list of the member roles
+ * that allowed the write. Each stored role uuid becomes a list of that one
+ * role, and the field stops being a relation to `directus_roles`.
+ */
+export async function up(knex: Knex): Promise<void> {
+	const fieldRows = await readStampFields(knex, [...RENAMED_SPECIALS.keys()]);
+
+	if (fieldRows.length === 0) {
+		return;
+	}
+
+	refuseNonPostgres(knex, fieldRows);
+
+	const inspector = createInspector(knex);
+
+	for (const { id, collection, field, special } of fieldRows) {
+		// An instance upgraded from an old release may hold the constraint under
+		// another name than knex's default.
+		const roleForeignKey = (await inspector.foreignKeys(collection))
+			.find(({ column }) => column === field);
+
+		if (roleForeignKey) {
+			await knex.schema.alterTable(collection, (table) => {
+				table.dropForeign([field], roleForeignKey.constraint_name ?? undefined);
+			});
+		}
+
+		await knex.raw(
+			'alter table ?? alter column ?? type json using case when ?? is null'
+			+ ' then null else json_build_array(??) end',
+			[collection, field, field, field],
+		);
+
+		await knex('directus_relations')
+			.delete()
+			.where({ many_collection: collection, many_field: field });
+
+		const renamedSpecials = special.split(',')
+			.map((name) => RENAMED_SPECIALS.get(name) ?? name);
+
+		if (!renamedSpecials.includes('cast-json')) {
+			renamedSpecials.push('cast-json');
+		}
+
+		await knex('directus_fields')
+			.update({ special: renamedSpecials.join(',') })
+			.where({ id });
+	}
+
+	useLogger().info(
+		`Turned the role stamp fields ${namedFields(fieldRows)} into json lists`
+		+ ' of member roles, dropping their relation to "directus_roles"',
+	);
+}
+
+/**
+ * Back to one role uuid: the first role of each list is kept, the others are
+ * lost.
+ */
+export async function down(knex: Knex): Promise<void> {
+	const fieldRows = await readStampFields(knex, [...FORMER_SPECIALS.keys()]);
+
+	if (fieldRows.length === 0) {
+		return;
+	}
+
+	refuseNonPostgres(knex, fieldRows);
+
+	for (const { id, collection, field, special } of fieldRows) {
+		await knex.raw(
+			'alter table ?? alter column ?? type uuid using (?? ->> 0)::uuid',
+			[collection, field, field],
+		);
+
+		await knex.schema.alterTable(collection, (table) => {
+			table.foreign(field)
+				.references('directus_roles.id')
+				.onDelete('SET NULL');
+		});
+
+		await knex('directus_relations').insert({
+			many_collection: collection,
+			many_field: field,
+			one_collection: 'directus_roles',
+		});
+
+		const formerFieldSpecials = special.split(',')
+			.filter((name) => name !== 'cast-json')
+			.map((name) => FORMER_SPECIALS.get(name) ?? name);
+
+		await knex('directus_fields')
+			.update({ special: formerFieldSpecials.join(',') })
+			.where({ id });
+	}
+
+	useLogger().info(
+		`Turned the role stamp fields ${namedFields(fieldRows)} back into one`
+		+ ' role uuid related to "directus_roles", keeping the first role of'
+		+ ' each list',
+	);
+}

@@ -9,15 +9,32 @@ export interface AccessRow {
 	role: string | null;
 }
 
-export const fetchPolicies = withCache('policies', _fetchPolicies, ({ roles, user, ip }) => ({ roles, user, ip }));
+export const fetchPolicyAccessRows = withCache(
+	'policy-access-rows',
+	_fetchPolicyAccessRows,
+	({ roles, user, ip }) => ({ roles, user, ip }),
+);
 
 /**
  * Fetch the policies associated with the current user accountability
  */
-export async function _fetchPolicies(
-	{ roles, user, ip }: Pick<Accountability, 'user' | 'roles' | 'ip'>,
+export async function fetchPolicies(
+	accountability: Pick<Accountability, 'user' | 'roles' | 'ip'>,
 	context: Context,
 ): Promise<string[]> {
+	const accessRows = await fetchPolicyAccessRows(accountability, context);
+
+	return accessRows.map(({ policy }) => policy.id);
+}
+
+/**
+ * The access rows granting the accountability its policies, by priority, each
+ * keeping the role it is attached to: null for a policy given to the user.
+ */
+export async function _fetchPolicyAccessRows(
+	{ roles, user, ip }: Pick<Accountability, 'user' | 'roles' | 'ip'>,
+	context: Context,
+): Promise<AccessRow[]> {
 	const { AccessService } = await import('../../services/access.js');
 	const accessService = new AccessService(context);
 
@@ -55,7 +72,5 @@ export async function _fetchPolicies(
 		return roles.indexOf(a.role) - roles.indexOf(b.role);
 	});
 
-	const ids = filteredAccessRows.map(({ policy }) => policy.id);
-
-	return ids;
+	return filteredAccessRows;
 }

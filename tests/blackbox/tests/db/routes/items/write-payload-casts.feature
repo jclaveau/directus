@@ -8,7 +8,8 @@ Feature: A write casts each field by its special, and reads it back cast
     list still has to hold as many items as it states.
   - `test_write_cast_row` is keyed by strings the scenarios choose: `flag` is a
     cast-boolean, `notes` a cast-json text, `tags` a cast-csv, `role_created`
-    and `role_updated` record a role, `day` is a date and `moment` a dateTime.
+    and `role_updated` list the member roles that allowed the write, `day` is
+    a date and `moment` a dateTime.
   - `test_write_cast_activity` logs activity but keeps no revisions.
   - `test_write_cast_single` is a singleton nothing writes: `motto` defaults to
     `hello`, `visits` has no default.
@@ -79,27 +80,27 @@ Feature: A write casts each field by its special, and reads it back cast
       | 3       | directus_users      | 1      | 0      | 0      | 0      |
       | 3       | test_write_cast_row | 1      | 1      | 0      | 0      |
 
-  Scenario: the role fields record the role of the user who created and updated
+  Scenario: the role fields record the roles of the user who created and updated
     When these requests get these responses:
-      | request                                    | response          |
-      | method: POST                               | code: 200         |+
-      | path: /items/test_write_cast_row           |                   |
-      | token: TestsFlowToken                      |                   |
-      | payload:                                   |                   |
-      |   id: wc-role                              |                   |
-      | method: PATCH                              | code: 200         |+
-      | path: /items/test_write_cast_row/wc-role   |                   |
-      | token: TestsFlowToken                      |                   |
-      | payload:                                   |                   |
-      |   flag: true                               |                   |
-      | method: GET                                | code: 200         |+
-      | path: /items/test_write_cast_row           | body:             |
-      | token: TestsFlowToken                      |   data:           |
-      | query:                                     |     - id: wc-role |
-      |   filter[id][_eq]: wc-role                 |                   |
-      |   filter[role_created][_eq]: $CURRENT_ROLE |                   |
-      |   filter[role_updated][_eq]: $CURRENT_ROLE |                   |
-      |   fields: id                               |                   |
+      | request                                  | response          |
+      | method: POST                             | code: 200         |+
+      | path: /items/test_write_cast_row         |                   |
+      | token: TestsFlowToken                    |                   |
+      | payload:                                 |                   |
+      |   id: wc-role                            |                   |
+      | method: PATCH                            | code: 200         |+
+      | path: /items/test_write_cast_row/wc-role |                   |
+      | token: TestsFlowToken                    |                   |
+      | payload:                                 |                   |
+      |   flag: true                             |                   |
+      | method: GET                              | code: 200         |+
+      | path: /items/test_write_cast_row         | body:             |
+      | token: TestsFlowToken                    |   data:           |
+      | query:                                   |     - id: wc-role |
+      |   filter[id][_eq]: wc-role               |                   |
+      |   filter[role_created][_nnull]: true     |                   |
+      |   filter[role_updated][_nnull]: true     |                   |
+      |   fields: id                             |                   |
     And on postgres the requests ran these statements:
       | request | table               | select | insert | update | delete |
       | 1       | directus_access     | 2      | 0      | 0      | 0      |

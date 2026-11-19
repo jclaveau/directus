@@ -9,6 +9,11 @@ import { SchemaBuilder } from '@directus/schema-builder';
 import type { Item, Accountability, FieldOverview } from '@directus/types';
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
+import {
+	fetchAllowingMemberRoles,
+} from '../permissions/lib/fetch-allowing-member-roles.js';
+
+vi.mock('../permissions/lib/fetch-allowing-member-roles.js');
 
 vi.mock('../../src/database/index', () => ({
 	getDatabaseClient: vi.fn().mockReturnValue('postgres'),
@@ -254,6 +259,153 @@ describe('Integration Tests', () => {
 					});
 
 					expect(result).toBe('someone-else');
+				});
+			});
+
+			describe('role stamps', () => {
+				beforeEach(() => {
+					vi.mocked(fetchAllowingMemberRoles).mockReset();
+				});
+
+				test('roles-created stamps the allowing roles on create', async () => {
+					vi.mocked(fetchAllowingMemberRoles).mockResolvedValue(['editors']);
+
+					const accountability = {
+						user: 'user-a',
+						memberRoles: ['editors'],
+					} as Accountability;
+
+					const result = await service.transformers['roles-created']!({
+						value: ['someone-else'],
+						action: 'create',
+						payload: {},
+						accountability,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toEqual(['editors']);
+
+					expect(fetchAllowingMemberRoles).toHaveBeenCalledWith(
+						{
+							accountability,
+							action: 'create',
+							collection: 'test',
+							primaryKeys: [],
+						},
+						{ knex: db, schema: { collections: {}, relations: [] } },
+					);
+				});
+
+				test('roles-created stamps null without a user on create', async () => {
+					const result = await service.transformers['roles-created']!({
+						value: ['someone-else'],
+						action: 'create',
+						payload: {},
+						accountability: { user: null } as Accountability,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe(null);
+					expect(fetchAllowingMemberRoles).not.toHaveBeenCalled();
+				});
+
+				test('roles-created keeps the value on update', async () => {
+					const result = await service.transformers['roles-created']!({
+						value: ['someone-else'],
+						action: 'update',
+						payload: {},
+						accountability: { user: 'user-a' } as Accountability,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toEqual(['someone-else']);
+				});
+
+				test('roles-updated stamps the roles allowing the rows', async () => {
+					vi.mocked(fetchAllowingMemberRoles).mockResolvedValue(['reviewers']);
+
+					const accountability = {
+						user: 'user-a',
+						memberRoles: ['editors', 'reviewers'],
+					} as Accountability;
+
+					const result = await service.transformers['roles-updated']!({
+						value: ['someone-else'],
+						action: 'update',
+						payload: {},
+						accountability,
+						specials: [],
+						helpers,
+						primaryKeys: [7],
+					});
+
+					expect(result).toEqual(['reviewers']);
+
+					expect(fetchAllowingMemberRoles).toHaveBeenCalledWith(
+						{
+							accountability,
+							action: 'update',
+							collection: 'test',
+							primaryKeys: [7],
+						},
+						{ knex: db, schema: { collections: {}, relations: [] } },
+					);
+				});
+
+				test('roles-updated checks no row when the context names none', async () => {
+					vi.mocked(fetchAllowingMemberRoles).mockResolvedValue([]);
+
+					const accountability = { user: 'user-a' } as Accountability;
+
+					await service.transformers['roles-updated']!({
+						value: null,
+						action: 'update',
+						payload: {},
+						accountability,
+						specials: [],
+						helpers,
+					});
+
+					expect(fetchAllowingMemberRoles).toHaveBeenCalledWith(
+						{
+							accountability,
+							action: 'update',
+							collection: 'test',
+							primaryKeys: [],
+						},
+						{ knex: db, schema: { collections: {}, relations: [] } },
+					);
+				});
+
+				test('roles-updated stamps null without a user on update', async () => {
+					const result = await service.transformers['roles-updated']!({
+						value: ['someone-else'],
+						action: 'update',
+						payload: {},
+						accountability: null,
+						specials: [],
+						helpers,
+						primaryKeys: [7],
+					});
+
+					expect(result).toBe(null);
+					expect(fetchAllowingMemberRoles).not.toHaveBeenCalled();
+				});
+
+				test('roles-updated keeps the value on create', async () => {
+					const result = await service.transformers['roles-updated']!({
+						value: ['someone-else'],
+						action: 'create',
+						payload: {},
+						accountability: { user: 'user-a' } as Accountability,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toEqual(['someone-else']);
 				});
 			});
 
@@ -801,6 +953,41 @@ describe('Integration Tests', () => {
 				);
 
 				expect(result).toMatchObject({ other_string: 'not-redacted', other_hidden: REDACT_STR });
+			});
+
+			test('hands the rows an update writes to the role stamp', async () => {
+				vi.mocked(fetchAllowingMemberRoles).mockReset();
+				vi.mocked(fetchAllowingMemberRoles).mockResolvedValue(['reviewers']);
+
+				const stampSchema = new SchemaBuilder()
+					.collection('test', (c) => {
+						c.field('id').id();
+
+						c.field('changed_by_roles')
+							.json()
+							.options({ special: ['roles-updated'] });
+					})
+					.build();
+
+				const accountability = { user: 'user-a' } as Accountability;
+
+				const result = await new PayloadService('test', {
+					knex: db,
+					schema: stampSchema,
+					accountability,
+				}).processValues('update', { changed_by_roles: null }, {}, {}, [7, 8]);
+
+				expect(result).toEqual({ changed_by_roles: '["reviewers"]' });
+
+				expect(fetchAllowingMemberRoles).toHaveBeenCalledWith(
+					{
+						accountability,
+						action: 'update',
+						collection: 'test',
+						primaryKeys: [7, 8],
+					},
+					{ knex: db, schema: stampSchema },
+				);
 			});
 		});
 

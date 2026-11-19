@@ -64,6 +64,9 @@ import { processPayload } from '../permissions/modules/process-payload/process-p
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import {
+	refuseRemovedRoleStampSpecial,
+} from '../utils/refuse-removed-role-stamp-special.js';
+import {
 	refuseRemovedRoleVariableInPayload,
 } from '../utils/refuse-removed-role-variable.js';
 import { resolveMutationBatching } from '../utils/resolve-mutation-batching.js';
@@ -503,6 +506,7 @@ implements AbstractService<Item> {
 
 		for (const row of data) {
 			refuseRemovedRoleVariableInPayload(this.collection, row);
+			refuseRemovedRoleStampSpecial(this.collection, row);
 		}
 
 		// a row written alone counts itself again
@@ -2330,6 +2334,7 @@ implements AbstractService<Item> {
 
 		for (const group of groups) {
 			refuseRemovedRoleVariableInPayload(this.collection, group.data);
+			refuseRemovedRoleStampSpecial(this.collection, group.data);
 		}
 
 		// Answered like an empty batch or a query matching nothing: no row, no hook.
@@ -3460,7 +3465,14 @@ implements AbstractService<Item> {
 
 			const payloadWithA2O = payloadsWithA2O[0]!;
 			const payloadWithoutAliasAndPK = pick(payloadWithA2O, without(fields, primaryKeyField, ...aliases));
-			const payloadWithTypeCasting = await payloadService.processValues('update', payloadWithoutAliasAndPK);
+
+			const payloadWithTypeCasting = await payloadService.processValues(
+				'update',
+				payloadWithoutAliasAndPK,
+				{},
+				{},
+				keys,
+			);
 
 			let updatedRowCount = 0;
 
@@ -3691,6 +3703,9 @@ implements AbstractService<Item> {
 				const payloadWithTypeCasting = await payloadService.processValues(
 					'update',
 					pick(payloadWithPresets, without(fields, primaryKeyField, ...aliases)),
+					{},
+					{},
+					group.keys,
 				) as Partial<AnyItem>;
 
 				preparedGroups.push({ group, payloadWithPresets, payloadWithTypeCasting });
