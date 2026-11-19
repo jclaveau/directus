@@ -1,15 +1,16 @@
-Feature: A user moved to another role through the role drops the cached reads
+Feature: A user taken out of a role through the role drops the cached reads
 
   - The feature runs against an instance of its own with the response cache
     on, in memory, and `CACHE_AUTO_PURGE` off: only a write that changes
     rights, such as a user's role, flushes it.
-  - `PATCH /roles/:id` with a `users` list writes each user through an upsert
-    of the batch, which runs its rows with the purge deferred to it.
+  - `PATCH /roles/:id` with a `users` list writes the role's memberships
+    (#746): the ones it no longer lists are deleted as nested rows of the
+    write, with the purge deferred to it.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own. A response cell states the keys it checks.
 
-  Scenario: a user moved to a role that cannot read loses the cached read
+  Scenario: a user taken out of the role that reads loses the cached read
     Given these requests are sent:
       | request                                 | response  |
       | method: POST                            | code: 200 |+
@@ -45,11 +46,6 @@ Feature: A user moved to another role through the role drops the cached reads
       |   policies:                             |           |
       |     - policy: <reader-policy>           |           |
       | method: POST                            | code: 200 |+
-      | path: /roles                            |           |
-      | payload:                                |           |
-      |   id: <outsider-role>                   |           |
-      |   name: outsider-<run>                  |           |
-      | method: POST                            | code: 200 |+
       | path: /users                            |           |
       | payload:                                |           |
       |   id: <mover>                           |           |
@@ -72,10 +68,9 @@ Feature: A user moved to another role through the role drops the cached reads
       |   fields: label                    |   data:                         |
       |                                    |     - label: v1                 |
       | method: PATCH                      | code: 200                       |+
-      | path: /roles/<outsider-role>       |                                 |
+      | path: /roles/<reader-role>         |                                 |
       | payload:                           |                                 |
-      |   users:                           |                                 |
-      |     - id: <mover>                  |                                 |
+      |   users: []                        |                                 |
       | as: mover-<run>                    | code: 403                       |+
       | method: GET                        | body:                           |
       | path: /items/cache_role_move_notes |   errors:                       |

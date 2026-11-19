@@ -72,6 +72,12 @@
     user:
       _eq: $CURRENT_USER
 
+- collection: directus_role_members
+  action: read
+  permissions:
+    user:
+      _eq: $CURRENT_USER
+
 - collection: directus_roles
   action: read
   permissions:
@@ -128,4 +134,4 @@
     - theme_dark
     - tfa_secret
     - status
-    - role
+    - roles

@@ -4,9 +4,10 @@ Feature: A role an extension writes in its own transaction flushes once it commi
     on, in memory, and `CACHE_AUTO_PURGE` off: only a write that changes
     rights, such as a user's role, flushes it.
   - `POST /untracked-trx-write/move-user` opens a transaction with
-    the extension's own `database.transaction()`, writes the user's role
-    through `UsersService`, then sends the `read` as that user
-    before it commits, and answers with what that read got.
+    the extension's own `database.transaction()`, replaces the user's
+    memberships with one in `role` (#746) through `UsersService`, then sends
+    the `read` as that user before it commits, and answers with what that
+    read got.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own. A response cell states the keys it checks.

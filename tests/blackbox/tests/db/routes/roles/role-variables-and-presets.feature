@@ -239,8 +239,8 @@ Feature: A user's roles resolve the role variables and order the presets
       | path: /items/role_variable_notes  |   errors:                               |
       | payload:                          |     - message: >-                       |
       |   label: parent-tagged            |         Validation failed for field     |
-      |   role_tag: <parent-role>         |         "role_tag". Value has to be one |
-      |                                   |         of "<child-role>".              |
+      |   role_tag: <parent-role>         |         "role_tag". Value has to be     |
+      |                                   |         "<child-role>".                 |
       | as: variable-<run>                | code: 200                               |+
       | method: POST                      |                                         |
       | path: /items/role_variable_notes  |                                         |

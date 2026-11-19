@@ -1,16 +1,16 @@
-Feature: A flow run sees the role of the user who triggered it
+Feature: A flow run sees the roles of the user who triggered it
 
-  - Pins today's single-role contract (#746). A webhook flow hands its
-    operations `$accountability`, whose `role` is the user's own role and
-    `roles` its chain, parent first. Stored flow code reads them, such as the
-    webhook flows migration 20240311A wrote.
+  - A webhook flow hands its operations `$accountability`, whose
+    `memberRoles` are the user's memberships and `roles` adds their chain,
+    parent first. `role` is gone (#746, D10), which stored flow code such as
+    the webhook flows migration 20240311A wrote may still read.
   - The `exec` operation answers the two values; the flow returns the last
     operation's data as the response body.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own. A response cell states the keys it checks.
 
-  Scenario: a webhook flow run reads the user's role and its chain
+  Scenario: a webhook flow run reads the user's member roles and their chain
     Given these requests are sent:
       | request                                   | response  |
       | method: POST                              | code: 200 |+
@@ -54,7 +54,8 @@ Feature: A flow run sees the role of the user who triggered it
       |   options:                                |           |
       |     code: >-                              |           |
       |       module.exports = async (data) => ({ |           |
-      |       role: data.$accountability.role,    |           |
+      |       memberRoles:                        |           |
+      |       data.$accountability.memberRoles,   |           |
       |       roles: data.$accountability.roles   |           |
       |       });                                 |           |
       | method: PATCH                             | code: 200 |+
@@ -62,13 +63,14 @@ Feature: A flow run sees the role of the user who triggered it
       | payload:                                  |           |
       |   operation: <operation>                  |           |
     Then these requests get these responses:
-      | request                     | response             |
-      | as: trigger-<run>           | code: 200            |+
-      | method: GET                 | body:                |
-      | path: /flows/trigger/<flow> |   role: <child-role> |
-      | eventually: true            |   roles:             |
-      |                             |     - <parent-role>  |
-      |                             |     - <child-role>   |
+      | request                     | response            |
+      | as: trigger-<run>           | code: 200           |+
+      | method: GET                 | body:               |
+      | path: /flows/trigger/<flow> |   memberRoles:      |
+      | eventually: true            |     - <child-role>  |
+      |                             |   roles:            |
+      |                             |     - <parent-role> |
+      |                             |     - <child-role>  |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_access    | 2      | 0      | 0      | 0      |

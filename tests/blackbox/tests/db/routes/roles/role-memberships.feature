@@ -2,8 +2,9 @@ Feature: A user holds several roles, each one a membership
 
   - A user's roles are rows of `directus_role_members` (#746), written
     through the `roles` field: `roles: [{ role, sort }]`. A user gets what
-    every member role's policies allow. The single `role` field is gone: a
-    write sending it is refused.
+    every member role's policies allow, and app access lets them read their
+    own memberships. The single `role` field is gone: a write sending it is
+    refused.
   - A deleted role takes its memberships along, and suspends only the users
     it leaves with no role.
   - An invitation's memberships are its inviter's: a re-invite by the same
@@ -36,7 +37,7 @@ Feature: A user holds several roles, each one a membership
       | payload:                           |           |
       |   id: <first-policy>               |           |
       |   name: first-<run>                |           |
-      |   app_access: false                |           |
+      |   app_access: true                 |           |
       |   admin_access: false              |           |
       |   permissions:                     |           |
       |     - collection: membership_notes |           |
