@@ -90,6 +90,8 @@ mkdirSync(outputDirectory, { recursive: true });
 const capturesPath = join(outputDirectory, 'captures.jsonl');
 const cloudflaredLogPath = join(outputDirectory, 'cloudflared.log');
 const capturedEvents = [];
+const signatureHeaderKeys = new Set();
+const unhandledEventTypes = new Set();
 let webhookSecret = null;
 
 // Stripe takes form-encoded bodies, nested keys as `a[b][0]=c`.
@@ -159,8 +161,10 @@ async function callStripe(method, path, formValue) {
 }
 
 // What stripe.webhooks.constructEvent checks: `t=<unix>` plus one `v1=` holding
-// the hex HMAC-SHA256 of `<t>.<raw body>` under the endpoint's secret. Names
-// the header's keys too, so a new scheme shows in the baseline diff.
+// the hex HMAC-SHA256 of `<t>.<raw body>` under the endpoint's secret. The
+// other keys (v0, and on some events destination, payload, secret) vary from
+// one delivery to the next, so they go to signature-header-keys.json, outside
+// the comparison.
 function checkSignature(rawBodyBytes, signatureHeader) {
 	if (signatureHeader === undefined) {
 		return 'missing';
@@ -179,14 +183,16 @@ function checkSignature(rawBodyBytes, signatureHeader) {
 		];
 	});
 
-	const headerKeys = [...new Set(headerParts.map(([partKey]) => partKey))]
-		.sort()
-		.join(',');
+	signatureHeaderKeys.add(
+		[...new Set(headerParts.map(([partKey]) => partKey))]
+			.sort()
+			.join(','),
+	);
 
 	const signedAt = headerParts.find(([partKey]) => partKey === 't')?.[1];
 
 	if (webhookSecret === null || signedAt === undefined) {
-		return `unchecked (${headerKeys})`;
+		return 'unchecked: no t or no webhook secret';
 	}
 
 	const expectedHex = createHmac('sha256', webhookSecret)
@@ -200,9 +206,9 @@ function checkSignature(rawBodyBytes, signatureHeader) {
 			&& timingSafeEqual(Buffer.from(partValue), Buffer.from(expectedHex));
 	});
 
-	return `${hasValidSignature
+	return hasValidSignature
 		? 'valid'
-		: 'invalid'} (${headerKeys})`;
+		: 'invalid';
 }
 
 let currentActionName = 'setup';
@@ -573,19 +579,28 @@ function describeActionEvents(actionRequestIds, probeSubscriptionId) {
 			continue;
 		}
 
+		const subscriptionRead = describeSubscriptionRead(
+			capturedEvent.eventBody,
+			probeSubscriptionId,
+		);
+
+		// Which charge, payment intent or product events Stripe adds is not
+		// what the bundle relies on, and varies between runs.
+		if (subscriptionRead === 'not handled') {
+			unhandledEventTypes.add(capturedEvent.eventBody.type);
+			continue;
+		}
+
 		const eventRequestId = capturedEvent.eventBody.request?.id ?? null;
 
 		// An event no API call caused (a test clock advance) belongs to the
 		// action running when it arrived.
 		const actionName = Object.entries(actionRequestIds)
 			.find(([, requestIds]) => requestIds.includes(eventRequestId))?.[0]
-			?? `${capturedEvent.actionAtArrival} (no request id)`;
+			?? capturedEvent.actionAtArrival;
 
-		const eventLine = `${capturedEvent.eventBody.type};`
-			+ ` ${describeSubscriptionRead(
-				capturedEvent.eventBody,
-				probeSubscriptionId,
-			)}; signature ${capturedEvent.signatureStatus}`;
+		const eventLine = `${capturedEvent.eventBody.type}; ${subscriptionRead};`
+			+ ` signature ${capturedEvent.signatureStatus}`;
 
 		describedEvents[actionName] ??= [];
 
@@ -853,6 +868,17 @@ try {
 	);
 
 	observedBehaviour.envelopes = describeEnvelopes();
+
+	writeFileSync(
+		join(outputDirectory, 'unhandled-event-types.json'),
+		`${JSON.stringify([...unhandledEventTypes].sort(), null, '\t')}\n`,
+	);
+
+	writeFileSync(
+		join(outputDirectory, 'signature-header-keys.json'),
+		`${JSON.stringify([...signatureHeaderKeys].sort(), null, '\t')}\n`,
+	);
+
 	const observedJson = `${JSON.stringify(observedBehaviour, null, '\t')}\n`;
 	writeFileSync(join(outputDirectory, 'observed-behaviour.json'), observedJson);
 
