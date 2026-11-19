@@ -1356,7 +1356,7 @@ describe('App Caching Tests', () => {
 					.send({
 						email: `cache-case-scope-${suffix}@example.com`,
 						password: randomUUID(),
-						role: role.id,
+						roles: [{ role: role.id }],
 						token,
 						status: 'active',
 					})
@@ -1463,7 +1463,7 @@ describe('App Caching Tests', () => {
 					.send({
 						email: `cache-case-token-${suffix}@example.com`,
 						password: randomUUID(),
-						role: role.id,
+						roles: [{ role: role.id }],
 						token,
 						status: 'active',
 					})
@@ -1572,7 +1572,7 @@ describe('App Caching Tests', () => {
 					.send({
 						email: `cache-multicase-${suffix}@example.com`,
 						password: randomUUID(),
-						role: role.id,
+						roles: [{ role: role.id }],
 						token,
 						status: 'active',
 					})
@@ -1668,7 +1668,7 @@ describe('App Caching Tests', () => {
 					.send({
 						email: `cache-nested-${suffix}@example.com`,
 						password: randomUUID(),
-						role: role.id,
+						roles: [{ role: role.id }],
 						token,
 						status: 'active',
 					})
@@ -1776,7 +1776,7 @@ describe('App Caching Tests', () => {
 					.send({
 						email: `cache-union-${suffix}@example.com`,
 						password: randomUUID(),
-						role: role.id,
+						roles: [{ role: role.id }],
 						token,
 						status: 'active',
 					})
@@ -2140,7 +2140,7 @@ describe('App Caching Tests', () => {
 				.send({
 					email: `cache-case-rel-${suffix}@example.com`,
 					password: randomUUID(),
-					role: role.id,
+					roles: [{ role: role.id }],
 					token,
 					status: 'active',
 				})
@@ -2243,7 +2243,7 @@ describe('App Caching Tests', () => {
 				.send({
 					email: `cache-multifield-${suffix}@example.com`,
 					password: randomUUID(),
-					role: role.id,
+					roles: [{ role: role.id }],
 					token,
 					status: 'active',
 				})
@@ -2479,7 +2479,7 @@ describe('App Caching Tests', () => {
 		});
 
 		// Bare-list and single-item variants cache like the filtered ones; read twice.
-		// directus_users.role is a relation present on every install.
+		// directus_role_members.user is a relation present on every install.
 		it.each(vendors)('%s — sibling field/relation routes cache', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
 			const url = getUrl(vendor, env);
@@ -2493,7 +2493,7 @@ describe('App Caching Tests', () => {
 			const readFieldsAll = () => read('/fields');
 			const readOneField = () => read(`/fields/${collectionFirst}/string_field`);
 			const readRelationsAll = () => read('/relations');
-			const readOneRelation = () => read('/relations/directus_users/role');
+			const readOneRelation = () => read('/relations/directus_role_members/user');
 
 			await request(url).post(`/utils/cache/clear`)
 				.set('Authorization', auth);

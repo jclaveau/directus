@@ -248,7 +248,7 @@ describe('Common', () => {
 					.get(`/users`)
 					.query({
 						filter: { email: { _eq: email } },
-						fields: ['id', 'email', 'token', 'role'],
+						fields: ['id', 'email', 'token', 'roles.role'],
 					})
 					.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 					.expect('Content-Type', /application\/json/)
@@ -260,7 +260,7 @@ describe('Common', () => {
 						id: expect.any(String),
 						email: email,
 						token: expect.any(String),
-						role: expect.any(String),
+						roles: [{ role: expect.any(String) }],
 					},
 				]);
 			});
@@ -290,7 +290,7 @@ describe('Common', () => {
 					.get(`/users`)
 					.query({
 						filter: { email: { _eq: email } },
-						fields: ['id', 'email', 'token', 'role'],
+						fields: ['id', 'email', 'token', 'roles.role'],
 					})
 					.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 					.expect('Content-Type', /application\/json/)
@@ -302,7 +302,7 @@ describe('Common', () => {
 						id: expect.any(String),
 						email: email,
 						token: expect.any(String),
-						role: expect.any(String),
+						roles: [{ role: expect.any(String) }],
 					},
 				]);
 			});
@@ -332,7 +332,7 @@ describe('Common', () => {
 					.get(`/users`)
 					.query({
 						filter: { email: { _eq: email } },
-						fields: ['id', 'email', 'token', 'role'],
+						fields: ['id', 'email', 'token', 'roles.role'],
 					})
 					.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 					.expect('Content-Type', /application\/json/)
@@ -344,7 +344,7 @@ describe('Common', () => {
 						id: expect.any(String),
 						email: email,
 						token: expect.any(String),
-						role: expect.any(String),
+						roles: [{ role: expect.any(String) }],
 					},
 				]);
 			});
@@ -372,7 +372,7 @@ describe('Common', () => {
 					.get(`/users`)
 					.query({
 						filter: { email: { _eq: email } },
-						fields: ['id', 'email', 'token', 'role'],
+						fields: ['id', 'email', 'token', 'roles.role'],
 					})
 					.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 					.expect('Content-Type', /application\/json/)
@@ -384,7 +384,7 @@ describe('Common', () => {
 						id: expect.any(String),
 						email: email,
 						token: expect.any(String),
-						role: null,
+						roles: [],
 					},
 				]);
 			});

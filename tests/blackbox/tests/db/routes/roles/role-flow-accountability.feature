@@ -28,7 +28,8 @@ Feature: A flow run sees the role of the user who triggered it
       | path: /users                              |           |
       | payload:                                  |           |
       |   email: trigger-<run>@example.com        |           |
-      |   role: <child-role>                      |           |
+      |   roles:                                  |           |
+      |     - role: <child-role>                  |           |
       |   token: trigger-<run>                    |           |
       | method: POST                              | code: 200 |+
       | path: /flows                              |           |

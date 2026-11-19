@@ -142,11 +142,20 @@ export async function CreateUser(vendor: Vendor, options: Partial<OptionsCreateU
 		delete options.roleName;
 	}
 
+	const { role, ...userFields } = options;
+
+	const userPayload = role
+		? {
+			...userFields,
+			roles: [{ role }],
+		}
+		: userFields;
+
 	// Action
 	const response = await request(getUrl(vendor))
 		.post(`/users`)
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
-		.send(options);
+		.send(userPayload);
 
 	return dataOrThrow(response, `user "${options.email}"`);
 }

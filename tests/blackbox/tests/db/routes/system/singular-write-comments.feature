@@ -463,7 +463,8 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       |   id: <reader>                           |           |
       |   email: role-reader-<run>@example.com   |           |
       |   email_notifications: false             |           |
-      |   role: <child-role>                     |           |
+      |   roles:                                 |           |
+      |     - role: <child-role>                 |           |
     Then these requests get these responses:
       | request                              | response                                 |
       | method: POST                         | code: 200                                |+

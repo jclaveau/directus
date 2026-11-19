@@ -174,27 +174,28 @@ Feature: A nested write to users, roles or policies hands its user checks up
 
   Scenario: a role's users given as an empty list leave the role
     When these requests get these responses:
-      | request                                           | response         |
-      | method: POST                                      | code: 200        |+
-      | path: /roles                                      |                  |
-      | payload:                                          |                  |
-      |   id: 5e1f0000-0000-4000-8000-000000000001        |                  |
-      |   name: integrity                                 |                  |
-      | method: POST                                      | code: 200        |+
-      | path: /users                                      |                  |
-      | payload:                                          |                  |
-      |   id: 5e1f0000-0000-4000-8000-000000000015        |                  |
-      |   email: role-emptied@write.email                 |                  |
-      |   role: 5e1f0000-0000-4000-8000-000000000001      |                  |
-      | method: PATCH                                     | code: 200        |+
-      | path: /roles/5e1f0000-0000-4000-8000-000000000001 |                  |
-      | payload:                                          |                  |
-      |   users: []                                       |                  |
-      | method: GET                                       | code: 200        |+
-      | path: /users                                      | body:            |
-      | query:                                            |   data:          |
-      |   filter[email][_eq]: role-emptied@write.email    |     - role: null |
-      |   fields: role                                    |                  |
+      | request                                           | response        |
+      | method: POST                                      | code: 200       |+
+      | path: /roles                                      |                 |
+      | payload:                                          |                 |
+      |   id: 5e1f0000-0000-4000-8000-000000000001        |                 |
+      |   name: integrity                                 |                 |
+      | method: POST                                      | code: 200       |+
+      | path: /users                                      |                 |
+      | payload:                                          |                 |
+      |   id: 5e1f0000-0000-4000-8000-000000000015        |                 |
+      |   email: role-emptied@write.email                 |                 |
+      |   roles:                                          |                 |
+      |     - role: 5e1f0000-0000-4000-8000-000000000001  |                 |
+      | method: PATCH                                     | code: 200       |+
+      | path: /roles/5e1f0000-0000-4000-8000-000000000001 |                 |
+      | payload:                                          |                 |
+      |   users: []                                       |                 |
+      | method: GET                                       | code: 200       |+
+      | path: /users                                      | body:           |
+      | query:                                            |   data:         |
+      |   filter[email][_eq]: role-emptied@write.email    |     - roles: [] |
+      |   fields: roles.role                              |                 |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_access    | 1      | 0      | 0      | 0      |
@@ -214,19 +215,21 @@ Feature: A nested write to users, roles or policies hands its user checks up
 
   Scenario: a role's users creating a user put it in the role
     When these requests get these responses:
-      | request                                           | response                |
-      | method: PATCH                                     | code: 200               |+
-      | path: /roles/5e1f0000-0000-4000-8000-000000000001 |                         |
-      | payload:                                          |                         |
-      |   users:                                          |                         |
-      |     create:                                       |                         |
-      |       - id: 5e1f0000-0000-4000-8000-000000000016  |                         |
-      |         email: role-created@write.email           |                         |
-      | method: GET                                       | code: 200               |+
-      | path: /users                                      | body:                   |
-      | query:                                            |   data:                 |
-      |   filter[email][_eq]: role-created@write.email    |     - role:             |
-      |   fields: role.name                               |         name: integrity |
+      | request                                           | response                    |
+      | method: PATCH                                     | code: 200                   |+
+      | path: /roles/5e1f0000-0000-4000-8000-000000000001 |                             |
+      | payload:                                          |                             |
+      |   users:                                          |                             |
+      |     create:                                       |                             |
+      |       - user:                                     |                             |
+      |          id: 5e1f0000-0000-4000-8000-000000000016 |                             |
+      |          email: role-created@write.email          |                             |
+      | method: GET                                       | code: 200                   |+
+      | path: /users                                      | body:                       |
+      | query:                                            |   data:                     |
+      |   filter[email][_eq]: role-created@write.email    |     - roles:                |
+      |   fields: roles.role.name                         |         - role:             |
+      |                                                   |             name: integrity |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_access    | 2      | 0      | 0      | 0      |
@@ -235,29 +238,30 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | 1       | directus_roles     | 5      | 0      | 0      | 0      |
       | 1       | directus_users     | 4      | 1      | 0      | 0      |
 
-  Scenario: a role's users updating a user outside it activate it and move it in
+  Scenario: a role's users adding a user outside it activate it and make it a member
     When these requests get these responses:
-      | request                                           | response                |
-      | method: POST                                      | code: 200               |+
-      | path: /users                                      |                         |
-      | payload:                                          |                         |
-      |   id: 5e1f0000-0000-4000-8000-000000000017        |                         |
-      |   email: role-updated@write.email                 |                         |
-      |   status: draft                                   |                         |
-      | method: PATCH                                     | code: 200               |+
-      | path: /roles/5e1f0000-0000-4000-8000-000000000001 |                         |
-      | payload:                                          |                         |
-      |   users:                                          |                         |
-      |     update:                                       |                         |
-      |       - id: 5e1f0000-0000-4000-8000-000000000017  |                         |
-      |         status: active                            |                         |
-      | method: GET                                       | code: 200               |+
-      | path: /users                                      | body:                   |
-      | query:                                            |   data:                 |
-      |   filter[email][_eq]: role-updated@write.email    |     - status: active    |
-      |   fields:                                         |       role:             |
-      |     - status                                      |         name: integrity |
-      |     - role.name                                   |                         |
+      | request                                           | response                    |
+      | method: POST                                      | code: 200                   |+
+      | path: /users                                      |                             |
+      | payload:                                          |                             |
+      |   id: 5e1f0000-0000-4000-8000-000000000017        |                             |
+      |   email: role-updated@write.email                 |                             |
+      |   status: draft                                   |                             |
+      | method: PATCH                                     | code: 200                   |+
+      | path: /roles/5e1f0000-0000-4000-8000-000000000001 |                             |
+      | payload:                                          |                             |
+      |   users:                                          |                             |
+      |     create:                                       |                             |
+      |       - user:                                     |                             |
+      |          id: 5e1f0000-0000-4000-8000-000000000017 |                             |
+      |          status: active                           |                             |
+      | method: GET                                       | code: 200                   |+
+      | path: /users                                      | body:                       |
+      | query:                                            |   data:                     |
+      |   filter[email][_eq]: role-updated@write.email    |     - status: active        |
+      |   fields:                                         |       roles:                |
+      |     - status                                      |         - role:             |
+      |     - roles.role.name                             |             name: integrity |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_access    | 1      | 0      | 0      | 0      |
@@ -272,24 +276,26 @@ Feature: A nested write to users, roles or policies hands its user checks up
 
   Scenario: a role's users deleting a user take it out of the role
     When these requests get these responses:
-      | request                                           | response         |
-      | method: POST                                      | code: 200        |+
-      | path: /users                                      |                  |
-      | payload:                                          |                  |
-      |   id: 5e1f0000-0000-4000-8000-000000000018        |                  |
-      |   email: role-deleted@write.email                 |                  |
-      |   role: 5e1f0000-0000-4000-8000-000000000001      |                  |
-      | method: PATCH                                     | code: 200        |+
-      | path: /roles/5e1f0000-0000-4000-8000-000000000001 |                  |
-      | payload:                                          |                  |
-      |   users:                                          |                  |
-      |     delete:                                       |                  |
-      |       - 5e1f0000-0000-4000-8000-000000000018      |                  |
-      | method: GET                                       | code: 200        |+
-      | path: /users                                      | body:            |
-      | query:                                            |   data:          |
-      |   filter[email][_eq]: role-deleted@write.email    |     - role: null |
-      |   fields: role                                    |                  |
+      | request                                           | response        |
+      | method: POST                                      | code: 200       |+
+      | path: /users                                      |                 |
+      | payload:                                          |                 |
+      |   id: 5e1f0000-0000-4000-8000-000000000018        |                 |
+      |   email: role-deleted@write.email                 |                 |
+      |   roles:                                          |                 |
+      |     - id: 5e1f0000-0000-4000-8000-000000000019    |                 |
+      |       role: 5e1f0000-0000-4000-8000-000000000001  |                 |
+      | method: PATCH                                     | code: 200       |+
+      | path: /roles/5e1f0000-0000-4000-8000-000000000001 |                 |
+      | payload:                                          |                 |
+      |   users:                                          |                 |
+      |     delete:                                       |                 |
+      |       - 5e1f0000-0000-4000-8000-000000000019      |                 |
+      | method: GET                                       | code: 200       |+
+      | path: /users                                      | body:           |
+      | query:                                            |   data:         |
+      |   filter[email][_eq]: role-deleted@write.email    |     - roles: [] |
+      |   fields: roles.role                              |                 |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_access    | 1      | 0      | 0      | 0      |

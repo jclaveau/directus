@@ -47,7 +47,8 @@ Feature: An asset is cached publicly with no role, privately with one
       |       - policy: <file-reader-policy> |           |
       |   - email: in-role-<run>@example.com |           |
       |     token: in-role-<run>             |           |
-      |     role: <reader-role>              |           |
+      |     roles:                           |           |
+      |       - role: <reader-role>          |           |
     Then these requests get these responses:
       | request                | response                                  |
       | as: no-role-<run>      | code: 200                                 |+

@@ -22,29 +22,31 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   id: <second-role>  |           |
       |   name: second-<run> |           |
     Then these requests get these responses:
-      | request                            | response                  |
-      | method: POST                       | code: 204                 |+
-      | path: /users/invite                |                           |
-      | payload:                           |                           |
-      |   email: invited-<run>@example.com |                           |
-      |   role: <first-role>               |                           |
-      | method: GET                        | code: 200                 |+
-      | path: /users                       | body:                     |
-      | query:                             |   data:                   |
-      |   fields: status,role              |     - status: invited     |
-      |   filter[email][_eq]: >-           |       role: <first-role>  |
-      |     invited-<run>@example.com      |                           |
-      | method: POST                       | code: 204                 |+
-      | path: /users/invite                |                           |
-      | payload:                           |                           |
-      |   email: invited-<run>@example.com |                           |
-      |   role: <second-role>              |                           |
-      | method: GET                        | code: 200                 |+
-      | path: /users                       | body:                     |
-      | query:                             |   data:                   |
-      |   fields: status,role              |     - status: invited     |
-      |   filter[email][_eq]: >-           |       role: <second-role> |
-      |     invited-<run>@example.com      |                           |
+      | request                            | response                      |
+      | method: POST                       | code: 204                     |+
+      | path: /users/invite                |                               |
+      | payload:                           |                               |
+      |   email: invited-<run>@example.com |                               |
+      |   roles:                           |                               |
+      |     - <first-role>                 |                               |
+      | method: GET                        | code: 200                     |+
+      | path: /users                       | body:                         |
+      | query:                             |   data:                       |
+      |   fields: status,roles.role        |     - status: invited         |
+      |   filter[email][_eq]: >-           |       roles:                  |
+      |     invited-<run>@example.com      |         - role: <first-role>  |
+      | method: POST                       | code: 204                     |+
+      | path: /users/invite                |                               |
+      | payload:                           |                               |
+      |   email: invited-<run>@example.com |                               |
+      |   roles:                           |                               |
+      |     - <second-role>                |                               |
+      | method: GET                        | code: 200                     |+
+      | path: /users                       | body:                         |
+      | query:                             |   data:                       |
+      |   fields: status,roles.role        |     - status: invited         |
+      |   filter[email][_eq]: >-           |       roles:                  |
+      |     invited-<run>@example.com      |         - role: <second-role> |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_activity  | 0      | 1      | 0      | 0      |
@@ -68,7 +70,8 @@ Feature: A user is invited, re-invited and accepts the invitation
       | path: /users/invite                  |           |
       | payload:                             |           |
       |   email: accepting-<run>@example.com |           |
-      |   role: <invitee-role>               |           |
+      |   roles:                             |           |
+      |     - <invitee-role>                 |           |
     Then these requests get these responses:
       | request                                | response                     |
       | method: POST                           | code: 204                    |+
@@ -149,9 +152,10 @@ Feature: A user is invited, re-invited and accepts the invitation
       | path: /users/invite                | body:                                   |
       | payload:                           |   errors:                               |
       |   email: refused-<run>@example.com |     - message: >-                       |
-      |   role: <refused-role>             |         Invalid payload. URL            |
-      |   invite_url: >-                   |         "https://elsewhere.test/accept" |
-      |     https://elsewhere.test/accept  |         can't be used to invite users.  |
+      |   roles:                           |         Invalid payload. URL            |
+      |     - <refused-role>               |         "https://elsewhere.test/accept" |
+      |   invite_url: >-                   |         can't be used to invite users.  |
+      |     https://elsewhere.test/accept  |                                         |
       | method: GET                        | code: 200                               |+
       | path: /users                       | body:                                   |
       | query:                             |   data: []                              |
@@ -174,7 +178,8 @@ Feature: A user is invited, re-invited and accepts the invitation
       | path: /users/invite              |           |
       | payload:                         |           |
       |   email: again-<run>@example.com |           |
-      |   role: <again-role>             |           |
+      |   roles:                         |           |
+      |     - <again-role>               |           |
       | method: POST                     | code: 200 |+
       | path: /users                     |           |
       | payload:                         |           |
@@ -185,16 +190,18 @@ Feature: A user is invited, re-invited and accepts the invitation
       | path: /users/invite               | body:                                   |
       | payload:                          |   errors:                               |
       |   email: again-<run>@example.com  |     - message: >-                       |
-      |   role: <again-role>              |         Invalid payload. URL            |
-      |   invite_url: >-                  |         "https://elsewhere.test/accept" |
-      |     https://elsewhere.test/accept |         can't be used to invite users.  |
+      |   roles:                          |         Invalid payload. URL            |
+      |     - <again-role>                |         "https://elsewhere.test/accept" |
+      |   invite_url: >-                  |         can't be used to invite users.  |
+      |     https://elsewhere.test/accept |                                         |
       | method: POST                      | code: 400                               |+
       | path: /users/invite               | body:                                   |
       | payload:                          |   errors:                               |
       |   email: known-<run>@example.com  |     - message: >-                       |
-      |   role: <again-role>              |         Invalid payload. URL            |
-      |   invite_url: >-                  |         "https://elsewhere.test/accept" |
-      |     https://elsewhere.test/accept |         can't be used to invite users.  |
+      |   roles:                          |         Invalid payload. URL            |
+      |     - <again-role>                |         "https://elsewhere.test/accept" |
+      |   invite_url: >-                  |         can't be used to invite users.  |
+      |     https://elsewhere.test/accept |                                         |
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
       | 1       | directus_users | 2      | 0      | 0      | 0      |

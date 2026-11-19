@@ -26,13 +26,15 @@ Feature: A deleted role suspends its users and drops its presets
       | payload:                                |           |
       |   id: <member>                          |           |
       |   email: member-<run>@example.com       |           |
-      |   role: <deleted-role>                  |           |
+      |   roles:                                |           |
+      |     - role: <deleted-role>              |           |
       | method: POST                            | code: 200 |+
       | path: /users                            |           |
       | payload:                                |           |
       |   id: <child-member>                    |           |
       |   email: child-member-<run>@example.com |           |
-      |   role: <child-role>                    |           |
+      |   roles:                                |           |
+      |     - role: <child-role>                |           |
       | method: POST                            | code: 200 |+
       | path: /presets                          |           |
       | payload:                                |           |
@@ -40,28 +42,29 @@ Feature: A deleted role suspends its users and drops its presets
       |   collection: directus_users            |           |
       |   role: <deleted-role>                  |           |
     Then these requests get these responses:
-      | request                                | response               |
-      | method: DELETE                         | code: 204              |+
-      | path: /roles/<deleted-role>            |                        |
-      | method: GET                            | code: 200              |+
-      | path: /users/<member>                  | body:                  |
-      | query:                                 |   data:                |
-      |   fields: status,role                  |     status: suspended  |
-      |                                        |     role: null         |
-      | method: GET                            | code: 200              |+
-      | path: /users/<child-member>            | body:                  |
-      | query:                                 |   data:                |
-      |   fields: status,role                  |     status: active     |
-      |                                        |     role: <child-role> |
-      | method: GET                            | code: 200              |+
-      | path: /roles/<child-role>              | body:                  |
-      | query:                                 |   data:                |
-      |   fields: parent                       |     parent: null       |
-      | method: GET                            | code: 200              |+
-      | path: /presets                         | body:                  |
-      | query:                                 |   data: []             |
-      |   fields: id                           |                        |
-      |   filter[bookmark][_eq]: deleted-<run> |                        |
+      | request                                | response                   |
+      | method: DELETE                         | code: 204                  |+
+      | path: /roles/<deleted-role>            |                            |
+      | method: GET                            | code: 200                  |+
+      | path: /users/<member>                  | body:                      |
+      | query:                                 |   data:                    |
+      |   fields: status,roles.role            |     status: suspended      |
+      |                                        |     roles: []              |
+      | method: GET                            | code: 200                  |+
+      | path: /users/<child-member>            | body:                      |
+      | query:                                 |   data:                    |
+      |   fields: status,roles.role            |     status: active         |
+      |                                        |     roles:                 |
+      |                                        |       - role: <child-role> |
+      | method: GET                            | code: 200                  |+
+      | path: /roles/<child-role>              | body:                      |
+      | query:                                 |   data:                    |
+      |   fields: parent                       |     parent: null           |
+      | method: GET                            | code: 200                  |+
+      | path: /presets                         | body:                      |
+      | query:                                 |   data: []                 |
+      |   fields: id                           |                            |
+      |   filter[bookmark][_eq]: deleted-<run> |                            |
     And on postgres the requests ran these statements:
       | request | table                | select | insert | update | delete | with |
       | 1       | directus_access      | 7      | 0      | 0      | 0      | 0    |

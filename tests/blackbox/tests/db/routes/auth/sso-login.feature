@@ -17,147 +17,147 @@ Feature: A first SSO login creates the user, a later one updates it
 
   Scenario: an OAuth2 login creates the user, a later one updates it
     Then these requests get these responses:
-      | request                            | response                                   |
-      | login: mockoauth                   | code: 200                                  |+
-      | profile:                           |                                            |
-      |   sub: ada-oauth                   |                                            |
-      |   email: ada@sso.example.com       |                                            |
-      |   given_name: Ada                  |                                            |
-      |   family_name: Lovelace            |                                            |
-      |   groups: [staff]                  |                                            |
-      | method: GET                        | code: 200                                  |+
-      | path: /users                       | body:                                      |
-      | query:                             |   data:                                    |
-      |   fields:                          |   - provider: mockoauth                    |
-      |     - provider                     |     external_identifier: ada-oauth         |
-      |     - external_identifier          |     email: ada@sso.example.com             |
-      |     - email                        |     first_name: Ada                        |
-      |     - first_name                   |     last_name: Lovelace                    |
-      |     - last_name                    |     role: >-                               |
-      |     - role                         |       5b3e8f0a-9c41-4d6e-8a2f-1c7d3e9b6a04 |
-      |     - auth_data                    |     auth_data:                             |
-      |   filter[email][_eq]: >-           |       refreshToken: ada-oauth-refresh-2    |
-      |     ada@sso.example.com            |                                            |
-      | login: mockoauth                   | code: 200                                  |+
-      | profile:                           |                                            |
-      |   sub: ada-oauth                   |                                            |
-      |   email: ada@sso.example.com       |                                            |
-      |   given_name: Augusta              |                                            |
-      |   family_name: King                |                                            |
-      |   groups: []                       |                                            |
-      | remember_session: ada_session      |                                            |
-      | method: GET                        | code: 200                                  |+
-      | path: /users                       | body:                                      |
-      | query:                             |   data:                                    |
-      |   fields:                          |   - provider: mockoauth                    |
-      |     - provider                     |     external_identifier: ada-oauth         |
-      |     - external_identifier          |     email: ada@sso.example.com             |
-      |     - email                        |     first_name: Augusta                    |
-      |     - first_name                   |     last_name: King                        |
-      |     - last_name                    |     role: >-                               |
-      |     - role                         |       d70c0943-5b55-4c5d-a613-f539a27a57f5 |
-      |     - auth_data                    |     auth_data:                             |
-      |   filter[email][_eq]: >-           |       refreshToken: ada-oauth-refresh-4    |
-      |     ada@sso.example.com            |                                            |
-      | method: POST                       | code: 200                                  |+
-      | path: /auth/refresh                |                                            |
-      | payload:                           |                                            |
-      |   refresh_token: <ada_session>     |                                            |
-      |   mode: json                       |                                            |
-      | method: GET                        | code: 200                                  |+
-      | path: /users                       | body:                                      |
-      | query:                             |   data:                                    |
-      |   fields:                          |   - auth_data:                             |
-      |     - auth_data                    |       refreshToken: ada-oauth-refresh-5    |
-      |   filter[email][_eq]: >-           |                                            |
-      |     ada@sso.example.com            |                                            |
+      | request                        | response                                     |
+      | login: mockoauth               | code: 200                                    |+
+      | profile:                       |                                              |
+      |   sub: ada-oauth               |                                              |
+      |   email: ada@sso.example.com   |                                              |
+      |   given_name: Ada              |                                              |
+      |   family_name: Lovelace        |                                              |
+      |   groups: [staff]              |                                              |
+      | method: GET                    | code: 200                                    |+
+      | path: /users                   | body:                                        |
+      | query:                         |   data:                                      |
+      |   fields:                      |   - provider: mockoauth                      |
+      |     - provider                 |     external_identifier: ada-oauth           |
+      |     - external_identifier      |     email: ada@sso.example.com               |
+      |     - email                    |     first_name: Ada                          |
+      |     - first_name               |     last_name: Lovelace                      |
+      |     - last_name                |     roles:                                   |
+      |     - roles.role               |     - role: >-                               |
+      |     - auth_data                |         5b3e8f0a-9c41-4d6e-8a2f-1c7d3e9b6a04 |
+      |   filter[email][_eq]: >-       |     auth_data:                               |
+      |     ada@sso.example.com        |       refreshToken: ada-oauth-refresh-2      |
+      | login: mockoauth               | code: 200                                    |+
+      | profile:                       |                                              |
+      |   sub: ada-oauth               |                                              |
+      |   email: ada@sso.example.com   |                                              |
+      |   given_name: Augusta          |                                              |
+      |   family_name: King            |                                              |
+      |   groups: []                   |                                              |
+      | remember_session: ada_session  |                                              |
+      | method: GET                    | code: 200                                    |+
+      | path: /users                   | body:                                        |
+      | query:                         |   data:                                      |
+      |   fields:                      |   - provider: mockoauth                      |
+      |     - provider                 |     external_identifier: ada-oauth           |
+      |     - external_identifier      |     email: ada@sso.example.com               |
+      |     - email                    |     first_name: Augusta                      |
+      |     - first_name               |     last_name: King                          |
+      |     - last_name                |     roles:                                   |
+      |     - roles.role               |     - role: >-                               |
+      |     - auth_data                |         d70c0943-5b55-4c5d-a613-f539a27a57f5 |
+      |   filter[email][_eq]: >-       |     auth_data:                               |
+      |     ada@sso.example.com        |       refreshToken: ada-oauth-refresh-4      |
+      | method: POST                   | code: 200                                    |+
+      | path: /auth/refresh            |                                              |
+      | payload:                       |                                              |
+      |   refresh_token: <ada_session> |                                              |
+      |   mode: json                   |                                              |
+      | method: GET                    | code: 200                                    |+
+      | path: /users                   | body:                                        |
+      | query:                         |   data:                                      |
+      |   fields:                      |   - auth_data:                               |
+      |     - auth_data                |       refreshToken: ada-oauth-refresh-5      |
+      |   filter[email][_eq]: >-       |                                              |
+      |     ada@sso.example.com        |                                              |
 
   Scenario: an OpenID login creates the user, a later one updates it
     Then these requests get these responses:
-      | request                            | response                                   |
-      | login: mockopenid                  | code: 200                                  |+
-      | profile:                           |                                            |
-      |   sub: grace-openid                |                                            |
-      |   email: grace@sso.example.com     |                                            |
-      |   given_name: Grace                |                                            |
-      |   family_name: Hopper              |                                            |
-      | method: GET                        | code: 200                                  |+
-      | path: /users                       | body:                                      |
-      | query:                             |   data:                                    |
-      |   fields:                          |   - provider: mockopenid                   |
-      |     - provider                     |     external_identifier: grace-openid      |
-      |     - external_identifier          |     email: grace@sso.example.com           |
-      |     - email                        |     first_name: Grace                      |
-      |     - first_name                   |     last_name: Hopper                      |
-      |     - last_name                    |     role: >-                               |
-      |     - role                         |       d70c0943-5b55-4c5d-a613-f539a27a57f5 |
-      |     - auth_data                    |     auth_data:                             |
-      |   filter[email][_eq]: >-           |       refreshToken: grace-openid-refresh-2 |
-      |     grace@sso.example.com          |                                            |
-      | login: mockopenid                  | code: 200                                  |+
-      | profile:                           |                                            |
-      |   sub: grace-openid                |                                            |
-      |   email: grace@sso.example.com     |                                            |
-      |   given_name: Amazing              |                                            |
-      |   family_name: Grace               |                                            |
-      | remember_session: grace_session    |                                            |
-      | method: GET                        | code: 200                                  |+
-      | path: /users                       | body:                                      |
-      | query:                             |   data:                                    |
-      |   fields:                          |   - provider: mockopenid                   |
-      |     - provider                     |     external_identifier: grace-openid      |
-      |     - external_identifier          |     email: grace@sso.example.com           |
-      |     - email                        |     first_name: Amazing                    |
-      |     - first_name                   |     last_name: Grace                       |
-      |     - last_name                    |     role: >-                               |
-      |     - role                         |       d70c0943-5b55-4c5d-a613-f539a27a57f5 |
-      |     - auth_data                    |     auth_data:                             |
-      |   filter[email][_eq]: >-           |       refreshToken: grace-openid-refresh-4 |
-      |     grace@sso.example.com          |                                            |
-      | method: POST                       | code: 200                                  |+
-      | path: /auth/refresh                |                                            |
-      | payload:                           |                                            |
-      |   refresh_token: <grace_session>   |                                            |
-      |   mode: json                       |                                            |
-      | method: GET                        | code: 200                                  |+
-      | path: /users                       | body:                                      |
-      | query:                             |   data:                                    |
-      |   fields:                          |   - auth_data:                             |
-      |     - auth_data                    |       refreshToken: grace-openid-refresh-5 |
-      |   filter[email][_eq]: >-           |                                            |
-      |     grace@sso.example.com          |                                            |
+      | request                          | response                                     |
+      | login: mockopenid                | code: 200                                    |+
+      | profile:                         |                                              |
+      |   sub: grace-openid              |                                              |
+      |   email: grace@sso.example.com   |                                              |
+      |   given_name: Grace              |                                              |
+      |   family_name: Hopper            |                                              |
+      | method: GET                      | code: 200                                    |+
+      | path: /users                     | body:                                        |
+      | query:                           |   data:                                      |
+      |   fields:                        |   - provider: mockopenid                     |
+      |     - provider                   |     external_identifier: grace-openid        |
+      |     - external_identifier        |     email: grace@sso.example.com             |
+      |     - email                      |     first_name: Grace                        |
+      |     - first_name                 |     last_name: Hopper                        |
+      |     - last_name                  |     roles:                                   |
+      |     - roles.role                 |     - role: >-                               |
+      |     - auth_data                  |         d70c0943-5b55-4c5d-a613-f539a27a57f5 |
+      |   filter[email][_eq]: >-         |     auth_data:                               |
+      |     grace@sso.example.com        |       refreshToken: grace-openid-refresh-2   |
+      | login: mockopenid                | code: 200                                    |+
+      | profile:                         |                                              |
+      |   sub: grace-openid              |                                              |
+      |   email: grace@sso.example.com   |                                              |
+      |   given_name: Amazing            |                                              |
+      |   family_name: Grace             |                                              |
+      | remember_session: grace_session  |                                              |
+      | method: GET                      | code: 200                                    |+
+      | path: /users                     | body:                                        |
+      | query:                           |   data:                                      |
+      |   fields:                        |   - provider: mockopenid                     |
+      |     - provider                   |     external_identifier: grace-openid        |
+      |     - external_identifier        |     email: grace@sso.example.com             |
+      |     - email                      |     first_name: Amazing                      |
+      |     - first_name                 |     last_name: Grace                         |
+      |     - last_name                  |     roles:                                   |
+      |     - roles.role                 |     - role: >-                               |
+      |     - auth_data                  |         d70c0943-5b55-4c5d-a613-f539a27a57f5 |
+      |   filter[email][_eq]: >-         |     auth_data:                               |
+      |     grace@sso.example.com        |       refreshToken: grace-openid-refresh-4   |
+      | method: POST                     | code: 200                                    |+
+      | path: /auth/refresh              |                                              |
+      | payload:                         |                                              |
+      |   refresh_token: <grace_session> |                                              |
+      |   mode: json                     |                                              |
+      | method: GET                      | code: 200                                    |+
+      | path: /users                     | body:                                        |
+      | query:                           |   data:                                      |
+      |   fields:                        |   - auth_data:                               |
+      |     - auth_data                  |       refreshToken: grace-openid-refresh-5   |
+      |   filter[email][_eq]: >-         |                                              |
+      |     grace@sso.example.com        |                                              |
 
   Scenario: an OAuth2 user in two mapped groups gets the role mapped first
     Then these requests get these responses:
-      | request                      | response                                   |
-      | login: mockoauth             | code: 200                                  |+
-      | profile:                     |                                            |
-      |   sub: kay-oauth             |                                            |
-      |   email: kay@sso.example.com |                                            |
-      |   given_name: Kay            |                                            |
-      |   family_name: Antonelli     |                                            |
-      |   groups: [auditors, staff]  |                                            |
-      | method: GET                  | code: 200                                  |+
-      | path: /users                 | body:                                      |
-      | query:                       |   data:                                    |
-      |   fields:                    |   - role: >-                               |
-      |     - role                   |       5b3e8f0a-9c41-4d6e-8a2f-1c7d3e9b6a04 |
-      |   filter[email][_eq]: >-     |                                            |
-      |     kay@sso.example.com      |                                            |
-      | login: mockoauth             | code: 200                                  |+
-      | profile:                     |                                            |
-      |   sub: kay-oauth             |                                            |
-      |   email: kay@sso.example.com |                                            |
-      |   given_name: Kay            |                                            |
-      |   family_name: Antonelli     |                                            |
-      |   groups: [auditors]         |                                            |
-      | method: GET                  | code: 200                                  |+
-      | path: /users                 | body:                                      |
-      | query:                       |   data:                                    |
-      |   fields:                    |   - role: >-                               |
-      |     - role                   |       0c6f2a9d-3e18-4b57-9d40-7a1e5c8b2f63 |
-      |   filter[email][_eq]: >-     |                                            |
-      |     kay@sso.example.com      |                                            |
+      | request                      | response                                     |
+      | login: mockoauth             | code: 200                                    |+
+      | profile:                     |                                              |
+      |   sub: kay-oauth             |                                              |
+      |   email: kay@sso.example.com |                                              |
+      |   given_name: Kay            |                                              |
+      |   family_name: Antonelli     |                                              |
+      |   groups: [auditors, staff]  |                                              |
+      | method: GET                  | code: 200                                    |+
+      | path: /users                 | body:                                        |
+      | query:                       |   data:                                      |
+      |   fields:                    |   - roles:                                   |
+      |     - roles.role             |     - role: >-                               |
+      |   filter[email][_eq]: >-     |         5b3e8f0a-9c41-4d6e-8a2f-1c7d3e9b6a04 |
+      |     kay@sso.example.com      |                                              |
+      | login: mockoauth             | code: 200                                    |+
+      | profile:                     |                                              |
+      |   sub: kay-oauth             |                                              |
+      |   email: kay@sso.example.com |                                              |
+      |   given_name: Kay            |                                              |
+      |   family_name: Antonelli     |                                              |
+      |   groups: [auditors]         |                                              |
+      | method: GET                  | code: 200                                    |+
+      | path: /users                 | body:                                        |
+      | query:                       |   data:                                      |
+      |   fields:                    |   - roles:                                   |
+      |     - roles.role             |     - role: >-                               |
+      |   filter[email][_eq]: >-     |         0c6f2a9d-3e18-4b57-9d40-7a1e5c8b2f63 |
+      |     kay@sso.example.com      |                                              |
     And on postgres the requests ran these statements:
       | request | table                | select | insert | update | delete | with |
       | 1       | directus_access      | 2      | 0      | 0      | 0      | 0    |
@@ -187,35 +187,35 @@ Feature: A first SSO login creates the user, a later one updates it
 
   Scenario: an OpenID user's group maps their role, a later login changes it
     Then these requests get these responses:
-      | request                      | response                                   |
-      | login: mockopenid            | code: 200                                  |+
-      | profile:                     |                                            |
-      |   sub: lin-openid            |                                            |
-      |   email: lin@sso.example.com |                                            |
-      |   given_name: Lin            |                                            |
-      |   family_name: Hua           |                                            |
-      |   groups: [staff]            |                                            |
-      | method: GET                  | code: 200                                  |+
-      | path: /users                 | body:                                      |
-      | query:                       |   data:                                    |
-      |   fields:                    |   - role: >-                               |
-      |     - role                   |       5b3e8f0a-9c41-4d6e-8a2f-1c7d3e9b6a04 |
-      |   filter[email][_eq]: >-     |                                            |
-      |     lin@sso.example.com      |                                            |
-      | login: mockopenid            | code: 200                                  |+
-      | profile:                     |                                            |
-      |   sub: lin-openid            |                                            |
-      |   email: lin@sso.example.com |                                            |
-      |   given_name: Lin            |                                            |
-      |   family_name: Hua           |                                            |
-      |   groups: [auditors]         |                                            |
-      | method: GET                  | code: 200                                  |+
-      | path: /users                 | body:                                      |
-      | query:                       |   data:                                    |
-      |   fields:                    |   - role: >-                               |
-      |     - role                   |       0c6f2a9d-3e18-4b57-9d40-7a1e5c8b2f63 |
-      |   filter[email][_eq]: >-     |                                            |
-      |     lin@sso.example.com      |                                            |
+      | request                      | response                                     |
+      | login: mockopenid            | code: 200                                    |+
+      | profile:                     |                                              |
+      |   sub: lin-openid            |                                              |
+      |   email: lin@sso.example.com |                                              |
+      |   given_name: Lin            |                                              |
+      |   family_name: Hua           |                                              |
+      |   groups: [staff]            |                                              |
+      | method: GET                  | code: 200                                    |+
+      | path: /users                 | body:                                        |
+      | query:                       |   data:                                      |
+      |   fields:                    |   - roles:                                   |
+      |     - roles.role             |     - role: >-                               |
+      |   filter[email][_eq]: >-     |         5b3e8f0a-9c41-4d6e-8a2f-1c7d3e9b6a04 |
+      |     lin@sso.example.com      |                                              |
+      | login: mockopenid            | code: 200                                    |+
+      | profile:                     |                                              |
+      |   sub: lin-openid            |                                              |
+      |   email: lin@sso.example.com |                                              |
+      |   given_name: Lin            |                                              |
+      |   family_name: Hua           |                                              |
+      |   groups: [auditors]         |                                              |
+      | method: GET                  | code: 200                                    |+
+      | path: /users                 | body:                                        |
+      | query:                       |   data:                                      |
+      |   fields:                    |   - roles:                                   |
+      |     - roles.role             |     - role: >-                               |
+      |   filter[email][_eq]: >-     |         0c6f2a9d-3e18-4b57-9d40-7a1e5c8b2f63 |
+      |     lin@sso.example.com      |                                              |
     And on postgres the requests ran these statements:
       | request | table                | select | insert | update | delete | with |
       | 1       | directus_access      | 2      | 0      | 0      | 0      | 0    |

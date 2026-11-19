@@ -56,7 +56,8 @@ Feature: A role an extension writes in its own transaction flushes once it commi
       | payload:                                |           |
       |   id: <mover>                           |           |
       |   email: mover-<run>@example.com        |           |
-      |   role: <reader-role>                   |           |
+      |   roles:                                |           |
+      |     - role: <reader-role>               |           |
       |   token: mover-<run>                    |           |
     Then these requests get these responses:
       | request                                | response                        |

@@ -58,7 +58,8 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       | path: /users                              |           |
       | payload:                                  |           |
       |   email: child-<run>@example.com          |           |
-      |   role: <child-role>                      |           |
+      |   roles:                                  |           |
+      |     - role: <child-role>                  |           |
       |   token: child-<run>                      |           |
     Then these requests get these responses:
       | request                              | response                             |
@@ -120,20 +121,21 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       | payload:                         |           |
       |   id: <child-user>               |           |
       |   email: child-<run>@example.com |           |
-      |   role: <child-role>             |           |
+      |   roles:                         |           |
+      |     - role: <child-role>         |           |
       |   token: child-<run>             |           |
     Then these requests get these responses:
-      | request                    | response               |
-      | as: child-<run>            | code: 200              |+
-      | method: GET                | body:                  |
-      | path: /policies/me/globals |   data:                |
-      |                            |     app_access: true   |
-      |                            |     admin_access: true |
-      | as: child-<run>            | code: 200              |+
-      | method: GET                | body:                  |
-      | path: /users/<child-user>  |   data:                |
-      | query:                     |     role: <child-role> |
-      |   fields: role             |                        |
+      | request                    | response                   |
+      | as: child-<run>            | code: 200                  |+
+      | method: GET                | body:                      |
+      | path: /policies/me/globals |   data:                    |
+      |                            |     app_access: true       |
+      |                            |     admin_access: true     |
+      | as: child-<run>            | code: 200                  |+
+      | method: GET                | body:                      |
+      | path: /users/<child-user>  |   data:                    |
+      | query:                     |     roles:                 |
+      |   fields: roles.role       |       - role: <child-role> |
     And on postgres the requests ran these statements:
       | request | table             | select | insert | update | delete |
       | 1       | directus_access   | 3      | 0      | 0      | 0      |
@@ -206,7 +208,8 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       | path: /users                     |           |
       | payload:                         |           |
       |   email: blind-<run>@example.com |           |
-      |   role: <child-role>             |           |
+      |   roles:                         |           |
+      |     - role: <child-role>         |           |
       |   token: blind-<run>             |           |
     Then these requests get these responses:
       | request         | response                |
@@ -249,7 +252,8 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       | path: /users                       |           |
       | payload:                           |           |
       |   email: graphql-<run>@example.com |           |
-      |   role: <child-role>               |           |
+      |   roles:                           |           |
+      |     - role: <child-role>           |           |
       |   token: graphql-<run>             |           |
     Then these requests get these responses:
       | request                          | response                  |

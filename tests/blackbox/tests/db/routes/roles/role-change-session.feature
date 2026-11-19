@@ -56,7 +56,8 @@ Feature: A role change reaches a static token at once, a session at its next log
       |   id: <mover>                       |           |
       |   email: mover-<run>@example.com    |           |
       |   password: mover-password          |           |
-      |   role: <reader-role>               |           |
+      |   roles:                            |           |
+      |     - role: <reader-role>           |           |
       |   token: mover-<run>                |           |
       | method: POST                        | code: 200 |+
       | path: /auth/login                   |           |
@@ -75,7 +76,8 @@ Feature: A role change reaches a static token at once, a session at its next log
       | method: PATCH                    | code: 200                          |+
       | path: /users/<mover>             |                                    |
       | payload:                         |                                    |
-      |   role: <outsider-role>          |                                    |
+      |   roles:                         |                                    |
+      |     - role: <outsider-role>      |                                    |
       | as: mover-<run>                  | code: 403                          |+
       | method: GET                      | body:                              |
       | path: /items/role_change_notes   |   errors:                          |
@@ -190,7 +192,8 @@ Feature: A role change reaches a static token at once, a session at its next log
       |   id: <mover>                        |           |
       |   email: refresher-<run>@example.com |           |
       |   password: mover-password           |           |
-      |   role: <reader-role>                |           |
+      |   roles:                             |           |
+      |     - role: <reader-role>            |           |
       | method: POST                         | code: 200 |+
       | path: /auth/login                    |           |
       | payload:                             |           |
@@ -203,7 +206,8 @@ Feature: A role change reaches a static token at once, a session at its next log
       | method: PATCH                            | code: 200                          |+
       | path: /users/<mover>                     |                                    |
       | payload:                                 |                                    |
-      |   role: <outsider-role>                  |                                    |
+      |   roles:                                 |                                    |
+      |     - role: <outsider-role>              |                                    |
       | as: public                               | code: 200                          |+
       | method: POST                             |                                    |
       | path: /auth/refresh                      |                                    |

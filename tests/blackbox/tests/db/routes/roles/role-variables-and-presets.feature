@@ -97,7 +97,8 @@ Feature: A user's roles resolve the role variables and order the presets
       | path: /users                        |           |
       | payload:                            |           |
       |   email: preset-<run>@example.com   |           |
-      |   role: <child-role>                |           |
+      |   roles:                            |           |
+      |     - role: <child-role>            |           |
       |   token: preset-<run>               |           |
       |   policies:                         |           |
       |     - policy: <user-policy>         |           |
@@ -192,7 +193,8 @@ Feature: A user's roles resolve the role variables and order the presets
       | path: /users                          |           |
       | payload:                              |           |
       |   email: variable-<run>@example.com   |           |
-      |   role: <child-role>                  |           |
+      |   roles:                              |           |
+      |     - role: <child-role>              |           |
       |   token: variable-<run>               |           |
       | method: POST                          | code: 200 |+
       | path: /items/role_variable_notes      |           |
@@ -302,7 +304,8 @@ Feature: A user's roles resolve the role variables and order the presets
       | path: /users                   |           |
       | payload:                       |           |
       |   email: app-<run>@example.com |           |
-      |   role: <child-role>           |           |
+      |   roles:                       |           |
+      |     - role: <child-role>       |           |
       |   token: app-<run>             |           |
       | method: POST                   | code: 200 |+
       | path: /presets                 |           |

@@ -70,7 +70,8 @@ Feature: A share reads with its sender's role chain and its own
       | path: /users                       |           |
       | payload:                           |           |
       |   email: sharer-<run>@example.com  |           |
-      |   role: <child-role>               |           |
+      |   roles:                           |           |
+      |     - role: <child-role>           |           |
       |   token: sharer-<run>              |           |
     Then these requests get these responses:
       | request                              | response                           |
