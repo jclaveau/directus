@@ -93,9 +93,26 @@ Feature: The presets of several member roles apply parents first, then leaves
       | query:                                   |     visibility: external |
       |   fields: visibility                     |                          |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions  | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_roles        | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index              | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+      | 1       | role_order_notes      | 1      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | role_order_notes      | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: between two leaf roles the later sort wins, not the deeper chain
     Given the rows of directus_policies:
@@ -137,6 +154,23 @@ Feature: The presets of several member roles apply parents first, then leaves
       | query:                                     |     visibility: public |
       |   fields: visibility                       |                        |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions  | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_roles        | 4      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index              | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+      | 1       | role_order_notes      | 1      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | role_order_notes      | 1      | 0      | 0      | 0      | 0    |
