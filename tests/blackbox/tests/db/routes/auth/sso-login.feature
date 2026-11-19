@@ -13,7 +13,8 @@ Feature: A first SSO login creates the user, a later one updates it
     group "auditors" the role 0c6f2a9d-... (sso_auditors), anyone else the
     default role d70c0943-... A user in several mapped groups gets one role:
     the first the mapping lists. That row is `managed_by: auth:<provider>`,
-    and a later login replaces only that provider's rows.
+    and a later login replaces only that provider's rows. It goes after the
+    user's other roles: its `sort` is one past the user's highest.
   - Any other row is a request as the admin.
 
   Scenario: an OAuth2 login creates the user, a later one updates it
@@ -359,3 +360,38 @@ Feature: A first SSO login creates the user, a later one updates it
       | 4       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
       | 4       | pg_index              | 2      | 0      | 0      | 0      | 0    |
       | 4       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+
+  Scenario: a login puts its mapped role after the roles an admin gave
+    Then these requests get these responses:
+      | request                                    | response                   |
+      | method: POST                               | code: 200                  |+
+      | path: /users                               |                            |
+      | payload:                                   |                            |
+      |   provider: mockoauth                      |                            |
+      |   external_identifier: kim-oauth           |                            |
+      |   email: kim@sso.example.com               |                            |
+      |   roles:                                   |                            |
+      |   - role: >-                               |                            |
+      |       d70c0943-5b55-4c5d-a613-f539a27a57f5 |                            |
+      |     sort: 3                                |                            |
+      | login: mockoauth                           | code: 200                  |+
+      | profile:                                   |                            |
+      |   sub: kim-oauth                           |                            |
+      |   email: kim@sso.example.com               |                            |
+      |   groups: [staff]                          |                            |
+      | method: GET                                | code: 200                  |+
+      | path: /users                               | body:                      |
+      | query:                                     |   data:                    |
+      |   fields:                                  |   - roles:                 |
+      |     - roles.role.name                      |     - role:                |
+      |     - roles.sort                           |         name: >-           |
+      |   deep: >-                                 |           Tests Flow Role  |
+      |     {"roles":{"_sort":["sort"]}}           |       sort: 3              |
+      |   filter[email][_eq]: >-                   |     - role:                |
+      |     kim@sso.example.com                    |         name: sso_staff    |
+      |                                            |       sort: 4              |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | 3       | (none) | 0      | 0      | 0      | 0      |
