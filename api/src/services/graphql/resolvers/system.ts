@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { InvalidPayloadError } from '@directus/errors';
 import type { CollectionAccess, GraphQLParams } from '@directus/types';
 import { toBoolean } from '@directus/utils';
 import {
@@ -556,6 +557,13 @@ export function injectSystemResolvers(
 					invite_url: GraphQLString,
 				},
 				resolve: async (_, args) => {
+					// The REST invite schema refuses it the same way.
+					if (args['roles'].length === 0) {
+						throw new InvalidPayloadError({
+							reason: '"roles" must contain at least 1 items',
+						});
+					}
+
 					const service = new UsersService({
 						accountability: gql.accountability,
 						schema: gql.schema,

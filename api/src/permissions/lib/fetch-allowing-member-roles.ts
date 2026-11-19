@@ -253,5 +253,21 @@ async function fetchRowsMatching(
 		context,
 	);
 
+	const primaryKeyType = context.schema.collections[collection]!
+		.fields?.[primaryKeyField]?.type;
+
+	// Postgres reads a uuid back in lower case: name the row as the caller did.
+	if (primaryKeyType === 'uuid') {
+		const rowNameByUuid = new Map(primaryKeys.map((key) => {
+			return [String(key).toLowerCase(), String(key)];
+		}));
+
+		return matchedRows.map((matchedRow) => {
+			const matchedUuid = String(matchedRow[primaryKeyField]).toLowerCase();
+
+			return rowNameByUuid.get(matchedUuid) ?? matchedUuid;
+		});
+	}
+
 	return matchedRows.map((matchedRow) => String(matchedRow[primaryKeyField]));
 }

@@ -256,6 +256,7 @@ describe('system resolvers feed the request aggregate', () => {
 			null,
 		);
 	});
+
 	test('users_invite refuses an empty list of roles, as REST does', async () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),

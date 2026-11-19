@@ -90,8 +90,10 @@ const memberRoles = computed(() => {
 const memberRoleIds = computed(() => memberRoles.value.map((role) => role.id));
 
 if (props.role) {
+	// The m2m list reads only this shape: a plain array would be dropped
+	// as soon as another role is picked.
 	edits.value = {
-		roles: [{ role: props.role }],
+		roles: { create: [{ role: props.role }], update: [], delete: [] },
 		...edits.value,
 	};
 }

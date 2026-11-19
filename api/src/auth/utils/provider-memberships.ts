@@ -1,6 +1,7 @@
 import type { Item, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
 import { RoleMembersService } from '../../services/role-members.js';
+import { transaction } from '../../utils/transaction.js';
 
 function removedRoleError(eventName: string): Error {
 	return new Error(
@@ -86,8 +87,16 @@ export function providerMemberships(
 
 /**
  * Replace the memberships the provider granted, and only those: an invite's
- * (`invite:*`), another provider's, or one given by hand stays. A login
- * mapping the same roles again writes nothing, so it clears no cache.
+ * (`invite:*`), another provider's, or one given by hand stays. A row whose role
+ * is still mapped stays too, so a login mapping the same roles again, in any
+ * order, writes nothing and clears no cache.
+ *
+ * The new rows go in before the old ones go, in one transaction: a user moved
+ * from one admin role to another never holds zero roles in between, which the
+ * last-admin check would refuse, and a refused create leaves the old rows.
+ *
+ * The `role` guard of `withProviderRoles` is a non-enumerable property: a hook
+ * spreading the payload into a new object drops it with no error.
  */
 export async function syncProviderMemberships(
 	user: string,
@@ -100,23 +109,40 @@ export async function syncProviderMemberships(
 		.from('directus_role_members')
 		.where({ user, managed_by: providerManager(provider) });
 
-	const isUnchanged = managedRows.length === providerRoles.length
-		&& managedRows.every(({ role }, index) => role === providerRoles[index]);
+	const keptRoles = new Set<string>();
 
-	if (isUnchanged) {
+	const staleRowIds = managedRows.flatMap(({ id, role }) => {
+		if (providerRoles.includes(role) && !keptRoles.has(role)) {
+			keptRoles.add(role);
+
+			return [];
+		}
+
+		return [id];
+	});
+
+	const missingRoles = [...new Set(providerRoles)]
+		.filter((role) => !keptRoles.has(role));
+
+	if (staleRowIds.length === 0 && missingRoles.length === 0) {
 		return;
 	}
 
-	const roleMembersService = new RoleMembersService(context);
+	await transaction(context.knex, async (trx) => {
+		const roleMembersService = new RoleMembersService({
+			knex: trx,
+			schema: context.schema,
+		});
 
-	if (managedRows.length > 0) {
-		await roleMembersService.deleteMany(managedRows.map(({ id }) => id));
-	}
+		if (missingRoles.length > 0) {
+			await roleMembersService.createMany(
+				providerMemberships(provider, missingRoles, true)
+					.map((membership) => ({ ...membership, user })),
+			);
+		}
 
-	const createdMemberships = providerMemberships(provider, providerRoles, true)
-		.map((membership) => ({ ...membership, user }));
-
-	if (createdMemberships.length > 0) {
-		await roleMembersService.createMany(createdMemberships);
-	}
+		if (staleRowIds.length > 0) {
+			await roleMembersService.deleteMany(staleRowIds);
+		}
+	});
 }

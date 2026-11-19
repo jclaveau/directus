@@ -24,6 +24,9 @@ export async function up(knex: Knex): Promise<void> {
 
 		table.integer('sort');
 		table.string('managed_by', 255);
+
+		// Every request reads the roles of its user: Postgres indexes no FK.
+		table.index(['user']);
 	});
 
 	const usersWithRole: { id: string; role: string }[] = await knex
@@ -66,7 +69,7 @@ export async function down(knex: Knex): Promise<void> {
 	const severalRoleUsers = new Set<string>();
 
 	for (const { user, role } of memberships) {
-		if (roleByUser.has(user)) {
+		if (roleByUser.has(user) && roleByUser.get(user) !== role) {
 			severalRoleUsers.add(user);
 		}
 

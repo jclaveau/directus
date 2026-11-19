@@ -132,6 +132,8 @@ export class RolesService extends ItemsService {
 			await new RoleMembersService(options).deleteByQuery(
 				{
 					filter: { role: { _in: keys } },
+					// Past QUERY_LIMIT_DEFAULT the cascade would drop the rest unseen.
+					limit: -1,
 				},
 				{ ...holdingOpts, bypassLimits: true },
 			);

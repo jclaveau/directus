@@ -192,6 +192,11 @@ function useOnCreate() {
 				return options.filter(({ value }) => [null, 'user-created'].includes(value));
 			}
 
+			// No special stamps the roles of a user in one uuid any more.
+			if (localType.value === 'm2o' && relations.value.m2o?.related_collection === 'directus_roles') {
+				return options.filter(({ value }) => value === null);
+			}
+
 			return options;
 		} else if (['date', 'time', 'dateTime', 'timestamp'].includes(type.value!)) {
 			return [
@@ -274,6 +279,11 @@ function useOnUpdate() {
 
 			if (localType.value === 'm2o' && relations.value.m2o?.related_collection === 'directus_users') {
 				return options.filter(({ value }) => [null, 'user-updated'].includes(value));
+			}
+
+			// No special stamps the roles of a user in one uuid any more.
+			if (localType.value === 'm2o' && relations.value.m2o?.related_collection === 'directus_roles') {
+				return options.filter(({ value }) => value === null);
 			}
 
 			return options;
