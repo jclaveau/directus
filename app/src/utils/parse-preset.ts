@@ -11,12 +11,17 @@ export function parsePreset(preset: Record<string, any> | null): Record<string, 
 	// TODO make this work with new user
 	const accountability: Accountability = {
 		role: currentUser.role?.id ?? null,
+		memberRoles: currentUser.role
+			? [currentUser.role.id]
+			: [],
 		user: currentUser.id,
 	};
 
 	return (
 		parsePresetShared(preset, accountability, {
-			$CURRENT_ROLE: currentUser.role as Role,
+			$CURRENT_MEMBER_ROLES: currentUser.role
+				? [currentUser.role as Role]
+				: [],
 			$CURRENT_USER: currentUser as User,
 		}) ?? {}
 	);

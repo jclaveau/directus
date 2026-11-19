@@ -5,6 +5,13 @@ export type ShareScope = {
 
 export type Accountability = {
 	role: string | null;
+	/**
+	 * The roles the user is a member of, as stored, by sort: no ancestors.
+	 */
+	memberRoles: string[];
+	/**
+	 * The member roles and every ancestor of each.
+	 */
 	roles: string[];
 	user: string | null;
 	admin: boolean;

@@ -4,7 +4,7 @@ import { contextHasDynamicVariables } from './context-has-dynamic-variables.js';
 
 const context: DynamicVariableContext = {
 	$CURRENT_USER: new Set(),
-	$CURRENT_ROLE: new Set(),
+	$CURRENT_MEMBER_ROLES: new Set(),
 	$CURRENT_ROLES: new Set(),
 	$CURRENT_POLICIES: new Set(),
 };
@@ -18,6 +18,6 @@ test('Returns false if context is empty', () => {
 });
 
 test('Returns true if context contains value', () => {
-	context.$CURRENT_ROLE.add('id');
+	context.$CURRENT_MEMBER_ROLES.add('id');
 	expect(contextHasDynamicVariables(context)).toBe(true);
 });

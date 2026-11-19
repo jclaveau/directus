@@ -133,6 +133,9 @@ export class CommentsService extends ItemsService {
 				const accountability: Accountability = {
 					user: userID,
 					role: user['role']?.id ?? null,
+					memberRoles: user['role']?.id
+						? [user['role'].id]
+						: [],
 					admin: false,
 					app: false,
 					roles: await fetchRolesTree(user['role']?.id ?? null, this.knex),

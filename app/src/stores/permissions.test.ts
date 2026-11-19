@@ -54,7 +54,7 @@ describe('actions', () => {
 
 			const permissionWithDynamicVariablesInPresets = {
 				presets: {
-					field_a: '$CURRENT_ROLE.name',
+					field_a: '$CURRENT_MEMBER_ROLES.name',
 					field_b: '$CURRENT_USER.custom_user_field',
 				},
 			};

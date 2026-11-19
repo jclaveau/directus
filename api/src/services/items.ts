@@ -63,6 +63,9 @@ import { processAst } from '../permissions/modules/process-ast/process-ast.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
+import {
+	refuseRemovedRoleVariableInPayload,
+} from '../utils/refuse-removed-role-variable.js';
 import { resolveMutationBatching } from '../utils/resolve-mutation-batching.js';
 import {
 	flushResponseCacheAfterCommit,
@@ -496,6 +499,10 @@ implements AbstractService<Item> {
 
 		if (data.length === 0) {
 			return [];
+		}
+
+		for (const row of data) {
+			refuseRemovedRoleVariableInPayload(this.collection, row);
 		}
 
 		// a row written alone counts itself again
@@ -2319,6 +2326,10 @@ implements AbstractService<Item> {
 			throw new InvalidPayloadError({
 				reason: `Each update group needs a "data" object`,
 			});
+		}
+
+		for (const group of groups) {
+			refuseRemovedRoleVariableInPayload(this.collection, group.data);
 		}
 
 		// Answered like an empty batch or a query matching nothing: no row, no hook.

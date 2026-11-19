@@ -6,7 +6,10 @@ import { fetchPermissions } from '../../lib/fetch-permissions.js';
 
 export interface FetchAllowedCollectionsOptions {
 	action: PermissionsAction;
-	accountability: Pick<Accountability, 'user' | 'role' | 'roles' | 'ip' | 'admin' | 'app'>;
+	accountability: Pick<
+		Accountability,
+		'user' | 'role' | 'memberRoles' | 'roles' | 'ip' | 'admin' | 'app'
+	>;
 }
 
 export async function fetchAllowedCollections(

@@ -44,7 +44,7 @@
           - user:
               _null: true
           - role:
-              _eq: $CURRENT_ROLE
+              _in: $CURRENT_MEMBER_ROLES
       - _and:
           - user:
               _null: true

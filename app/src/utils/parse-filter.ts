@@ -11,13 +11,18 @@ export function parseFilter(filter: Filter | null): Filter {
 	// TODO should this work with policies app side? Is that a dynamic variable that we expose in other filters, that are not permissions?
 	const accountability: Accountability = {
 		role: currentUser.role?.id ?? null,
+		memberRoles: currentUser.role
+			? [currentUser.role.id]
+			: [],
 		roles: currentUser.roles.map((role) => role.id),
 		user: currentUser.id,
 	} as Accountability;
 
 	return (
 		parseFilterShared(filter, accountability, {
-			$CURRENT_ROLE: currentUser.role ?? undefined,
+			$CURRENT_MEMBER_ROLES: currentUser.role
+				? [currentUser.role]
+				: [],
 			$CURRENT_ROLES: currentUser.roles,
 			$CURRENT_USER: currentUser,
 		}) ?? {}

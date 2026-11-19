@@ -148,7 +148,7 @@ export const appRecommendedPermissions: Partial<Permission>[] = [
 				{
 					// TODO should this be _in $CURRENT_ROLES?
 					role: {
-						_eq: '$CURRENT_ROLE',
+						_in: '$CURRENT_MEMBER_ROLES',
 					},
 				},
 				{

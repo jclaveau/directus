@@ -53,7 +53,7 @@ export const ASSET_TRANSFORM_QUERY_KEYS = [
 	'focal_point_y',
 ] as const satisfies Readonly<(keyof TransformationParams)[]>;
 
-export const FILTER_VARIABLES = ['$NOW', '$CURRENT_USER', '$CURRENT_ROLE'];
+export const FILTER_VARIABLES = ['$NOW', '$CURRENT_USER', '$CURRENT_MEMBER_ROLES'];
 
 export const ALIAS_TYPES = ['alias', 'o2m', 'm2m', 'm2a', 'o2a', 'files', 'translations'];
 

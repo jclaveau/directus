@@ -7,7 +7,10 @@ import { fetchPermissions } from '../../lib/fetch-permissions.js';
 export type FieldMap = Record<string, string[]>;
 
 export interface FetchAllowedFieldMapOptions {
-	accountability: Pick<Accountability, 'user' | 'role' | 'roles' | 'ip' | 'admin' | 'app'>;
+	accountability: Pick<
+		Accountability,
+		'user' | 'role' | 'memberRoles' | 'roles' | 'ip' | 'admin' | 'app'
+	>;
 	action: PermissionsAction;
 }
 

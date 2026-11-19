@@ -32,7 +32,7 @@ describe('parse-filter', () => {
 			// Static field
 			user: { _eq: 'Kay' },
 			// Dynamic fields
-			role: { _in: ['$CURRENT_ROLE', '2'] },
+			role: { _in: ['$CURRENT_MEMBER_ROLES', '2'] },
 			roles: { _in: ['$CURRENT_ROLES'] },
 			orgName: { _eq: '$CURRENT_USER.org.name' },
 		};

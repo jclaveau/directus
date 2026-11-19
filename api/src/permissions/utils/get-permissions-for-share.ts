@@ -31,6 +31,9 @@ export async function getPermissionsForShare(
 	const userAccountability: Accountability = {
 		user: user_created.id,
 		role: user_created.role,
+		memberRoles: user_created.role
+			? [user_created.role]
+			: [],
 		roles: await fetchRolesTree(user_created.role, context.knex),
 		admin: false,
 		app: false,
@@ -41,6 +44,9 @@ export async function getPermissionsForShare(
 	const shareAccountability: Accountability = {
 		user: null,
 		role: role,
+		memberRoles: role
+			? [role]
+			: [],
 		roles: await fetchRolesTree(role, context.knex),
 		admin: false,
 		app: false,

@@ -10,7 +10,10 @@ export interface FetchPermissionsOptions {
 	action?: PermissionsAction;
 	policies: string[];
 	collections?: string[];
-	accountability?: Pick<Accountability, 'user' | 'role' | 'roles' | 'app' | 'share' | 'ip'>;
+	accountability?: Pick<
+		Accountability,
+		'user' | 'role' | 'memberRoles' | 'roles' | 'app' | 'share' | 'ip'
+	>;
 	bypassDynamicVariableProcessing?: boolean;
 }
 

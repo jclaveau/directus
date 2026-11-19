@@ -3,7 +3,7 @@ import { parseFilter, parsePreset } from '@directus/utils';
 
 export interface ProcessPermissionsOptions {
 	permissions: Permission[];
-	accountability: Pick<Accountability, 'user' | 'role' | 'roles'>;
+	accountability: Pick<Accountability, 'user' | 'role' | 'memberRoles' | 'roles'>;
 	permissionsContext: Record<string, any>;
 }
 

@@ -4,6 +4,7 @@ export function createDefaultAccountability(overrides?: Partial<Accountability>)
 	return {
 		role: null,
 		user: null,
+		memberRoles: [],
 		roles: [],
 		admin: false,
 		app: false,

@@ -19,7 +19,7 @@ test('Extracts dynamic variables context from permissions', () => {
 		},
 		{
 			validation: {
-				id: { _eq: '$CURRENT_ROLE.name' },
+				id: { _eq: '$CURRENT_MEMBER_ROLES.name' },
 			},
 		},
 		{
@@ -33,7 +33,7 @@ test('Extracts dynamic variables context from permissions', () => {
 
 	expect(res).toEqual({
 		$CURRENT_USER: new Set(['id']),
-		$CURRENT_ROLE: new Set(['name']),
+		$CURRENT_MEMBER_ROLES: new Set(['name']),
 		$CURRENT_ROLES: new Set(['description', 'id']),
 		$CURRENT_POLICIES: new Set(['foo']),
 	});
@@ -46,14 +46,14 @@ test('Extracts dynamic variables context arbitrary objects', () => {
 		},
 		other: [
 			{
-				other: '$CURRENT_ROLE.name',
+				other: '$CURRENT_MEMBER_ROLES.name',
 			},
 		],
 	});
 
 	expect(result).toEqual({
 		$CURRENT_USER: new Set(['test.hi']),
-		$CURRENT_ROLE: new Set(['name']),
+		$CURRENT_MEMBER_ROLES: new Set(['name']),
 		$CURRENT_ROLES: new Set(),
 		$CURRENT_POLICIES: new Set(),
 	});
