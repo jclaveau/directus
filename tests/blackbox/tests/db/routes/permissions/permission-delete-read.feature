@@ -50,7 +50,8 @@ Feature: A deleted permission refuses the next read at once
       | path: /users                      |           |
       | payload:                          |           |
       |   email: reader-<run>@example.com |           |
-      |   role: <reader-role>             |           |
+      |   roles:                          |           |
+      |     - role: <reader-role>         |           |
       |   token: reader-<run>             |           |
     Then these requests get these responses:
       | request                    | response                                    |
