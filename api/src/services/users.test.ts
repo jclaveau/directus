@@ -1306,7 +1306,8 @@ describe('Integration Tests', () => {
 
 				const writes: unknown[] = [];
 
-				vi.spyOn(UsersService.prototype, 'updateOne')
+				// clearAllMocks keeps a mocked implementation: later tests update users.
+				const updateUserSpy = vi.spyOn(UsersService.prototype, 'updateOne')
 					.mockImplementation(async function (this: UsersService, key, data) {
 						writes.push({
 							collection: this.collection,
@@ -1318,7 +1319,8 @@ describe('Integration Tests', () => {
 						return key;
 					});
 
-				vi.spyOn(RoleMembersService.prototype, 'updateMany')
+				const updateMembersSpy = vi
+					.spyOn(RoleMembersService.prototype, 'updateMany')
 					.mockImplementation(async function (
 						this: RoleMembersService,
 						keys,
@@ -1334,7 +1336,8 @@ describe('Integration Tests', () => {
 						return keys;
 					});
 
-				vi.spyOn(RoleMembersService.prototype, 'deleteMany')
+				const deleteMembersSpy = vi
+					.spyOn(RoleMembersService.prototype, 'deleteMany')
 					.mockImplementation(async function (this: RoleMembersService, keys) {
 						writes.push({
 							collection: this.collection,
@@ -1344,6 +1347,12 @@ describe('Integration Tests', () => {
 
 						return keys;
 					});
+
+				onTestFinished(() => {
+					updateUserSpy.mockRestore();
+					updateMembersSpy.mockRestore();
+					deleteMembersSpy.mockRestore();
+				});
 
 				await service.acceptInvite('invite-token', 'new-password');
 

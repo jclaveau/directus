@@ -1,10 +1,14 @@
 import { InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { UserIntegrityCheckFlag } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Keyv } from 'keyv';
 import { clearSystemCache } from '../cache.js';
+import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
+import { flushResponseCache } from '../scoped-cache/index.js';
 import { transaction } from '../utils/transaction.js';
 import { ItemsService } from './items.js';
 import { RoleMembersService } from './role-members.js';
@@ -21,6 +25,20 @@ vi.mock('../permissions/modules/validate-access/validate-access.js');
 vi.mock('../permissions/modules/process-payload/process-payload.js', () => {
 	return {
 		processPayload: vi.fn(async ({ payload }) => payload),
+	};
+});
+
+vi.mock('../permissions/cache.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../permissions/cache.js')>(),
+		clearCache: vi.fn(),
+	};
+});
+
+vi.mock('../scoped-cache/index.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../scoped-cache/index.js')>(),
+		flushResponseCache: vi.fn(),
 	};
 });
 
@@ -41,6 +59,8 @@ const schema = new SchemaBuilder()
 afterEach(() => {
 	vi.restoreAllMocks();
 	vi.mocked(clearSystemCache).mockClear();
+	vi.mocked(clearPermissionsCache).mockClear();
+	vi.mocked(flushResponseCache).mockClear();
 });
 
 describe('Services / RoleMembers', () => {
@@ -82,7 +102,7 @@ describe('Services / RoleMembers', () => {
 				},
 			);
 
-			expect(clearSystemCache).toHaveBeenCalledTimes(1);
+			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
 		});
 
 		it('requests the user limits check when none was requested', async () => {
@@ -99,7 +119,7 @@ describe('Services / RoleMembers', () => {
 				{ userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits },
 			);
 
-			expect(clearSystemCache).toHaveBeenCalledTimes(1);
+			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
 		});
 
 		it('clears the caches once the parent transaction has committed', async () => {
@@ -110,7 +130,7 @@ describe('Services / RoleMembers', () => {
 			const tracker = createTracker(database);
 			const transactionStates: string[][] = [];
 
-			vi.mocked(clearSystemCache).mockImplementationOnce(async () => {
+			vi.mocked(clearPermissionsCache).mockImplementationOnce(async () => {
 				transactionStates.push(
 					tracker.history.transactions.map((trx) => trx.state),
 				);
@@ -128,10 +148,14 @@ describe('Services / RoleMembers', () => {
 			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
 				.mockResolvedValue(['member-id-9']);
 
-			await expect(new RoleMembersService({
+			const service = new RoleMembersService({
 				knex: knex.default({ client: MockClient }),
 				schema,
-			}).createMany(
+			});
+
+			service.cache = { namespace: 'response' } as Keyv;
+
+			await expect(service.createMany(
 				[{ role: 'role-id-9', user: 'user-id-9' }],
 				{ createsNewUserMemberships: true },
 			)).resolves.toStrictEqual(['member-id-9']);
@@ -143,6 +167,32 @@ describe('Services / RoleMembers', () => {
 					userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits,
 				},
 			);
+
+			expect(clearSystemCache).not.toHaveBeenCalled();
+			expect(clearPermissionsCache).not.toHaveBeenCalled();
+			expect(flushResponseCache).not.toHaveBeenCalled();
+		});
+
+		it(oneLine`
+			clears the permissions and the response caches, not the schema, for
+			the memberships of an existing user
+		`, async () => {
+			vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['member-id-10']);
+
+			const service = new RoleMembersService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			});
+
+			service.cache = { namespace: 'response' } as Keyv;
+
+			await service.createOne({ role: 'role-id-10', user: 'user-id-10' });
+
+			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
+
+			expect(flushResponseCache)
+				.toHaveBeenCalledWith({ namespace: 'response' });
 
 			expect(clearSystemCache).not.toHaveBeenCalled();
 		});
@@ -174,7 +224,7 @@ describe('Services / RoleMembers', () => {
 				},
 			);
 
-			expect(clearSystemCache).toHaveBeenCalledTimes(1);
+			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
 		});
 
 		it('requests every integrity check when no callback is given', async () => {
@@ -190,6 +240,27 @@ describe('Services / RoleMembers', () => {
 				[{ data: { sort: 2 }, keys: ['member-id-6'] }],
 				{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
 			);
+		});
+
+		it('clears the permissions and response caches, not the schema', async () => {
+			vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue(['member-id-11']);
+
+			const service = new RoleMembersService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			});
+
+			service.cache = { namespace: 'response' } as Keyv;
+
+			await service.updateBatch([{ id: 'member-id-11', sort: 3 }]);
+
+			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
+
+			expect(flushResponseCache)
+				.toHaveBeenCalledWith({ namespace: 'response' });
+
+			expect(clearSystemCache).not.toHaveBeenCalled();
 		});
 	});
 
@@ -214,7 +285,7 @@ describe('Services / RoleMembers', () => {
 				userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
 			});
 
-			expect(clearSystemCache).toHaveBeenCalledTimes(1);
+			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
 		});
 
 		it('clears the caches of a delete made without options', async () => {
@@ -226,7 +297,28 @@ describe('Services / RoleMembers', () => {
 				schema,
 			}).deleteMany(['member-id-8']);
 
-			expect(clearSystemCache).toHaveBeenCalledTimes(1);
+			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
+		});
+
+		it('clears the permissions and response caches, not the schema', async () => {
+			vi.spyOn(ItemsService.prototype, 'deleteMany')
+				.mockResolvedValue(['member-id-12']);
+
+			const service = new RoleMembersService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			});
+
+			service.cache = { namespace: 'response' } as Keyv;
+
+			await service.deleteMany(['member-id-12']);
+
+			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
+
+			expect(flushResponseCache)
+				.toHaveBeenCalledWith({ namespace: 'response' });
+
+			expect(clearSystemCache).not.toHaveBeenCalled();
 		});
 	});
 

@@ -1150,6 +1150,9 @@ describe('Integration Tests', () => {
 					.spyOn(RoleMembersService.prototype, 'createMany')
 					.mockResolvedValue(['member-id-1']);
 
+				// The empty `delete` list still reads the memberships it names.
+				tracker.on.select('directus_role_members').response([]);
+
 				await new PayloadService('directus_users', { knex: db, schema })
 					.processO2M(
 						[{
@@ -1175,6 +1178,9 @@ describe('Integration Tests', () => {
 				const createMany = vi
 					.spyOn(RoleMembersService.prototype, 'createMany')
 					.mockResolvedValue(['member-id-2']);
+
+				// The empty `delete` list still reads the memberships it names.
+				tracker.on.select('directus_role_members').response([]);
 
 				await new PayloadService('directus_roles', { knex: db, schema })
 					.processO2M(
