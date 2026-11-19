@@ -31,10 +31,20 @@ data:
     one_collection: directus_users
 
   ### Users
-  - many_collection: directus_users
+  - many_collection: directus_role_members
+    many_field: user
+    one_collection: directus_users
+    one_field: roles
+    one_deselect_action: delete
+    junction_field: role
+    sort_field: sort
+
+  - many_collection: directus_role_members
     many_field: role
     one_collection: directus_roles
     one_field: users
+    one_deselect_action: delete
+    junction_field: user
 
   - many_collection: directus_users
     many_field: avatar

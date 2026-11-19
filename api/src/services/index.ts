@@ -24,6 +24,7 @@ export * from './policies.js';
 export * from './presets.js';
 export * from './relations.js';
 export * from './revisions.js';
+export * from './role-members.js';
 export * from './roles.js';
 export * from './schema.js';
 export * from './server.js';

@@ -81,7 +81,7 @@ router.search('/', validateBatch('read'), readHandler, respond);
 router.get(
 	'/me',
 	asyncHandler(async (req, res, next) => {
-		if (!req.accountability?.user && !req.accountability?.role)
+		if (!req.accountability?.user && !req.accountability?.memberRoles.length)
 			throw new ForbiddenError({
 				reason: `Can't access /me without being logged in`,
 			});

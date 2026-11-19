@@ -1,7 +1,7 @@
 import { InvalidCredentialsError } from '@directus/errors';
 import type { Accountability } from '@directus/types';
 import getDatabase from '../database/index.js';
-import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+import { fetchUserRoles } from '../permissions/lib/fetch-member-roles.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
 import { getSecret } from './get-secret.js';
@@ -33,13 +33,13 @@ export async function getAccountabilityForToken(
 
 			if (payload.id) accountability.user = payload.id;
 
-			accountability.role = payload.role;
+			const { memberRoles, roles } = await fetchUserRoles(
+				payload.id ?? null,
+				database,
+			);
 
-			accountability.memberRoles = payload.role
-				? [payload.role]
-				: [];
-
-			accountability.roles = await fetchRolesTree(payload.role, database);
+			accountability.memberRoles = memberRoles;
+			accountability.roles = roles;
 
 			const { admin, app, grantedDbConnections } = await fetchGlobalAccess(
 				accountability,
@@ -51,7 +51,7 @@ export async function getAccountabilityForToken(
 			accountability.grantedDbConnections = grantedDbConnections;
 		} else {
 			const user = await database
-				.select('directus_users.id', 'directus_users.role')
+				.select('directus_users.id')
 				.from('directus_users')
 				.where({
 					'directus_users.token': token,
@@ -64,13 +64,11 @@ export async function getAccountabilityForToken(
 			}
 
 			accountability.user = user.id;
-			accountability.role = user.role;
 
-			accountability.memberRoles = user.role
-				? [user.role]
-				: [];
+			const { memberRoles, roles } = await fetchUserRoles(user.id, database);
 
-			accountability.roles = await fetchRolesTree(user.role, database);
+			accountability.memberRoles = memberRoles;
+			accountability.roles = roles;
 
 			const { admin, app, grantedDbConnections } = await fetchGlobalAccess(
 				accountability,

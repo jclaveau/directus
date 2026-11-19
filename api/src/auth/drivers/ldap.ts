@@ -26,6 +26,11 @@ import type { AuthDriverOptions, AuthenticationMode, User } from '../../types/in
 import asyncHandler from '../../utils/async-handler.js';
 import { getIPFromReq } from '../../utils/get-ip-from-req.js';
 import { AuthDriver } from '../auth.js';
+import {
+	providerMemberships,
+	syncProviderMemberships,
+	takeProviderRole,
+} from '../utils/provider-memberships.js';
 
 interface UserInfo {
 	dn: string;
@@ -315,8 +320,21 @@ export class LDAPAuthDriver extends AuthDriver {
 				{ database: getDatabase(), schema: this.schema, accountability: null },
 			);
 
+			const { userPayload: updatedUser, providerRole } = takeProviderRole(
+				updatedUserPayload,
+			);
+
 			// Update user to update properties that might have changed
-			await this.usersService.updateOne(userId, updatedUserPayload);
+			await this.usersService.updateOne(userId, updatedUser);
+
+			if (providerRole !== undefined) {
+				await syncProviderMemberships(
+					userId,
+					this.config['provider'],
+					providerRole ?? null,
+					{ knex: this.knex, schema: this.schema },
+				);
+			}
 
 			return userId;
 		}
@@ -343,8 +361,15 @@ export class LDAPAuthDriver extends AuthDriver {
 			{ database: getDatabase(), schema: this.schema, accountability: null },
 		);
 
+		const { userPayload: createdUser, providerRole } = takeProviderRole(
+			updatedUserPayload,
+		);
+
 		try {
-			await this.usersService.createOne(updatedUserPayload);
+			await this.usersService.createOne({
+				...createdUser,
+				roles: providerMemberships(this.config['provider'], providerRole),
+			});
 		} catch (e) {
 			if (isDirectusError(e, ErrorCode.RecordNotUnique)) {
 				logger.warn(e, '[LDAP] Failed to register user. User not unique');

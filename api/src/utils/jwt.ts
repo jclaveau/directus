@@ -25,7 +25,7 @@ export function verifyJWT(token: string, secret: string) {
 export function verifyAccessJWT(token: string, secret: string) {
 	const payload = verifyJWT(token, secret) as DirectusTokenPayload;
 
-	if (payload.role === undefined || payload.app_access === undefined || payload.admin_access === undefined) {
+	if (payload.app_access === undefined || payload.admin_access === undefined) {
 		throw new InvalidTokenError();
 	}
 

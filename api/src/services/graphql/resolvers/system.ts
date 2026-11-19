@@ -377,7 +377,12 @@ export function injectSystemResolvers(
 					serialize: (value) => value,
 				}),
 				resolve: async (_, _args, __, _info) => {
-					if (!gql.accountability?.user && !gql.accountability?.role) return null;
+					if (
+						!gql.accountability?.user
+						&& !gql.accountability?.memberRoles.length
+					) {
+						return null;
+					}
 
 					const result = await fetchAccountabilityCollectionAccess(gql.accountability, {
 						schema: gql.schema,
@@ -395,7 +400,12 @@ export function injectSystemResolvers(
 			roles_me: {
 				type: ReadCollectionTypes['directus_roles']!.List,
 				resolve: async (_, args, __, info) => {
-					if (!gql.accountability?.user && !gql.accountability?.role) return null;
+					if (
+						!gql.accountability?.user
+						&& !gql.accountability?.memberRoles.length
+					) {
+						return null;
+					}
 
 					const service = new RolesService({
 						accountability: gql.accountability,
@@ -435,7 +445,12 @@ export function injectSystemResolvers(
 					},
 				}),
 				resolve: async (_, _args, __, _info) => {
-					if (!gql.accountability?.user && !gql.accountability?.role) return null;
+					if (
+						!gql.accountability?.user
+						&& !gql.accountability?.memberRoles.length
+					) {
+						return null;
+					}
 
 					const result = await fetchAccountabilityPolicyGlobals(gql.accountability, {
 						schema: gql.schema,
@@ -535,7 +550,9 @@ export function injectSystemResolvers(
 				type: GraphQLBoolean,
 				args: {
 					email: new GraphQLNonNull(GraphQLString),
-					role: new GraphQLNonNull(GraphQLString),
+					roles: new GraphQLNonNull(
+						new GraphQLList(new GraphQLNonNull(GraphQLString)),
+					),
 					invite_url: GraphQLString,
 				},
 				resolve: async (_, args) => {
@@ -544,7 +561,12 @@ export function injectSystemResolvers(
 						schema: gql.schema,
 					});
 
-					await service.inviteUser(args['email'], args['role'], args['invite_url'] || null);
+					await service.inviteUser(
+						args['email'],
+						args['roles'],
+						args['invite_url'] || null,
+					);
+
 					return true;
 				},
 			},

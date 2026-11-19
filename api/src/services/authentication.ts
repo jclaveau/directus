@@ -18,7 +18,7 @@ import emitter from '../emitter.js';
 import {
 	createScopedCacheExtensionHandle,
 } from '../extensions/lib/scoped-cache-handle.js';
-import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+import { fetchUserRoles } from '../permissions/lib/fetch-member-roles.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { RateLimiterRes, createRateLimiter } from '../rate-limiter.js';
 import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
@@ -102,7 +102,18 @@ export class AuthenticationService {
 		const user = await this.knex
 			.select<
 				User & { tfa_secret: string | null }
-			>('id', 'first_name', 'last_name', 'email', 'password', 'status', 'role', 'tfa_secret', 'provider', 'external_identifier', 'auth_data')
+			>(
+				'id',
+				'first_name',
+				'last_name',
+				'email',
+				'password',
+				'status',
+				'tfa_secret',
+				'provider',
+				'external_identifier',
+				'auth_data',
+			)
 			.from('directus_users')
 			.where('id', userId)
 			.first();
@@ -211,7 +222,7 @@ export class AuthenticationService {
 			}
 		}
 
-		const roles = await fetchRolesTree(user.role, this.knex);
+		const { roles } = await fetchUserRoles(user.id, this.knex);
 
 		const globalAccess = await fetchGlobalAccess(
 			{ roles, user: user.id, ip: this.accountability?.ip ?? null },
@@ -220,7 +231,6 @@ export class AuthenticationService {
 
 		const tokenPayload: DirectusTokenPayload = {
 			id: user.id,
-			role: user.role,
 			app_access: globalAccess.app,
 			admin_access: globalAccess.admin,
 		};
@@ -318,7 +328,6 @@ export class AuthenticationService {
 				user_provider: 'u.provider',
 				user_external_identifier: 'u.external_identifier',
 				user_auth_data: 'u.auth_data',
-				user_role: 'u.role',
 				share_id: 'd.id',
 				share_start: 'd.date_start',
 				share_end: 'd.date_end',
@@ -352,7 +361,7 @@ export class AuthenticationService {
 			}
 		}
 
-		const roles = await fetchRolesTree(record.user_role, this.knex);
+		const { roles } = await fetchUserRoles(record.user_id, this.knex);
 
 		const globalAccess = await fetchGlobalAccess(
 			{ user: record.user_id, roles, ip: this.accountability?.ip ?? null },
@@ -372,7 +381,6 @@ export class AuthenticationService {
 				provider: record.user_provider,
 				external_identifier: record.user_external_identifier,
 				auth_data: record.user_auth_data,
-				role: record.user_role,
 				app_access: globalAccess.app,
 				admin_access: globalAccess.admin,
 			});
@@ -384,7 +392,6 @@ export class AuthenticationService {
 
 		const tokenPayload: DirectusTokenPayload = {
 			id: record.user_id,
-			role: record.user_role,
 			app_access: globalAccess.app,
 			admin_access: globalAccess.admin,
 		};
@@ -404,7 +411,6 @@ export class AuthenticationService {
 
 		if (record.share_id) {
 			tokenPayload.share = record.share_id;
-			tokenPayload.role = null;
 
 			tokenPayload.app_access = false;
 			tokenPayload.admin_access = false;
@@ -518,7 +524,17 @@ export class AuthenticationService {
 		const record = await this.knex
 			.select<
 				User & Session
-			>('u.id', 'u.first_name', 'u.last_name', 'u.email', 'u.password', 'u.status', 'u.role', 'u.provider', 'u.external_identifier', 'u.auth_data')
+			>(
+				'u.id',
+				'u.first_name',
+				'u.last_name',
+				'u.email',
+				'u.password',
+				'u.status',
+				'u.provider',
+				'u.external_identifier',
+				'u.auth_data',
+			)
 			.from('directus_sessions as s')
 			.innerJoin('directus_users as u', 's.user', 'u.id')
 			.where('s.token', refreshToken)
@@ -543,7 +559,6 @@ export class AuthenticationService {
 				'email',
 				'password',
 				'status',
-				'role',
 				'provider',
 				'external_identifier',
 				'auth_data',

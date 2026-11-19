@@ -17,6 +17,12 @@ data:
     display_template: '{{ policy.name }}'
     sort_field: sort
 
+  - collection: directus_role_members
+    icon: group
+    note: $t:directus_collection.directus_role_members
+    display_template: '{{ role.name }}'
+    sort_field: sort
+
   - collection: directus_activity
     note: $t:directus_collection.directus_activity
     accountability: null

@@ -7,7 +7,7 @@ import type {
 import type { Knex } from 'knex';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
-import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+import { fetchUserRoles } from '../permissions/lib/fetch-member-roles.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { md } from '../utils/md.js';
 import { queueAfterCommit } from '../utils/transaction.js';
@@ -31,7 +31,7 @@ export class NotificationsService extends ItemsService<Notification> {
 			// A recipient sent as an M2O object (`{ id }`) reaches here as sent
 			const user = await usersService.readOne(
 				(data.recipient as any).id ?? data.recipient,
-				{ fields: ['id', 'email', 'email_notifications', 'role'] },
+				{ fields: ['id', 'email', 'email_notifications'] },
 			);
 
 			if (user['email'] && user['email_notifications'] === true) {
@@ -40,7 +40,7 @@ export class NotificationsService extends ItemsService<Notification> {
 					.toString();
 
 				const html = data.message ? md(data.message) : '';
-				const roles = await fetchRolesTree(user['role'], this.knex);
+				const { roles } = await fetchUserRoles(user['id'], this.knex);
 
 				const { app: app_access } = await fetchGlobalAccess(
 					{

@@ -22,6 +22,10 @@ import asyncHandler from '../../utils/async-handler.js';
 import { getConfigFromEnv } from '../../utils/get-config-from-env.js';
 import { LocalAuthDriver } from './local.js';
 import { isLoginRedirectAllowed } from '../../utils/is-login-redirect-allowed.js';
+import {
+	providerMemberships,
+	takeProviderRole,
+} from '../utils/provider-memberships.js';
 
 // Register the samlify schema validator
 samlify.setSchemaValidator(validator);
@@ -95,8 +99,15 @@ export class SAMLAuthDriver extends LocalAuthDriver {
 			{ database: getDatabase(), schema: this.schema, accountability: null },
 		);
 
+		const { userPayload: createdUser, providerRole } = takeProviderRole(
+			updatedUserPayload,
+		);
+
 		try {
-			return await this.usersService.createOne(updatedUserPayload);
+			return await this.usersService.createOne({
+				...createdUser,
+				roles: providerMemberships(provider, providerRole),
+			});
 		} catch (error) {
 			if (isDirectusError(error, ErrorCode.RecordNotUnique)) {
 				logger.warn(error, '[SAML] Failed to register user. User not unique');

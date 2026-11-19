@@ -2,7 +2,6 @@ import type { Accountability } from '@directus/types';
 
 export function createDefaultAccountability(overrides?: Partial<Accountability>): Accountability {
 	return {
-		role: null,
 		user: null,
 		memberRoles: [],
 		roles: [],

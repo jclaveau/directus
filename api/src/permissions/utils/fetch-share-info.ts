@@ -8,7 +8,6 @@ export interface ShareInfo {
 	role: string | null;
 	user_created: {
 		id: string;
-		role: string;
 	};
 }
 
@@ -19,6 +18,6 @@ export async function _fetchShareInfo(shareId: string, context: AbstractServiceO
 	const sharesService = new SharesService(context);
 
 	return withoutMeta(await sharesService.readOne(shareId, {
-		fields: ['collection', 'item', 'role', 'user_created.id', 'user_created.role'],
+		fields: ['collection', 'item', 'role', 'user_created.id'],
 	})) as ShareInfo;
 }

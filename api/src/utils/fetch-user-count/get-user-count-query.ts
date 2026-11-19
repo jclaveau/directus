@@ -7,6 +7,18 @@ export interface GetUserCountOptions {
 	includeRoles?: PrimaryKey[];
 }
 
+/** A user counts once, whatever number of the roles it is a member of. */
+function membershipQuery(knex: Knex, roleKeys: PrimaryKey[]) {
+	return knex
+		.select(knex.raw('1'))
+		.from('directus_role_members')
+		.whereRaw('?? = ??', [
+			'directus_role_members.user',
+			'directus_users.id',
+		])
+		.whereIn('directus_role_members.role', roleKeys);
+}
+
 export function getUserCountQuery(knex: Knex, options: GetUserCountOptions) {
 	// Safety check for an empty list of includeRoles, which would otherwise return all users
 	if (options.includeRoles && options.includeRoles.length === 0) {
@@ -20,11 +32,13 @@ export function getUserCountQuery(knex: Knex, options: GetUserCountOptions) {
 	}
 
 	if (options.excludeRoles && options.excludeRoles.length > 0) {
-		query = query.whereNotIn('role', options.excludeRoles);
+		query = query.whereNotExists(
+			membershipQuery(knex, options.excludeRoles),
+		);
 	}
 
 	if (options.includeRoles && options.includeRoles.length > 0) {
-		query = query.whereIn('role', options.includeRoles);
+		query = query.whereExists(membershipQuery(knex, options.includeRoles));
 	}
 
 	return query.first();

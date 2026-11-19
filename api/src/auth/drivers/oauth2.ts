@@ -35,6 +35,11 @@ import { isLoginRedirectAllowed } from '../../utils/is-login-redirect-allowed.js
 import { verifyJWT } from '../../utils/jwt.js';
 import { Url } from '../../utils/url.js';
 import { LocalAuthDriver } from './local.js';
+import {
+	providerMemberships,
+	syncProviderMemberships,
+	takeProviderRole,
+} from '../utils/provider-memberships.js';
 
 export class OAuth2AuthDriver extends LocalAuthDriver {
 	client: Client;
@@ -249,9 +254,20 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 				{ database: getDatabase(), schema: this.schema, accountability: null },
 			);
 
+			const { userPayload: updatedUser, providerRole } = takeProviderRole(
+				updatedUserPayload,
+			);
+
 			// Update user to update refresh_token and other properties that might have changed
-			if (Object.values(updatedUserPayload).some((value) => value !== undefined)) {
-				await this.usersService.updateOne(userId, updatedUserPayload);
+			if (Object.values(updatedUser).some((value) => value !== undefined)) {
+				await this.usersService.updateOne(userId, updatedUser);
+			}
+
+			if (providerRole !== undefined) {
+				await syncProviderMemberships(userId, provider, providerRole ?? null, {
+					knex: this.knex,
+					schema: this.schema,
+				});
 			}
 
 			return userId;
@@ -276,8 +292,15 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			{ database: getDatabase(), schema: this.schema, accountability: null },
 		);
 
+		const { userPayload: createdUser, providerRole } = takeProviderRole(
+			updatedUserPayload,
+		);
+
 		try {
-			await this.usersService.createOne(updatedUserPayload);
+			await this.usersService.createOne({
+				...createdUser,
+				roles: providerMemberships(provider, providerRole),
+			});
 		} catch (e) {
 			if (isDirectusError(e, ErrorCode.RecordNotUnique)) {
 				logger.warn(e, '[OAuth2] Failed to register user. User not unique');

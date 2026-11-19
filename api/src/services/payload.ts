@@ -147,14 +147,7 @@ export class PayloadService {
 			if (action === 'update') return accountability?.user || null;
 			return value;
 		},
-		async 'role-created'({ action, value, accountability }) {
-			if (action === 'create') return accountability?.role || null;
-			return value;
-		},
-		async 'role-updated'({ action, value, accountability }) {
-			if (action === 'update') return accountability?.role || null;
-			return value;
-		},
+		// TODO(#746 D9): `roles-created` / `roles-updated` replace these two.
 		async 'date-created'({ action, value, helpers }) {
 			if (action === 'create') return new Date(helpers.date.writeTimestamp(new Date().toISOString()));
 			return value;

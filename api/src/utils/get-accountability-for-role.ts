@@ -36,7 +36,6 @@ export async function getAccountabilityForRole(
 		);
 
 		generatedAccountability = createDefaultAccountability({
-			role,
 			memberRoles: [role],
 			roles,
 			user: null,

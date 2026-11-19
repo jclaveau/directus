@@ -37,6 +37,25 @@ import { SettingsService } from './settings.js';
 const env = useEnv();
 const logger = useLogger();
 
+/** D1 of #746: no sugar replacing every membership by one role. */
+class SingleRoleFieldError extends InvalidPayloadError {
+	constructor() {
+		super({
+			reason: '"role" is replaced by the memberships in "roles":'
+				+ ' send "roles": [{ "role": <role id> }]',
+		});
+	}
+}
+
+class InviterMissingError extends InvalidPayloadError {
+	constructor() {
+		super({
+			reason: 'An invitation is managed by its inviter,'
+				+ ' and this request names no user',
+		});
+	}
+}
+
 // Bounds the bind parameters of one update and the rows one cache snapshot holds.
 const UNLINK_CHUNK_SIZE = 10_000;
 
@@ -146,9 +165,11 @@ export class UsersService extends ItemsService {
 	 */
 	private async getUserByEmail(
 		email: string,
-	): Promise<{ id: string; role: string; status: string; password: string; email: string } | undefined> {
+	): Promise<
+		{ id: string; status: string; password: string; email: string } | undefined
+	> {
 		return this.knex
-			.select('id', 'role', 'status', 'password', 'email')
+			.select('id', 'status', 'password', 'email')
 			.from('directus_users')
 			.whereRaw(`LOWER(??) = ?`, ['email', email.toLowerCase()])
 			.first();
@@ -206,6 +227,10 @@ export class UsersService extends ItemsService {
 		const someActive = data.some((payload) => !('status' in payload) || payload['status'] === 'active');
 
 		try {
+			if (data.some((payload) => 'role' in payload)) {
+				throw new SingleRoleFieldError();
+			}
+
 			if (emails.length) {
 				this.validateEmail(emails);
 				await this.checkUniqueEmails(emails);
@@ -259,6 +284,10 @@ export class UsersService extends ItemsService {
 
 		for (const { data, keys } of groups) {
 			try {
+				if ('role' in data) {
+					throw new SingleRoleFieldError();
+				}
+
 				if (data['email']) {
 					const lowerEmail = String(data['email']).toLowerCase();
 
@@ -326,7 +355,7 @@ export class UsersService extends ItemsService {
 		let integrityCheckFlags = UserIntegrityCheckFlag.None;
 
 		for (const { data } of groups) {
-			if ('role' in data) {
+			if ('roles' in data) {
 				integrityCheckFlags |= UserIntegrityCheckFlag.All;
 			}
 
@@ -357,8 +386,8 @@ export class UsersService extends ItemsService {
 			}
 		}
 
-		// Only clear the caches if the role has been updated
-		if (groups.some(({ data }) => 'role' in data)) {
+		// Only clear the caches if the memberships have been updated
+		if (groups.some(({ data }) => 'roles' in data)) {
 			await this.clearCaches(opts);
 		}
 	}
@@ -450,16 +479,36 @@ export class UsersService extends ItemsService {
 		return keys;
 	}
 
-	async inviteUser(email: string | string[], role: string, url: string | null, subject?: string | null): Promise<void> {
+	/**
+	 * The memberships an invite grants are its inviter's: `managed_by` is
+	 * `invite:<inviter id>`. A re-invite by the same inviter replaces them,
+	 * one by another inviter adds its own (D8 of #746).
+	 */
+	async inviteUser(
+		email: string | string[],
+		roles: string[],
+		url: string | null,
+		subject?: string | null,
+	): Promise<void> {
 		const opts: MutationOptions = {};
 
 		try {
 			if (url && isUrlAllowed(url, env['USER_INVITE_URL_ALLOW_LIST'] as string) === false) {
 				throw new InvalidPayloadError({ reason: `URL "${url}" can't be used to invite users` });
 			}
+
+			if (!this.accountability?.user) {
+				throw new InviterMissingError();
+			}
 		} catch (err: any) {
 			opts.preMutationError = err;
 		}
+
+		const inviteManager = `invite:${this.accountability?.user}`;
+
+		const invitedMemberships = roles.map((role) => {
+			return { role, managed_by: inviteManager };
+		});
 
 		const emails = toArray(email);
 
@@ -474,11 +523,28 @@ export class UsersService extends ItemsService {
 
 			// Create user first to verify uniqueness if unknown
 			if (isEmpty(user)) {
-				await this.createOne({ email, role, status: 'invited' }, opts);
+				await this.createOne(
+					{ email, roles: invitedMemberships, status: 'invited' },
+					opts,
+				);
+			}
+			else if (user.status === 'invited') {
+				const inviterMemberships: { id: string }[] = await this.knex
+					.select('id')
+					.from('directus_role_members')
+					.where({ user: user.id, managed_by: inviteManager });
 
-				// For known users update role if changed
-			} else if (user.status === 'invited' && user.role !== role) {
-				await this.updateOne(user.id, { role }, opts);
+				await this.updateOne(
+					user.id,
+					{
+						roles: {
+							create: invitedMemberships,
+							update: [],
+							delete: inviterMemberships.map(({ id }) => id),
+						},
+					},
+					opts,
+				);
 			}
 			else if (opts.preMutationError) {
 				throw opts.preMutationError;
@@ -569,11 +635,13 @@ export class UsersService extends ItemsService {
 		const first_name = input.first_name ?? null;
 		const last_name = input.last_name ?? null;
 
-		const partialUser: Partial<User> = {
+		const partialUser: Item = {
 			// Required fields
 			email: input.email,
 			password: input.password,
-			role: publicRegistrationRole,
+			roles: publicRegistrationRole
+				? [{ role: publicRegistrationRole }]
+				: [],
 			status: hasEmailVerification ? 'unverified' : 'active',
 			// Optional fields
 			first_name,

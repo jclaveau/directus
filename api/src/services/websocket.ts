@@ -36,7 +36,15 @@ export class WebSocketService {
 	broadcast(message: string | WebSocketMessage, filter?: { user?: string; role?: string }) {
 		this.controller.clients.forEach((client: WebSocketClient) => {
 			if (filter && filter.user && filter.user !== client.accountability?.user) return;
-			if (filter && filter.role && filter.role !== client.accountability?.role) return;
+
+			if (
+				filter
+				&& filter.role
+				&& !client.accountability?.memberRoles.includes(filter.role)
+			) {
+				return;
+			}
+
 			client.send(typeof message === 'string' ? message : JSON.stringify(message));
 		});
 	}

@@ -192,7 +192,6 @@ interface ReplayPlan {
 
 interface ReplayUser {
 	id: string;
-	role: string | null;
 }
 
 type Verdict =
@@ -733,7 +732,7 @@ class CacheAudit {
 		if (lookup === undefined) {
 			lookup = getDatabase()('directus_users')
 				.where({ id: userId })
-				.first('id', 'role')
+				.first('id')
 				.then((row: ReplayUser | undefined) => row ?? null);
 
 			this.users.set(userId, lookup);
@@ -749,7 +748,7 @@ class CacheAudit {
 		// `getAccountabilityForToken` recomputes both from the database, which is
 		// the point — the replay runs as the user is today, not as it was.
 		const token = jwt.sign(
-			{ id: user.id, role: user.role, app_access: false, admin_access: false },
+			{ id: user.id, app_access: false, admin_access: false },
 			getSecret(),
 			{ expiresIn: REPLAY_TOKEN_TTL, issuer: 'directus' },
 		);

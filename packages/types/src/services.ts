@@ -427,7 +427,12 @@ interface TFAService {
  * The UsersService
  */
 interface UsersService {
-	inviteUser(email: string | string[], role: string, url: string | null, subject?: string | null): Promise<void>;
+	inviteUser(
+		email: string | string[],
+		roles: string[],
+		url: string | null,
+		subject?: string | null,
+	): Promise<void>;
 	acceptInvite(token: string, password: string): Promise<void>;
 	registerUser(input: RegisterUserInput): Promise<void>;
 	verifyRegistration(token: string): Promise<string>;

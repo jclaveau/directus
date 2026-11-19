@@ -185,16 +185,18 @@ fields:
           value: archived
     width: half
 
-  - field: role
-    interface: select-dropdown-m2o
+  - field: roles
+    interface: list-m2m
     options:
-      template: '{{ name }}'
-    special:
-      - m2o
-    width: half
+      layout: list
+      managedByField: managed_by
+      template: '{{ role.name }}'
     display: related-values
     display_options:
-      template: '{{ name }}'
+      template: '{{ role.name }}'
+    special:
+      - m2m
+    width: full
 
   - field: policies
     interface: list-m2m
