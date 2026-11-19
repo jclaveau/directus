@@ -77,6 +77,9 @@ Feature: The role stamps list the member roles that allowed the write
       | path: /items/stamp_inherited_notes |   data:                |
       | payload:                           |     created_roles:     |
       |   label: first                     |       - <editors-role> |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
 
   Scenario: a policy given to the user directly counts as no role
     Given these requests are sent:
@@ -133,6 +136,9 @@ Feature: The role stamps list the member roles that allowed the write
       | path: /items/stamp_direct_notes |   data:               |
       | payload:                        |     created_roles: [] |
       |   label: first                  |                       |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
 
   Scenario: an update counts only the roles whose rule matches the row
     Given these requests are sent:
@@ -234,6 +240,10 @@ Feature: The role stamps list the member roles that allowed the write
       | payload:                                           |     updated_roles:       |
       |   label: edited                                    |       - <editors-role>   |
       |                                                    |       - <reviewers-role> |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
 
   Scenario: an update stamps each row with the roles whose rule matches it
     Given these requests are sent:
@@ -346,6 +356,10 @@ Feature: The role stamps list the member roles that allowed the write
       |                                      |       status: review       |
       |                                      |       updated_roles:       |
       |                                      |         - <reviewers-role> |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
 
   Scenario: an update counts only the roles allowed to set a written field
     Given these requests are sent:
@@ -436,6 +450,10 @@ Feature: The role stamps list the member roles that allowed the write
       | path: /items/stamp_field_notes/<field-note> |   data:                  |
       | payload:                                    |     updated_roles:       |
       |   label: relabelled                         |       - <editors-role>   |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
 
   Scenario: an admin records the member roles giving it admin access
     Given these requests are sent:
@@ -463,6 +481,9 @@ Feature: The role stamps list the member roles that allowed the write
       | path: /items/stamp_admin_notes |   data:                                      |
       | payload:                       |     created_roles:                           |
       |   label: first                 |       - d70c0943-5b55-4c5d-a613-f539a27a57f5 |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
 
   Scenario: a field written with a removed role special is refused
     Given these requests are sent:
@@ -499,3 +520,7 @@ Feature: The role stamps list the member roles that allowed the write
       |       - role-updated              |         removed special "role-updated": a |
       |                                   |         user can hold several roles, use  |
       |                                   |         "roles-updated" on a json field.  |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
