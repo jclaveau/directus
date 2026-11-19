@@ -4,7 +4,7 @@ import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { Helpers } from '../database/helpers/index.js';
 import { getHelpers } from '../database/helpers/index.js';
-import { ItemsService, PayloadService } from './index.js';
+import { ItemsService, PayloadService, RoleMembersService } from './index.js';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Item, Accountability, FieldOverview } from '@directus/types';
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
@@ -1119,6 +1119,82 @@ describe('Integration Tests', () => {
 						'processO2M takes the parent rows as [{ data, key }],'
 						+ ' got {"cities":[]}',
 					));
+			});
+		});
+
+		describe('processO2M of the memberships of new users', () => {
+			const schema = new SchemaBuilder()
+				.collection('directus_users', (c) => {
+					c.field('id').uuid()
+						.primary();
+
+					c.field('roles').o2m('directus_role_members', 'user');
+				})
+				.collection('directus_roles', (c) => {
+					c.field('id').uuid()
+						.primary();
+
+					c.field('users').o2m('directus_role_members', 'role');
+				})
+				.collection('directus_role_members', (c) => {
+					c.field('id').uuid()
+						.primary();
+
+					c.field('user').uuid();
+					c.field('role').uuid();
+				})
+				.build();
+
+			test('tells the memberships created with their user so', async () => {
+				const createMany = vi
+					.spyOn(RoleMembersService.prototype, 'createMany')
+					.mockResolvedValue(['member-id-1']);
+
+				await new PayloadService('directus_users', { knex: db, schema })
+					.processO2M(
+						[{
+							data: {
+								roles: {
+									create: [{ role: 'role-id-1' }],
+									update: [],
+									delete: [],
+								},
+							},
+							key: 'user-id-1',
+						}],
+						{ createsNewUserMemberships: true },
+					);
+
+				expect(createMany).toHaveBeenCalledWith(
+					[{ role: 'role-id-1', user: 'user-id-1' }],
+					expect.objectContaining({ createsNewUserMemberships: true }),
+				);
+			});
+
+			test('tells a new role\'s memberships of users it holds nothing', async () => {
+				const createMany = vi
+					.spyOn(RoleMembersService.prototype, 'createMany')
+					.mockResolvedValue(['member-id-2']);
+
+				await new PayloadService('directus_roles', { knex: db, schema })
+					.processO2M(
+						[{
+							data: {
+								users: {
+									create: [{ user: 'user-id-2' }],
+									update: [],
+									delete: [],
+								},
+							},
+							key: 'role-id-2',
+						}],
+						{ createsNewUserMemberships: true },
+					);
+
+				expect(createMany).toHaveBeenCalledWith(
+					[{ role: 'role-id-2', user: 'user-id-2' }],
+					expect.objectContaining({ createsNewUserMemberships: undefined }),
+				);
 			});
 		});
 	});

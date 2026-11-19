@@ -31,7 +31,7 @@ describe('the migration', () => {
 	});
 
 	beforeEach(() => {
-		tracker.on.any(/^(create|alter|drop) (table|index)/).response(undefined);
+		tracker.on.any(/^(create|alter|drop) (unique )?(table|index)/).response(undefined);
 	});
 
 	afterEach(() => {
@@ -117,6 +117,47 @@ describe('the migration', () => {
 			'create index "directus_role_members_user_index"'
 			+ ' on "directus_role_members" ("user")',
 		);
+	});
+
+	test('up records invites, one per user, role and inviter', async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			foreignKeys: vi.fn().mockResolvedValue([]),
+		} as any);
+
+		tracker.on.select('directus_users').response([]);
+
+		await up(db);
+
+		expect(tracker.history.any.map(({ sql }) => sql)).toEqual(
+			expect.arrayContaining([
+				'create table "directus_invites" ("id" uuid, "user" uuid not null,'
+				+ ' "role" uuid not null, "user_created" uuid null,'
+				+ ' "date_created" timestamptz default CURRENT_TIMESTAMP,'
+				+ ' constraint "directus_invites_pkey" primary key ("id"))',
+				'alter table "directus_invites" add constraint'
+				+ ' "directus_invites_user_foreign" foreign key ("user")'
+				+ ' references "directus_users" ("id") on delete CASCADE',
+				'alter table "directus_invites" add constraint'
+				+ ' "directus_invites_role_foreign" foreign key ("role")'
+				+ ' references "directus_roles" ("id") on delete CASCADE',
+				'alter table "directus_invites" add constraint'
+				+ ' "directus_invites_user_created_foreign" foreign key'
+				+ ' ("user_created") references "directus_users" ("id")'
+				+ ' on delete SET NULL',
+				'create unique index "directus_invites_user_role_user_created_unique"'
+				+ ' on "directus_invites"'
+				+ ' ("user", "role", coalesce(cast("user_created" as text), \'\'))',
+			]),
+		);
+	});
+
+	test('down drops the invites', async () => {
+		tracker.on.select('directus_role_members').response([]);
+
+		await down(db);
+
+		expect(tracker.history.any.map(({ sql }) => sql))
+			.toContain('drop table "directus_invites"');
 	});
 
 	test('down gives each user the role of its one membership', async () => {

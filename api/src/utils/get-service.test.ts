@@ -19,6 +19,11 @@ beforeAll(() => {
 });
 
 describe('Utils / getService', () => {
+	it('serves the invites with their own service', () => {
+		expect(getService('directus_invites', { knex: db, schema }).constructor.name)
+			.toEqual('InvitesService');
+	});
+
 	it('should throw ForbiddenError for an unhandled directus_* collection', () => {
 		expect(() => getService('directus_unknown', { knex: db, schema })).toThrowError(ForbiddenError);
 

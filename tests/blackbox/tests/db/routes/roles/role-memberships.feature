@@ -7,8 +7,13 @@ Feature: A user holds several roles, each one a membership
     refused.
   - A deleted role takes its memberships along, and suspends only the users
     it leaves with no role.
-  - An invitation's memberships are its inviter's: a re-invite by the same
-    inviter replaces them, one by another inviter adds its own.
+  - An invitation is a row of `directus_invites` per inviter and role; a
+    re-invite by the same inviter replaces its rows. A role invited holds one
+    membership, `managed_by: invite`, while any invite of it is left. Once
+    the user accepts, the admins own it: `managed_by` turns null, and the
+    invite rows stay as history only.
+  - `managed_by` names what manages a membership: `invite`, `auth:<provider>`
+    or an extension; a request neither sets it nor changes such a membership.
   - A user holds a role once per `managed_by`: a second membership of the
     same role from the same manager is refused, whether a write creates it
     or moves another membership onto that role.
@@ -187,7 +192,7 @@ Feature: A user holds several roles, each one a membership
       |                              |     roles:                |
       |                              |       - role: <kept-role> |
 
-  Scenario: a re-invite replaces its inviter's roles, another inviter adds
+  Scenario: a role invited by two inviters is held once, until both drop it
     Given these requests are sent:
       | request                              | response  |
       | method: POST                         | code: 200 |+
@@ -233,55 +238,141 @@ Feature: A user holds several roles, each one a membership
       |     - role: <inviter-role>           |           |
       |       sort: 1                        |           |
     Then these requests get these responses:
-      | request                                    | response                 |
-      | as: inviter-a-<run>                        | code: 204                |+
-      | method: POST                               |                          |
-      | path: /users/invite                        |                          |
-      | payload:                                   |                          |
-      |   email: to-<run>@example.com              |                          |
-      |   roles:                                   |                          |
-      |     - <role-a>                             |                          |
-      | as: inviter-a-<run>                        | code: 204                |+
-      | method: POST                               |                          |
-      | path: /users/invite                        |                          |
-      | payload:                                   |                          |
-      |   email: to-<run>@example.com              |                          |
-      |   roles:                                   |                          |
-      |     - <role-b>                             |                          |
-      | method: GET                                | code: 200                |+
-      | path: /users                               | body:                    |
-      | query:                                     |   data:                  |
-      |   fields: status,roles.role                |     - status: invited    |
-      |   filter[email][_eq]: to-<run>@example.com |       roles:             |
-      |                                            |         - role: <role-b> |
-      | method: GET                                | code: 200                |+
-      | path: /users                               | body:                    |
-      | query:                                     |   data:                  |
-      |   fields: roles.role                       |     - roles:             |
-      |   filter[email][_eq]: to-<run>@example.com |         - role: <role-b> |
-      |   deep[roles][_filter][managed_by][_eq]:   |                          |
-      |     invite:<inviter-a>                     |                          |
-      | as: inviter-b-<run>                        | code: 204                |+
-      | method: POST                               |                          |
-      | path: /users/invite                        |                          |
-      | payload:                                   |                          |
-      |   email: to-<run>@example.com              |                          |
-      |   roles:                                   |                          |
-      |     - <role-a>                             |                          |
-      | method: GET                                | code: 200                |+
-      | path: /users                               | body:                    |
-      | query:                                     |   data:                  |
-      |   fields: roles.role                       |     - roles:             |
-      |   filter[email][_eq]: to-<run>@example.com |         - role: <role-a> |
-      |   deep[roles][_filter][managed_by][_eq]:   |                          |
-      |     invite:<inviter-b>                     |                          |
-      | method: GET                                | code: 200                |+
-      | path: /users                               | body:                    |
-      | query:                                     |   data:                  |
-      |   fields: roles.role                       |     - roles:             |
-      |   filter[email][_eq]: to-<run>@example.com |         - role: <role-b> |
-      |   deep[roles][_filter][managed_by][_eq]:   |                          |
-      |     invite:<inviter-a>                     |                          |
+      | request                                    | response                     |
+      | as: inviter-a-<run>                        | code: 204                    |+
+      | method: POST                               |                              |
+      | path: /users/invite                        |                              |
+      | payload:                                   |                              |
+      |   email: to-<run>@example.com              |                              |
+      |   roles:                                   |                              |
+      |     - <role-a>                             |                              |
+      | as: inviter-a-<run>                        | code: 204                    |+
+      | method: POST                               |                              |
+      | path: /users/invite                        |                              |
+      | payload:                                   |                              |
+      |   email: to-<run>@example.com              |                              |
+      |   roles:                                   |                              |
+      |     - <role-b>                             |                              |
+      | method: GET                                | code: 200                    |+
+      | path: /users                               | body:                        |
+      | query:                                     |   data:                      |
+      |   fields: roles.role,roles.managed_by      |     - roles:                 |
+      |   filter[email][_eq]: to-<run>@example.com |         - role: <role-b>     |
+      |   deep: >-                                 |           managed_by: invite |
+      |     {"roles":{"_sort":["sort"]}}           |                              |
+      | as: inviter-b-<run>                        | code: 204                    |+
+      | method: POST                               |                              |
+      | path: /users/invite                        |                              |
+      | payload:                                   |                              |
+      |   email: to-<run>@example.com              |                              |
+      |   roles:                                   |                              |
+      |     - <role-a>                             |                              |
+      |     - <role-b>                             |                              |
+      | method: GET                                | code: 200                    |+
+      | path: /users                               | body:                        |
+      | query:                                     |   data:                      |
+      |   fields: roles.role,roles.managed_by      |     - roles:                 |
+      |   filter[email][_eq]: to-<run>@example.com |         - role: <role-b>     |
+      |   deep: >-                                 |           managed_by: invite |
+      |     {"roles":{"_sort":["sort"]}}           |         - role: <role-a>     |
+      |                                            |           managed_by: invite |
+      | as: inviter-a-<run>                        | code: 204                    |+
+      | method: POST                               |                              |
+      | path: /users/invite                        |                              |
+      | payload:                                   |                              |
+      |   email: to-<run>@example.com              |                              |
+      |   roles:                                   |                              |
+      |     - <role-a>                             |                              |
+      | method: GET                                | code: 200                    |+
+      | path: /users                               | body:                        |
+      | query:                                     |   data:                      |
+      |   fields: roles.role,roles.managed_by      |     - roles:                 |
+      |   filter[email][_eq]: to-<run>@example.com |         - role: <role-b>     |
+      |   deep: >-                                 |           managed_by: invite |
+      |     {"roles":{"_sort":["sort"]}}           |         - role: <role-a>     |
+      |                                            |           managed_by: invite |
+      | as: inviter-b-<run>                        | code: 204                    |+
+      | method: POST                               |                              |
+      | path: /users/invite                        |                              |
+      | payload:                                   |                              |
+      |   email: to-<run>@example.com              |                              |
+      |   roles:                                   |                              |
+      |     - <role-a>                             |                              |
+      | method: GET                                | code: 200                    |+
+      | path: /users                               | body:                        |
+      | query:                                     |   data:                      |
+      |   fields: roles.role,roles.managed_by      |     - roles:                 |
+      |   filter[email][_eq]: to-<run>@example.com |         - role: <role-a>     |
+      |   deep: >-                                 |           managed_by: invite |
+      |     {"roles":{"_sort":["sort"]}}           |                              |
+
+  Scenario: an accepted invite leaves its roles to the admins
+    Given the rows of directus_roles:
+      | id      | name        |
+      | <staff> | staff-<run> |
+      | <press> | press-<run> |
+    And the rows of directus_users:
+      | id      | email                   | status  |
+      | <alice> | alice-<run>@example.com | invited |
+    And the rows of directus_role_members:
+      | user    | role    | sort |
+      | <alice> | <staff> | 1    |
+    Then these requests get these responses:
+      | request                               | response                 |
+      | method: POST                          | code: 204                |+
+      | path: /users/invite                   |                          |
+      | payload:                              |                          |
+      |   email: alice-<run>@example.com      |                          |
+      |   roles:                              |                          |
+      |     - <staff>                         |                          |
+      |     - <press>                         |                          |
+      | method: POST                          | code: 204                |+
+      | path: /users/invite/accept            |                          |
+      | payload:                              |                          |
+      |   token: !jwt                         |                          |
+      |     email: alice-<run>@example.com    |                          |
+      |     scope: invite                     |                          |
+      |   password: accepted-password         |                          |
+      | method: GET                           | code: 200                |+
+      | path: /users/<alice>                  | body:                    |
+      | query:                                |   data:                  |
+      |   fields: roles.role,roles.managed_by |     roles:               |
+      |   deep: >-                            |       - role: <staff>    |
+      |     {"roles":{"_sort":["sort"]}}      |         managed_by: null |
+      |                                       |       - role: <press>    |
+      |                                       |         managed_by: null |
+      | method: PATCH                         | code: 200                |+
+      | path: /users/<alice>                  |                          |
+      | payload:                              |                          |
+      |   roles: []                           |                          |
+      | method: GET                           | code: 200                |+
+      | path: /users/<alice>                  | body:                    |
+      | query:                                |   data:                  |
+      |   fields: roles.role                  |     roles: []            |
+
+  Scenario: a request setting managed_by is refused
+    Given the rows of directus_roles:
+      | id      | name        |
+      | <staff> | staff-<run> |
+    And the rows of directus_users:
+      | id      | email                   |
+      | <alice> | alice-<run>@example.com |
+    Then these requests get these responses:
+      | request                     | response                              |
+      | method: PATCH               | code: 400                             |+
+      | path: /users/<alice>        | body:                                 |
+      | payload:                    |   errors:                             |
+      |   roles:                    |     - message: >-                     |
+      |     create:                 |         Invalid payload. "managed_by" |
+      |       - role: <staff>       |         is set by the code managing   |
+      |         managed_by: invite  |         the membership, not by a      |
+      |                             |         request.                      |
+      |                             |       extensions:                     |
+      |                             |         code: INVALID_PAYLOAD         |
+      | method: GET                 | code: 200                             |+
+      | path: /users/<alice>        | body:                                 |
+      | query:                      |   data:                               |
+      |   fields: roles.role        |     roles: []                         |
 
   Scenario: a role the user holds by hand is refused when given again by hand
     Given the rows of directus_roles:

@@ -257,7 +257,7 @@ describe('Integration Tests', () => {
 						filter: { role: { _in: keys } },
 						limit: -1,
 					},
-					opts,
+					{ ...opts, deletesManagedMemberships: true },
 				);
 
 				expect(rolesUpdateByQuerySpy).toHaveBeenCalledWith(

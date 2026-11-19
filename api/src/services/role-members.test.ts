@@ -1,3 +1,4 @@
+import { InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import knex from 'knex';
@@ -12,6 +13,14 @@ vi.mock('../../src/database/index', () => {
 	return {
 		default: vi.fn(),
 		getDatabaseClient: vi.fn().mockReturnValue('postgres'),
+	};
+});
+
+vi.mock('../permissions/modules/validate-access/validate-access.js');
+
+vi.mock('../permissions/modules/process-payload/process-payload.js', () => {
+	return {
+		processPayload: vi.fn(async ({ payload }) => payload),
 	};
 });
 
@@ -114,6 +123,29 @@ describe('Services / RoleMembers', () => {
 
 			expect(transactionStates).toEqual([['committed']]);
 		});
+
+		it('clears no cache for the memberships of users it creates', async () => {
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['member-id-9']);
+
+			await expect(new RoleMembersService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			}).createMany(
+				[{ role: 'role-id-9', user: 'user-id-9' }],
+				{ createsNewUserMemberships: true },
+			)).resolves.toStrictEqual(['member-id-9']);
+
+			expect(createMany).toHaveBeenCalledWith(
+				[{ role: 'role-id-9', user: 'user-id-9' }],
+				{
+					createsNewUserMemberships: true,
+					userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits,
+				},
+			);
+
+			expect(clearSystemCache).not.toHaveBeenCalled();
+		});
 	});
 
 	describe('updateBatch', () => {
@@ -195,6 +227,266 @@ describe('Services / RoleMembers', () => {
 			}).deleteMany(['member-id-8']);
 
 			expect(clearSystemCache).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('managed_by', () => {
+		it('refuses a request setting managed_by', async () => {
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database);
+
+			await expect(new RoleMembersService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					memberRoles: [],
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).createOne({
+				managed_by: 'invite',
+				role: 'role-id-10',
+				user: 'user-id-10',
+			})).rejects.toThrow(new InvalidPayloadError({
+				reason: '"managed_by" is set by the code managing the membership,'
+					+ ' not by a request',
+			}));
+		});
+
+		it('lets the invite code, without accountability, set managed_by', async () => {
+			await expect(new RoleMembersService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			})['validateRowsToCreate']([{
+				managed_by: 'invite',
+				role: 'role-id-10',
+				user: 'user-id-10',
+			}])).resolves.toBeUndefined();
+		});
+
+		it('lets a request create a membership given by hand', async () => {
+			await expect(new RoleMembersService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					memberRoles: [],
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: knex.default({ client: MockClient }),
+				schema,
+			})['validateRowsToCreate']([{
+				managed_by: null,
+				role: 'role-id-10',
+				user: 'user-id-10',
+			}])).resolves.toBeUndefined();
+		});
+
+		it('refuses a request moving a managed membership', async () => {
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			tracker.on
+				.select('directus_role_members')
+				.response([{
+					id: '6f1c2a4e-0000-4000-8000-000000000011',
+					managed_by: 'auth:mockoauth',
+					user: 'user-id-11',
+					role: 'role-id-11',
+				}]);
+
+			await expect(new RoleMembersService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					memberRoles: [],
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).updateOne('6f1c2a4e-0000-4000-8000-000000000011', {
+				role: 'role-id-1',
+			})).rejects.toThrow(new InvalidPayloadError({
+				reason: 'Membership "6f1c2a4e-0000-4000-8000-000000000011" is managed'
+					+ ' by "auth:mockoauth": the next login of user "user-id-11" sets it'
+					+ ' from that provider\'s ROLE_MAPPING',
+			}));
+
+			expect(tracker.history.select).toMatchObject([
+				{
+					sql: 'select "id", "managed_by", "user", "role"'
+						+ ' from "directus_role_members"'
+						+ ' where "id" in (?) and "managed_by" is not null',
+					bindings: ['6f1c2a4e-0000-4000-8000-000000000011'],
+				},
+			]);
+		});
+
+		it('refuses a request moving a membership an extension manages', async () => {
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			tracker.on
+				.select('directus_role_members')
+				.response([{
+					id: '6f1c2a4e-0000-4000-8000-000000000014',
+					managed_by: 'ext:subscription',
+					user: 'user-id-14',
+					role: 'role-id-14',
+				}]);
+
+			await expect(new RoleMembersService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					memberRoles: [],
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).updateOne('6f1c2a4e-0000-4000-8000-000000000014', {
+				user: 'user-id-1',
+			})).rejects.toThrow(new Error(
+				'Invalid payload. Membership "6f1c2a4e-0000-4000-8000-000000000014"'
+				+ ' is managed by "ext:subscription", which alone changes it.',
+			));
+		});
+
+		it('lets a request reorder a managed membership', async () => {
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			tracker.on
+				.select('directus_role_members')
+				.response([{
+					id: '6f1c2a4e-0000-4000-8000-000000000015',
+					managed_by: 'invite',
+					user: 'user-id-15',
+					role: 'role-id-15',
+				}]);
+
+			await expect(new RoleMembersService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					memberRoles: [],
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			})['validateGroupsToUpdate'](
+				[{
+					keys: ['6f1c2a4e-0000-4000-8000-000000000015'],
+					data: { sort: 3, role: 'role-id-15' },
+				}],
+				database,
+			)).resolves.toBeUndefined();
+		});
+
+		it('refuses managed_by sent for a membership given by hand', async () => {
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			tracker.on.select('directus_role_members').response([]);
+
+			await expect(new RoleMembersService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					memberRoles: [],
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).updateOne('6f1c2a4e-0000-4000-8000-000000000012', {
+				managed_by: 'invite',
+			})).rejects.toThrow(new InvalidPayloadError({
+				reason: '"managed_by" is set by the code managing the membership,'
+					+ ' not by a request',
+			}));
+		});
+
+		it('refuses a request deleting a managed membership', async () => {
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			tracker.on
+				.select('directus_role_members')
+				.response([{
+					id: '6f1c2a4e-0000-4000-8000-000000000013',
+					managed_by: 'invite',
+					user: 'user-id-13',
+					role: 'role-id-13',
+				}]);
+
+			await expect(new RoleMembersService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					memberRoles: [],
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			}).deleteMany([
+				'6f1c2a4e-0000-4000-8000-000000000001',
+				'6f1c2a4e-0000-4000-8000-000000000013',
+			])).rejects.toThrow(new InvalidPayloadError({
+				reason: 'Membership "6f1c2a4e-0000-4000-8000-000000000013" comes from'
+					+ ' the invites of user "user-id-13" to role "role-id-13": delete'
+					+ ' those invites to remove it',
+			}));
+
+			expect(tracker.history.select).toMatchObject([
+				{
+					sql: 'select "id", "managed_by", "user", "role"'
+						+ ' from "directus_role_members"'
+						+ ' where "id" in (?, ?) and "managed_by" is not null',
+					bindings: [
+						'6f1c2a4e-0000-4000-8000-000000000001',
+						'6f1c2a4e-0000-4000-8000-000000000013',
+					],
+				},
+			]);
+		});
+
+		it('lets a role delete take its managed memberships along', async () => {
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			await expect(new RoleMembersService({
+				accountability: {
+					admin: true,
+					app: true,
+					ip: null,
+					memberRoles: [],
+					roles: [],
+					user: 'admin-id-1',
+				},
+				knex: database,
+				schema,
+			})['validateKeysToDelete'](
+				['6f1c2a4e-0000-4000-8000-000000000013'],
+				{ deletesManagedMemberships: true },
+				database,
+			)).resolves.toBeUndefined();
+
+			expect(tracker.history.select).toEqual([]);
 		});
 	});
 });
