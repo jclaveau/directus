@@ -114,12 +114,14 @@ describe('providerMemberships', () => {
 
 describe('syncProviderMemberships', () => {
 	let knexMock: Knex;
+
 	let userRows: {
 		id: string;
 		role: string;
 		managed_by: string | null;
 		sort: number | null;
 	}[];
+
 	let deleteMany: ReturnType<typeof vi.fn>;
 	let createMany: ReturnType<typeof vi.fn>;
 
