@@ -30,6 +30,9 @@ export async function fetchPolicies(
 /**
  * The access rows granting the accountability its policies, by priority, each
  * keeping the role it is attached to: null for a policy given to the user.
+ * Role rows follow `roles` (fetchUserRoles: parents root first, then the leaf
+ * roles by membership `sort`), and the user's own rows come last, so the
+ * presets of a later row win.
  */
 export async function _fetchPolicyAccessRows(
 	{ roles, user, ip }: Pick<Accountability, 'user' | 'roles' | 'ip'>,

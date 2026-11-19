@@ -30,20 +30,40 @@ export async function _fetchMemberRoles(
 }
 
 /**
- * The member roles and the ancestors of each, every chain root first: an
- * ancestor two member roles share comes once, before both.
+ * The member roles and the ancestors of each, in the order presets apply, the
+ * last one winning on a field. First the parents, every role that is an
+ * ancestor of another role of the list, root first, one depth in the
+ * membership `sort` of the chain it came through; then the leaf roles, the
+ * member roles that are no ancestor of another, by membership `sort`. A member
+ * role parenting another member role counts as a parent.
+ *
+ * press (sort 1), editors under staff (sort 2) → staff, press, editors
+ * editors under staff (sort 1), staff (sort 2) → staff, editors
  */
 export async function fetchUserRoles(user: string | null, knex: Knex) {
 	const memberRoles = await fetchMemberRoles(user, knex);
-	const roles: string[] = [];
+	const memberChains: string[][] = [];
 
 	for (const memberRole of memberRoles) {
-		for (const chainRole of await fetchRolesTree(memberRole, knex)) {
-			if (!roles.includes(chainRole)) {
-				roles.push(chainRole);
-			}
-		}
+		memberChains.push(await fetchRolesTree(memberRole, knex));
 	}
 
-	return { memberRoles, roles };
+	const chainDepths = memberChains.flatMap((memberChain) => {
+		return memberChain.slice(0, -1).map((parentRole, parentDepth) => {
+			return { parentRole, parentDepth };
+		});
+	});
+
+	// A stable sort keeps the membership order within one depth.
+	const parentRoles = [
+		...new Set(chainDepths
+			.sort((left, right) => left.parentDepth - right.parentDepth)
+			.map(({ parentRole }) => parentRole)),
+	];
+
+	const leafRoles = memberRoles.filter((memberRole) => {
+		return !parentRoles.includes(memberRole);
+	});
+
+	return { memberRoles, roles: [...parentRoles, ...leafRoles] };
 }
