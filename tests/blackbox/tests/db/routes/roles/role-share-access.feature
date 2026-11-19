@@ -45,6 +45,9 @@ Feature: A share reads with its sender's role chain and its own
       |     - collection: directus_shares  |           |
       |       action: create               |           |
       |       fields: ['*']                |           |
+      |     - collection: directus_shares  |           |
+      |       action: read                 |           |
+      |       fields: ['*']                |           |
       | method: POST                       | code: 200 |+
       | path: /roles                       |           |
       | payload:                           |           |

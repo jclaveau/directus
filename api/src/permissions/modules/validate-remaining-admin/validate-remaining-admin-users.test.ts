@@ -23,7 +23,11 @@ test(oneLine`
 		{ excludeRoles: ['role-admin'] },
 		{ knex } as Context,
 	)).rejects.toMatchObject({
-		message: 'Cannot remove the last admin user from the system',
+		status: 422,
+		message: oneLine`
+			Can't process content. Cannot remove the last admin user from the
+			system.
+		`,
 	});
 
 	expect(fetchUserCount).toHaveBeenCalledWith({
