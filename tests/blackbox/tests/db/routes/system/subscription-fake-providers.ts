@@ -29,6 +29,8 @@ export type StripeHolding = {
 	directus_subscription: number | null;
 	status: string;
 	cancel_at_period_end?: boolean;
+	/** The price's cents; the recorded 1000 without it. */
+	unit_amount?: number;
 };
 
 export type ReceivedWrite = {
@@ -340,6 +342,10 @@ export async function startFakeProviders() {
 					data: [{
 						...RECORDED_STRIPE_SUBSCRIPTION.items.data[0],
 						current_period_end: STRIPE_PERIOD_END,
+						price: {
+							...RECORDED_STRIPE_SUBSCRIPTION.items.data[0].price,
+							unit_amount: stripeHolding.unit_amount ?? 1000,
+						},
 					}],
 				},
 			},

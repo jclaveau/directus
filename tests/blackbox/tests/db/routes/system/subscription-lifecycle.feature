@@ -856,6 +856,31 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       {"amountCents":1000,"currency":"EUR","interval":{"months":1,"days":0}}
       """
 
+  Scenario: a plan changed in the Stripe portal keeps the plan sold, logged
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 94 | stripe   | 94      | 1                 | active      |
+    And Stripe holds this subscription:
+      | column                | value        |
+      | subscription          | sub_repriced |
+      | customer              | cus_repriced |
+      | directus_subscription | 94           |
+      | status                | active       |
+      | unit_amount           | 2000         |
+    When Stripe sends these events:
+      | type                          | subscription |
+      | customer.subscription.updated | sub_repriced |
+    Then this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_94> | <policy_94> | @scalabus/subscriptions |
+    And the instance eventually logged:
+      """
+      Subscription 94 is billed
+      {"amountCents":2000,"currency":"EUR","interval":{"months":1,"days":0}} by
+      "stripe", its plan "plan-94" sells
+      {"amountCents":1000,"currency":"EUR","interval":{"months":1,"days":0}}
+      """
+
   Scenario: a manager seats beneficiaries up to the plan's maximum, freed by a delete
     Given these pending subscriptions, each with its own plan:
       | id | provider | manager | beneficiaries_max | plan_status |
