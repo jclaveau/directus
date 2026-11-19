@@ -11,10 +11,8 @@ beforeEach(() => {
 				userStore: {
 					currentUser: {
 						id: '1',
-						role: {
-							id: '1',
-							name: 'admin',
-						},
+						roles: [{ id: 'm1', role: { id: '1', name: 'admin' } }],
+						effectiveRoles: [{ id: '1' }],
 						// Custom nested user field
 						org: { name: 'Directus' },
 					},

@@ -46,8 +46,10 @@ const roleFilter = computed(() => {
 		return {
 			_and: [
 				{
-					role: {
-						_eq: props.role,
+					roles: {
+						role: {
+							_eq: props.role,
+						},
 					},
 				},
 			],

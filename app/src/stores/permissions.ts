@@ -47,7 +47,7 @@ export const usePermissionsStore = defineStore({
 						fields.add(value.replace('$CURRENT_USER.', ''));
 					}
 					else if (value.startsWith('$CURRENT_MEMBER_ROLES.')) {
-						fields.add(value.replace('$CURRENT_MEMBER_ROLES.', 'role.'));
+						fields.add(value.replace('$CURRENT_MEMBER_ROLES.', 'roles.role.'));
 					}
 				};
 

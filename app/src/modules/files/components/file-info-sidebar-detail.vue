@@ -96,7 +96,7 @@ function useUser() {
 		try {
 			const response = await api.get(`/users/${props.file.uploaded_by}`, {
 				params: {
-					fields: ['id', 'email', 'first_name', 'last_name', 'role'],
+					fields: ['id', 'email', 'first_name', 'last_name'],
 				},
 			});
 
@@ -111,7 +111,7 @@ function useUser() {
 			if (props.file.modified_by) {
 				const response = await api.get(`/users/${props.file.modified_by}`, {
 					params: {
-						fields: ['id', 'email', 'first_name', 'last_name', 'role'],
+						fields: ['id', 'email', 'first_name', 'last_name'],
 					},
 				});
 

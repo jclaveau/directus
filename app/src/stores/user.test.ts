@@ -5,7 +5,7 @@ import type { RouteLocationNormalized } from 'vue-router';
 
 import api from '@/api';
 import { AppUser } from '@/types/user';
-import { Role, User, Globals } from '@directus/types';
+import { Role, RoleMembership, User, Globals } from '@directus/types';
 import { useUserStore } from './user';
 
 beforeEach(() => {
@@ -27,10 +27,12 @@ const mockUsersResponse = {
 	tfa_secret: null,
 	avatar: null,
 	custom_user_field: 'test',
-	role: {
-		id: '00000000-0000-0000-0000-000000000000',
-		custom_role_field: 'test',
-	} as Partial<Role>,
+	roles: [
+		{
+			id: '00000000-0000-0000-0000-000000000001',
+			role: { id: '00000000-0000-0000-0000-000000000000' },
+		},
+	] as Partial<RoleMembership>[],
 	policies: [],
 } as Partial<User>;
 
@@ -137,7 +139,11 @@ describe('actions', () => {
 			const userStore = useUserStore();
 			await userStore.hydrate();
 
-			expect(userStore.currentUser).toEqual({ ...mockUsersResponse, ...mockGlobalsResponse, roles: mockRolesResponse });
+			expect(userStore.currentUser).toEqual({
+				...mockUsersResponse,
+				...mockGlobalsResponse,
+				effectiveRoles: mockRolesResponse,
+			});
 		});
 	});
 

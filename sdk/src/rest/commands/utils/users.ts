@@ -4,19 +4,23 @@ import type { RestCommand } from '../../types.js';
  * Invite a new user by email.
  *
  * @param email User email to invite.
- * @param role Role of the new user.
+ * @param roles Roles of the new user.
  * @param invite_url Provide a custom invite url which the link in the email will lead to. The invite token will be passed as a parameter.
  *
  * @returns Nothing
  */
 export const inviteUser =
-	<Schema>(email: string, role: string, invite_url?: string): RestCommand<void, Schema> =>
+	<Schema>(
+		email: string,
+		roles: string[],
+		invite_url?: string,
+	): RestCommand<void, Schema> =>
 	() => ({
 		path: `/users/invite`,
 		method: 'POST',
 		body: JSON.stringify({
 			email,
-			role,
+			roles,
 			...(invite_url ? { invite_url } : {}),
 		}),
 	});

@@ -13,7 +13,7 @@ import CommentsSidebarDetail from '@/views/private/components/comments-sidebar-d
 import RevisionsDrawerDetail from '@/views/private/components/revisions-drawer-detail.vue';
 import SaveOptions from '@/views/private/components/save-options.vue';
 import { useCollection } from '@directus/composables';
-import type { User } from '@directus/types';
+import type { Role, User } from '@directus/types';
 import { computed, ref, toRefs } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
@@ -64,7 +64,7 @@ const {
 	primaryKey,
 	props.primaryKey !== '+'
 		? {
-				fields: ['*', 'role.*'],
+				fields: ['*', 'roles.*', 'roles.role.*'],
 			}
 		: undefined,
 );
@@ -74,11 +74,20 @@ const {
 	itemPermissions: { updateAllowed, deleteAllowed, saveAllowed, archiveAllowed, fields },
 } = permissions;
 
-const user = computed(() => ({ ...item.value, role: item.value?.role?.id }));
+const user = computed(() => {
+	return {
+		...item.value,
+		roles: item.value?.roles?.map((membership) => membership.id),
+	};
+});
+
+const memberRoles = computed(() => {
+	return (item.value?.roles ?? []).map((membership) => membership.role as Role);
+});
 
 if (props.role) {
 	edits.value = {
-		role: props.role,
+		roles: [{ role: props.role }],
 		...edits.value,
 	};
 }
@@ -376,7 +385,7 @@ function revert(values: Record<string, any>) {
 		</template>
 
 		<template #navigation>
-			<users-navigation :current-role="item?.role?.id ?? role" />
+			<users-navigation :current-role="memberRoles[0]?.id ?? role" />
 		</template>
 
 		<div class="user-item">
@@ -410,7 +419,14 @@ function revert(values: Record<string, any>) {
 							<v-icon name="place" small />
 							{{ item.location }}
 						</div>
-						<v-chip v-if="item.role?.name" :class="item.status" small>{{ item.role.name }}</v-chip>
+						<v-chip
+							v-for="memberRole in memberRoles"
+							:key="memberRole.id"
+							:class="item.status"
+							small
+						>
+							{{ memberRole.name }}
+						</v-chip>
 					</template>
 				</div>
 			</div>
