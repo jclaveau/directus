@@ -16,6 +16,14 @@ vi.mock('@/api', () => {
 	};
 });
 
+const userStoreState = vi.hoisted(() => {
+	return { isAdmin: true };
+});
+
+vi.mock('@/stores/user', () => {
+	return { useUserStore: () => userStoreState };
+});
+
 vi.mock('@/utils/unexpected-error', () => {
 	return {
 		unexpectedError: (error: unknown) => {
@@ -48,6 +56,23 @@ const global: GlobalMountOptions = {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	userStoreState.isAdmin = true;
+});
+
+test('shows nothing and reads nothing to a user who is no admin', async () => {
+	userStoreState.isAdmin = false;
+
+	vi.spyOn(api, 'get').mockResolvedValue({ data: { data: [] } });
+
+	const wrapper = mount(UserPoliciesSidebarDetail, {
+		props: { userId: 'user-1', memberRoleIds: ['role-editor'] },
+		global,
+	});
+
+	await flushPromises();
+
+	expect(api.get).not.toHaveBeenCalled();
+	expect(wrapper.html()).toBe('<!--v-if-->');
 });
 
 test('shows a progress bar while the roles are read', async () => {

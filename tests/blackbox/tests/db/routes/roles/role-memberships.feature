@@ -9,6 +9,8 @@ Feature: A user holds several roles, each one a membership
     it leaves with no role.
   - An invitation's memberships are its inviter's: a re-invite by the same
     inviter replaces them, one by another inviter adds its own.
+  - A user holds a role once per `managed_by`: a second membership of the
+    same role from the same manager is refused.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own. A response cell states the keys it checks.
@@ -279,3 +281,33 @@ Feature: A user holds several roles, each one a membership
       |   filter[email][_eq]: to-<run>@example.com |         - role: <role-b> |
       |   deep[roles][_filter][managed_by][_eq]:   |                          |
       |     invite:<inviter-a>                     |                          |
+
+  Scenario: a role the user holds by hand is refused when given again by hand
+    Given the rows of directus_roles:
+      | id      | name        |
+      | <staff> | staff-<run> |
+    And the rows of directus_users:
+      | id      | email                   |
+      | <alice> | alice-<run>@example.com |
+    And the rows of directus_role_members:
+      | user    | role    | sort |
+      | <alice> | <staff> | 1    |
+    Then these requests get these responses:
+      | request                           | response                        |
+      | method: PATCH                     | code: 400                       |+
+      | path: /users/<alice>              | body:                           |
+      | payload:                          |   errors:                       |
+      |   roles:                          |     - message: >-               |
+      |     create:                       |         Invalid payload. The    |
+      |       - role: <staff>             |         user "<alice>" already  |
+      |                                   |         holds the role          |
+      |                                   |         "<staff>" with          |
+      |                                   |         managed_by null.        |
+      |                                   |       extensions:               |
+      |                                   |         code: INVALID_PAYLOAD   |
+      | method: GET                       | code: 200                       |+
+      | path: /users/<alice>              | body:                           |
+      | query:                            |   data:                         |
+      |   fields: roles.role,roles.sort   |     roles:                      |
+      |                                   |       - role: <staff>           |
+      |                                   |         sort: 1                 |

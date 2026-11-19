@@ -5,6 +5,10 @@ Feature: The presets of several member roles apply parents first, then leaves
     first; then the leaf roles, the member roles that are no ancestor of
     another, by membership `sort`. A member role that is also the parent of
     another member role counts as a parent (#746).
+  - A policy reached through several member roles counts at its last place
+    in that order.
+  - A role given by an invite or a login provider goes after the user's
+    other roles: its membership `sort` is one past the user's highest.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own. A response cell states the keys it checks.
@@ -191,3 +195,98 @@ Feature: The presets of several member roles apply parents first, then leaves
       | 1       | role_order_notes      | 1      | 1      | 0      | 0      | 0    |
       | 2       | directus_users        | 1      | 0      | 0      | 0      | 0    |
       | 2       | role_order_notes      | 1      | 0      | 0      | 0      | 0    |
+
+  Scenario: a policy reached through two member roles counts at its last one
+    Given the rows of directus_policies:
+      | id      | name      | app_access | admin_access |
+      | <p-pub> | pub-<run> | false      | false        |
+      | <p-rev> | rev-<run> | false      | false        |
+    And the rows of directus_permissions:
+      | policy  | collection       | action | fields | presets             |
+      | <p-pub> | role_order_notes | create | ["*"]  | {"status":"draft"}  |
+      | <p-pub> | role_order_notes | read   | ["*"]  |                     |
+      | <p-rev> | role_order_notes | create | ["*"]  | {"status":"review"} |
+    And the rows of directus_roles:
+      | id           | name             | parent  |
+      | <staff>      | staff-<run>      |         |
+      | <editors-fr> | editors-fr-<run> | <staff> |
+      | <press>      | press-<run>      |         |
+    And the rows of directus_access:
+      | role         | policy  |
+      | <staff>      | <p-pub> |
+      | <editors-fr> | <p-rev> |
+      | <press>      | <p-pub> |
+    And the rows of directus_users:
+      | id      | email                   | token       |
+      | <alice> | alice-<run>@example.com | alice-<run> |
+    And the rows of directus_role_members:
+      | user    | role         | sort |
+      | <alice> | <editors-fr> | 1    |
+      | <alice> | <press>      | 2    |
+    Then these requests get these responses:
+      | request                                    | response          |
+      | as: alice-<run>                            | code: 200         |+
+      | method: POST                               |                   |
+      | path: /items/role_order_notes              |                   |
+      | payload: {}                                |                   |
+      | remember: alice-note                       |                   |
+      | as: alice-<run>                            | code: 200         |+
+      | method: GET                                | body:             |
+      | path: /items/role_order_notes/<alice-note> |   data:           |
+      | query:                                     |     status: draft |
+      |   fields: status                           |                   |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+
+  Scenario: an invited role's preset beats a role given by hand before it
+    Given the rows of directus_policies:
+      | id        | name        | app_access | admin_access |
+      | <p-staff> | staff-<run> | false      | false        |
+      | <p-press> | press-<run> | false      | false        |
+    And the rows of directus_permissions:
+      | policy    | collection       | action | fields | presets                   |
+      | <p-staff> | role_order_notes | create | ["*"]  | {"visibility":"internal"} |
+      | <p-staff> | role_order_notes | read   | ["*"]  |                           |
+      | <p-press> | role_order_notes | create | ["*"]  | {"visibility":"public"}   |
+    And the rows of directus_roles:
+      | id      | name        |
+      | <staff> | staff-<run> |
+      | <press> | press-<run> |
+    And the rows of directus_access:
+      | role    | policy    |
+      | <staff> | <p-staff> |
+      | <press> | <p-press> |
+    And the rows of directus_users:
+      | id      | email                   | token       | status  |
+      | <alice> | alice-<run>@example.com | alice-<run> | invited |
+    And the rows of directus_role_members:
+      | user    | role    | sort |
+      | <alice> | <staff> | 1    |
+    Then these requests get these responses:
+      | request                                    | response               |
+      | method: POST                               | code: 204              |+
+      | path: /users/invite                        |                        |
+      | payload:                                   |                        |
+      |   email: alice-<run>@example.com           |                        |
+      |   roles:                                   |                        |
+      |     - <press>                              |                        |
+      | method: PATCH                              | code: 200              |+
+      | path: /users/<alice>                       |                        |
+      | payload:                                   |                        |
+      |   status: active                           |                        |
+      | as: alice-<run>                            | code: 200              |+
+      | method: POST                               |                        |
+      | path: /items/role_order_notes              |                        |
+      | payload: {}                                |                        |
+      | remember: alice-note                       |                        |
+      | as: alice-<run>                            | code: 200              |+
+      | method: GET                                | body:                  |
+      | path: /items/role_order_notes/<alice-note> |   data:                |
+      | query:                                     |     visibility: public |
+      |   fields: visibility                       |                        |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 3       | (none) | 0      | 0      | 0      | 0      |
+      | 4       | (none) | 0      | 0      | 0      | 0      |

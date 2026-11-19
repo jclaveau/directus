@@ -18,6 +18,7 @@ defineSingularWriteFeature(
 				fields: [
 					{ field: 'visibility', type: 'string', meta: {} },
 					{ field: 'lang', type: 'string', meta: {} },
+					{ field: 'status', type: 'string', meta: {} },
 				],
 			});
 		},

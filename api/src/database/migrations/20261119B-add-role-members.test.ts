@@ -39,7 +39,7 @@ describe('the migration', () => {
 		vi.restoreAllMocks();
 	});
 
-	test('up turns the role of each user into one membership', async () => {
+	test('up turns each role into a membership, an SSO user\'s managed', async () => {
 		vi.mocked(randomUUID)
 			.mockReturnValueOnce('00000000-0000-4000-8000-000000000001')
 			.mockReturnValueOnce('00000000-0000-4000-8000-000000000002');
@@ -52,8 +52,8 @@ describe('the migration', () => {
 		} as any);
 
 		tracker.on.select('directus_users').response([
-			{ id: 'user-1', role: 'role-a' },
-			{ id: 'user-2', role: 'role-b' },
+			{ id: 'user-1', role: 'role-a', provider: 'default' },
+			{ id: 'user-2', role: 'role-b', provider: 'mockoauth' },
 		]);
 
 		tracker.on.insert('directus_role_members').response([]);
@@ -63,10 +63,12 @@ describe('the migration', () => {
 		expect(tracker.history.insert.map(({ bindings }) => bindings)).toEqual([
 			[
 				'00000000-0000-4000-8000-000000000001',
+				null,
 				'role-a',
 				1,
 				'user-1',
 				'00000000-0000-4000-8000-000000000002',
+				'auth:mockoauth',
 				'role-b',
 				1,
 				'user-2',

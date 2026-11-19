@@ -209,3 +209,20 @@ test('keeps the role of each policy, null for the user\'s own', async () => {
 		{ policy: { id: 'policy-u', ip_access: null }, role: null },
 	]);
 });
+
+test('counts a policy reached through two roles at its last place', async () => {
+	AccessService.prototype.readByQuery = vi.fn().mockResolvedValue([
+		{ policy: { id: 'policy-pub', ip_access: null }, role: 'role-staff' },
+		{ policy: { id: 'policy-rev', ip_access: null }, role: 'role-editors' },
+		{ policy: { id: 'policy-pub', ip_access: null }, role: 'role-press' },
+	]);
+
+	const accountability = {
+		roles: ['role-staff', 'role-editors', 'role-press'],
+		user: null,
+		ip: null,
+	} as unknown as Accountability;
+
+	await expect(fetchPolicies(accountability, {} as Context))
+		.resolves.toEqual(['policy-rev', 'policy-pub']);
+});
