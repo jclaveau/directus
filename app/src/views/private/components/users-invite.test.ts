@@ -191,3 +191,30 @@ test('a role prop hides the select and is the invited role', async () => {
 		roles: ['role-staff'],
 	});
 });
+
+test('emptying the roles select blocks the invite', async () => {
+	vi.spyOn(api, 'get').mockResolvedValueOnce({
+		data: { data: [{ id: 'role-editor', name: 'Editor' }] },
+	});
+
+	const apiPostSpy = vi.spyOn(api, 'post').mockResolvedValueOnce({});
+
+	const wrapper = mount(UsersInvite, {
+		props: { modelValue: false },
+		global,
+	});
+
+	await wrapper.setProps({ modelValue: true });
+	await flushPromises();
+
+	wrapper.findComponent(VSelectStub).vm.$emit('update:modelValue', []);
+
+	wrapper.findComponent(VTextareaStub).vm
+		.$emit('update:modelValue', 'a@example.com');
+
+	await flushPromises();
+	await wrapper.findAll('button')[1]!.trigger('click');
+	await flushPromises();
+
+	expect(apiPostSpy).not.toHaveBeenCalled();
+});

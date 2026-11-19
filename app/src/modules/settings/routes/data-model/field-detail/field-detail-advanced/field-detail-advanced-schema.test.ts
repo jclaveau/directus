@@ -185,3 +185,42 @@ test('a json file field has no create or update trigger', () => {
 
 	expect(wrapper.findAllComponents(VSelectStub)).toHaveLength(1);
 });
+
+test('a uuid relation to directus_roles offers no stamp of a user', () => {
+	const wrapper = mount(FieldDetailAdvancedSchema, {
+		global: {
+			stubs,
+			plugins: [
+				i18n,
+				createTestingPinia({
+					createSpy: vi.fn,
+					initialState: {
+						fieldDetailStore: {
+							editing: '+',
+							localType: 'm2o',
+							relations: {
+								m2o: { related_collection: 'directus_roles' },
+							},
+							field: {
+								field: 'owner_role',
+								type: 'uuid',
+								schema: { is_primary_key: false },
+								meta: { special: null },
+							},
+						},
+					},
+				}),
+			],
+		},
+	});
+
+	const selectStubs = wrapper.findAllComponents(VSelectStub);
+
+	expect(selectStubs[1]!.props('items')).toEqual([
+		{ text: 'Do Nothing', value: null },
+	]);
+
+	expect(selectStubs[2]!.props('items')).toEqual([
+		{ text: 'Do Nothing', value: null },
+	]);
+});

@@ -102,6 +102,22 @@ describe('the migration', () => {
 		);
 	});
 
+	test('up indexes the memberships by user', async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			foreignKeys: vi.fn().mockResolvedValue([]),
+		} as any);
+
+		tracker.on.any(/^create index/).response(undefined);
+		tracker.on.select('directus_users').response([]);
+
+		await up(db);
+
+		expect(tracker.history.any.map(({ sql }) => sql)).toContain(
+			'create index "directus_role_members_user_index"'
+			+ ' on "directus_role_members" ("user")',
+		);
+	});
+
 	test('down gives each user the role of its one membership', async () => {
 		tracker.on.select('directus_role_members').response([
 			{ user: 'user-1', role: 'role-b' },
@@ -120,6 +136,21 @@ describe('the migration', () => {
 		expect(tracker.history.any.map(({ sql }) => sql).at(-1)).toEqual(
 			'drop table "directus_role_members"',
 		);
+	});
+
+	test('down rolls back a user holding one role twice', async () => {
+		tracker.on.select('directus_role_members').response([
+			{ user: 'user-1', role: 'role-b' },
+			{ user: 'user-1', role: 'role-b' },
+		]);
+
+		tracker.on.update('directus_users').response(1);
+
+		await down(db);
+
+		expect(tracker.history.update.map(({ bindings }) => bindings)).toEqual([
+			['role-b', 'user-1'],
+		]);
 	});
 
 	test('down refuses users holding several roles, changing nothing', async () => {

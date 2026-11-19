@@ -2,6 +2,7 @@ import type { SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { RoleMembersService } from '../../services/role-members.js';
+import { transaction } from '../../utils/transaction.js';
 import {
 	providerMemberships,
 	syncProviderMemberships,
@@ -10,6 +11,7 @@ import {
 } from './provider-memberships.js';
 
 vi.mock('../../services/role-members.js');
+vi.mock('../../utils/transaction.js');
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -125,6 +127,10 @@ describe('syncProviderMemberships', () => {
 			return { deleteMany, createMany } as any;
 		});
 
+		vi.mocked(transaction).mockImplementation(async (knex, handler) => {
+			return handler(knex);
+		});
+
 		knexMock = {
 			select: vi.fn().mockReturnThis(),
 			from: vi.fn().mockReturnThis(),
@@ -180,7 +186,7 @@ describe('syncProviderMemberships', () => {
 		]);
 	});
 
-	test('replaces every row the provider holds by the mapped role', async () => {
+	test('deletes only the rows whose role is no longer mapped', async () => {
 		managedRows = [
 			{ id: 'row-1', role: 'role-a' },
 			{ id: 'row-2', role: 'role-b' },
@@ -191,11 +197,62 @@ describe('syncProviderMemberships', () => {
 			schema: {} as SchemaOverview,
 		});
 
-		expect(deleteMany).toHaveBeenCalledWith(['row-1', 'row-2']);
+		expect(deleteMany).toHaveBeenCalledWith(['row-1']);
+		expect(createMany).not.toHaveBeenCalled();
+	});
+
+	test('writes nothing when the mapped roles come in another order', async () => {
+		managedRows = [
+			{ id: 'row-1', role: 'role-a' },
+			{ id: 'row-2', role: 'role-b' },
+		];
+
+		await syncProviderMemberships('user-1', 'github', ['role-b', 'role-a'], {
+			knex: knexMock,
+			schema: {} as SchemaOverview,
+		});
+
+		expect(RoleMembersService).not.toHaveBeenCalled();
+	});
+
+	test('deletes a second row of a role still mapped', async () => {
+		managedRows = [
+			{ id: 'row-1', role: 'role-a' },
+			{ id: 'row-2', role: 'role-a' },
+		];
+
+		await syncProviderMemberships('user-1', 'github', ['role-a'], {
+			knex: knexMock,
+			schema: {} as SchemaOverview,
+		});
+
+		expect(deleteMany).toHaveBeenCalledWith(['row-2']);
+		expect(createMany).not.toHaveBeenCalled();
+	});
+
+	test('creates the new role before deleting the old one, in one trx', async () => {
+		managedRows = [{ id: 'row-1', role: 'role-a' }];
+
+		await syncProviderMemberships('user-1', 'github', ['role-b'], {
+			knex: knexMock,
+			schema: {} as SchemaOverview,
+		});
+
+		expect(transaction).toHaveBeenCalledOnce();
+
+		expect(RoleMembersService).toHaveBeenCalledWith({
+			knex: knexMock,
+			schema: {},
+		});
 
 		expect(createMany).toHaveBeenCalledWith([
 			{ role: 'role-b', managed_by: 'auth:github', user: 'user-1' },
 		]);
+
+		expect(deleteMany).toHaveBeenCalledWith(['row-1']);
+
+		expect(createMany.mock.invocationCallOrder[0])
+			.toBeLessThan(deleteMany.mock.invocationCallOrder[0]!);
 	});
 
 	test('only deletes when no role is mapped any more', async () => {

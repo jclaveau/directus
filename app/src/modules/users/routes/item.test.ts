@@ -250,7 +250,13 @@ test('a new user under a role starts with a membership of that role', () => {
 		global,
 	});
 
-	expect(itemEdits.value).toEqual({ roles: [{ role: 'role-editor' }] });
+	expect(itemEdits.value).toEqual({
+		roles: {
+			create: [{ role: 'role-editor' }],
+			update: [],
+			delete: [],
+		},
+	});
 
 	expect(wrapper.findComponent({ name: 'UserPoliciesSidebarDetail' })
 		.exists()).toBe(false);

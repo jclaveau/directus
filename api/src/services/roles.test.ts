@@ -255,6 +255,7 @@ describe('Integration Tests', () => {
 				expect(roleMembersDeleteByQuerySpy).toHaveBeenCalledWith(
 					{
 						filter: { role: { _in: keys } },
+						limit: -1,
 					},
 					opts,
 				);
@@ -309,6 +310,7 @@ describe('Integration Tests', () => {
 				expect(roleMembersDeleteByQuerySpy).toHaveBeenCalledWith(
 					{
 						filter: { role: { _in: ['role-id-15'] } },
+						limit: -1,
 					},
 					expect.objectContaining({ bypassLimits: true }),
 				);

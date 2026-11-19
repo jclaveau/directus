@@ -1,3 +1,4 @@
+import { InvalidPayloadError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import { SchemaComposer } from 'graphql-compose';
 import knex from 'knex';
@@ -254,5 +255,47 @@ describe('system resolvers feed the request aggregate', () => {
 			['role-1', 'role-2'],
 			null,
 		);
+	});
+	test('users_invite refuses an empty list of roles, as REST does', async () => {
+		const gql = new GraphQLService({
+			knex: knex({ client: MockClient }),
+			schema: { collections: {} } as any,
+			accountability: null,
+			scope: 'system',
+		});
+
+		const schemaComposer = new SchemaComposer();
+
+		injectSystemResolvers(
+			gql,
+			schemaComposer,
+			{
+				CreateCollectionTypes: {},
+				ReadCollectionTypes: {},
+				UpdateCollectionTypes: {},
+				DeleteCollectionTypes: {},
+			},
+			{
+				read: { collections: {} },
+				create: { collections: { directus_users: {} } },
+				update: { collections: {} },
+				delete: { collections: {} },
+			} as any,
+		);
+
+		const inviteUser = vi.spyOn(UsersService.prototype, 'inviteUser')
+			.mockResolvedValue(undefined);
+
+		await expect(schemaComposer.Mutation.getFieldConfig('users_invite')
+			.resolve!(
+				undefined,
+				{ email: 'ada@example.com', roles: [], invite_url: null },
+				{},
+				{} as any,
+			)).rejects.toThrow(new InvalidPayloadError({
+			reason: '"roles" must contain at least 1 items',
+		}));
+
+		expect(inviteUser).not.toHaveBeenCalled();
 	});
 });

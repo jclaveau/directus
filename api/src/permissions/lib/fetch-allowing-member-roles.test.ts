@@ -439,3 +439,54 @@ test('refuses an update naming no row', async () => {
 
 	expect(fetchPermissions).not.toHaveBeenCalled();
 });
+
+test('matches a uuid key sent in capitals to the row read back', async () => {
+	vi.mocked(fetchPolicyAccessRows).mockResolvedValue([
+		{ policy: { id: 'policy-editors', ip_access: null }, role: 'editors' },
+	]);
+
+	vi.mocked(fetchPermissions).mockResolvedValue([
+		{
+			policy: 'policy-editors',
+			fields: ['*'],
+			permissions: { status: { _eq: 'draft' } },
+		},
+	] as unknown as Permission[]);
+
+	vi.mocked(getDBQuery).mockResolvedValueOnce([
+		{ id: 'a1b2c3d4-0000-4000-8000-00000000000f' },
+	] as never);
+
+	vi.mocked(fetchRolesTree).mockResolvedValueOnce(['editors']);
+
+	const accountability = {
+		user: 'user-1',
+		admin: false,
+		memberRoles: ['editors'],
+		roles: ['editors'],
+		ip: null,
+	} as unknown as Accountability;
+
+	await expect(fetchAllowingMemberRolesByRow(
+		{
+			accountability,
+			action: 'update',
+			collection: 'articles',
+			primaryKeys: ['A1B2C3D4-0000-4000-8000-00000000000F'],
+			fields: ['label'],
+		},
+		{
+			knex,
+			schema: {
+				collections: {
+					articles: {
+						primary: 'id',
+						fields: { id: { type: 'uuid' } },
+					},
+				},
+			} as unknown as SchemaOverview,
+		},
+	)).resolves.toEqual(new Map([
+		['A1B2C3D4-0000-4000-8000-00000000000F', ['editors']],
+	]));
+});
