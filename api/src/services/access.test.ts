@@ -265,6 +265,7 @@ describe('Services / Access', () => {
 				admin: false,
 				app: false,
 				ip: null,
+				memberRoles: [],
 				roles: [],
 				user: null,
 			};
@@ -584,6 +585,7 @@ describe('Services / Access', () => {
 				admin: false,
 				app: false,
 				ip: null,
+				memberRoles: [],
 				roles: [],
 				user: null,
 			};

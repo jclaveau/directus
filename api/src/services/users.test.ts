@@ -931,7 +931,9 @@ describe('Integration Tests', () => {
 					tracker.on.select('directus_role_members').response([]);
 
 					vi.spyOn(UsersService.prototype, 'updateOne')
-						.mockResolvedValueOnce('8e2b4c10-5d3a-4f6e-9a7b-000000000019');
+						.mockImplementationOnce(async (_key, _data, opts) => {
+							throw opts?.preMutationError;
+						});
 
 					const promise = service.inviteUser(
 						'user@example.com',

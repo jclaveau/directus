@@ -203,7 +203,7 @@ test('keeps the role whose update rule matches every written row', async () => {
 
 	vi.mocked(fetchPermissions).mockResolvedValue([
 		{ policy: 'policy-editors', permissions: { status: { _eq: 'draft' } } },
-	] as Permission[]);
+	] as unknown as Permission[]);
 
 	vi.mocked(fetchPermittedAstRootFields).mockResolvedValue([
 		{ id: 7 },

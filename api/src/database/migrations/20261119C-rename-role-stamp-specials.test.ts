@@ -75,7 +75,7 @@ describe('the migration', () => {
 
 		await up(db);
 
-		expect(tracker.history.any.map(({ sql, bindings }) => ({ sql, bindings })))
+		expect(tracker.history.all.map(({ sql, bindings }) => ({ sql, bindings })))
 			.toEqual([
 				{
 					sql: 'select "id", "collection", "field", "special" from'
@@ -138,7 +138,7 @@ describe('the migration', () => {
 
 		await up(db);
 
-		expect(tracker.history.any).toHaveLength(1);
+		expect(tracker.history.all).toHaveLength(1);
 		expect(createInspector).not.toHaveBeenCalled();
 		expect(logger.info).not.toHaveBeenCalled();
 	});
@@ -167,7 +167,7 @@ describe('the migration', () => {
 			+ ' not on "sqlite"',
 		));
 
-		expect(tracker.history.any).toHaveLength(1);
+		expect(tracker.history.all).toHaveLength(1);
 	});
 
 	test('down turns each list back into the uuid of its first role', async () => {
@@ -182,7 +182,7 @@ describe('the migration', () => {
 
 		await down(db);
 
-		expect(tracker.history.any.map(({ sql, bindings }) => ({ sql, bindings })))
+		expect(tracker.history.all.map(({ sql, bindings }) => ({ sql, bindings })))
 			.toEqual([
 				{
 					sql: 'select "id", "collection", "field", "special" from'
@@ -230,7 +230,7 @@ describe('the migration', () => {
 
 		await down(db);
 
-		expect(tracker.history.any).toHaveLength(1);
+		expect(tracker.history.all).toHaveLength(1);
 		expect(logger.info).not.toHaveBeenCalled();
 	});
 
