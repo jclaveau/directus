@@ -123,6 +123,9 @@ describe('syncProviderMemberships', () => {
 		deleteMany = vi.fn();
 		createMany = vi.fn();
 
+		vi.mocked(RoleMembersService).mockClear();
+		vi.mocked(transaction).mockClear();
+
 		vi.mocked(RoleMembersService).mockImplementation(function () {
 			return { deleteMany, createMany } as any;
 		});

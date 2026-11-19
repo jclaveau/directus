@@ -31,7 +31,7 @@ describe('the migration', () => {
 	});
 
 	beforeEach(() => {
-		tracker.on.any(/^(create|alter|drop) table/).response(undefined);
+		tracker.on.any(/^(create|alter|drop) (table|index)/).response(undefined);
 	});
 
 	afterEach(() => {
@@ -107,7 +107,6 @@ describe('the migration', () => {
 			foreignKeys: vi.fn().mockResolvedValue([]),
 		} as any);
 
-		tracker.on.any(/^create index/).response(undefined);
 		tracker.on.select('directus_users').response([]);
 
 		await up(db);
