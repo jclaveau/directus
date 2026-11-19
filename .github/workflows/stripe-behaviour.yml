@@ -1,0 +1,79 @@
+name: Stripe behaviour
+
+# Probes what Stripe (test mode) answers and which events it sends for the
+# subscription calls the subscriptions bundle makes, and fails when that differs
+# from scripts/stripe-behaviour/stripe-behaviour.baseline.json. Creates a test
+# clock, a customer and a subscription on the test account; never touches live
+# mode.
+#
+# Also runs on a pull request that changes the probe: workflow_dispatch only
+# sees a workflow once it is on the default branch.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/stripe-behaviour.yml
+      - scripts/stripe-behaviour/**
+  schedule:
+    - cron: '43 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stripe-behaviour
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARED_VERSION: 2026.6.0
+  CLOUDFLARED_SHA256: 08d27c4c5d3ed73ee3e98ef2ddceb4ad09fd4cfc28e243565a189538e8ccd706
+
+jobs:
+  probe:
+    # A fork's pull request gets no secrets.
+    if: >-
+      github.repository == 'jclaveau/directus'
+      && (github.event_name != 'pull_request'
+        || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Check the secret's format
+        env:
+          SUBSCRIPTIONS_STRIPE_SECRET_KEY: ${{ secrets.SUBSCRIPTIONS_STRIPE_SECRET_KEY }}
+        run: |
+          [[ "$SUBSCRIPTIONS_STRIPE_SECRET_KEY" =~ ^sk_test_[A-Za-z0-9]+$ ]] \
+            || { echo "::error::SUBSCRIPTIONS_STRIPE_SECRET_KEY is missing or not an sk_test_ key"; exit 1; }
+
+      - name: Install cloudflared
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/cloudflared" \
+            "https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-amd64"
+          echo "$CLOUDFLARED_SHA256  $RUNNER_TEMP/cloudflared" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/cloudflared"
+          echo "CLOUDFLARED_BIN=$RUNNER_TEMP/cloudflared" >> "$GITHUB_ENV"
+
+      - name: Probe Stripe
+        env:
+          SUBSCRIPTIONS_STRIPE_SECRET_KEY: ${{ secrets.SUBSCRIPTIONS_STRIPE_SECRET_KEY }}
+        run: |
+          node scripts/stripe-behaviour/stripe-webhook-probe.mjs \
+            --output-directory "$RUNNER_TEMP/stripe-behaviour"
+
+      - name: Upload the captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stripe-behaviour
+          path: ${{ runner.temp }}/stripe-behaviour
+          retention-days: 30
+          if-no-files-found: ignore
