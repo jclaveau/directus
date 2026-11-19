@@ -18,7 +18,7 @@ beforeEach(() => {
 });
 
 test('two concurrent calls on one key run the handler once', async () => {
-	const cachedHandler = vi.fn(async () => ['row']);
+	const cachedHandler = vi.fn(async (_options: object) => ['row']);
 	const cachedRead = withCache('rows', cachedHandler);
 
 	const readResults = await Promise.all([
@@ -31,7 +31,7 @@ test('two concurrent calls on one key run the handler once', async () => {
 });
 
 test('two concurrent calls on two keys run the handler twice', async () => {
-	const cachedHandler = vi.fn(async () => ['row']);
+	const cachedHandler = vi.fn(async (_options: object) => ['row']);
 	const cachedRead = withCache('rows', cachedHandler);
 
 	await Promise.all([
@@ -43,7 +43,7 @@ test('two concurrent calls on two keys run the handler twice', async () => {
 });
 
 test('a call made after a read ended reads the cache again', async () => {
-	const cachedHandler = vi.fn(async () => ['row']);
+	const cachedHandler = vi.fn(async (_options: object) => ['row']);
 	const cachedRead = withCache('rows', cachedHandler);
 
 	await cachedRead({ policies: ['a'] });
@@ -78,7 +78,7 @@ test('a call waiting on a failed read reads on its own', async () => {
 });
 
 test('a changed result does not reach the other caller', async () => {
-	const cachedHandler = vi.fn(async () => {
+	const cachedHandler = vi.fn(async (_options: object) => {
 		return { admin: false, connections: [] as string[] };
 	});
 
@@ -98,7 +98,7 @@ test('a changed result does not reach the other caller', async () => {
 test('a call made after the running reads were cleared queries again', async () => {
 	const finishReads: ((rows: string[]) => void)[] = [];
 
-	const cachedHandler = vi.fn(() => {
+	const cachedHandler = vi.fn((_options: object) => {
 		return new Promise<string[]>((resolve) => {
 			finishReads.push(resolve);
 		});
