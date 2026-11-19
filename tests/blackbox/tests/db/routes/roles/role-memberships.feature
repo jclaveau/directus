@@ -10,7 +10,8 @@ Feature: A user holds several roles, each one a membership
   - An invitation's memberships are its inviter's: a re-invite by the same
     inviter replaces them, one by another inviter adds its own.
   - A user holds a role once per `managed_by`: a second membership of the
-    same role from the same manager is refused.
+    same role from the same manager is refused, whether a write creates it
+    or moves another membership onto that role.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own. A response cell states the keys it checks.
@@ -311,3 +312,37 @@ Feature: A user holds several roles, each one a membership
       |   fields: roles.role,roles.sort   |     roles:                      |
       |                                   |       - role: <staff>           |
       |                                   |         sort: 1                 |
+
+  Scenario: a membership moved onto a role the user holds is refused
+    Given the rows of directus_roles:
+      | id      | name        |
+      | <staff> | staff-<run> |
+      | <press> | press-<run> |
+    And the rows of directus_users:
+      | id      | email                   |
+      | <alice> | alice-<run>@example.com |
+    And the rows of directus_role_members:
+      | id          | user    | role    | sort |
+      | <staff-row> | <alice> | <staff> | 1    |
+      | <press-row> | <alice> | <press> | 2    |
+    Then these requests get these responses:
+      | request                           | response                        |
+      | method: PATCH                     | code: 400                       |+
+      | path: /users/<alice>              | body:                           |
+      | payload:                          |   errors:                       |
+      |   roles:                          |     - message: >-               |
+      |     update:                       |         Invalid payload. The    |
+      |       - id: <press-row>           |         user "<alice>" already  |
+      |         role: <staff>             |         holds the role          |
+      |                                   |         "<staff>" with          |
+      |                                   |         managed_by null.        |
+      |                                   |       extensions:               |
+      |                                   |         code: INVALID_PAYLOAD   |
+      | method: GET                       | code: 200                       |+
+      | path: /users/<alice>              | body:                           |
+      | query:                            |   data:                         |
+      |   fields: roles.role,roles.sort   |     roles:                      |
+      |   deep: >-                        |       - role: <staff>           |
+      |     {"roles":{"_sort":["sort"]}}  |         sort: 1                 |
+      |                                   |       - role: <press>           |
+      |                                   |         sort: 2                 |
