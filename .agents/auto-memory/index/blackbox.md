@@ -35,4 +35,4 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [#617 schema-move lock PARKED](../project_directus_issue617_parked.md) — not a flake source; pick up only when a schema-wide assertion test exists
 - [bb scenario titles live in the .test.ts too](../reference_directus_bb_scenario_titles_in_test_file.md) — renaming a `Scenario:` without the sibling .test.ts title list fails the file "(0 test)" in CI only
 - [Test profile window (PROPOSED, #740/#741)](../project_directus_test_profile_window_proposal.md) — start/stop in-process profiler for tests; a profile cannot see DB planning (use wall − CPU); gate on same-run CPU ratio; bind-param tally first
-- [withCache shares a running read](../reference_directus_withcache_inflight_dedupe.md) — per process since #747; before, two concurrent same-key reads flaked a statement count 3-or-4
+- [withCache shares a running read](../reference_directus_withcache_inflight_dedupe.md) — per process since #747, a clone per caller, emptied by clearCache; before, two concurrent same-key reads flaked a statement count 3-or-4
