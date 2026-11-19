@@ -41,7 +41,7 @@ line appended below.
 - [Cache layers fail differently](project_directus_cache_failure_semantics.md) — ioredis raises, Keyv swallows, bus fire-and-forget
 - [Cache tier switches](project_directus_cache_tier_switches.md) — only response+schema switchable
 
-## blackbox (33) — seeds, sharding, flakes, spawned instances
+## blackbox (34) — seeds, sharding, flakes, spawned instances
 `.agents/auto-memory/index/blackbox.md`
 
 - [Directus blackbox run + logs](project_directus_blackbox_run_and_logs.md) — bb runs on every code PR; the label is NOT required and cancels the run
@@ -62,7 +62,7 @@ line appended below.
 - [knex-mock matches raw SQL](reference_directus_knex_mock_sql_matching.md) — register the narrower handler first
 - [useEnv mock needs vi.hoisted](reference_directus_useenv_mock_hoisted.md) — automock evals the real module first
 
-## api (46) — Directus core internals, env, errors, migrations, DB
+## api (47) — Directus core internals, env, errors, migrations, DB
 `.agents/auto-memory/index/api.md`
 
 - [IMPORTANT: default = raw SQL behaviour](feedback_directus_default_matches_dbms.md) — service queries/mutations behave like the equivalent raw SQL by default; stricter = opt-in option

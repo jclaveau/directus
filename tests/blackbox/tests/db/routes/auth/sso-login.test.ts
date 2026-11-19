@@ -6,8 +6,9 @@ import { defineSsoFeature, SSO_CLIENT_ID } from './sso-steps';
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 
-// The role the feature names `sso_staff`.
+// The roles the feature names `sso_staff` and `sso_auditors`.
 const STAFF_ROLE_ID = '5b3e8f0a-9c41-4d6e-8a2f-1c7d3e9b6a04';
+const AUDITORS_ROLE_ID = '0c6f2a9d-3e18-4b57-9d40-7a1e5c8b2f63';
 
 defineSsoFeature(
 	'./tests/db/routes/auth/sso-login.feature',
@@ -31,7 +32,10 @@ defineSsoFeature(
 			AUTH_MOCKOAUTH_SYNC_USER_INFO: 'true',
 			AUTH_MOCKOAUTH_DEFAULT_ROLE_ID: ROLE.TESTS_FLOW.ID,
 			AUTH_MOCKOAUTH_ROLE_MAPPING:
-				`json:${JSON.stringify({ staff: STAFF_ROLE_ID })}`,
+				`json:${JSON.stringify({
+					staff: STAFF_ROLE_ID,
+					auditors: AUDITORS_ROLE_ID,
+				})}`,
 
 			AUTH_MOCKOPENID_DRIVER: 'openid',
 			AUTH_MOCKOPENID_MODE: 'json',
@@ -41,13 +45,21 @@ defineSsoFeature(
 			AUTH_MOCKOPENID_ALLOW_PUBLIC_REGISTRATION: 'true',
 			AUTH_MOCKOPENID_SYNC_USER_INFO: 'true',
 			AUTH_MOCKOPENID_DEFAULT_ROLE_ID: ROLE.TESTS_FLOW.ID,
+			AUTH_MOCKOPENID_ROLE_MAPPING:
+				`json:${JSON.stringify({
+					staff: STAFF_ROLE_ID,
+					auditors: AUDITORS_ROLE_ID,
+				})}`,
 		};
 	},
 	{
 		async beforeFeature(vendor) {
 			const created = await request(getUrl(vendor))
 				.post('/roles')
-				.send({ id: STAFF_ROLE_ID, name: 'sso_staff' })
+				.send([
+					{ id: STAFF_ROLE_ID, name: 'sso_staff' },
+					{ id: AUDITORS_ROLE_ID, name: 'sso_auditors' },
+				])
 				.set('Authorization', AUTH);
 
 			expect(created.statusCode).toBe(200);
@@ -79,11 +91,12 @@ defineSsoFeature(
 				expect(deletedUsers.statusCode).toBe(204);
 			}
 
-			const deletedRole = await request(getUrl(vendor))
-				.delete(`/roles/${STAFF_ROLE_ID}`)
+			const deletedRoles = await request(getUrl(vendor))
+				.delete('/roles')
+				.send([STAFF_ROLE_ID, AUDITORS_ROLE_ID])
 				.set('Authorization', AUTH);
 
-			expect(deletedRole.statusCode).toBe(204);
+			expect(deletedRoles.statusCode).toBe(204);
 		},
 	},
 );

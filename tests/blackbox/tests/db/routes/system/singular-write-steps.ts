@@ -47,7 +47,7 @@ const REQUEST_CELL_KEYS = [
 	'eventually',
 ] as const satisfies readonly (keyof RequestCell)[];
 
-const RESPONSE_CELL_KEYS = ['code', 'body', 'text'] as const;
+const RESPONSE_CELL_KEYS = ['code', 'headers', 'body', 'text'] as const;
 
 type Row = { request: string; response: string };
 
@@ -268,13 +268,17 @@ function sendRequest(instanceUrl: string, requestCell: RequestCell) {
 
 	pendingRequest
 		.query(query)
-		.set(headers)
-		.set(
+		.set(headers);
+
+	// `as: public` sends no credentials at all.
+	if (token !== 'public') {
+		pendingRequest.set(
 			'Authorization',
 			token === undefined
 				? AUTH
 				: `Bearer ${token}`,
 		);
+	}
 
 	// A multipart upload: Directus wants every form field before the file.
 	if (file !== undefined) {
@@ -296,9 +300,10 @@ function sendRequest(instanceUrl: string, requestCell: RequestCell) {
 		: pendingRequest.send(payload as object);
 }
 
-function codeBodyAndText(response: Response) {
+function comparableResponse(response: Response) {
 	return {
 		code: response.statusCode,
+		headers: response.headers,
 		body: response.body,
 		text: response.text,
 	};
@@ -400,7 +405,7 @@ async function sendRows(
 			await expect.poll(async () => {
 				response = await sendRequest(instanceUrl(), requestCell);
 
-				return codeBodyAndText(response);
+				return comparableResponse(response);
 			}, { timeout: 10_000, interval: 250 }).toMatchObject(
 				expectedResponse,
 			);
@@ -408,7 +413,7 @@ async function sendRows(
 		else {
 			response = await sendRequest(instanceUrl(), requestCell);
 
-			expect(codeBodyAndText(response)).toMatchObject(expectedResponse);
+			expect(comparableResponse(response)).toMatchObject(expectedResponse);
 		}
 
 		if (requestCell.remember !== undefined) {
