@@ -89,9 +89,10 @@ Feature: A role an extension writes in its own transaction flushes once it commi
       |                                        |         or it does not exist.   |
       |                                        |         Queried in root.        |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 2       | directus_access    | 2      | 0      | 0      | 0      |
-      | 2       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 2       | directus_roles     | 1      | 0      | 0      | 0      |
-      | 2       | directus_users     | 3      | 0      | 1      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 2       | directus_access       | 4      | 0      | 0      | 0      |
+      | 2       | directus_activity     | 0      | 3      | 0      | 0      |
+      | 2       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 2       | directus_role_members | 3      | 1      | 0      | 1      |
+      | 2       | directus_roles        | 2      | 0      | 0      | 0      |
+      | 2       | directus_users        | 4      | 0      | 0      | 0      |

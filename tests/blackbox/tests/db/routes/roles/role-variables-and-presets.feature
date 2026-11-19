@@ -264,23 +264,23 @@ Feature: A user's roles resolve the role variables and order the presets
       |     role_tag: $CURRENT_ROLE       |         use "$CURRENT_MEMBER_ROLES"     |
       |                                   |         with "_in" or "_nin".           |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 3      | 0      | 0      | 0      |
-      | 1       | directus_permissions | 2      | 0      | 0      | 0      |
-      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
-      | 1       | directus_roles       | 2      | 0      | 0      | 0      |
-      | 1       | directus_users       | 1      | 0      | 0      | 0      |
-      | 1       | role_variable_notes  | 1      | 0      | 0      | 0      |
-      | 2       | directus_users       | 1      | 0      | 0      | 0      |
-      | 2       | role_variable_notes  | 1      | 0      | 0      | 0      |
-      | 3       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 3       | directus_users       | 1      | 0      | 0      | 0      |
-      | 4       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 4       | directus_revisions   | 0      | 1      | 0      | 0      |
-      | 4       | directus_users       | 1      | 0      | 0      | 0      |
-      | 4       | role_variable_notes  | 1      | 1      | 0      | 0      |
-      | 5       | directus_users       | 1      | 0      | 0      | 0      |
-      | 5       | role_variable_notes  | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      |
+      | 1       | directus_permissions  | 2      | 0      | 0      | 0      |
+      | 1       | directus_policies     | 1      | 0      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles        | 2      | 0      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | role_variable_notes   | 1      | 0      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | role_variable_notes   | 1      | 0      | 0      | 0      |
+      | 3       | directus_users        | 1      | 0      | 0      | 0      |
+      | 4       | directus_permissions  | 1      | 0      | 0      | 0      |
+      | 4       | directus_users        | 1      | 0      | 0      | 0      |
+      | 5       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 5       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 5       | directus_users        | 1      | 0      | 0      | 0      |
+      | 5       | role_variable_notes   | 1      | 1      | 0      | 0      |
 
   Scenario: an app user reads the presets of their own role, not the parent's
     Given these requests are sent:

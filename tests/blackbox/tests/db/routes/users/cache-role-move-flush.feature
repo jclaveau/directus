@@ -82,9 +82,9 @@ Feature: A user taken out of a role through the role drops the cached reads
       |                                    |         or it does not exist.   |
       |                                    |         Queried in root.        |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 3       | directus_access    | 4      | 0      | 0      | 0      |
-      | 3       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 3       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 3       | directus_roles     | 6      | 0      | 0      | 0      |
-      | 3       | directus_users     | 8      | 0      | 1      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 3       | directus_access       | 5      | 0      | 0      | 0      |
+      | 3       | directus_activity     | 0      | 2      | 0      | 0      |
+      | 3       | directus_role_members | 4      | 0      | 0      | 1      |
+      | 3       | directus_roles        | 7      | 0      | 0      | 0      |
+      | 3       | directus_users        | 2      | 0      | 0      | 0      |

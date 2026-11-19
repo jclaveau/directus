@@ -147,16 +147,16 @@ Feature: A share reads with its sender's role chain and its own
       | 2       | role_share_notes      | 1      | 0      | 0      | 0      | 0    |
       | 3       | directus_sessions     | 0      | 1      | 0      | 1      | 0    |
       | 3       | directus_shares       | 1      | 0      | 1      | 0      | 0    |
-      | 4       | directus_access       | 5      | 0      | 0      | 0      | 0    |
-      | 4       | directus_permissions  | 4      | 0      | 0      | 0      | 0    |
-      | 4       | directus_policies     | 3      | 0      | 0      | 0      | 0    |
+      | 4       | directus_access       | 4      | 0      | 0      | 0      | 0    |
+      | 4       | directus_permissions  | 3      | 0      | 0      | 0      | 0    |
+      | 4       | directus_policies     | 2      | 0      | 0      | 0      | 0    |
       | 4       | directus_sessions     | 1      | 0      | 0      | 0      | 0    |
       | 4       | directus_shares       | 1      | 0      | 0      | 0      | 0    |
       | 4       | directus_users        | 1      | 0      | 0      | 0      | 0    |
       | 4       | role_share_notes      | 1      | 0      | 0      | 0      | 0    |
       | 5       | directus_sessions     | 0      | 1      | 0      | 1      | 0    |
       | 5       | directus_shares       | 1      | 0      | 1      | 0      | 0    |
-      | 6       | directus_access       | 3      | 0      | 0      | 0      | 0    |
+      | 6       | directus_access       | 2      | 0      | 0      | 0      | 0    |
       | 6       | directus_permissions  | 2      | 0      | 0      | 0      | 0    |
       | 6       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
       | 6       | directus_sessions     | 1      | 0      | 0      | 0      | 0    |
@@ -233,9 +233,9 @@ Feature: A share reads with its sender's role chain and its own
       | request | table                    | select | insert | update | delete |
       | 1       | directus_access          | 2      | 0      | 0      | 0      |
       | 1       | directus_sessions        | 2      | 1      | 1      | 1      |
-      | 2       | directus_access          | 6      | 0      | 0      | 0      |
+      | 2       | directus_access          | 4      | 0      | 0      | 0      |
       | 2       | directus_permissions     | 6      | 0      | 0      | 0      |
-      | 2       | directus_policies        | 5      | 0      | 0      | 0      |
+      | 2       | directus_policies        | 3      | 0      | 0      | 0      |
       | 2       | directus_roles           | 1      | 0      | 0      | 0      |
       | 2       | directus_sessions        | 1      | 0      | 0      | 0      |
       | 2       | directus_shares          | 1      | 0      | 0      | 0      |
