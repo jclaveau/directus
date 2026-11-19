@@ -447,10 +447,10 @@ describe('Services / RoleMembers', () => {
 				schema,
 			}).updateOne('6f1c2a4e-0000-4000-8000-000000000014', {
 				user: 'user-id-1',
-			})).rejects.toThrow(new Error(
-				'Invalid payload. Membership "6f1c2a4e-0000-4000-8000-000000000014"'
-				+ ' is managed by "ext:subscription", which alone changes it.',
-			));
+			})).rejects.toThrow(new InvalidPayloadError({
+				reason: 'Membership "6f1c2a4e-0000-4000-8000-000000000014"'
+					+ ' is managed by "ext:subscription", which alone changes it',
+			}));
 		});
 
 		it('lets a request reorder a managed membership', async () => {
