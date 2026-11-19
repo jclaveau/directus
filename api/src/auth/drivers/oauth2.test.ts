@@ -18,6 +18,7 @@ const mockedDeps = vi.hoisted(() => {
 		logger: { warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 		createOne: vi.fn(),
 		updateOne: vi.fn(),
+		profileGroups: [] as string[],
 	};
 });
 
@@ -31,7 +32,11 @@ vi.mock('openid-client', () => {
 							return { access_token: 'access', refresh_token: 'refresh' };
 						},
 						userinfo: async () => {
-							return { login: 'Ada', email: 'ada@example.com' };
+							return {
+								login: 'Ada',
+								email: 'ada@example.com',
+								groups: mockedDeps.profileGroups,
+							};
 						},
 					};
 				},
@@ -109,10 +114,11 @@ beforeEach(() => {
 afterEach(() => {
 	knexTracker.reset();
 	vi.resetAllMocks();
+	mockedDeps.profileGroups = [];
 });
 
 describe('OAuth2AuthDriver getUserID', () => {
-	test('a login of a known user syncs the provider membership', async () => {
+	test('a login of a known user syncs the default role', async () => {
 		knexTracker.on.select('directus_users').response({ id: 'user-1' });
 
 		const userId = await new OAuth2AuthDriver(
@@ -140,7 +146,7 @@ describe('OAuth2AuthDriver getUserID', () => {
 		expect(syncProviderMemberships).toHaveBeenCalledWith(
 			'user-1',
 			'github',
-			'role-default',
+			['role-default'],
 			{
 				knex: mockedKnex,
 				schema: { collections: {}, relations: [] },
@@ -148,8 +154,77 @@ describe('OAuth2AuthDriver getUserID', () => {
 		);
 	});
 
-	test('a login whose payload names no role leaves the memberships', async () => {
+	test('a login syncs the role of the group mapped first', async () => {
 		knexTracker.on.select('directus_users').response({ id: 'user-1' });
+		mockedDeps.profileGroups = ['auditors', 'staff'];
+
+		await new OAuth2AuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'github',
+				authorizeUrl: 'https://idp.example.com/authorize',
+				accessUrl: 'https://idp.example.com/token',
+				profileUrl: 'https://idp.example.com/profile',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				identifierKey: 'login',
+				defaultRoleId: 'role-default',
+				roleMapping: { staff: 'role-staff', auditors: 'role-auditors' },
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
+
+		expect(syncProviderMemberships).toHaveBeenCalledWith(
+			'user-1',
+			'github',
+			['role-staff'],
+			{
+				knex: mockedKnex,
+				schema: { collections: {}, relations: [] },
+			},
+		);
+	});
+
+	test('the auth.update hook reads roles and is refused role', async () => {
+		knexTracker.on.select('directus_users').response({ id: 'user-1' });
+		mockedDeps.profileGroups = ['staff'];
+		let hookPayload: any;
+
+		vi.mocked(emitter.emitFilter).mockImplementation(
+			async (_eventName: any, eventPayload: any) => {
+				hookPayload = eventPayload;
+				return eventPayload;
+			},
+		);
+
+		await new OAuth2AuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'github',
+				authorizeUrl: 'https://idp.example.com/authorize',
+				accessUrl: 'https://idp.example.com/token',
+				profileUrl: 'https://idp.example.com/profile',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				identifierKey: 'login',
+				defaultRoleId: 'role-default',
+				roleMapping: { staff: 'role-staff', auditors: 'role-auditors' },
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
+
+		expect(JSON.parse(JSON.stringify(hookPayload))).toEqual({
+			auth_data: '{"refreshToken":"refresh"}',
+			roles: ['role-staff'],
+		});
+
+		expect(() => hookPayload.role).toThrow(new Error(
+			'The "auth.update" payload has no "role" since multi-role (#746):'
+			+ ' read or set "roles"',
+		));
+	});
+
+	test('a login without a role mapping leaves the memberships', async () => {
+		knexTracker.on.select('directus_users').response({ id: 'user-1' });
+		mockedDeps.profileGroups = ['staff'];
 
 		await new OAuth2AuthDriver(
 			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
@@ -168,7 +243,7 @@ describe('OAuth2AuthDriver getUserID', () => {
 		expect(syncProviderMemberships).not.toHaveBeenCalled();
 	});
 
-	test('a first login creates the user with the provider membership', async () => {
+	test('a first unmapped login gives the admin the role', async () => {
 		knexTracker.on.select('directus_users').response(undefined);
 		mockedDeps.createOne.mockResolvedValue('user-1');
 
@@ -192,7 +267,68 @@ describe('OAuth2AuthDriver getUserID', () => {
 			email: 'ada@example.com',
 			external_identifier: 'Ada',
 			auth_data: '{"refreshToken":"refresh"}',
-			roles: [{ role: 'role-default', managed_by: 'auth:github' }],
+			roles: [{ role: 'role-default', managed_by: null }],
 		});
+		});
+
+	test('a first login gives the provider the role mapped first', async () => {
+		knexTracker.on.select('directus_users').response(undefined);
+		mockedDeps.createOne.mockResolvedValue('user-1');
+		mockedDeps.profileGroups = ['auditors', 'staff'];
+
+		await new OAuth2AuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'github',
+				authorizeUrl: 'https://idp.example.com/authorize',
+				accessUrl: 'https://idp.example.com/token',
+				profileUrl: 'https://idp.example.com/profile',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				identifierKey: 'login',
+				allowPublicRegistration: true,
+				defaultRoleId: 'role-default',
+				roleMapping: { staff: 'role-staff', auditors: 'role-auditors' },
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
+
+		expect(mockedDeps.createOne).toHaveBeenCalledWith({
+			provider: 'github',
+			email: 'ada@example.com',
+			external_identifier: 'Ada',
+			auth_data: '{"refreshToken":"refresh"}',
+			roles: [{ role: 'role-staff', managed_by: 'auth:github' }],
+		});
+	});
+
+	test('refuses an auth.create hook returning its own role', async () => {
+		knexTracker.on.select('directus_users').response(undefined);
+
+		vi.mocked(emitter.emitFilter).mockImplementation(
+			async (_eventName: any, eventPayload: any) => {
+				return { ...eventPayload, role: 'role-hook' };
+			},
+		);
+
+		await expect(new OAuth2AuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'github',
+				authorizeUrl: 'https://idp.example.com/authorize',
+				accessUrl: 'https://idp.example.com/token',
+				profileUrl: 'https://idp.example.com/profile',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				identifierKey: 'login',
+				allowPublicRegistration: true,
+				defaultRoleId: 'role-default',
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' }))
+			.rejects.toThrow(new Error(
+				'The "auth.create" payload has no "role" since multi-role (#746):'
+				+ ' read or set "roles"',
+			));
+
+		expect(mockedDeps.createOne).not.toHaveBeenCalled();
 	});
 });

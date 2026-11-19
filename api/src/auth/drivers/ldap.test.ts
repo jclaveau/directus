@@ -897,7 +897,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 			expect(mockedDeps.syncProviderMemberships).toHaveBeenCalledWith(
 				'user-1',
 				'ldap',
-				'role-editor',
+				['role-editor'],
 				{ knex: mockedKnex, schema: { collections: {}, relations: [] } },
 			);
 		});
@@ -1021,7 +1021,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 			expect(mockedDeps.syncProviderMemberships).toHaveBeenCalledWith(
 				'user-1',
 				'ldap',
-				'role-default',
+				['role-default'],
 				{ knex: mockedKnex, schema: { collections: {}, relations: [] } },
 			);
 		});
@@ -1056,7 +1056,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 			expect(mockedDeps.syncProviderMemberships).toHaveBeenCalledWith(
 				'user-1',
 				'ldap',
-				null,
+				[],
 				{ knex: mockedKnex, schema: { collections: {}, relations: [] } },
 			);
 		});
@@ -1174,7 +1174,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 					last_name: 'Doe',
 					email: 'john@example.com',
 					external_identifier: 'cn=jdoe,ou=users,dc=example',
-					role: 'role-editor',
+					roles: ['role-editor'],
 				},
 				{
 					identifier: 'cn=jdoe,ou=users,dc=example',
@@ -1209,7 +1209,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 			expect(mockedDeps.updateOne).not.toHaveBeenCalled();
 		});
 
-		test('creates the user with defaultRoleId when no group matches', async () => {
+		test('creates the user with an admin-owned role without groupDn', async () => {
 			const ldapDriver = new LDAPAuthDriver(
 				{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
 				{
@@ -1239,7 +1239,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 				last_name: undefined,
 				email: undefined,
 				external_identifier: 'cn=jdoe,ou=users,dc=example',
-				roles: [{ role: 'role-default', managed_by: 'auth:ldap' }],
+				roles: [{ role: 'role-default', managed_by: null }],
 			});
 		});
 

@@ -12,7 +12,8 @@ Feature: A first SSO login creates the user, a later one updates it
   - Both give the group "staff" the role 5b3e8f0a-... (sso_staff), the
     group "auditors" the role 0c6f2a9d-... (sso_auditors), anyone else the
     default role d70c0943-... A user in several mapped groups gets one role:
-    the first the mapping lists.
+    the first the mapping lists. That row is `managed_by: auth:<provider>`,
+    and a later login replaces only that provider's rows.
   - Any other row is a request as the admin.
 
   Scenario: an OAuth2 login creates the user, a later one updates it
@@ -198,6 +199,56 @@ Feature: A first SSO login creates the user, a later one updates it
       | 4       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
       | 4       | pg_index              | 2      | 0      | 0      | 0      | 0    |
       | 4       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+
+  Scenario: a later login keeps the role an admin gave the user
+    Then these requests get these responses:
+      | request                                    | response                         |
+      | method: POST                               | code: 200                        |+
+      | path: /users                               |                                  |
+      | payload:                                   |                                  |
+      |   provider: mockoauth                      |                                  |
+      |   external_identifier: lee-oauth           |                                  |
+      |   email: lee@sso.example.com               |                                  |
+      |   roles:                                   |                                  |
+      |   - role: >-                               |                                  |
+      |       d70c0943-5b55-4c5d-a613-f539a27a57f5 |                                  |
+      | login: mockoauth                           | code: 200                        |+
+      | profile:                                   |                                  |
+      |   sub: lee-oauth                           |                                  |
+      |   email: lee@sso.example.com               |                                  |
+      |   groups: [staff]                          |                                  |
+      | method: GET                                | code: 200                        |+
+      | path: /users                               | body:                            |
+      | query:                                     |   data:                          |
+      |   fields:                                  |   - roles:                       |
+      |     - roles.role.name                      |     - role:                      |
+      |     - roles.managed_by                     |         name: sso_staff          |
+      |   deep: >-                                 |       managed_by: auth:mockoauth |
+      |     {"roles":{"_sort":["managed_by"]}}     |     - role:                      |
+      |   filter[email][_eq]: >-                   |         name: Tests Flow Role    |
+      |     lee@sso.example.com                    |       managed_by: null           |
+      | login: mockoauth                           | code: 200                        |+
+      | profile:                                   |                                  |
+      |   sub: lee-oauth                           |                                  |
+      |   email: lee@sso.example.com               |                                  |
+      |   groups: [auditors]                       |                                  |
+      | method: GET                                | code: 200                        |+
+      | path: /users                               | body:                            |
+      | query:                                     |   data:                          |
+      |   fields:                                  |   - roles:                       |
+      |     - roles.role.name                      |     - role:                      |
+      |     - roles.managed_by                     |         name: sso_auditors       |
+      |   deep: >-                                 |       managed_by: auth:mockoauth |
+      |     {"roles":{"_sort":["managed_by"]}}     |     - role:                      |
+      |   filter[email][_eq]: >-                   |         name: Tests Flow Role    |
+      |     lee@sso.example.com                    |       managed_by: null           |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete | with |
+      | 1       | (none) | 0      | 0      | 0      | 0      | 0    |
+      | 2       | (none) | 0      | 0      | 0      | 0      | 0    |
+      | 3       | (none) | 0      | 0      | 0      | 0      | 0    |
+      | 4       | (none) | 0      | 0      | 0      | 0      | 0    |
+      | 5       | (none) | 0      | 0      | 0      | 0      | 0    |
 
   Scenario: an OpenID user's group maps their role, a later login changes it
     Then these requests get these responses:

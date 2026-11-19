@@ -5,7 +5,8 @@ import { RoleMembersService } from '../../services/role-members.js';
 import {
 	providerMemberships,
 	syncProviderMemberships,
-	takeProviderRole,
+	takeProviderRoles,
+	withProviderRoles,
 } from './provider-memberships.js';
 
 vi.mock('../../services/role-members.js');
@@ -14,49 +15,104 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-describe('takeProviderRole', () => {
-	test('moves role out of the payload', () => {
-		expect(takeProviderRole({ email: 'a@b.c', role: 'role-a' })).toEqual({
-			userPayload: { email: 'a@b.c' },
-			providerRole: 'role-a',
+describe('withProviderRoles', () => {
+	test('lists the roles, and no role key, in the payload', () => {
+		const hookPayload = withProviderRoles(
+			'auth.create',
+			{ email: 'a@b.c' },
+			['role-a'],
+		);
+
+		expect(JSON.parse(JSON.stringify(hookPayload))).toEqual({
+			email: 'a@b.c',
+			roles: ['role-a'],
 		});
 	});
 
-	test('keeps a null role as null', () => {
-		expect(takeProviderRole({ email: 'a@b.c', role: null })).toEqual({
+	test('leaves the roles out when the login syncs none', () => {
+		expect(JSON.parse(JSON.stringify(
+			withProviderRoles('auth.update', { email: 'a@b.c' }, undefined),
+		))).toEqual({ email: 'a@b.c' });
+	});
+
+	test('refuses a hook reading the removed role', () => {
+		const hookPayload = withProviderRoles('auth.update', {}, ['role-a']);
+
+		expect(() => hookPayload['role']).toThrow(new Error(
+			'The "auth.update" payload has no "role" since multi-role (#746):'
+			+ ' read or set "roles"',
+		));
+	});
+
+	test('refuses a hook setting the removed role', () => {
+		const hookPayload = withProviderRoles('auth.create', {}, ['role-a']);
+
+		expect(() => {
+			hookPayload['role'] = 'role-b';
+		}).toThrow(new Error(
+			'The "auth.create" payload has no "role" since multi-role (#746):'
+			+ ' read or set "roles"',
+		));
+	});
+});
+
+describe('takeProviderRoles', () => {
+	test('moves the roles out of the payload', () => {
+		expect(takeProviderRoles(
+			'auth.update',
+			withProviderRoles('auth.update', { email: 'a@b.c' }, ['role-a']),
+		)).toEqual({
 			userPayload: { email: 'a@b.c' },
-			providerRole: null,
+			providerRoles: ['role-a'],
 		});
 	});
 
-	test('returns undefined when the payload names no role', () => {
-		expect(takeProviderRole({ email: 'a@b.c' })).toEqual({
+	test('returns undefined roles when the payload names none', () => {
+		expect(takeProviderRoles('auth.update', { email: 'a@b.c' })).toEqual({
 			userPayload: { email: 'a@b.c' },
-			providerRole: undefined,
+			providerRoles: undefined,
 		});
+	});
+
+	test('refuses a hook returning its own role key', () => {
+		expect(() => {
+			return takeProviderRoles('auth.create', { email: 'a@b.c', role: 'r' });
+		}).toThrow(new Error(
+			'The "auth.create" payload has no "role" since multi-role (#746):'
+			+ ' read or set "roles"',
+		));
+	});
+
+	test('refuses roles that are no list of role ids', () => {
+		expect(() => {
+			return takeProviderRoles('auth.update', { roles: 'role-a' });
+		}).toThrow(new Error(
+			'The "auth.update" payload lists its "roles" as role ids, got "role-a"',
+		));
 	});
 });
 
 describe('providerMemberships', () => {
-	test('gives one membership managed by the provider', () => {
-		expect(providerMemberships('github', 'role-a')).toEqual([
+	test('gives the provider the mapped role', () => {
+		expect(providerMemberships('github', ['role-a'], true)).toEqual([
 			{ role: 'role-a', managed_by: 'auth:github' },
 		]);
 	});
 
-	test('gives none for a null role', () => {
-		expect(providerMemberships('github', null)).toEqual([]);
+	test('leaves a role no mapping gave to the admin', () => {
+		expect(providerMemberships('github', ['role-default'], false)).toEqual([
+			{ role: 'role-default', managed_by: null },
+		]);
 	});
 
-	test('gives none for an undefined role', () => {
-		expect(providerMemberships('github', undefined)).toEqual([]);
+	test('gives none for undefined roles', () => {
+		expect(providerMemberships('github', undefined, true)).toEqual([]);
 	});
 });
 
 describe('syncProviderMemberships', () => {
 	let knexMock: Knex;
 	let managedRows: { id: string; role: string }[];
-	let whereMock: ReturnType<typeof vi.fn>;
 	let deleteMany: ReturnType<typeof vi.fn>;
 	let createMany: ReturnType<typeof vi.fn>;
 
@@ -69,17 +125,15 @@ describe('syncProviderMemberships', () => {
 			return { deleteMany, createMany } as any;
 		});
 
-		whereMock = vi.fn().mockImplementation(async () => managedRows);
-
 		knexMock = {
 			select: vi.fn().mockReturnThis(),
 			from: vi.fn().mockReturnThis(),
-			where: whereMock,
+			where: vi.fn().mockImplementation(async () => managedRows),
 		} as unknown as Knex;
 	});
 
-	test('reads only the rows managed by the provider of the user', async () => {
-		await syncProviderMemberships('user-1', 'github', null, {
+	test('reads only the rows managed by the provider', async () => {
+		await syncProviderMemberships('user-1', 'github', [], {
 			knex: knexMock,
 			schema: {} as SchemaOverview,
 		});
@@ -87,27 +141,25 @@ describe('syncProviderMemberships', () => {
 		expect(knexMock.select).toHaveBeenCalledWith('id', 'role');
 		expect(knexMock.from).toHaveBeenCalledWith('directus_role_members');
 
-		expect(whereMock).toHaveBeenCalledWith({
+		expect(knexMock.where).toHaveBeenCalledWith({
 			user: 'user-1',
 			managed_by: 'auth:github',
 		});
 	});
 
-	test('writes nothing when the same role is already granted', async () => {
+	test('writes nothing when the mapped role is already granted', async () => {
 		managedRows = [{ id: 'row-1', role: 'role-a' }];
 
-		await syncProviderMemberships('user-1', 'github', 'role-a', {
+		await syncProviderMemberships('user-1', 'github', ['role-a'], {
 			knex: knexMock,
 			schema: {} as SchemaOverview,
 		});
 
 		expect(RoleMembersService).not.toHaveBeenCalled();
-		expect(deleteMany).not.toHaveBeenCalled();
-		expect(createMany).not.toHaveBeenCalled();
 	});
 
 	test('writes nothing when no role is mapped and none is granted', async () => {
-		await syncProviderMemberships('user-1', 'github', null, {
+		await syncProviderMemberships('user-1', 'github', [], {
 			knex: knexMock,
 			schema: {} as SchemaOverview,
 		});
@@ -116,7 +168,7 @@ describe('syncProviderMemberships', () => {
 	});
 
 	test('only creates when a role is mapped and none is granted', async () => {
-		await syncProviderMemberships('user-1', 'github', 'role-a', {
+		await syncProviderMemberships('user-1', 'github', ['role-a'], {
 			knex: knexMock,
 			schema: {} as SchemaOverview,
 		});
@@ -128,40 +180,13 @@ describe('syncProviderMemberships', () => {
 		]);
 	});
 
-	test('replaces the granted role by the newly mapped one', async () => {
-		managedRows = [{ id: 'row-1', role: 'role-old' }];
-
-		await syncProviderMemberships('user-1', 'github', 'role-new', {
-			knex: knexMock,
-			schema: {} as SchemaOverview,
-		});
-
-		expect(deleteMany).toHaveBeenCalledWith(['row-1']);
-
-		expect(createMany).toHaveBeenCalledWith([
-			{ role: 'role-new', managed_by: 'auth:github', user: 'user-1' },
-		]);
-	});
-
-	test('only deletes when the mapped role is removed', async () => {
-		managedRows = [{ id: 'row-1', role: 'role-old' }];
-
-		await syncProviderMemberships('user-1', 'github', null, {
-			knex: knexMock,
-			schema: {} as SchemaOverview,
-		});
-
-		expect(deleteMany).toHaveBeenCalledWith(['row-1']);
-		expect(createMany).not.toHaveBeenCalled();
-	});
-
-	test('replaces every row when the provider holds several', async () => {
+	test('replaces every row the provider holds by the mapped role', async () => {
 		managedRows = [
 			{ id: 'row-1', role: 'role-a' },
 			{ id: 'row-2', role: 'role-b' },
 		];
 
-		await syncProviderMemberships('user-1', 'github', 'role-a', {
+		await syncProviderMemberships('user-1', 'github', ['role-b'], {
 			knex: knexMock,
 			schema: {} as SchemaOverview,
 		});
@@ -169,7 +194,19 @@ describe('syncProviderMemberships', () => {
 		expect(deleteMany).toHaveBeenCalledWith(['row-1', 'row-2']);
 
 		expect(createMany).toHaveBeenCalledWith([
-			{ role: 'role-a', managed_by: 'auth:github', user: 'user-1' },
+			{ role: 'role-b', managed_by: 'auth:github', user: 'user-1' },
 		]);
+	});
+
+	test('only deletes when no role is mapped any more', async () => {
+		managedRows = [{ id: 'row-1', role: 'role-old' }];
+
+		await syncProviderMemberships('user-1', 'github', [], {
+			knex: knexMock,
+			schema: {} as SchemaOverview,
+		});
+
+		expect(deleteMany).toHaveBeenCalledWith(['row-1']);
+		expect(createMany).not.toHaveBeenCalled();
 	});
 });

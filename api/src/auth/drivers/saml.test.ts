@@ -117,7 +117,7 @@ describe('SAMLAuthDriver getUserID', () => {
 			last_name: 'Lovelace',
 			email: 'ada@example.com',
 			external_identifier: 'ada',
-			roles: [{ role: 'role-default', managed_by: 'auth:saml' }],
+			roles: [{ role: 'role-default', managed_by: null }],
 		}]]);
 	});
 
