@@ -114,9 +114,25 @@ Feature: A user's one role resolves the role variables and orders the presets
       |   fields: label,note,tag                     |     note: from the child |
       |                                              |     tag: from the parent |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete | with |
+      | 1       | directus_access      | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_roles       | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index             | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
+      | 1       | role_preset_notes    | 1      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 2       | role_preset_notes    | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: the role variables resolve to the user's role and its chain
     Given these requests are sent:
@@ -220,12 +236,23 @@ Feature: A user's one role resolves the role variables and orders the presets
       |   fields: role_tag,created_role        |     - role_tag: <child-role>        |
       |   filter[label][_eq]: preset row       |       created_role: <child-role>    |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
-      | 3       | (none) | 0      | 0      | 0      | 0      |
-      | 4       | (none) | 0      | 0      | 0      | 0      |
-      | 5       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_access      | 3      | 0      | 0      | 0      |
+      | 1       | directus_permissions | 2      | 0      | 0      | 0      |
+      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles       | 2      | 0      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | role_variable_notes  | 1      | 0      | 0      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | role_variable_notes  | 1      | 0      | 0      | 0      |
+      | 3       | directus_permissions | 1      | 0      | 0      | 0      |
+      | 3       | directus_users       | 1      | 0      | 0      | 0      |
+      | 4       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 4       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 4       | directus_users       | 1      | 0      | 0      | 0      |
+      | 4       | role_variable_notes  | 1      | 1      | 0      | 0      |
+      | 5       | directus_users       | 1      | 0      | 0      | 0      |
+      | 5       | role_variable_notes  | 1      | 0      | 0      | 0      |
 
   Scenario: an app user reads the presets of their own role, not the parent's
     Given these requests are sent:
@@ -277,5 +304,10 @@ Feature: A user's one role resolves the role variables and orders the presets
       |   sort: bookmark                       |                                |
       |   filter[bookmark][_ends_with]: -<run> |                                |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_access      | 3      | 0      | 0      | 0      |
+      | 1       | directus_permissions | 2      | 0      | 0      | 0      |
+      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 1       | directus_presets     | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles       | 2      | 0      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |

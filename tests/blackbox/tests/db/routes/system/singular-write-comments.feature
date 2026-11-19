@@ -481,6 +481,16 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       |                                      |       collection: test_singular_comments |
       |                                      |       item: '<entry>'                    |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_access        | 3      | 0      | 0      | 0      |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_comments      | 1      | 1      | 0      | 0      |
+      | 1       | directus_notifications | 0      | 1      | 0      | 0      |
+      | 1       | directus_permissions   | 3      | 0      | 0      | 0      |
+      | 1       | directus_policies      | 1      | 0      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_roles         | 3      | 0      | 0      | 0      |
+      | 1       | directus_users         | 6      | 0      | 0      | 0      |
+      | 1       | test_singular_comments | 1      | 0      | 0      | 0      |
+      | 2       | directus_notifications | 1      | 0      | 0      | 0      |
+      | 2       | directus_users         | 1      | 0      | 0      | 0      |

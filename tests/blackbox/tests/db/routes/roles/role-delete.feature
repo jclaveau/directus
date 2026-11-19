@@ -63,9 +63,27 @@ Feature: A deleted role suspends its users and drops its presets
       |   fields: id                           |                        |
       |   filter[bookmark][_eq]: deleted-<run> |                        |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
-      | 3       | (none) | 0      | 0      | 0      | 0      |
-      | 4       | (none) | 0      | 0      | 0      | 0      |
-      | 5       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete | with |
+      | 1       | directus_access      | 7      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity    | 0      | 3      | 0      | 0      | 0    |
+      | 1       | directus_presets     | 1      | 0      | 0      | 1      | 0    |
+      | 1       | directus_revisions   | 0      | 2      | 0      | 0      | 0    |
+      | 1       | directus_roles       | 7      | 0      | 1      | 1      | 0    |
+      | 1       | directus_sessions    | 0      | 0      | 0      | 1      | 0    |
+      | 1       | directus_users       | 8      | 0      | 1      | 0      | 0    |
+      | 2       | directus_access      | 2      | 0      | 0      | 0      | 0    |
+      | 2       | directus_collections | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users       | 2      | 0      | 0      | 0      | 0    |
+      | 2       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
+      | 2       | information_schema   | 1      | 0      | 0      | 0      | 0    |
+      | 2       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | pg_index             | 2      | 0      | 0      | 0      | 0    |
+      | 2       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_users       | 2      | 0      | 0      | 0      | 0    |
+      | 4       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 5       | directus_presets     | 1      | 0      | 0      | 0      | 0    |
+      | 5       | directus_users       | 1      | 0      | 0      | 0      | 0    |

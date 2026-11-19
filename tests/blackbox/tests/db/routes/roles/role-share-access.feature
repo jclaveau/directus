@@ -120,13 +120,38 @@ Feature: A share reads with its sender's role chain and its own
       |                                      |         does not exist. Queried in |
       |                                      |         root.                      |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
-      | 3       | (none) | 0      | 0      | 0      | 0      |
-      | 4       | (none) | 0      | 0      | 0      | 0      |
-      | 5       | (none) | 0      | 0      | 0      | 0      |
-      | 6       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_access      | 3      | 0      | 0      | 0      |
+      | 1       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 1       | directus_permissions | 6      | 0      | 0      | 0      |
+      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 1       | directus_roles       | 2      | 0      | 0      | 0      |
+      | 1       | directus_shares      | 1      | 1      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | role_share_notes     | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 2       | directus_shares      | 1      | 1      | 0      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | role_share_notes     | 1      | 0      | 0      | 0      |
+      | 3       | directus_sessions    | 0      | 1      | 0      | 1      |
+      | 3       | directus_shares      | 1      | 0      | 1      | 0      |
+      | 4       | directus_access      | 5      | 0      | 0      | 0      |
+      | 4       | directus_permissions | 3      | 0      | 0      | 0      |
+      | 4       | directus_policies    | 3      | 0      | 0      | 0      |
+      | 4       | directus_sessions    | 1      | 0      | 0      | 0      |
+      | 4       | directus_shares      | 1      | 0      | 0      | 0      |
+      | 4       | directus_users       | 1      | 0      | 0      | 0      |
+      | 4       | role_share_notes     | 1      | 0      | 0      | 0      |
+      | 5       | directus_sessions    | 0      | 1      | 0      | 1      |
+      | 5       | directus_shares      | 1      | 0      | 1      | 0      |
+      | 6       | directus_access      | 3      | 0      | 0      | 0      |
+      | 6       | directus_permissions | 2      | 0      | 0      | 0      |
+      | 6       | directus_roles       | 1      | 0      | 0      | 0      |
+      | 6       | directus_sessions    | 1      | 0      | 0      | 0      |
+      | 6       | directus_shares      | 1      | 0      | 0      | 0      |
+      | 6       | directus_users       | 1      | 0      | 0      | 0      |
 
   Scenario: a refreshed share session keeps reading with the share's role
     Given these requests are sent:
@@ -195,6 +220,14 @@ Feature: A share reads with its sender's role chain and its own
       | query:                                       |     label: shared |
       |   fields: label                              |                   |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 2      | 0      | 0      | 0      |
+      | 1       | directus_sessions        | 2      | 1      | 1      | 1      |
+      | 2       | directus_access          | 6      | 0      | 0      | 0      |
+      | 2       | directus_permissions     | 6      | 0      | 0      | 0      |
+      | 2       | directus_policies        | 5      | 0      | 0      | 0      |
+      | 2       | directus_roles           | 1      | 0      | 0      | 0      |
+      | 2       | directus_sessions        | 1      | 0      | 0      | 0      |
+      | 2       | directus_shares          | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      |
+      | 2       | role_share_refresh_notes | 1      | 0      | 0      | 0      |

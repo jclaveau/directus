@@ -2,7 +2,10 @@ Feature: A user holds one role and gets the policies of its whole parent chain
 
   - Pins today's single-role contract (#746): `directus_users.role` is one
     role, and the user gets that role's policies plus those of every parent
-    above it. `/roles/me` lists every role of that chain.
+    above it. `/roles/me` lists every role of that chain, only their ids
+    to a user who may not read the roles. GraphQL `roles_me` takes no
+    argument and lists the chain by key: its scenario names both roles
+    alike, so their order does not matter.
   - Admin and app access are recomputed on every request from the chain.
   - A user with no role is still logged in: the `/me` endpoints answer them,
     and refuse only a request sending no credentials (`as: public`).
@@ -76,10 +79,18 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       |                                      |     app_access: true                 |
       |                                      |     admin_access: false              |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
-      | 3       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_access         | 3      | 0      | 0      | 0      |
+      | 1       | directus_permissions    | 2      | 0      | 0      | 0      |
+      | 1       | directus_policies       | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles          | 2      | 0      | 0      | 0      |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | role_chain_parent_notes | 1      | 0      | 0      | 0      |
+      | 2       | directus_permissions    | 1      | 0      | 0      | 0      |
+      | 2       | directus_roles          | 1      | 0      | 0      | 0      |
+      | 2       | directus_users          | 1      | 0      | 0      | 0      |
+      | 3       | directus_policies       | 1      | 0      | 0      | 0      |
+      | 3       | directus_users          | 1      | 0      | 0      | 0      |
 
   Scenario: a user of a child role is an admin when the parent role is
     Given these requests are sent:
@@ -124,9 +135,12 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       | query:                     |     role: <child-role> |
       |   fields: role             |                        |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_access   | 3      | 0      | 0      | 0      |
+      | 1       | directus_policies | 2      | 0      | 0      | 0      |
+      | 1       | directus_roles    | 2      | 0      | 0      | 0      |
+      | 1       | directus_users    | 1      | 0      | 0      | 0      |
+      | 2       | directus_users    | 2      | 0      | 0      | 0      |
 
   Scenario: a user with no role reaches the me endpoints, no credentials do not
     Then these requests get these responses:
@@ -161,13 +175,18 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       | path: /policies/me/globals |   data:                  |
       |                            |     app_access: false    |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
-      | 3       | (none) | 0      | 0      | 0      | 0      |
-      | 4       | (none) | 0      | 0      | 0      | 0      |
-      | 5       | (none) | 0      | 0      | 0      | 0      |
-      | 6       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_access      | 3      | 0      | 0      | 0      |
+      | 1       | directus_permissions | 1      | 0      | 0      | 0      |
+      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | directus_permissions | 1      | 0      | 0      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 3       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 3       | directus_users       | 1      | 0      | 0      | 0      |
+      | 4       | (none)               | 0      | 0      | 0      | 0      |
+      | 5       | (none)               | 0      | 0      | 0      | 0      |
+      | 6       | (none)               | 0      | 0      | 0      | 0      |
 
   Scenario: a user who cannot read the roles gets the ids of their chain
     Given these requests are sent:
@@ -197,8 +216,11 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       | query:          |     - id: <parent-role> |
       |   fields: name  |     - id: <child-role>  |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_access      | 3      | 0      | 0      | 0      |
+      | 1       | directus_permissions | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles       | 2      | 0      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
 
   Scenario: graphql lists the roles of the user's chain
     Given these requests are sent:
@@ -214,12 +236,12 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       | path: /roles                       |           |
       | payload:                           |           |
       |   id: <parent-role>                |           |
-      |   name: parent-<run>               |           |
+      |   name: chain-<run>                |           |
       | method: POST                       | code: 200 |+
       | path: /roles                       |           |
       | payload:                           |           |
       |   id: <child-role>                 |           |
-      |   name: child-<run>                |           |
+      |   name: chain-<run>                |           |
       |   parent: <parent-role>            |           |
       |   policies:                        |           |
       |     - policy: <app-policy>         |           |
@@ -230,13 +252,13 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       |   role: <child-role>               |           |
       |   token: graphql-<run>             |           |
     Then these requests get these responses:
-      | request                                        | response                   |
-      | as: graphql-<run>                              | code: 200                  |+
-      | method: POST                                   | body:                      |
-      | path: /graphql/system                          |   data:                    |
-      | payload:                                       |     roles_me:              |
-      |   query: '{ roles_me(sort: "name") { name } }' |       - name: child-<run>  |
-      |                                                |       - name: parent-<run> |
+      | request                          | response                  |
+      | as: graphql-<run>                | code: 200                 |+
+      | method: POST                     | body:                     |
+      | path: /graphql/system            |   data:                   |
+      | payload:                         |     roles_me:             |
+      |   query: '{ roles_me { name } }' |       - name: chain-<run> |
+      |                                  |       - name: chain-<run> |
     And on postgres the requests ran these statements:
       | request | table  | select | insert | update | delete |
       | 1       | (none) | 0      | 0      | 0      | 0      |
