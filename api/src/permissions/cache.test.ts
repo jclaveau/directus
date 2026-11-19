@@ -36,3 +36,17 @@ test('Keeps the permission cache local without Redis', async () => {
 
 	expect(defineCache).toHaveBeenCalledWith({ type: 'local', maxKeys: 500 });
 });
+
+test('clearCache forgets the reads still running', async () => {
+	vi.mocked(redisConfigAvailable).mockReturnValue(false);
+	vi.mocked(useEnv).mockReturnValue({ CACHE_NAMESPACE: 'planner-api' });
+	vi.mocked(defineCache).mockReturnValue(() => ({ clear: vi.fn() }) as any);
+
+	const { clearCache } = await import('./cache.js');
+	const { runningReads } = await import('./running-reads.js');
+	runningReads.set('rows-1', Promise.resolve(['row']));
+
+	await clearCache();
+
+	expect([...runningReads.keys()]).toEqual([]);
+});

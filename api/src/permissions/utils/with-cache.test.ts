@@ -1,5 +1,6 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { useCache } from '../cache.js';
+import { runningReads } from '../running-reads.js';
 import { withCache } from './with-cache.js';
 
 vi.mock('../cache.js', () => {
@@ -74,5 +75,53 @@ test('a failed read rejects every waiting call and is not kept', async () => {
 	]);
 
 	await expect(cachedRead({ policies: ['a'] })).resolves.toEqual(['row']);
+	expect(cachedHandler).toHaveBeenCalledTimes(2);
+});
+
+test('a changed result does not reach the other caller', async () => {
+	const cachedHandler = vi.fn(async () => {
+		return { admin: false, connections: [] as string[] };
+	});
+
+	const cachedRead = withCache('access', cachedHandler);
+
+	const [firstAccess, secondAccess] = await Promise.all([
+		cachedRead({ roles: ['a'] }),
+		cachedRead({ roles: ['a'] }),
+	]);
+
+	firstAccess.admin = true;
+	firstAccess.connections.push('main');
+
+	expect(secondAccess).toEqual({ admin: false, connections: [] });
+});
+
+test('a call made after the running reads were cleared queries again', async () => {
+	const finishReads: ((rows: string[]) => void)[] = [];
+
+	const cachedHandler = vi.fn(() => {
+		return new Promise<string[]>((resolve) => {
+			finishReads.push(resolve);
+		});
+	});
+
+	const cachedRead = withCache('rows', cachedHandler);
+
+	const staleRead = cachedRead({ policies: ['a'] });
+	runningReads.clear();
+	const freshRead = cachedRead({ policies: ['a'] });
+
+	await vi.waitUntil(() => cachedHandler.mock.calls.length === 2);
+	finishReads[0]!(['stale row']);
+	await expect(staleRead).resolves.toEqual(['stale row']);
+
+	const joiningRead = cachedRead({ policies: ['a'] });
+	finishReads[1]!(['fresh row']);
+
+	await expect(Promise.all([freshRead, joiningRead])).resolves.toEqual([
+		['fresh row'],
+		['fresh row'],
+	]);
+
 	expect(cachedHandler).toHaveBeenCalledTimes(2);
 });
