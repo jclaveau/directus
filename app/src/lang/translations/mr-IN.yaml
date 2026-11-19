@@ -1552,7 +1552,7 @@ no_value: व्हॅल्यू नाही
 do_nothing: काहीही करू नका
 generate_and_save_uuid: UUID तयार करा आणि जतन करा
 save_current_user_id: वर्तमान वापरकर्ता आयडी जतन करा
-save_current_user_role: वर्तमान वापरकर्ता भूमिका जतन करा
+save_current_user_roles: वर्तमान वापरकर्ता भूमिका जतन करा
 save_current_datetime: वर्तमान तारीख/वेळ जतन करा
 always_open: नेहमी उघडा
 start_open: उघडणे सुरू करा

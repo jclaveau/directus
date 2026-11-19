@@ -785,7 +785,7 @@ no_fields_in_collection: 'N''eus ket a vaezienn e "{collection}" evit poent'
 do_nothing: Ober netra
 generate_and_save_uuid: Genel hag Enrollañ an UUID
 save_current_user_id: Enrollañ ID an implijer war implij
-save_current_user_role: Enrollañ roll an implijer war implij
+save_current_user_roles: Enrollañ roll an implijer war implij
 save_current_datetime: Enrollañ devezh/eur a vremañ
 block: Bloc'h
 inline: En linenn

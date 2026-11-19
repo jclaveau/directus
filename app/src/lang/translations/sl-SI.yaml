@@ -968,7 +968,7 @@ no_fields_in_collection: 'Zbirka {collection} še nima polj'
 do_nothing: Ne stori ničesar
 generate_and_save_uuid: Ustvari in shrani UUID
 save_current_user_id: Shrani ID uporabnika
-save_current_user_role: Shrani vlogo uporabnika
+save_current_user_roles: Shrani vlogo uporabnika
 save_current_datetime: Shrani datum in uro
 always_open: Vedno odprto
 start_open: Začni odprto

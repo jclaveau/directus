@@ -1510,7 +1510,7 @@ no_value: Değer yok
 do_nothing: Hiçbir Şey Yapma
 generate_and_save_uuid: UUID Oluştur ve Kaydet
 save_current_user_id: Mevcut Kullanıcı ID'sini Kaydet
-save_current_user_role: Mevcut Kullanıcı Rolünü Kaydet
+save_current_user_roles: Mevcut Kullanıcı Rolünü Kaydet
 save_current_datetime: Mevcut Tarih/Zamanı Kaydet
 always_open: Her Zaman Açık
 start_open: Açık Başla

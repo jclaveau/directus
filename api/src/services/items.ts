@@ -59,6 +59,9 @@ import getDatabase, {
 import { runAst } from '../database/run-ast/run-ast.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
+import {
+	fetchAllowingMemberRolesByRow,
+} from '../permissions/lib/fetch-allowing-member-roles.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
@@ -95,7 +98,7 @@ import {
 } from '../utils/lodash-es-used.js';
 import { validateKeys } from '../utils/validate-keys.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
-import { PayloadService } from './payload.js';
+import { memberRoleStampKey, PayloadService } from './payload.js';
 
 const env = useEnv();
 
@@ -3431,6 +3434,7 @@ implements AbstractService<Item> {
 		aliases: string[],
 		opts: MutationOptions & { mutationTracker: MutationTracker },
 		nestedActionEvents: ActionEventParams[],
+		memberRoleStamps: Map<string, string[]> = new Map(),
 	): Promise<UpdateGroup<Item>> {
 		// Sorted for the work below only. `group.keys` stays in the caller's row order,
 		// which is what `updateGroups` returns and what the per-row action events walk.
@@ -3454,6 +3458,7 @@ implements AbstractService<Item> {
 				knex: trx,
 				schema: this.schema,
 				nested: this.nested,
+				memberRoleStamps,
 			});
 
 			const {
@@ -3555,28 +3560,100 @@ implements AbstractService<Item> {
 		opts: MutationOptions & { mutationTracker: MutationTracker },
 		nestedActionEvents: ActionEventParams[],
 	): Promise<UpdateGroup<Item>[]> {
-		const appliedGroups: UpdateGroup<Item>[] = [];
+		const { stampedGroups, memberRoleStamps } = await this.splitByMemberRoles(
+			groups,
+			aliases,
+		);
 
-		for (const groupRun of this.splitBatchRuns(groups, aliases, opts)) {
+		for (const groupRun of this.splitBatchRuns(stampedGroups, aliases, opts)) {
 			if (groupRun.length === 1) {
-				appliedGroups.push(await this.applyUpdateGroup(
+				await this.applyUpdateGroup(
 					groupRun[0]!,
 					aliases,
 					opts,
 					nestedActionEvents,
-				));
+					memberRoleStamps,
+				);
 			}
 			else {
-				appliedGroups.push(...await this.applyUpdateBatch(
+				await this.applyUpdateBatch(
 					groupRun,
 					aliases,
 					opts,
 					nestedActionEvents,
-				));
+					memberRoleStamps,
+				);
 			}
 		}
 
-		return appliedGroups;
+		// What was written is each group as asked, however it was split.
+		return groups;
+	}
+
+	/**
+	 * A `roles-updated` stamp lists the member roles allowing each row: a group
+	 * whose rows different roles allow is cut into one group per stamp, the
+	 * stamps worked out here once, as the rows were before the update.
+	 */
+	private async splitByMemberRoles(
+		groups: UpdateGroup<Item>[],
+		aliases: string[],
+	) {
+		const memberRoleStamps = new Map<string, string[]>();
+		const collectionSchema = this.schema.collections[this.collection]!;
+
+		const stampsRows = Object.values(collectionSchema.fields)
+			.some(({ special }) => special.includes('roles-updated'));
+
+		if (!this.accountability?.user || !stampsRows) {
+			return { stampedGroups: groups, memberRoleStamps };
+		}
+
+		const stampedGroups: UpdateGroup<Item>[] = [];
+
+		for (const group of groups) {
+			const writtenFields = Object.keys(pick(
+				group.data,
+				without(
+					Object.keys(collectionSchema.fields),
+					collectionSchema.primary,
+					...aliases,
+				),
+			));
+
+			const rolesByRow = await fetchAllowingMemberRolesByRow(
+				{
+					accountability: this.accountability,
+					action: 'update',
+					collection: this.collection,
+					primaryKeys: group.keys,
+					fields: writtenFields,
+				},
+				{ knex: this.knex, schema: this.schema },
+			);
+
+			const keysByStamp = new Map<string, PrimaryKey[]>();
+
+			for (const key of group.keys) {
+				const stampText = JSON.stringify(rolesByRow.get(String(key)));
+
+				keysByStamp.set(stampText, [
+					...keysByStamp.get(stampText) ?? [],
+					key,
+				]);
+			}
+
+			for (const [stampText, stampKeys] of keysByStamp) {
+				memberRoleStamps.set(
+					memberRoleStampKey(stampKeys, writtenFields),
+					JSON.parse(stampText),
+				);
+
+				stampedGroups.push({ data: group.data, keys: stampKeys });
+			}
+		}
+
+		return { stampedGroups, memberRoleStamps };
 	}
 
 	/**
@@ -3677,6 +3754,7 @@ implements AbstractService<Item> {
 		aliases: string[],
 		opts: MutationOptions & { mutationTracker: MutationTracker },
 		nestedActionEvents: ActionEventParams[],
+		memberRoleStamps: Map<string, string[]>,
 	): Promise<UpdateGroup<Item>[]> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
@@ -3686,6 +3764,7 @@ implements AbstractService<Item> {
 			knex: this.knex,
 			schema: this.schema,
 			nested: this.nested,
+			memberRoleStamps,
 		});
 
 		const preparedGroups: {
@@ -3786,9 +3865,13 @@ implements AbstractService<Item> {
 			const appliedGroups: UpdateGroup<Item>[] = [];
 
 			for (const { group } of preparedGroups) {
-				appliedGroups.push(
-					await this.applyUpdateGroup(group, aliases, opts, nestedActionEvents),
-				);
+				appliedGroups.push(await this.applyUpdateGroup(
+					group,
+					aliases,
+					opts,
+					nestedActionEvents,
+					memberRoleStamps,
+				));
 			}
 
 			if (prepareError !== null) {

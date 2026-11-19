@@ -100,8 +100,15 @@ export async function up(knex: Knex): Promise<void> {
 			renamedSpecials.push('cast-json');
 		}
 
+		// The m2o picker cannot show a json list: tags edit it, labels show it.
 		await knex('directus_fields')
-			.update({ special: renamedSpecials.join(',') })
+			.update({
+				special: renamedSpecials.join(','),
+				interface: 'tags',
+				options: null,
+				display: 'labels',
+				display_options: null,
+			})
 			.where({ id });
 	}
 
@@ -112,8 +119,8 @@ export async function up(knex: Knex): Promise<void> {
 }
 
 /**
- * Back to one role uuid: the first role of each list is kept, the others are
- * lost.
+ * Back to one role uuid, related to `directus_roles` again. Refused, changing
+ * nothing, while a stamp lists several roles: one uuid cannot hold them.
  */
 export async function down(knex: Knex): Promise<void> {
 	const fieldRows = await readStampFields(knex, [...FORMER_SPECIALS.keys()]);
@@ -123,6 +130,47 @@ export async function down(knex: Knex): Promise<void> {
 	}
 
 	refuseNonPostgres(knex, fieldRows);
+
+	const inspector = createInspector(knex);
+	const severalRoleStamps: string[] = [];
+
+	for (const { collection, field } of fieldRows) {
+		const primaryKeyField = await inspector.primary(collection);
+
+		if (primaryKeyField === null) {
+			throw new Error(
+				`Cannot roll back the role stamp ${JSON.stringify(collection)}.`
+				+ `${JSON.stringify(field)}: its table has no primary key to name`
+				+ ' the rows listing several roles',
+			);
+		}
+
+		const severalRoleRows: Record<string, unknown>[] = await knex
+			.select(primaryKeyField)
+			.from(collection)
+			.whereRaw('json_array_length(??) > 1', [field])
+			.orderBy(primaryKeyField);
+
+		if (severalRoleRows.length > 0) {
+			const rowKeys = severalRoleRows
+				.map((severalRoleRow) => {
+					return JSON.stringify(severalRoleRow[primaryKeyField]);
+				})
+				.join(', ');
+
+			severalRoleStamps.push(
+				`${JSON.stringify(collection)}.${JSON.stringify(field)} rows ${rowKeys}`,
+			);
+		}
+	}
+
+	if (severalRoleStamps.length > 0) {
+		throw new Error(
+			'Cannot roll back the multi-role migration: role stamps list several'
+			+ ` roles in ${severalRoleStamps.join(' and ')}; back up and keep one`
+			+ ' role per stamp first',
+		);
+	}
 
 	for (const { id, collection, field, special } of fieldRows) {
 		await knex.raw(
@@ -147,13 +195,18 @@ export async function down(knex: Knex): Promise<void> {
 			.map((name) => FORMER_SPECIALS.get(name) ?? name);
 
 		await knex('directus_fields')
-			.update({ special: formerFieldSpecials.join(',') })
+			.update({
+				special: formerFieldSpecials.join(','),
+				interface: 'select-dropdown-m2o',
+				options: null,
+				display: 'related-values',
+				display_options: null,
+			})
 			.where({ id });
 	}
 
 	useLogger().info(
 		`Turned the role stamp fields ${namedFields(fieldRows)} back into one`
-		+ ' role uuid related to "directus_roles", keeping the first role of'
-		+ ' each list',
+		+ ' role uuid related to "directus_roles"',
 	);
 }

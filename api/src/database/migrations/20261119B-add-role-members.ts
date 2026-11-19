@@ -5,8 +5,8 @@ import { randomUUID } from 'node:crypto';
 /**
  * A user holds several roles (#746): `directus_role_members` replaces
  * `directus_users.role`. Each user's role becomes their one membership, then
- * the column goes. `down` keeps the first membership by `sort` and drops the
- * others, naming nobody: it is the way back to a single role.
+ * the column goes. `down` puts each user's one membership back in the column,
+ * and refuses, changing nothing, while a user holds several roles.
  */
 export async function up(knex: Knex): Promise<void> {
 	await knex.schema.createTable('directus_role_members', (table) => {
@@ -57,6 +57,31 @@ export async function up(knex: Knex): Promise<void> {
 }
 
 export async function down(knex: Knex): Promise<void> {
+	const memberships: { user: string; role: string }[] = await knex
+		.select('user', 'role')
+		.from('directus_role_members')
+		.orderBy('id');
+
+	const roleByUser = new Map<string, string>();
+	const severalRoleUsers = new Set<string>();
+
+	for (const { user, role } of memberships) {
+		if (roleByUser.has(user)) {
+			severalRoleUsers.add(user);
+		}
+
+		roleByUser.set(user, role);
+	}
+
+	// One column holds one role: the extra ones would be lost.
+	if (severalRoleUsers.size > 0) {
+		throw new Error(
+			'Cannot roll back the multi-role migration: users'
+			+ ` ${[...severalRoleUsers].map((user) => JSON.stringify(user)).join(', ')}`
+			+ ' hold several roles; back up and remove the extra memberships first',
+		);
+	}
+
 	await knex.schema.alterTable('directus_users', (table) => {
 		table.uuid('role')
 			.references('directus_roles.id')
@@ -64,23 +89,7 @@ export async function down(knex: Knex): Promise<void> {
 			.onDelete('SET NULL');
 	});
 
-	const memberships: { user: string; role: string }[] = await knex
-		.select('user', 'role')
-		.from('directus_role_members')
-		.orderBy([
-			{ column: 'sort', nulls: 'last' },
-			'id',
-		]);
-
-	const firstRoleByUser = new Map<string, string>();
-
-	for (const { user, role } of memberships) {
-		if (!firstRoleByUser.has(user)) {
-			firstRoleByUser.set(user, role);
-		}
-	}
-
-	for (const [user, role] of firstRoleByUser) {
+	for (const [user, role] of roleByUser) {
 		await knex('directus_users')
 			.update({ role })
 			.where({ id: user });

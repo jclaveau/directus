@@ -1552,7 +1552,7 @@ no_value: Значення відсутнє
 do_nothing: Нічого не робити
 generate_and_save_uuid: Генерувати та зберегти UUID
 save_current_user_id: Зберігти поточний ID
-save_current_user_role: Зберегти поточну роль користувача
+save_current_user_roles: Зберегти поточну роль користувача
 save_current_datetime: Зберігти поточну дату/час
 always_open: Завжди відкрито
 start_open: Почати відкритим

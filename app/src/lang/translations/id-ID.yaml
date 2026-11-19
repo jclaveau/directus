@@ -1228,7 +1228,7 @@ no_value: Tidak berharga
 do_nothing: Tidak Ada
 generate_and_save_uuid: Hasilkan dan Simpan UUID
 save_current_user_id: Simpan ID Pengguna Saat ini
-save_current_user_role: Simpan Peran Pengguna Saat ini
+save_current_user_roles: Simpan Peran Pengguna Saat ini
 save_current_datetime: Simpan Tanggal/Waktu Saat ini
 always_open: Selalu Buka
 start_open: Mulai Terbuka

@@ -71,8 +71,30 @@ type Transformers = {
 		helpers: Helpers;
 		// the rows an update writes
 		primaryKeys?: PrimaryKey[];
+		// the fields the write sets
+		writtenFields?: string[];
 	}) => Promise<any>;
 };
+
+export type PayloadServiceOptions = AbstractServiceOptions & {
+	// the `roles-updated` stamp of rows already worked out, by
+	// `memberRoleStampKey`
+	memberRoleStamps?: Map<string, string[]>;
+};
+
+/**
+ * The key a `roles-updated` stamp is found by: the rows, as strings, and the
+ * fields the update sets, each sorted.
+ */
+export function memberRoleStampKey(
+	primaryKeys: PrimaryKey[],
+	writtenFields: string[],
+) {
+	return JSON.stringify([
+		primaryKeys.map((key) => String(key)).sort(),
+		[...writtenFields].sort(),
+	]);
+}
 
 /**
  * Process a given payload for a collection to ensure the special fields (hash, uuid, date etc) are
@@ -85,14 +107,16 @@ export class PayloadService {
 	collection: string;
 	schema: SchemaOverview;
 	nested: string[];
+	memberRoleStamps: Map<string, string[]>;
 
-	constructor(collection: string, options: AbstractServiceOptions) {
+	constructor(collection: string, options: PayloadServiceOptions) {
 		this.accountability = options.accountability || null;
 		this.knex = options.knex || getDatabase();
 		this.helpers = getHelpers(this.knex);
 		this.collection = collection;
 		this.schema = options.schema;
 		this.nested = options.nested ?? [];
+		this.memberRoleStamps = options.memberRoleStamps ?? new Map();
 
 		return this;
 	}
@@ -152,22 +176,41 @@ export class PayloadService {
 			if (action === 'update') return accountability?.user || null;
 			return value;
 		},
-		'roles-created': async ({ action, value, accountability }) => {
+		'roles-created': async ({
+			action,
+			value,
+			accountability,
+			writtenFields = [],
+		}) => {
 			if (action !== 'create') {
 				return value;
 			}
 
-			return await this.allowingMemberRoles('create', accountability, []);
+			return await this.allowingMemberRoles(
+				'create',
+				accountability,
+				[],
+				writtenFields,
+			);
 		},
-		'roles-updated': async ({ action, value, accountability, primaryKeys }) => {
+		'roles-updated': async ({
+			action,
+			value,
+			accountability,
+			primaryKeys = [],
+			writtenFields = [],
+		}) => {
 			if (action !== 'update') {
 				return value;
 			}
 
-			return await this.allowingMemberRoles(
+			return this.memberRoleStamps.get(
+				memberRoleStampKey(primaryKeys, writtenFields),
+			) ?? await this.allowingMemberRoles(
 				'update',
 				accountability,
-				primaryKeys ?? [],
+				primaryKeys,
+				writtenFields,
 			);
 		},
 		async 'date-created'({ action, value, helpers }) {
@@ -258,6 +301,7 @@ export class PayloadService {
 					action,
 					this.accountability,
 					primaryKeys,
+					fieldsInPayload,
 				);
 
 				if (newValue !== undefined) record[name] = newValue;
@@ -322,6 +366,7 @@ export class PayloadService {
 		action: PayloadAction,
 		accountability: Accountability | null,
 		primaryKeys: PrimaryKey[] = [],
+		writtenFields: string[] = [],
 	): Promise<any> {
 		if (!field.special) return payload[field.field];
 		const fieldSpecials = field.special ? toArray(field.special) : [];
@@ -338,6 +383,7 @@ export class PayloadService {
 					specials: fieldSpecials,
 					helpers: this.helpers,
 					primaryKeys,
+					writtenFields,
 				});
 			}
 		}
@@ -353,6 +399,7 @@ export class PayloadService {
 		action: 'create' | 'update',
 		accountability: Accountability | null,
 		primaryKeys: PrimaryKey[],
+		writtenFields: string[],
 	): Promise<string[] | null> {
 		if (!accountability?.user) {
 			return null;
@@ -364,6 +411,7 @@ export class PayloadService {
 				action,
 				collection: this.collection,
 				primaryKeys,
+				fields: writtenFields,
 			},
 			{ knex: this.knex, schema: this.schema },
 		);

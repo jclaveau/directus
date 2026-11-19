@@ -308,6 +308,28 @@ describe('the migration', () => {
 		]);
 	});
 
+	test('down refuses a stamp whose table has no primary key', async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			primary: vi.fn().mockResolvedValue(null),
+		} as any);
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 3,
+				collection: 'articles',
+				field: 'made_by_role',
+				special: 'roles-created,cast-json',
+			},
+		]);
+
+		await expect(down(db)).rejects.toEqual(new Error(
+			'Cannot roll back the role stamp "articles"."made_by_role": its table'
+			+ ' has no primary key to name the rows listing several roles',
+		));
+
+		expect(tracker.history.all).toHaveLength(1);
+	});
+
 	test('down changes nothing without a role list field', async () => {
 		tracker.on.select('directus_fields').response([
 			{

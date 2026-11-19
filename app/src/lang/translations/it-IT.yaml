@@ -1565,7 +1565,7 @@ no_value: Nessun valore
 do_nothing: Non Fare Niente
 generate_and_save_uuid: Genera e Salva UUID
 save_current_user_id: Salva l'Id Utente Attuale
-save_current_user_role: Salva Ruolo Utente Attuale
+save_current_user_roles: Salva Ruolo Utente Attuale
 save_current_datetime: Salva Data/Ora Attuale
 always_open: Sempre aperto
 start_open: Inizia aperto

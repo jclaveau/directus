@@ -1,10 +1,11 @@
 import type { Accountability, Permission, PrimaryKey } from '@directus/types';
-import {
-	fetchPermittedAstRootFields,
-} from '../../database/run-ast/modules/fetch-permitted-ast-root-fields.js';
-import type { AST } from '../../types/ast.js';
+import { getDBQuery } from '../../database/run-ast/lib/get-db-query.js';
 import { fetchPermissions } from './fetch-permissions.js';
-import { fetchPolicyAccessRows } from './fetch-policies.js';
+import {
+	type AccessRow,
+	fetchPolicies,
+	fetchPolicyAccessRows,
+} from './fetch-policies.js';
 import { fetchRolesTree } from './fetch-roles-tree.js';
 import type { Context } from '../types.js';
 import { fetchRawPermissions } from '../utils/fetch-raw-permissions.js';
@@ -20,150 +21,237 @@ export interface FetchAllowingMemberRolesOptions {
 	action: 'create' | 'update';
 	collection: string;
 	primaryKeys: PrimaryKey[];
+	// a permission allows the write when it lets one of these fields be set
+	fields: string[];
 }
 
 /**
  * The member roles whose policies allowed the write, by membership `sort`. A
  * policy a member role inherits from a parent counts as the member role's, a
  * policy given to the user directly counts as no role's. An admin's are the
- * member roles holding an `admin_access` policy.
+ * member roles holding an `admin_access` policy. An update lists the roles
+ * allowing every row it writes.
  */
 export async function fetchAllowingMemberRoles(
 	options: FetchAllowingMemberRolesOptions,
 	context: Context,
 ): Promise<string[]> {
 	const { accountability } = options;
-	const allowingRoles: string[] = [];
+
+	if (options.action === 'update') {
+		const rolesByRow = await fetchAllowingMemberRolesByRow(options, context);
+
+		return accountability.memberRoles.filter((memberRole) => {
+			return [...rolesByRow.values()].every((rowRoles) => {
+				return rowRoles.includes(memberRole);
+			});
+		});
+	}
 
 	if (accountability.admin) {
-		for (const memberRole of accountability.memberRoles) {
-			const chainRoles = await fetchRolesTree(memberRole, context.knex);
-
-			const { admin: grantsAdmin } = await fetchGlobalAccessForRoles(
-				{ roles: chainRoles, ip: accountability.ip },
-				context.knex,
-			);
-
-			if (grantsAdmin) {
-				allowingRoles.push(memberRole);
-			}
-		}
-
-		return allowingRoles;
+		return await fetchAdminMemberRoles(accountability, context);
 	}
 
 	const accessRows = await fetchPolicyAccessRows(accountability, context);
 
-	const allowingPolicies = await fetchAllowingPolicies(
-		options,
-		accessRows.map(({ policy }) => policy.id),
+	const createPermissions = await fetchRawPermissions(
+		{
+			action: 'create',
+			policies: accessRows.map(({ policy }) => policy.id),
+			collections: [options.collection],
+			accountability,
+			bypassMinimalAppPermissions: false,
+		},
 		context,
 	);
 
-	for (const memberRole of accountability.memberRoles) {
-		const chainRoles = await fetchRolesTree(memberRole, context.knex);
+	// Every create permission's validation already had to pass, as
+	// `processPayload` checks them: each one letting a written field be set
+	// allowed the create.
+	const allowingPolicies = new Set<string>();
 
-		const holdsAllowingPolicy = accessRows.some(({ policy, role }) => {
-			return role !== null
-				&& chainRoles.includes(role)
-				&& allowingPolicies.has(policy.id);
-		});
-
-		if (holdsAllowingPolicy) {
-			allowingRoles.push(memberRole);
+	for (const permission of createPermissions) {
+		if (
+			permission.policy !== null
+			&& permitsAnyField(permission, options.fields)
+		) {
+			allowingPolicies.add(permission.policy);
 		}
 	}
 
-	return allowingRoles;
+	const memberRoleChains = await fetchMemberRoleChains(accountability, context);
+
+	return memberRolesHolding(memberRoleChains, accessRows, allowingPolicies);
 }
 
 /**
- * A create is checked as `processPayload` checks it: every permission's
- * validation already had to pass, so each create permission allowed it. An
- * update also needs the permission's item rule to match every row written,
- * read as `validateItemAccess` reads it, one rule at a time.
+ * The member roles allowing an update of each row, keyed by the row's key as a
+ * string: one query per permission with an item rule, whatever the row count.
  */
-async function fetchAllowingPolicies(
+export async function fetchAllowingMemberRolesByRow(
 	options: FetchAllowingMemberRolesOptions,
-	policies: string[],
 	context: Context,
-): Promise<Set<string>> {
-	const { accountability, action, collection } = options;
-	const allowingPolicies = new Set<string>();
+): Promise<Map<string, string[]>> {
+	const { accountability, collection, primaryKeys } = options;
 
-	if (action === 'create') {
-		const createPermissions = await fetchRawPermissions(
-			{
-				action,
-				policies,
-				collections: [collection],
-				accountability,
-				bypassMinimalAppPermissions: false,
-			},
-			context,
-		);
-
-		for (const { policy } of createPermissions) {
-			if (policy !== null) {
-				allowingPolicies.add(policy);
-			}
-		}
-
-		return allowingPolicies;
-	}
-
-	if (options.primaryKeys.length === 0) {
+	if (primaryKeys.length === 0) {
 		throw new Error(
 			`An update of ${JSON.stringify(collection)} names no row to check`
 			+ ' the permissions of',
 		);
 	}
 
+	const rowNames = primaryKeys.map((key) => String(key));
+
+	if (accountability.admin) {
+		const adminRoles = await fetchAdminMemberRoles(accountability, context);
+
+		return new Map(rowNames.map((rowName) => [rowName, adminRoles]));
+	}
+
+	const accessRows = await fetchPolicyAccessRows(accountability, context);
+
 	const updatePermissions = await fetchPermissions(
-		{ action, policies, collections: [collection], accountability },
+		{
+			action: 'update',
+			policies: accessRows.map(({ policy }) => policy.id),
+			collections: [collection],
+			accountability,
+		},
 		context,
 	);
 
+	const policiesByRow = new Map(rowNames.map((rowName) => {
+		return [rowName, new Set<string>()];
+	}));
+
 	for (const permission of updatePermissions) {
-		if (permission.policy === null) {
+		if (
+			permission.policy === null
+			|| !permitsAnyField(permission, options.fields)
+		) {
 			continue;
 		}
 
-		const allowsRows = !hasItemPermissions(permission)
-			|| await permissionMatchesRows(permission, options, context);
+		const allowedRows = hasItemPermissions(permission)
+			? await fetchRowsMatching(permission, options, context)
+			: rowNames;
 
-		if (allowsRows) {
-			allowingPolicies.add(permission.policy);
+		for (const rowName of allowedRows) {
+			policiesByRow.get(rowName)?.add(permission.policy);
 		}
 	}
 
-	return allowingPolicies;
+	const memberRoleChains = await fetchMemberRoleChains(accountability, context);
+
+	return new Map([...policiesByRow].map(([rowName, rowPolicies]) => {
+		return [
+			rowName,
+			memberRolesHolding(memberRoleChains, accessRows, rowPolicies),
+		];
+	}));
 }
 
-async function permissionMatchesRows(
+async function fetchAdminMemberRoles(
+	accountability: Accountability,
+	context: Context,
+): Promise<string[]> {
+	const adminRoles: string[] = [];
+
+	for (const memberRole of accountability.memberRoles) {
+		const chainRoles = await fetchRolesTree(memberRole, context.knex);
+
+		const { admin: grantsAdmin } = await fetchGlobalAccessForRoles(
+			{ roles: chainRoles, ip: accountability.ip },
+			context.knex,
+		);
+
+		if (grantsAdmin) {
+			adminRoles.push(memberRole);
+		}
+	}
+
+	return adminRoles;
+}
+
+async function fetchMemberRoleChains(
+	accountability: Accountability,
+	context: Context,
+): Promise<[string, string[]][]> {
+	const memberRoleChains: [string, string[]][] = [];
+
+	for (const memberRole of accountability.memberRoles) {
+		memberRoleChains.push([
+			memberRole,
+			await fetchRolesTree(memberRole, context.knex),
+		]);
+	}
+
+	return memberRoleChains;
+}
+
+function memberRolesHolding(
+	memberRoleChains: [string, string[]][],
+	accessRows: AccessRow[],
+	allowingPolicies: Set<string>,
+): string[] {
+	return memberRoleChains
+		.filter(([, chainRoles]) => {
+			return accessRows.some(({ policy, role }) => {
+				return role !== null
+					&& chainRoles.includes(role)
+					&& allowingPolicies.has(policy.id);
+			});
+		})
+		.map(([memberRole]) => memberRole);
+}
+
+// A write setting no field is not checked field by field.
+function permitsAnyField(permission: Permission, writtenFields: string[]) {
+	const permittedFields = permission.fields ?? [];
+
+	return writtenFields.length === 0
+		|| permittedFields.includes('*')
+		|| writtenFields.some((field) => permittedFields.includes(field));
+}
+
+/**
+ * The written rows the permission's item rule matches, read as
+ * `validateItemAccess` reads them, the rule alone.
+ */
+async function fetchRowsMatching(
 	permission: Permission,
 	{ accountability, collection, primaryKeys }: FetchAllowingMemberRolesOptions,
 	context: Context,
-) {
+): Promise<string[]> {
 	const primaryKeyField = context.schema.collections[collection]!.primary;
+	const policies = await fetchPolicies(accountability, context);
 
-	const ast: AST = {
-		type: 'root',
-		name: collection,
-		query: {
-			limit: primaryKeys.length,
-			filter: { [primaryKeyField]: { _in: primaryKeys } },
+	const permissions = await fetchPermissions(
+		{ action: 'update', accountability, policies },
+		context,
+	);
+
+	const matchedRows: Record<string, PrimaryKey>[] = await getDBQuery(
+		{
+			table: collection,
+			fieldNodes: [{
+				type: 'field',
+				name: primaryKeyField,
+				fieldKey: primaryKeyField,
+				whenCase: [],
+				alias: false,
+			}],
+			o2mNodes: [],
+			query: {
+				limit: primaryKeys.length,
+				filter: { [primaryKeyField]: { _in: primaryKeys } },
+			},
+			cases: [permission.permissions!],
+			permissions,
 		},
-		children: [],
-		cases: [permission.permissions!],
-	};
+		context,
+	);
 
-	const permittedRows = await fetchPermittedAstRootFields(ast, {
-		schema: context.schema,
-		accountability,
-		knex: context.knex,
-		action: 'update',
-	});
-
-	return permittedRows.length === primaryKeys.length;
+	return matchedRows.map((matchedRow) => String(matchedRow[primaryKeyField]));
 }

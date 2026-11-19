@@ -1210,7 +1210,7 @@ no_fields_in_collection: 'Encara no hi ha camps a "{collection}"'
 do_nothing: No facis res
 generate_and_save_uuid: Genera i Desa UUID
 save_current_user_id: Desa el ID d'usuari actual
-save_current_user_role: Desa el rol d'usuari actual
+save_current_user_roles: Desa el rol d'usuari actual
 save_current_datetime: Desa la Data/Hora actual
 start_open: Comença obert
 block: Block
