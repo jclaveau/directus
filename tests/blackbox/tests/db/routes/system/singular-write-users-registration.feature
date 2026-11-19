@@ -148,3 +148,39 @@ Feature: A visitor registers and verifies the email address
       | 11      | directus_access   | 2      | 0      | 0      | 0      |
       | 11      | directus_settings | 1      | 0      | 0      | 0      |
       | 11      | directus_users    | 2      | 0      | 0      | 0      |
+
+  Scenario: a registered user takes the registration role
+    Given these requests are sent:
+      | request                                         | response  |
+      | method: POST                                    | code: 200 |+
+      | path: /roles                                    |           |
+      | payload:                                        |           |
+      |   id: <registration-role>                       |           |
+      |   name: registration-<run>                      |           |
+      | method: PATCH                                   | code: 200 |+
+      | path: /settings                                 |           |
+      | payload:                                        |           |
+      |   public_registration: true                     |           |
+      |   public_registration_verify_email: false       |           |
+      |   public_registration_role: <registration-role> |           |
+      |   public_registration_email_filter: null        |           |
+    Then these requests get these responses:
+      | request                                      | response                        |
+      | method: POST                                 | code: 204                       |+
+      | path: /users/register                        |                                 |
+      | headers:                                     |                                 |
+      |   X-Forwarded-For: 198.51.100.40             |                                 |
+      | payload:                                     |                                 |
+      |   email: role-<run>@example.com              |                                 |
+      |   password: registered-password              |                                 |
+      | method: GET                                  | code: 200                       |+
+      | path: /users                                 | body:                           |
+      | query:                                       |   data:                         |
+      |   fields: status,role                        |     - status: active            |
+      |   filter[email][_eq]: role-<run>@example.com |       role: <registration-role> |
+    And on postgres the requests ran these statements:
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_access   | 2      | 0      | 0      | 0      |
+      | 1       | directus_settings | 2      | 0      | 0      | 0      |
+      | 1       | directus_users    | 3      | 1      | 0      | 0      |
+      | 2       | directus_users    | 2      | 0      | 0      | 0      |

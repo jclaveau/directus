@@ -7,6 +7,11 @@ import {
 	responseCellOf,
 } from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
+import {
+	auditEnvForFeature,
+	defineStatementCountsStep,
+	warmUpAuditedInstance,
+} from '@common/query-audit-steps';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
@@ -14,7 +19,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
-import request from 'supertest';
+import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 import {
 	MockIdentityProvider,
@@ -66,7 +71,8 @@ export const SSO_CLIENT_ID = 'sso-blackbox-client';
  * responses:`, against an instance of its own trusting the `mockoauth` (OAuth2)
  * and `mockopenid` (OpenID) providers this file starts. A row is a request to
  * that instance, or a `login: <provider>` walking the code flow with `profile`
- * as the provider's answer.
+ * as the provider's answer. A scenario may end with the statements its
+ * requests ran on postgres.
  */
 export function defineSsoFeature(
 	featurePath: string,
@@ -110,12 +116,20 @@ export function defineSsoFeature(
 				mockopenid: ssoInstance.providersByName['mockopenid']!.issuerUrl,
 			}));
 
+			Object.assign(vendorEnv, auditEnvForFeature(feature, vendor));
+
 			instance = spawn('node', [paths.cli, 'start'], {
 				cwd: paths.cwd,
 				env: vendorEnv,
 			});
 
 			await awaitDirectusConnection(Number(vendorEnv.PORT));
+
+			await warmUpAuditedInstance(
+				feature,
+				vendor,
+				getUrl(vendor, ssoInstance.vendorEnv),
+			);
 		}, 60_000);
 
 		afterAll(async () => {
@@ -130,10 +144,19 @@ export function defineSsoFeature(
 
 		defineFeature(feature, (scenario) => {
 			for (const { title } of feature.scenarios) {
-				scenario(title, ({ then }) => {
-					then('these requests get these responses:', (table: Row[]) => {
-						return sendRows(vendor, ssoInstance, table);
-					});
+				scenario(title, ({ then, and }) => {
+					const receivedResponses: Response[] = [];
+
+					then(
+						'these requests get these responses:',
+						async (table: Row[]) => {
+							receivedResponses.push(
+								...await sendRows(vendor, ssoInstance, table),
+							);
+						},
+					);
+
+					defineStatementCountsStep(and, vendor, receivedResponses);
 				}, 60_000);
 			}
 		});
@@ -211,6 +234,8 @@ async function sendRows(
 	ssoInstance: SsoInstance,
 	table: Row[],
 ) {
+	const receivedResponses: Response[] = [];
+
 	for (const { request: requestText, response: responseText } of table) {
 		const requestCell = loadYaml(withKeys(requestText, ssoInstance)) as
 			LoginCell | RequestCell;
@@ -241,5 +266,11 @@ async function sendRows(
 				response.body.data.refresh_token,
 			);
 		}
+
+		// A login's statements are those of its callback, the last request
+		// of the flow.
+		receivedResponses.push(response);
 	}
+
+	return receivedResponses;
 }

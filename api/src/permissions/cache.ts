@@ -1,6 +1,7 @@
 import { useEnv } from '@directus/env';
 import { defineCache, type CacheConfig } from '@directus/memory';
 import { redisConfigAvailable, useRedis } from '../redis/index.js';
+import { runningReads } from './running-reads.js';
 
 const localOnly = redisConfigAvailable() === false;
 
@@ -26,5 +27,7 @@ export const useCache = defineCache(config);
 
 export function clearCache() {
 	const cache = useCache();
+	runningReads.clear();
+
 	return cache.clear();
 }

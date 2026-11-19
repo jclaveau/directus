@@ -9,8 +9,10 @@ Feature: A first SSO login creates the user, a later one updates it
   - The providers hand `<sub>-refresh-<n>` out as refresh tokens, n counting
     the ones that subject got. Directus stores the one a login brings, then
     trades it at once, and again on every refresh: it keeps the last one.
-  - `mockoauth` gives the group "staff" the role 5b3e8f0a-... (sso_staff),
-    anyone else the default role d70c0943-...; `mockopenid` maps no group.
+  - Both give the group "staff" the role 5b3e8f0a-... (sso_staff), the
+    group "auditors" the role 0c6f2a9d-... (sso_auditors), anyone else the
+    default role d70c0943-... A user in several mapped groups gets one role:
+    the first the mapping lists.
   - Any other row is a request as the admin.
 
   Scenario: an OAuth2 login creates the user, a later one updates it
@@ -124,3 +126,119 @@ Feature: A first SSO login creates the user, a later one updates it
       |     - auth_data                    |       refreshToken: grace-openid-refresh-5 |
       |   filter[email][_eq]: >-           |                                            |
       |     grace@sso.example.com          |                                            |
+
+  Scenario: an OAuth2 user in two mapped groups gets the role mapped first
+    Then these requests get these responses:
+      | request                      | response                                   |
+      | login: mockoauth             | code: 200                                  |+
+      | profile:                     |                                            |
+      |   sub: kay-oauth             |                                            |
+      |   email: kay@sso.example.com |                                            |
+      |   given_name: Kay            |                                            |
+      |   family_name: Antonelli     |                                            |
+      |   groups: [auditors, staff]  |                                            |
+      | method: GET                  | code: 200                                  |+
+      | path: /users                 | body:                                      |
+      | query:                       |   data:                                    |
+      |   fields:                    |   - role: >-                               |
+      |     - role                   |       5b3e8f0a-9c41-4d6e-8a2f-1c7d3e9b6a04 |
+      |   filter[email][_eq]: >-     |                                            |
+      |     kay@sso.example.com      |                                            |
+      | login: mockoauth             | code: 200                                  |+
+      | profile:                     |                                            |
+      |   sub: kay-oauth             |                                            |
+      |   email: kay@sso.example.com |                                            |
+      |   given_name: Kay            |                                            |
+      |   family_name: Antonelli     |                                            |
+      |   groups: [auditors]         |                                            |
+      | method: GET                  | code: 200                                  |+
+      | path: /users                 | body:                                      |
+      | query:                       |   data:                                    |
+      |   fields:                    |   - role: >-                               |
+      |     - role                   |       0c6f2a9d-3e18-4b57-9d40-7a1e5c8b2f63 |
+      |   filter[email][_eq]: >-     |                                            |
+      |     kay@sso.example.com      |                                            |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete | with |
+      | 1       | directus_access      | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_sessions    | 0      | 1      | 0      | 1      | 0    |
+      | 1       | directus_settings    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users       | 4      | 1      | 2      | 0      | 0    |
+      | 2       | directus_users       | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_access      | 3      | 0      | 0      | 0      | 0    |
+      | 3       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 3       | directus_roles       | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_sessions    | 0      | 1      | 0      | 2      | 0    |
+      | 3       | directus_settings    | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_users       | 4      | 0      | 3      | 0      | 0    |
+      | 4       | directus_access      | 2      | 0      | 0      | 0      | 0    |
+      | 4       | directus_collections | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_users       | 2      | 0      | 0      | 0      | 0    |
+      | 4       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
+      | 4       | information_schema   | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_index             | 2      | 0      | 0      | 0      | 0    |
+      | 4       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
+
+  Scenario: an OpenID user's group maps their role, a later login changes it
+    Then these requests get these responses:
+      | request                      | response                                   |
+      | login: mockopenid            | code: 200                                  |+
+      | profile:                     |                                            |
+      |   sub: lin-openid            |                                            |
+      |   email: lin@sso.example.com |                                            |
+      |   given_name: Lin            |                                            |
+      |   family_name: Hua           |                                            |
+      |   groups: [staff]            |                                            |
+      | method: GET                  | code: 200                                  |+
+      | path: /users                 | body:                                      |
+      | query:                       |   data:                                    |
+      |   fields:                    |   - role: >-                               |
+      |     - role                   |       5b3e8f0a-9c41-4d6e-8a2f-1c7d3e9b6a04 |
+      |   filter[email][_eq]: >-     |                                            |
+      |     lin@sso.example.com      |                                            |
+      | login: mockopenid            | code: 200                                  |+
+      | profile:                     |                                            |
+      |   sub: lin-openid            |                                            |
+      |   email: lin@sso.example.com |                                            |
+      |   given_name: Lin            |                                            |
+      |   family_name: Hua           |                                            |
+      |   groups: [auditors]         |                                            |
+      | method: GET                  | code: 200                                  |+
+      | path: /users                 | body:                                      |
+      | query:                       |   data:                                    |
+      |   fields:                    |   - role: >-                               |
+      |     - role                   |       0c6f2a9d-3e18-4b57-9d40-7a1e5c8b2f63 |
+      |   filter[email][_eq]: >-     |                                            |
+      |     lin@sso.example.com      |                                            |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete | with |
+      | 1       | directus_access      | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_sessions    | 0      | 1      | 0      | 1      | 0    |
+      | 1       | directus_settings    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users       | 4      | 1      | 2      | 0      | 0    |
+      | 2       | directus_users       | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_access      | 3      | 0      | 0      | 0      | 0    |
+      | 3       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 3       | directus_roles       | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_sessions    | 0      | 1      | 0      | 2      | 0    |
+      | 3       | directus_settings    | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_users       | 4      | 0      | 3      | 0      | 0    |
+      | 4       | directus_access      | 2      | 0      | 0      | 0      | 0    |
+      | 4       | directus_collections | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_users       | 2      | 0      | 0      | 0      | 0    |
+      | 4       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
+      | 4       | information_schema   | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_index             | 2      | 0      | 0      | 0      | 0    |
+      | 4       | pg_proc              | 1      | 0      | 0      | 0      | 0    |

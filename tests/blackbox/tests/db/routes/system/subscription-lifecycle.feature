@@ -1,7 +1,7 @@
 Feature: A subscription's life at its provider, as the subscriptions bundle follows it
 
   - A request authenticates as the admin unless its `as` names a token;
-    `as: anonymous` sends none, like a provider.
+    `as: public` sends none, like a provider.
   - The instance loads the real `@scalabus/subscriptions` bundle, and its Mollie
     and Stripe clients call fake ones, answering what `holds` says.
   - `these pending subscriptions, each with its own plan` writes, for an `id` of
@@ -54,7 +54,7 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | <user_<id>> | <policy_<id>> | @scalabus/subscriptions |
     And these requests get these responses:
       | request                     | response                                  |
-      | as: anonymous               | code: 403                                 |+
+      | as: public                  | code: 403                                 |+
       | method: POST                | body:                                     |
       | path: /subscriptions/cancel |   errors:                                 |
       |                             |     - message: >-                         |
@@ -642,10 +642,10 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | status                | active    |
     When these requests get these responses:
       | request                              | response                                 |
-      | as: anonymous                        | code: 200                                |+
+      | as: public                           | code: 200                                |+
       | method: POST                         |                                          |
       | path: /subscriptions/webhooks/mollie |                                          |
-      | as: anonymous                        | code: 401                                |+
+      | as: public                           | code: 401                                |+
       | method: POST                         | body:                                    |
       | path: /subscriptions/webhooks/mollie |  errors:                                 |
       | payload: id=tr_first                 |  - message: >-                           |
@@ -654,7 +654,7 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       |                                      |      header, got null                    |
       |                                      |    extensions:                           |
       |                                      |      code: SUBSCRIPTION_WEBHOOK_UNSIGNED |
-      | as: anonymous                        | code: 401                                |+
+      | as: public                           | code: 401                                |+
       | method: POST                         | body:                                    |
       | path: /subscriptions/webhooks/mollie |  errors:                                 |
       | headers:                             |  - message: >-                           |
@@ -663,7 +663,7 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       |   type: payment.paid                 |      not sign the body                   |
       |   entityId: tr_first                 |    extensions:                           |
       |                                      |      code: SUBSCRIPTION_WEBHOOK_UNSIGNED |
-      | as: anonymous                        | code: 404                                |+
+      | as: public                           | code: 404                                |+
       | method: POST                         | body:                                    |
       | path: /subscriptions/webhooks/paddle |  errors:                                 |
       | payload: id=tr_first                 |  - message: >-                           |
@@ -1146,7 +1146,7 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | status                | active      |
     When these requests get these responses:
       | request                              | response                                 |
-      | as: anonymous                        | code: 400                                |+
+      | as: public                           | code: 400                                |+
       | method: POST                         | body:                                    |
       | path: /subscriptions/webhooks/stripe |   errors:                                |
       | payload:                             |   - message: >-                          |
@@ -1155,7 +1155,7 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       |                                      |       header, got null                   |
       |                                      |     extensions:                          |
       |                                      |       code: SUBSCRIPTION_WEBHOOK_REFUSED |
-      | as: anonymous                        | code: 400                                |+
+      | as: public                           | code: 400                                |+
       | method: POST                         | body:                                    |
       | path: /subscriptions/webhooks/stripe |   errors:                                |
       | headers:                             |   - message: >-                          |

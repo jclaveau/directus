@@ -47,7 +47,7 @@ const REQUEST_CELL_KEYS = [
 	'eventually',
 ] as const satisfies readonly (keyof RequestCell)[];
 
-const RESPONSE_CELL_KEYS = ['code', 'body', 'text'] as const;
+const RESPONSE_CELL_KEYS = ['code', 'headers', 'body', 'text'] as const;
 
 export type Row = { request: string; response: string };
 
@@ -270,7 +270,8 @@ function sendRequest(instanceUrl: string, requestCell: RequestCell) {
 		.query(query)
 		.set(headers);
 
-	if (token !== 'anonymous') {
+	// `as: public` sends no credentials at all.
+	if (token !== 'public') {
 		pendingRequest.set(
 			'Authorization',
 			token === undefined
@@ -299,9 +300,10 @@ function sendRequest(instanceUrl: string, requestCell: RequestCell) {
 		: pendingRequest.send(payload as object);
 }
 
-function codeBodyAndText(response: Response) {
+function comparableResponse(response: Response) {
 	return {
 		code: response.statusCode,
+		headers: response.headers,
 		body: response.body,
 		text: response.text,
 	};
@@ -403,7 +405,7 @@ export async function sendRows(
 			await expect.poll(async () => {
 				response = await sendRequest(instanceUrl(), requestCell);
 
-				return codeBodyAndText(response);
+				return comparableResponse(response);
 			}, { timeout: 10_000, interval: 250 }).toMatchObject(
 				expectedResponse,
 			);
@@ -411,7 +413,7 @@ export async function sendRows(
 		else {
 			response = await sendRequest(instanceUrl(), requestCell);
 
-			expect(codeBodyAndText(response)).toMatchObject(expectedResponse);
+			expect(comparableResponse(response)).toMatchObject(expectedResponse);
 		}
 
 		if (requestCell.remember !== undefined) {
