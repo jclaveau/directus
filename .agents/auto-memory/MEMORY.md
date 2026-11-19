@@ -34,7 +34,7 @@ line appended below.
 - [scopedCache hook API](reference_directus_scopedcache_api.md) — scopeTo/dependOn on reads, purgeBy on mutations
 - [Query-filter $NOW is NOT a cache poison](reference_directus_query_now_not_cache_poison.md) — mis-analysed ≥2×; keys differ per request
 
-## cache (33) — tiers, namespaces, keys, telemetry, audit, admin page, Redis
+## cache (34) — tiers, namespaces, keys, telemetry, audit, admin page, Redis
 `.agents/auto-memory/index/cache.md`
 
 - [Cache key identities](project_directus_cache_key_identities.md) — cacheKey digest vs redisKey; a wrong one fails SILENTLY as a cold cache

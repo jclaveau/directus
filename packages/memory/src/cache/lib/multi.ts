@@ -1,6 +1,6 @@
 import { processId } from '@directus/utils/node';
 import { createBus, type Bus } from '../../bus/index.js';
-import type { Cache } from '../types/class.js';
+import type { Cache, CacheRead } from '../types/class.js';
 import type { CacheConfigMulti } from '../types/config.js';
 import { CacheLocal } from './local.js';
 import { CacheRedis } from './redis.js';
@@ -77,6 +77,43 @@ export class CacheMulti implements Cache {
 		this.clearGeneration++;
 		await Promise.all([this.local.set(key, value), this.redis.set(key, value)]);
 		await this.clearOthers(key);
+	}
+
+	// Refills the local tier as `get` does, and for the same reason.
+	async getWithGeneration<T = unknown>(key: string): Promise<CacheRead<T>> {
+		const local = await this.local.get<T>(key);
+
+		if (local !== undefined) {
+			return { found: true, value: local };
+		}
+
+		const generationBeforeRead = this.clearGeneration;
+		const shared = await this.redis.getWithGeneration<T>(key);
+
+		if (shared.found && this.clearGeneration === generationBeforeRead) {
+			await this.local.set(key, shared.value);
+		}
+
+		return shared;
+	}
+
+	// Redis decides for every process; the local copy is skipped when a peer's
+	// clear reached this process after redis kept the value.
+	async setUnlessCleared(key: string, value: unknown, generation: number) {
+		const generationBeforeWrite = this.clearGeneration;
+
+		if (!await this.redis.setUnlessCleared(key, value, generation)) {
+			return false;
+		}
+
+		if (this.clearGeneration === generationBeforeWrite) {
+			this.clearGeneration++;
+			await this.local.set(key, value);
+		}
+
+		await this.clearOthers(key);
+
+		return true;
 	}
 
 	async delete(key: string) {

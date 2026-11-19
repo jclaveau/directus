@@ -1,3 +1,11 @@
+/**
+ * What `getWithGeneration` read: the cached value, or the generation a value
+ * computed for the missing key has to be stored under
+ */
+export type CacheRead<T> =
+	| { found: true; value: T }
+	| { found: false; generation: number };
+
 export interface Cache {
 	/**
 	 * Get the cached value by key. Returns undefined if the key doesn't exist in the cache
@@ -33,4 +41,23 @@ export interface Cache {
 	 * Remove all keys from the cache
 	 */
 	clear(): Promise<void>;
+
+	/**
+	 * Get the cached value by key or, when it is missing, the number of clears so
+	 * far, to hand back to `setUnlessCleared`
+	 *
+	 * @param key Key to retrieve from the cache
+	 */
+	getWithGeneration<T = unknown>(key: string): Promise<CacheRead<T>>;
+
+	/**
+	 * Save the given value unless a clear came since `generation` was read
+	 *
+	 * @returns Whether the value was saved
+	 */
+	setUnlessCleared(
+		key: string,
+		value: unknown,
+		generation: number,
+	): Promise<boolean>;
 }

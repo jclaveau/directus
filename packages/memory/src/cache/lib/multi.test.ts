@@ -207,3 +207,128 @@ describe('clear', () => {
 		expect(result).toBeUndefined();
 	});
 });
+
+describe('getWithGeneration', () => {
+	test('Returns the local value without a redis round trip', async () => {
+		await expect(cache.getWithGeneration(mockKey)).resolves.toEqual({
+			found: true,
+			value: mockLocalValue,
+		});
+
+		expect(cache['redis'].getWithGeneration).not.toHaveBeenCalled();
+	});
+
+	test('Returns the generation shared through redis on a miss', async () => {
+		vi.mocked(cache['local'].get).mockResolvedValue(undefined);
+
+		vi.mocked(cache['redis'].getWithGeneration).mockResolvedValue({
+			found: false,
+			generation: 7,
+		});
+
+		await expect(cache.getWithGeneration(mockKey)).resolves.toEqual({
+			found: false,
+			generation: 7,
+		});
+
+		expect(cache['local'].set).not.toHaveBeenCalled();
+	});
+
+	test('Keeps the redis value locally', async () => {
+		vi.mocked(cache['local'].get).mockResolvedValue(undefined);
+
+		vi.mocked(cache['redis'].getWithGeneration).mockResolvedValue({
+			found: true,
+			value: mockRedisValue,
+		});
+
+		await expect(cache.getWithGeneration(mockKey)).resolves.toEqual({
+			found: true,
+			value: mockRedisValue,
+		});
+
+		expect(cache['local'].set).toHaveBeenCalledWith(mockKey, mockRedisValue);
+	});
+
+	test("Keeps nothing locally when a peer's clear crossed the read", async () => {
+		vi.mocked(cache['local'].get).mockResolvedValue(undefined);
+
+		let resolveRead!: (read: { found: true; value: string }) => void;
+
+		vi.mocked(cache['redis'].getWithGeneration).mockReturnValue(
+			new Promise((resolve) => (resolveRead = resolve)),
+		);
+
+		const pending = cache.getWithGeneration(mockKey);
+
+		await vi.waitFor(() => {
+			expect(cache['redis'].getWithGeneration).toHaveBeenCalled();
+		});
+
+		await (vi.mocked(cache['bus'].subscribe).mock.calls[0]![1] as (
+			payload: unknown,
+		) => Promise<void>)({ type: 'clear', origin: 'another-process' });
+
+		resolveRead({ found: true, value: mockRedisValue });
+
+		await expect(pending).resolves.toEqual({
+			found: true,
+			value: mockRedisValue,
+		});
+
+		expect(cache['local'].set).not.toHaveBeenCalled();
+	});
+});
+
+describe('setUnlessCleared', () => {
+	test('Keeps nothing anywhere when redis refused the value', async () => {
+		vi.mocked(cache['redis'].setUnlessCleared).mockResolvedValue(false);
+
+		await expect(
+			cache.setUnlessCleared(mockKey, mockValue, 7),
+		).resolves.toBe(false);
+
+		expect(cache['redis'].setUnlessCleared)
+			.toHaveBeenCalledWith(mockKey, mockValue, 7);
+
+		expect(cache['local'].set).not.toHaveBeenCalled();
+		expect(cache['bus'].publish).not.toHaveBeenCalled();
+	});
+
+	test('Keeps the value locally and tells peers once redis kept it', async () => {
+		vi.mocked(cache['redis'].setUnlessCleared).mockResolvedValue(true);
+
+		await expect(cache.setUnlessCleared(mockKey, mockValue, 7)).resolves.toBe(true);
+
+		expect(cache['local'].set).toHaveBeenCalledWith(mockKey, mockValue);
+
+		expect(cache['bus'].publish).toHaveBeenCalledWith('multi-cache', {
+			type: 'clear',
+			key: mockKey,
+			origin: cache.processId,
+		});
+	});
+
+	test("Keeps nothing locally when a peer's clear crossed the write", async () => {
+		let resolveWrite!: (wasSet: boolean) => void;
+
+		vi.mocked(cache['redis'].setUnlessCleared).mockReturnValue(
+			new Promise<boolean>((resolve) => (resolveWrite = resolve)),
+		);
+
+		const pending = cache.setUnlessCleared(mockKey, mockValue, 7);
+
+		await vi.waitFor(() => {
+			expect(cache['redis'].setUnlessCleared).toHaveBeenCalled();
+		});
+
+		await (vi.mocked(cache['bus'].subscribe).mock.calls[0]![1] as (
+			payload: unknown,
+		) => Promise<void>)({ type: 'clear', origin: 'another-process' });
+
+		resolveWrite(true);
+
+		await expect(pending).resolves.toBe(true);
+		expect(cache['local'].set).not.toHaveBeenCalled();
+	});
+});

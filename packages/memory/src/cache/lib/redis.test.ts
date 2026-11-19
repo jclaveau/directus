@@ -72,3 +72,47 @@ describe('has', () => {
 		expect(res).toBe(true);
 	});
 });
+
+describe('clear', () => {
+	test('Moves the generation before removing the keys', async () => {
+		await cache.clear();
+
+		expect(cache['store'].bumpGeneration).toHaveBeenCalledOnce();
+		expect(cache['store'].clear).toHaveBeenCalledOnce();
+
+		// A write checked before the move lands before the removal, which drops it;
+		// a write checked after it is refused.
+		expect(
+			vi.mocked(cache['store'].bumpGeneration).mock.invocationCallOrder[0],
+		).toBeLessThan(vi.mocked(cache['store'].clear).mock.invocationCallOrder[0]!);
+	});
+});
+
+describe('getWithGeneration', () => {
+	test('Returns what the kv store read', async () => {
+		vi.mocked(cache['store'].getWithGeneration).mockResolvedValue({
+			found: false,
+			generation: 7,
+		});
+
+		await expect(cache.getWithGeneration(mockKey)).resolves.toEqual({
+			found: false,
+			generation: 7,
+		});
+
+		expect(cache['store'].getWithGeneration).toHaveBeenCalledWith(mockKey);
+	});
+});
+
+describe('setUnlessCleared', () => {
+	test('Returns whether the kv store kept the value', async () => {
+		vi.mocked(cache['store'].setUnlessCleared).mockResolvedValue(false);
+
+		await expect(
+			cache.setUnlessCleared(mockKey, mockValue, 7),
+		).resolves.toBe(false);
+
+		expect(cache['store'].setUnlessCleared)
+			.toHaveBeenCalledWith(mockKey, mockValue, 7);
+	});
+});
