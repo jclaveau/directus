@@ -1,0 +1,2747 @@
+{
+	"subscription created: invoice.finalized": {
+		"id": "evt_recorded1",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083320,
+		"data": {
+			"object": {
+				"id": "in_recorded1",
+				"object": "invoice",
+				"account_country": "FR",
+				"account_name": "Scalabus Tests",
+				"account_tax_ids": null,
+				"amount_due": 1000,
+				"amount_overpaid": 0,
+				"amount_paid": 1000,
+				"amount_remaining": 0,
+				"amount_shipping": 0,
+				"application": null,
+				"attempt_count": 1,
+				"attempted": true,
+				"auto_advance": false,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null,
+					"provider": null,
+					"status": null
+				},
+				"automatically_finalizes_at": null,
+				"billing_reason": "subscription_create",
+				"collection_method": "charge_automatically",
+				"created": 1795083317,
+				"currency": "eur",
+				"custom_fields": null,
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"customer_address": null,
+				"customer_email": null,
+				"customer_name": "scalabus-probe",
+				"customer_phone": null,
+				"customer_shipping": null,
+				"customer_tax_exempt": "none",
+				"customer_tax_ids": [],
+				"default_payment_method": null,
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"due_date": null,
+				"effective_at": 1795083317,
+				"ending_balance": 0,
+				"footer": null,
+				"from_invoice": null,
+				"hosted_invoice_url": "https://invoice.stripe.com/i/acct_recorded1/test_recorded1?s=ap",
+				"invoice_pdf": "https://pay.stripe.com/invoice/acct_recorded1/test_recorded1/pdf?s=ap",
+				"issuer": {
+					"type": "self"
+				},
+				"last_finalization_error": null,
+				"latest_revision": null,
+				"lines": {
+					"object": "list",
+					"data": [
+						{
+							"id": "il_recorded1",
+							"object": "line_item",
+							"amount": 1000,
+							"currency": "eur",
+							"description": "1 × scalabus-probe (at €10.00 / month)",
+							"discount_amounts": [],
+							"discountable": true,
+							"discounts": [],
+							"invoice": "in_recorded1",
+							"livemode": false,
+							"metadata": {
+								"directus_subscription": "424242"
+							},
+							"parent": {
+								"invoice_item_details": null,
+								"subscription_item_details": {
+									"invoice_item": null,
+									"proration": false,
+									"proration_details": {
+										"credited_items": null
+									},
+									"subscription": "sub_recorded1",
+									"subscription_item": "si_recorded1"
+								},
+								"type": "subscription_item_details"
+							},
+							"period": {
+								"end": 1797675317,
+								"start": 1795083317
+							},
+							"pretax_credit_amounts": [],
+							"pricing": {
+								"price_details": {
+									"price": "price_recorded1",
+									"product": "scalabus_probe"
+								},
+								"type": "price_details",
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"quantity_decimal": "1",
+							"subtotal": 1000,
+							"taxes": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/invoices/in_recorded1/lines"
+				},
+				"livemode": false,
+				"metadata": {},
+				"next_payment_attempt": null,
+				"number": "4E00818B-0003",
+				"on_behalf_of": null,
+				"parent": {
+					"quote_details": null,
+					"subscription_details": {
+						"metadata": {
+							"directus_subscription": "424242"
+						},
+						"subscription": "sub_recorded1"
+					},
+					"type": "subscription_details"
+				},
+				"payment_settings": {
+					"default_mandate": null,
+					"payment_method_options": null,
+					"payment_method_types": null
+				},
+				"period_end": 1795083317,
+				"period_start": 1795083317,
+				"post_payment_credit_notes_amount": 0,
+				"pre_payment_credit_notes_amount": 0,
+				"receipt_number": null,
+				"rendering": null,
+				"shipping_cost": null,
+				"shipping_details": null,
+				"starting_balance": 0,
+				"statement_descriptor": null,
+				"status": "paid",
+				"status_transitions": {
+					"finalized_at": 1795083317,
+					"marked_uncollectible_at": null,
+					"paid_at": 1795083317,
+					"voided_at": null
+				},
+				"subtotal": 1000,
+				"subtotal_excluding_tax": 1000,
+				"test_clock": "clock_recorded1",
+				"total": 1000,
+				"total_discount_amounts": [],
+				"total_excluding_tax": 1000,
+				"total_pretax_credit_amounts": [],
+				"total_taxes": [],
+				"webhooks_delivered_at": null
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": "req_recorded1",
+			"idempotency_key": "9167aeb8-784c-44d9-ba6d-1360d9ba9d98"
+		},
+		"type": "invoice.finalized"
+	},
+	"subscription created: invoice.paid": {
+		"id": "evt_recorded2",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083320,
+		"data": {
+			"object": {
+				"id": "in_recorded1",
+				"object": "invoice",
+				"account_country": "FR",
+				"account_name": "Scalabus Tests",
+				"account_tax_ids": null,
+				"amount_due": 1000,
+				"amount_overpaid": 0,
+				"amount_paid": 1000,
+				"amount_remaining": 0,
+				"amount_shipping": 0,
+				"application": null,
+				"attempt_count": 1,
+				"attempted": true,
+				"auto_advance": false,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null,
+					"provider": null,
+					"status": null
+				},
+				"automatically_finalizes_at": null,
+				"billing_reason": "subscription_create",
+				"collection_method": "charge_automatically",
+				"created": 1795083317,
+				"currency": "eur",
+				"custom_fields": null,
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"customer_address": null,
+				"customer_email": null,
+				"customer_name": "scalabus-probe",
+				"customer_phone": null,
+				"customer_shipping": null,
+				"customer_tax_exempt": "none",
+				"customer_tax_ids": [],
+				"default_payment_method": null,
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"due_date": null,
+				"effective_at": 1795083317,
+				"ending_balance": 0,
+				"footer": null,
+				"from_invoice": null,
+				"hosted_invoice_url": "https://invoice.stripe.com/i/acct_recorded1/test_recorded1?s=ap",
+				"invoice_pdf": "https://pay.stripe.com/invoice/acct_recorded1/test_recorded1/pdf?s=ap",
+				"issuer": {
+					"type": "self"
+				},
+				"last_finalization_error": null,
+				"latest_revision": null,
+				"lines": {
+					"object": "list",
+					"data": [
+						{
+							"id": "il_recorded1",
+							"object": "line_item",
+							"amount": 1000,
+							"currency": "eur",
+							"description": "1 × scalabus-probe (at €10.00 / month)",
+							"discount_amounts": [],
+							"discountable": true,
+							"discounts": [],
+							"invoice": "in_recorded1",
+							"livemode": false,
+							"metadata": {
+								"directus_subscription": "424242"
+							},
+							"parent": {
+								"invoice_item_details": null,
+								"subscription_item_details": {
+									"invoice_item": null,
+									"proration": false,
+									"proration_details": {
+										"credited_items": null
+									},
+									"subscription": "sub_recorded1",
+									"subscription_item": "si_recorded1"
+								},
+								"type": "subscription_item_details"
+							},
+							"period": {
+								"end": 1797675317,
+								"start": 1795083317
+							},
+							"pretax_credit_amounts": [],
+							"pricing": {
+								"price_details": {
+									"price": "price_recorded1",
+									"product": "scalabus_probe"
+								},
+								"type": "price_details",
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"quantity_decimal": "1",
+							"subtotal": 1000,
+							"taxes": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/invoices/in_recorded1/lines"
+				},
+				"livemode": false,
+				"metadata": {},
+				"next_payment_attempt": null,
+				"number": "4E00818B-0003",
+				"on_behalf_of": null,
+				"parent": {
+					"quote_details": null,
+					"subscription_details": {
+						"metadata": {
+							"directus_subscription": "424242"
+						},
+						"subscription": "sub_recorded1"
+					},
+					"type": "subscription_details"
+				},
+				"payment_settings": {
+					"default_mandate": null,
+					"payment_method_options": null,
+					"payment_method_types": null
+				},
+				"period_end": 1795083317,
+				"period_start": 1795083317,
+				"post_payment_credit_notes_amount": 0,
+				"pre_payment_credit_notes_amount": 0,
+				"receipt_number": null,
+				"rendering": null,
+				"shipping_cost": null,
+				"shipping_details": null,
+				"starting_balance": 0,
+				"statement_descriptor": null,
+				"status": "paid",
+				"status_transitions": {
+					"finalized_at": 1795083317,
+					"marked_uncollectible_at": null,
+					"paid_at": 1795083317,
+					"voided_at": null
+				},
+				"subtotal": 1000,
+				"subtotal_excluding_tax": 1000,
+				"test_clock": "clock_recorded1",
+				"total": 1000,
+				"total_discount_amounts": [],
+				"total_excluding_tax": 1000,
+				"total_pretax_credit_amounts": [],
+				"total_taxes": [],
+				"webhooks_delivered_at": null
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": "req_recorded1",
+			"idempotency_key": "9167aeb8-784c-44d9-ba6d-1360d9ba9d98"
+		},
+		"type": "invoice.paid"
+	},
+	"subscription created: customer.subscription.created": {
+		"id": "evt_recorded3",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083320,
+		"data": {
+			"object": {
+				"id": "sub_recorded1",
+				"object": "subscription",
+				"application": null,
+				"application_fee_percent": null,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null
+				},
+				"billing_cycle_anchor": 1795083317,
+				"billing_cycle_anchor_config": null,
+				"billing_mode": {
+					"flexible": {
+						"proration_discounts": "included"
+					},
+					"type": "flexible",
+					"updated_at": 1795083317
+				},
+				"billing_thresholds": null,
+				"cancel_at": null,
+				"cancel_at_period_end": false,
+				"canceled_at": null,
+				"cancellation_details": {
+					"comment": null,
+					"feedback": null,
+					"feedback_option": null,
+					"reason": null
+				},
+				"collection_method": "charge_automatically",
+				"created": 1795083317,
+				"currency": "eur",
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"days_until_due": null,
+				"default_payment_method": "pm_recorded1",
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"ended_at": null,
+				"invoice_settings": {
+					"account_tax_ids": null,
+					"custom_fields": null,
+					"description": null,
+					"footer": null,
+					"issuer": {
+						"type": "self"
+					}
+				},
+				"items": {
+					"object": "list",
+					"data": [
+						{
+							"id": "si_recorded1",
+							"object": "subscription_item",
+							"billing_thresholds": null,
+							"created": 1795083317,
+							"current_period_end": 1797675317,
+							"current_period_start": 1795083317,
+							"current_trial": null,
+							"discounts": [],
+							"metadata": {},
+							"plan": {
+								"id": "price_recorded1",
+								"object": "plan",
+								"active": false,
+								"amount": 1000,
+								"amount_decimal": "1000",
+								"billing_scheme": "per_unit",
+								"created": 1795083319,
+								"currency": "eur",
+								"interval": "month",
+								"interval_count": 1,
+								"livemode": false,
+								"metadata": {},
+								"meter": null,
+								"nickname": null,
+								"product": "scalabus_probe",
+								"tiers_mode": null,
+								"transform_usage": null,
+								"trial_period_days": null,
+								"usage_type": "licensed"
+							},
+							"price": {
+								"id": "price_recorded1",
+								"object": "price",
+								"active": false,
+								"billing_scheme": "per_unit",
+								"created": 1795083319,
+								"currency": "eur",
+								"custom_unit_amount": null,
+								"livemode": false,
+								"lookup_key": null,
+								"metadata": {},
+								"nickname": null,
+								"product": "scalabus_probe",
+								"recurring": {
+									"interval": "month",
+									"interval_count": 1,
+									"meter": null,
+									"trial_period_days": null,
+									"usage_type": "licensed"
+								},
+								"tax_behavior": "unspecified",
+								"tiers_mode": null,
+								"transform_quantity": null,
+								"type": "recurring",
+								"unit_amount": 1000,
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"subscription": "sub_recorded1",
+							"tax_rates": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/subscription_items?subscription=sub_recorded1"
+				},
+				"latest_invoice": "in_recorded1",
+				"livemode": false,
+				"managed_payments": {
+					"enabled": false
+				},
+				"metadata": {
+					"directus_subscription": "424242"
+				},
+				"next_pending_invoice_item_invoice": null,
+				"on_behalf_of": null,
+				"pause_collection": null,
+				"payment_settings": {
+					"payment_method_options": null,
+					"payment_method_types": null,
+					"save_default_payment_method": "off"
+				},
+				"pending_invoice_item_interval": null,
+				"pending_setup_intent": null,
+				"pending_update": null,
+				"plan": {
+					"id": "price_recorded1",
+					"object": "plan",
+					"active": false,
+					"amount": 1000,
+					"amount_decimal": "1000",
+					"billing_scheme": "per_unit",
+					"created": 1795083319,
+					"currency": "eur",
+					"interval": "month",
+					"interval_count": 1,
+					"livemode": false,
+					"metadata": {},
+					"meter": null,
+					"nickname": null,
+					"product": "scalabus_probe",
+					"tiers_mode": null,
+					"transform_usage": null,
+					"trial_period_days": null,
+					"usage_type": "licensed"
+				},
+				"quantity": 1,
+				"schedule": null,
+				"start_date": 1795083317,
+				"status": "active",
+				"test_clock": "clock_recorded1",
+				"transfer_data": null,
+				"trial_end": null,
+				"trial_settings": {
+					"end_behavior": {
+						"billing_cycle_anchor": "now",
+						"missing_payment_method": "create_invoice"
+					}
+				},
+				"trial_start": null,
+				"billing_schedules": []
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": "req_recorded1",
+			"idempotency_key": "9167aeb8-784c-44d9-ba6d-1360d9ba9d98"
+		},
+		"type": "customer.subscription.created"
+	},
+	"subscription created: invoice.created": {
+		"id": "evt_recorded4",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083320,
+		"data": {
+			"object": {
+				"id": "in_recorded1",
+				"object": "invoice",
+				"account_country": "FR",
+				"account_name": "Scalabus Tests",
+				"account_tax_ids": null,
+				"amount_due": 1000,
+				"amount_overpaid": 0,
+				"amount_paid": 1000,
+				"amount_remaining": 0,
+				"amount_shipping": 0,
+				"application": null,
+				"attempt_count": 1,
+				"attempted": true,
+				"auto_advance": false,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null,
+					"provider": null,
+					"status": null
+				},
+				"automatically_finalizes_at": null,
+				"billing_reason": "subscription_create",
+				"collection_method": "charge_automatically",
+				"created": 1795083317,
+				"currency": "eur",
+				"custom_fields": null,
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"customer_address": null,
+				"customer_email": null,
+				"customer_name": "scalabus-probe",
+				"customer_phone": null,
+				"customer_shipping": null,
+				"customer_tax_exempt": "none",
+				"customer_tax_ids": [],
+				"default_payment_method": null,
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"due_date": null,
+				"effective_at": 1795083317,
+				"ending_balance": 0,
+				"footer": null,
+				"from_invoice": null,
+				"hosted_invoice_url": "https://invoice.stripe.com/i/acct_recorded1/test_recorded1?s=ap",
+				"invoice_pdf": "https://pay.stripe.com/invoice/acct_recorded1/test_recorded1/pdf?s=ap",
+				"issuer": {
+					"type": "self"
+				},
+				"last_finalization_error": null,
+				"latest_revision": null,
+				"lines": {
+					"object": "list",
+					"data": [
+						{
+							"id": "il_recorded1",
+							"object": "line_item",
+							"amount": 1000,
+							"currency": "eur",
+							"description": "1 × scalabus-probe (at €10.00 / month)",
+							"discount_amounts": [],
+							"discountable": true,
+							"discounts": [],
+							"invoice": "in_recorded1",
+							"livemode": false,
+							"metadata": {
+								"directus_subscription": "424242"
+							},
+							"parent": {
+								"invoice_item_details": null,
+								"subscription_item_details": {
+									"invoice_item": null,
+									"proration": false,
+									"proration_details": {
+										"credited_items": null
+									},
+									"subscription": "sub_recorded1",
+									"subscription_item": "si_recorded1"
+								},
+								"type": "subscription_item_details"
+							},
+							"period": {
+								"end": 1797675317,
+								"start": 1795083317
+							},
+							"pretax_credit_amounts": [],
+							"pricing": {
+								"price_details": {
+									"price": "price_recorded1",
+									"product": "scalabus_probe"
+								},
+								"type": "price_details",
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"quantity_decimal": "1",
+							"subtotal": 1000,
+							"taxes": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/invoices/in_recorded1/lines"
+				},
+				"livemode": false,
+				"metadata": {},
+				"next_payment_attempt": null,
+				"number": "4E00818B-0003",
+				"on_behalf_of": null,
+				"parent": {
+					"quote_details": null,
+					"subscription_details": {
+						"metadata": {
+							"directus_subscription": "424242"
+						},
+						"subscription": "sub_recorded1"
+					},
+					"type": "subscription_details"
+				},
+				"payment_settings": {
+					"default_mandate": null,
+					"payment_method_options": null,
+					"payment_method_types": null
+				},
+				"period_end": 1795083317,
+				"period_start": 1795083317,
+				"post_payment_credit_notes_amount": 0,
+				"pre_payment_credit_notes_amount": 0,
+				"receipt_number": null,
+				"rendering": null,
+				"shipping_cost": null,
+				"shipping_details": null,
+				"starting_balance": 0,
+				"statement_descriptor": null,
+				"status": "paid",
+				"status_transitions": {
+					"finalized_at": 1795083317,
+					"marked_uncollectible_at": null,
+					"paid_at": 1795083317,
+					"voided_at": null
+				},
+				"subtotal": 1000,
+				"subtotal_excluding_tax": 1000,
+				"test_clock": "clock_recorded1",
+				"total": 1000,
+				"total_discount_amounts": [],
+				"total_excluding_tax": 1000,
+				"total_pretax_credit_amounts": [],
+				"total_taxes": [],
+				"webhooks_delivered_at": null
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": "req_recorded1",
+			"idempotency_key": "9167aeb8-784c-44d9-ba6d-1360d9ba9d98"
+		},
+		"type": "invoice.created"
+	},
+	"subscription created: invoice.payment_succeeded": {
+		"id": "evt_recorded5",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083320,
+		"data": {
+			"object": {
+				"id": "in_recorded1",
+				"object": "invoice",
+				"account_country": "FR",
+				"account_name": "Scalabus Tests",
+				"account_tax_ids": null,
+				"amount_due": 1000,
+				"amount_overpaid": 0,
+				"amount_paid": 1000,
+				"amount_remaining": 0,
+				"amount_shipping": 0,
+				"application": null,
+				"attempt_count": 1,
+				"attempted": true,
+				"auto_advance": false,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null,
+					"provider": null,
+					"status": null
+				},
+				"automatically_finalizes_at": null,
+				"billing_reason": "subscription_create",
+				"collection_method": "charge_automatically",
+				"created": 1795083317,
+				"currency": "eur",
+				"custom_fields": null,
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"customer_address": null,
+				"customer_email": null,
+				"customer_name": "scalabus-probe",
+				"customer_phone": null,
+				"customer_shipping": null,
+				"customer_tax_exempt": "none",
+				"customer_tax_ids": [],
+				"default_payment_method": null,
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"due_date": null,
+				"effective_at": 1795083317,
+				"ending_balance": 0,
+				"footer": null,
+				"from_invoice": null,
+				"hosted_invoice_url": "https://invoice.stripe.com/i/acct_recorded1/test_recorded1?s=ap",
+				"invoice_pdf": "https://pay.stripe.com/invoice/acct_recorded1/test_recorded1/pdf?s=ap",
+				"issuer": {
+					"type": "self"
+				},
+				"last_finalization_error": null,
+				"latest_revision": null,
+				"lines": {
+					"object": "list",
+					"data": [
+						{
+							"id": "il_recorded1",
+							"object": "line_item",
+							"amount": 1000,
+							"currency": "eur",
+							"description": "1 × scalabus-probe (at €10.00 / month)",
+							"discount_amounts": [],
+							"discountable": true,
+							"discounts": [],
+							"invoice": "in_recorded1",
+							"livemode": false,
+							"metadata": {
+								"directus_subscription": "424242"
+							},
+							"parent": {
+								"invoice_item_details": null,
+								"subscription_item_details": {
+									"invoice_item": null,
+									"proration": false,
+									"proration_details": {
+										"credited_items": null
+									},
+									"subscription": "sub_recorded1",
+									"subscription_item": "si_recorded1"
+								},
+								"type": "subscription_item_details"
+							},
+							"period": {
+								"end": 1797675317,
+								"start": 1795083317
+							},
+							"pretax_credit_amounts": [],
+							"pricing": {
+								"price_details": {
+									"price": "price_recorded1",
+									"product": "scalabus_probe"
+								},
+								"type": "price_details",
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"quantity_decimal": "1",
+							"subtotal": 1000,
+							"taxes": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/invoices/in_recorded1/lines"
+				},
+				"livemode": false,
+				"metadata": {},
+				"next_payment_attempt": null,
+				"number": "4E00818B-0003",
+				"on_behalf_of": null,
+				"parent": {
+					"quote_details": null,
+					"subscription_details": {
+						"metadata": {
+							"directus_subscription": "424242"
+						},
+						"subscription": "sub_recorded1"
+					},
+					"type": "subscription_details"
+				},
+				"payment_settings": {
+					"default_mandate": null,
+					"payment_method_options": null,
+					"payment_method_types": null
+				},
+				"period_end": 1795083317,
+				"period_start": 1795083317,
+				"post_payment_credit_notes_amount": 0,
+				"pre_payment_credit_notes_amount": 0,
+				"receipt_number": null,
+				"rendering": null,
+				"shipping_cost": null,
+				"shipping_details": null,
+				"starting_balance": 0,
+				"statement_descriptor": null,
+				"status": "paid",
+				"status_transitions": {
+					"finalized_at": 1795083317,
+					"marked_uncollectible_at": null,
+					"paid_at": 1795083317,
+					"voided_at": null
+				},
+				"subtotal": 1000,
+				"subtotal_excluding_tax": 1000,
+				"test_clock": "clock_recorded1",
+				"total": 1000,
+				"total_discount_amounts": [],
+				"total_excluding_tax": 1000,
+				"total_pretax_credit_amounts": [],
+				"total_taxes": [],
+				"webhooks_delivered_at": null
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": "req_recorded1",
+			"idempotency_key": "9167aeb8-784c-44d9-ba6d-1360d9ba9d98"
+		},
+		"type": "invoice.payment_succeeded"
+	},
+	"cancel_at_period_end true: customer.subscription.updated": {
+		"id": "evt_recorded6",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083332,
+		"data": {
+			"object": {
+				"id": "sub_recorded1",
+				"object": "subscription",
+				"application": null,
+				"application_fee_percent": null,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null
+				},
+				"billing_cycle_anchor": 1795083317,
+				"billing_cycle_anchor_config": null,
+				"billing_mode": {
+					"flexible": {
+						"proration_discounts": "included"
+					},
+					"type": "flexible",
+					"updated_at": 1795083317
+				},
+				"billing_thresholds": null,
+				"cancel_at": 1797675317,
+				"cancel_at_period_end": true,
+				"canceled_at": 1795083317,
+				"cancellation_details": {
+					"comment": null,
+					"feedback": null,
+					"feedback_option": null,
+					"reason": "cancellation_requested"
+				},
+				"collection_method": "charge_automatically",
+				"created": 1795083317,
+				"currency": "eur",
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"days_until_due": null,
+				"default_payment_method": "pm_recorded1",
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"ended_at": null,
+				"invoice_settings": {
+					"account_tax_ids": null,
+					"custom_fields": null,
+					"description": null,
+					"footer": null,
+					"issuer": {
+						"type": "self"
+					}
+				},
+				"items": {
+					"object": "list",
+					"data": [
+						{
+							"id": "si_recorded1",
+							"object": "subscription_item",
+							"billing_thresholds": null,
+							"created": 1795083317,
+							"current_period_end": 1797675317,
+							"current_period_start": 1795083317,
+							"current_trial": null,
+							"discounts": [],
+							"metadata": {},
+							"plan": {
+								"id": "price_recorded1",
+								"object": "plan",
+								"active": false,
+								"amount": 1000,
+								"amount_decimal": "1000",
+								"billing_scheme": "per_unit",
+								"created": 1795083319,
+								"currency": "eur",
+								"interval": "month",
+								"interval_count": 1,
+								"livemode": false,
+								"metadata": {},
+								"meter": null,
+								"nickname": null,
+								"product": "scalabus_probe",
+								"tiers_mode": null,
+								"transform_usage": null,
+								"trial_period_days": null,
+								"usage_type": "licensed"
+							},
+							"price": {
+								"id": "price_recorded1",
+								"object": "price",
+								"active": false,
+								"billing_scheme": "per_unit",
+								"created": 1795083319,
+								"currency": "eur",
+								"custom_unit_amount": null,
+								"livemode": false,
+								"lookup_key": null,
+								"metadata": {},
+								"nickname": null,
+								"product": "scalabus_probe",
+								"recurring": {
+									"interval": "month",
+									"interval_count": 1,
+									"meter": null,
+									"trial_period_days": null,
+									"usage_type": "licensed"
+								},
+								"tax_behavior": "unspecified",
+								"tiers_mode": null,
+								"transform_quantity": null,
+								"type": "recurring",
+								"unit_amount": 1000,
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"subscription": "sub_recorded1",
+							"tax_rates": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/subscription_items?subscription=sub_recorded1"
+				},
+				"latest_invoice": "in_recorded1",
+				"livemode": false,
+				"managed_payments": {
+					"enabled": false
+				},
+				"metadata": {
+					"directus_subscription": "424242"
+				},
+				"next_pending_invoice_item_invoice": null,
+				"on_behalf_of": null,
+				"pause_collection": null,
+				"payment_settings": {
+					"payment_method_options": null,
+					"payment_method_types": null,
+					"save_default_payment_method": "off"
+				},
+				"pending_invoice_item_interval": null,
+				"pending_setup_intent": null,
+				"pending_update": null,
+				"plan": {
+					"id": "price_recorded1",
+					"object": "plan",
+					"active": false,
+					"amount": 1000,
+					"amount_decimal": "1000",
+					"billing_scheme": "per_unit",
+					"created": 1795083319,
+					"currency": "eur",
+					"interval": "month",
+					"interval_count": 1,
+					"livemode": false,
+					"metadata": {},
+					"meter": null,
+					"nickname": null,
+					"product": "scalabus_probe",
+					"tiers_mode": null,
+					"transform_usage": null,
+					"trial_period_days": null,
+					"usage_type": "licensed"
+				},
+				"quantity": 1,
+				"schedule": null,
+				"start_date": 1795083317,
+				"status": "active",
+				"test_clock": "clock_recorded1",
+				"transfer_data": null,
+				"trial_end": null,
+				"trial_settings": {
+					"end_behavior": {
+						"billing_cycle_anchor": "now",
+						"missing_payment_method": "create_invoice"
+					}
+				},
+				"trial_start": null,
+				"billing_schedules": []
+			},
+			"previous_attributes": {
+				"cancel_at": null,
+				"cancel_at_period_end": false,
+				"canceled_at": null,
+				"cancellation_details": {
+					"reason": null
+				}
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": "req_recorded2",
+			"idempotency_key": "6956708a-6bb0-4e07-af68-575bd40f38ab"
+		},
+		"type": "customer.subscription.updated"
+	},
+	"cancel_at_period_end false: customer.subscription.updated": {
+		"id": "evt_recorded7",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083343,
+		"data": {
+			"object": {
+				"id": "sub_recorded1",
+				"object": "subscription",
+				"application": null,
+				"application_fee_percent": null,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null
+				},
+				"billing_cycle_anchor": 1795083317,
+				"billing_cycle_anchor_config": null,
+				"billing_mode": {
+					"flexible": {
+						"proration_discounts": "included"
+					},
+					"type": "flexible",
+					"updated_at": 1795083317
+				},
+				"billing_thresholds": null,
+				"cancel_at": null,
+				"cancel_at_period_end": false,
+				"canceled_at": null,
+				"cancellation_details": {
+					"comment": null,
+					"feedback": null,
+					"feedback_option": null,
+					"reason": null
+				},
+				"collection_method": "charge_automatically",
+				"created": 1795083317,
+				"currency": "eur",
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"days_until_due": null,
+				"default_payment_method": "pm_recorded1",
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"ended_at": null,
+				"invoice_settings": {
+					"account_tax_ids": null,
+					"custom_fields": null,
+					"description": null,
+					"footer": null,
+					"issuer": {
+						"type": "self"
+					}
+				},
+				"items": {
+					"object": "list",
+					"data": [
+						{
+							"id": "si_recorded1",
+							"object": "subscription_item",
+							"billing_thresholds": null,
+							"created": 1795083317,
+							"current_period_end": 1797675317,
+							"current_period_start": 1795083317,
+							"current_trial": null,
+							"discounts": [],
+							"metadata": {},
+							"plan": {
+								"id": "price_recorded1",
+								"object": "plan",
+								"active": false,
+								"amount": 1000,
+								"amount_decimal": "1000",
+								"billing_scheme": "per_unit",
+								"created": 1795083319,
+								"currency": "eur",
+								"interval": "month",
+								"interval_count": 1,
+								"livemode": false,
+								"metadata": {},
+								"meter": null,
+								"nickname": null,
+								"product": "scalabus_probe",
+								"tiers_mode": null,
+								"transform_usage": null,
+								"trial_period_days": null,
+								"usage_type": "licensed"
+							},
+							"price": {
+								"id": "price_recorded1",
+								"object": "price",
+								"active": false,
+								"billing_scheme": "per_unit",
+								"created": 1795083319,
+								"currency": "eur",
+								"custom_unit_amount": null,
+								"livemode": false,
+								"lookup_key": null,
+								"metadata": {},
+								"nickname": null,
+								"product": "scalabus_probe",
+								"recurring": {
+									"interval": "month",
+									"interval_count": 1,
+									"meter": null,
+									"trial_period_days": null,
+									"usage_type": "licensed"
+								},
+								"tax_behavior": "unspecified",
+								"tiers_mode": null,
+								"transform_quantity": null,
+								"type": "recurring",
+								"unit_amount": 1000,
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"subscription": "sub_recorded1",
+							"tax_rates": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/subscription_items?subscription=sub_recorded1"
+				},
+				"latest_invoice": "in_recorded1",
+				"livemode": false,
+				"managed_payments": {
+					"enabled": false
+				},
+				"metadata": {
+					"directus_subscription": "424242"
+				},
+				"next_pending_invoice_item_invoice": null,
+				"on_behalf_of": null,
+				"pause_collection": null,
+				"payment_settings": {
+					"payment_method_options": null,
+					"payment_method_types": null,
+					"save_default_payment_method": "off"
+				},
+				"pending_invoice_item_interval": null,
+				"pending_setup_intent": null,
+				"pending_update": null,
+				"plan": {
+					"id": "price_recorded1",
+					"object": "plan",
+					"active": false,
+					"amount": 1000,
+					"amount_decimal": "1000",
+					"billing_scheme": "per_unit",
+					"created": 1795083319,
+					"currency": "eur",
+					"interval": "month",
+					"interval_count": 1,
+					"livemode": false,
+					"metadata": {},
+					"meter": null,
+					"nickname": null,
+					"product": "scalabus_probe",
+					"tiers_mode": null,
+					"transform_usage": null,
+					"trial_period_days": null,
+					"usage_type": "licensed"
+				},
+				"quantity": 1,
+				"schedule": null,
+				"start_date": 1795083317,
+				"status": "active",
+				"test_clock": "clock_recorded1",
+				"transfer_data": null,
+				"trial_end": null,
+				"trial_settings": {
+					"end_behavior": {
+						"billing_cycle_anchor": "now",
+						"missing_payment_method": "create_invoice"
+					}
+				},
+				"trial_start": null,
+				"billing_schedules": []
+			},
+			"previous_attributes": {
+				"cancel_at": 1797675317,
+				"cancel_at_period_end": true,
+				"canceled_at": 1795083317,
+				"cancellation_details": {
+					"reason": "cancellation_requested"
+				}
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": "req_recorded3",
+			"idempotency_key": "e103c830-fbd8-47e8-b1ac-06915b0dc7ad"
+		},
+		"type": "customer.subscription.updated"
+	},
+	"renewal (test clock past the period end): invoice.upcoming": {
+		"id": "evt_recorded8",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083358,
+		"data": {
+			"object": {
+				"object": "invoice",
+				"account_country": "FR",
+				"account_name": "Scalabus Tests",
+				"account_tax_ids": null,
+				"amount_due": 1000,
+				"amount_overpaid": 0,
+				"amount_paid": 0,
+				"amount_remaining": 1000,
+				"amount_shipping": 0,
+				"application": null,
+				"attempt_count": 0,
+				"attempted": false,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null,
+					"provider": null,
+					"status": null
+				},
+				"automatically_finalizes_at": null,
+				"billing_reason": "upcoming",
+				"collection_method": "charge_automatically",
+				"created": 1797675317,
+				"currency": "eur",
+				"custom_fields": null,
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"customer_address": null,
+				"customer_email": null,
+				"customer_name": "scalabus-probe",
+				"customer_phone": null,
+				"customer_shipping": null,
+				"customer_tax_exempt": "none",
+				"customer_tax_ids": [],
+				"default_payment_method": null,
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"due_date": null,
+				"effective_at": null,
+				"ending_balance": 0,
+				"footer": null,
+				"from_invoice": null,
+				"issuer": {
+					"type": "self"
+				},
+				"last_finalization_error": null,
+				"latest_revision": null,
+				"lines": {
+					"object": "list",
+					"data": [
+						{
+							"id": "il_tmp_recorded1",
+							"object": "line_item",
+							"amount": 1000,
+							"currency": "eur",
+							"description": "1 × scalabus-probe (at €10.00 / month)",
+							"discount_amounts": [],
+							"discountable": true,
+							"discounts": [],
+							"invoice": null,
+							"livemode": false,
+							"metadata": {
+								"directus_subscription": "424242"
+							},
+							"parent": {
+								"invoice_item_details": null,
+								"subscription_item_details": {
+									"invoice_item": null,
+									"proration": false,
+									"proration_details": {
+										"credited_items": null
+									},
+									"subscription": "sub_recorded1",
+									"subscription_item": "si_recorded1"
+								},
+								"type": "subscription_item_details"
+							},
+							"period": {
+								"end": 1800353717,
+								"start": 1797675317
+							},
+							"pretax_credit_amounts": [],
+							"pricing": {
+								"price_details": {
+									"price": "price_recorded1",
+									"product": "scalabus_probe"
+								},
+								"type": "price_details",
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"quantity_decimal": "1",
+							"subtotal": 1000,
+							"taxes": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/invoices/upcoming_in_recorded1/lines"
+				},
+				"livemode": false,
+				"metadata": {},
+				"next_payment_attempt": 1797678917,
+				"number": null,
+				"on_behalf_of": null,
+				"parent": {
+					"quote_details": null,
+					"subscription_details": {
+						"metadata": {
+							"directus_subscription": "424242"
+						},
+						"subscription": "sub_recorded1"
+					},
+					"type": "subscription_details"
+				},
+				"payment_settings": {
+					"default_mandate": null,
+					"payment_method_options": null,
+					"payment_method_types": null
+				},
+				"period_end": 1797675317,
+				"period_start": 1795083317,
+				"post_payment_credit_notes_amount": 0,
+				"pre_payment_credit_notes_amount": 0,
+				"receipt_number": null,
+				"rendering": null,
+				"shipping_cost": null,
+				"shipping_details": null,
+				"starting_balance": 0,
+				"statement_descriptor": null,
+				"status": "draft",
+				"status_transitions": {
+					"finalized_at": null,
+					"marked_uncollectible_at": null,
+					"paid_at": null,
+					"voided_at": null
+				},
+				"subtotal": 1000,
+				"subtotal_excluding_tax": 1000,
+				"test_clock": "clock_recorded1",
+				"total": 1000,
+				"total_discount_amounts": [],
+				"total_excluding_tax": 1000,
+				"total_pretax_credit_amounts": [],
+				"total_taxes": [],
+				"webhooks_delivered_at": null
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": null,
+			"idempotency_key": null
+		},
+		"type": "invoice.upcoming"
+	},
+	"renewal (test clock past the period end): invoice.created": {
+		"id": "evt_recorded9",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083359,
+		"data": {
+			"object": {
+				"id": "in_recorded2",
+				"object": "invoice",
+				"account_country": "FR",
+				"account_name": "Scalabus Tests",
+				"account_tax_ids": null,
+				"amount_due": 1000,
+				"amount_overpaid": 0,
+				"amount_paid": 0,
+				"amount_remaining": 1000,
+				"amount_shipping": 0,
+				"application": null,
+				"attempt_count": 0,
+				"attempted": false,
+				"auto_advance": true,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null,
+					"provider": null,
+					"status": null
+				},
+				"automatically_finalizes_at": 1797934517,
+				"billing_reason": "subscription_cycle",
+				"collection_method": "charge_automatically",
+				"created": 1797675317,
+				"currency": "eur",
+				"custom_fields": null,
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"customer_address": null,
+				"customer_email": null,
+				"customer_name": "scalabus-probe",
+				"customer_phone": null,
+				"customer_shipping": null,
+				"customer_tax_exempt": "none",
+				"customer_tax_ids": [],
+				"default_payment_method": null,
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"due_date": null,
+				"effective_at": null,
+				"ending_balance": null,
+				"footer": null,
+				"from_invoice": null,
+				"hosted_invoice_url": null,
+				"invoice_pdf": null,
+				"issuer": {
+					"type": "self"
+				},
+				"last_finalization_error": null,
+				"latest_revision": null,
+				"lines": {
+					"object": "list",
+					"data": [
+						{
+							"id": "il_recorded2",
+							"object": "line_item",
+							"amount": 1000,
+							"currency": "eur",
+							"description": "1 × scalabus-probe (at €10.00 / month)",
+							"discount_amounts": [],
+							"discountable": true,
+							"discounts": [],
+							"invoice": "in_recorded2",
+							"livemode": false,
+							"metadata": {
+								"directus_subscription": "424242"
+							},
+							"parent": {
+								"invoice_item_details": null,
+								"subscription_item_details": {
+									"invoice_item": null,
+									"proration": false,
+									"proration_details": {
+										"credited_items": null
+									},
+									"subscription": "sub_recorded1",
+									"subscription_item": "si_recorded1"
+								},
+								"type": "subscription_item_details"
+							},
+							"period": {
+								"end": 1800353717,
+								"start": 1797675317
+							},
+							"pretax_credit_amounts": [],
+							"pricing": {
+								"price_details": {
+									"price": "price_recorded1",
+									"product": "scalabus_probe"
+								},
+								"type": "price_details",
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"quantity_decimal": "1",
+							"subtotal": 1000,
+							"taxes": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/invoices/in_recorded2/lines"
+				},
+				"livemode": false,
+				"metadata": {},
+				"next_payment_attempt": 1797678917,
+				"number": null,
+				"on_behalf_of": null,
+				"parent": {
+					"quote_details": null,
+					"subscription_details": {
+						"metadata": {
+							"directus_subscription": "424242"
+						},
+						"subscription": "sub_recorded1"
+					},
+					"type": "subscription_details"
+				},
+				"payment_settings": {
+					"default_mandate": null,
+					"payment_method_options": null,
+					"payment_method_types": null
+				},
+				"period_end": 1797675317,
+				"period_start": 1795083317,
+				"post_payment_credit_notes_amount": 0,
+				"pre_payment_credit_notes_amount": 0,
+				"receipt_number": null,
+				"rendering": null,
+				"shipping_cost": null,
+				"shipping_details": null,
+				"starting_balance": 0,
+				"statement_descriptor": null,
+				"status": "draft",
+				"status_transitions": {
+					"finalized_at": null,
+					"marked_uncollectible_at": null,
+					"paid_at": null,
+					"voided_at": null
+				},
+				"subtotal": 1000,
+				"subtotal_excluding_tax": 1000,
+				"test_clock": "clock_recorded1",
+				"total": 1000,
+				"total_discount_amounts": [],
+				"total_excluding_tax": 1000,
+				"total_pretax_credit_amounts": [],
+				"total_taxes": [],
+				"webhooks_delivered_at": null
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": null,
+			"idempotency_key": null
+		},
+		"type": "invoice.created"
+	},
+	"renewal (test clock past the period end): customer.subscription.updated": {
+		"id": "evt_recorded10",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083359,
+		"data": {
+			"object": {
+				"id": "sub_recorded1",
+				"object": "subscription",
+				"application": null,
+				"application_fee_percent": null,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null
+				},
+				"billing_cycle_anchor": 1795083317,
+				"billing_cycle_anchor_config": null,
+				"billing_mode": {
+					"flexible": {
+						"proration_discounts": "included"
+					},
+					"type": "flexible",
+					"updated_at": 1795083317
+				},
+				"billing_thresholds": null,
+				"cancel_at": null,
+				"cancel_at_period_end": false,
+				"canceled_at": null,
+				"cancellation_details": {
+					"comment": null,
+					"feedback": null,
+					"feedback_option": null,
+					"reason": null
+				},
+				"collection_method": "charge_automatically",
+				"created": 1795083317,
+				"currency": "eur",
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"days_until_due": null,
+				"default_payment_method": "pm_recorded1",
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"ended_at": null,
+				"invoice_settings": {
+					"account_tax_ids": null,
+					"custom_fields": null,
+					"description": null,
+					"footer": null,
+					"issuer": {
+						"type": "self"
+					}
+				},
+				"items": {
+					"object": "list",
+					"data": [
+						{
+							"id": "si_recorded1",
+							"object": "subscription_item",
+							"billing_thresholds": null,
+							"created": 1795083317,
+							"current_period_end": 1800353717,
+							"current_period_start": 1797675317,
+							"current_trial": null,
+							"discounts": [],
+							"metadata": {},
+							"plan": {
+								"id": "price_recorded1",
+								"object": "plan",
+								"active": false,
+								"amount": 1000,
+								"amount_decimal": "1000",
+								"billing_scheme": "per_unit",
+								"created": 1795083319,
+								"currency": "eur",
+								"interval": "month",
+								"interval_count": 1,
+								"livemode": false,
+								"metadata": {},
+								"meter": null,
+								"nickname": null,
+								"product": "scalabus_probe",
+								"tiers_mode": null,
+								"transform_usage": null,
+								"trial_period_days": null,
+								"usage_type": "licensed"
+							},
+							"price": {
+								"id": "price_recorded1",
+								"object": "price",
+								"active": false,
+								"billing_scheme": "per_unit",
+								"created": 1795083319,
+								"currency": "eur",
+								"custom_unit_amount": null,
+								"livemode": false,
+								"lookup_key": null,
+								"metadata": {},
+								"nickname": null,
+								"product": "scalabus_probe",
+								"recurring": {
+									"interval": "month",
+									"interval_count": 1,
+									"meter": null,
+									"trial_period_days": null,
+									"usage_type": "licensed"
+								},
+								"tax_behavior": "unspecified",
+								"tiers_mode": null,
+								"transform_quantity": null,
+								"type": "recurring",
+								"unit_amount": 1000,
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"subscription": "sub_recorded1",
+							"tax_rates": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/subscription_items?subscription=sub_recorded1"
+				},
+				"latest_invoice": "in_recorded2",
+				"livemode": false,
+				"managed_payments": {
+					"enabled": false
+				},
+				"metadata": {
+					"directus_subscription": "424242"
+				},
+				"next_pending_invoice_item_invoice": null,
+				"on_behalf_of": null,
+				"pause_collection": null,
+				"payment_settings": {
+					"payment_method_options": null,
+					"payment_method_types": null,
+					"save_default_payment_method": "off"
+				},
+				"pending_invoice_item_interval": null,
+				"pending_setup_intent": null,
+				"pending_update": null,
+				"plan": {
+					"id": "price_recorded1",
+					"object": "plan",
+					"active": false,
+					"amount": 1000,
+					"amount_decimal": "1000",
+					"billing_scheme": "per_unit",
+					"created": 1795083319,
+					"currency": "eur",
+					"interval": "month",
+					"interval_count": 1,
+					"livemode": false,
+					"metadata": {},
+					"meter": null,
+					"nickname": null,
+					"product": "scalabus_probe",
+					"tiers_mode": null,
+					"transform_usage": null,
+					"trial_period_days": null,
+					"usage_type": "licensed"
+				},
+				"quantity": 1,
+				"schedule": null,
+				"start_date": 1795083317,
+				"status": "active",
+				"test_clock": "clock_recorded1",
+				"transfer_data": null,
+				"trial_end": null,
+				"trial_settings": {
+					"end_behavior": {
+						"billing_cycle_anchor": "now",
+						"missing_payment_method": "create_invoice"
+					}
+				},
+				"trial_start": null,
+				"billing_schedules": []
+			},
+			"previous_attributes": {
+				"items": {
+					"data": [
+						{
+							"id": "si_recorded1",
+							"object": "subscription_item",
+							"billing_thresholds": null,
+							"created": 1795083317,
+							"current_period_end": 1797675317,
+							"current_period_start": 1795083317,
+							"current_trial": null,
+							"discounts": [],
+							"metadata": {},
+							"plan": {
+								"id": "price_recorded1",
+								"object": "plan",
+								"active": false,
+								"amount": 1000,
+								"amount_decimal": "1000",
+								"billing_scheme": "per_unit",
+								"created": 1795083319,
+								"currency": "eur",
+								"interval": "month",
+								"interval_count": 1,
+								"livemode": false,
+								"metadata": {},
+								"meter": null,
+								"nickname": null,
+								"product": "scalabus_probe",
+								"tiers_mode": null,
+								"transform_usage": null,
+								"trial_period_days": null,
+								"usage_type": "licensed"
+							},
+							"price": {
+								"id": "price_recorded1",
+								"object": "price",
+								"active": false,
+								"billing_scheme": "per_unit",
+								"created": 1795083319,
+								"currency": "eur",
+								"custom_unit_amount": null,
+								"livemode": false,
+								"lookup_key": null,
+								"metadata": {},
+								"nickname": null,
+								"product": "scalabus_probe",
+								"recurring": {
+									"interval": "month",
+									"interval_count": 1,
+									"meter": null,
+									"trial_period_days": null,
+									"usage_type": "licensed"
+								},
+								"tax_behavior": "unspecified",
+								"tiers_mode": null,
+								"transform_quantity": null,
+								"type": "recurring",
+								"unit_amount": 1000,
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"subscription": "sub_recorded1",
+							"tax_rates": []
+						}
+					]
+				},
+				"latest_invoice": "in_recorded1"
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": null,
+			"idempotency_key": null
+		},
+		"type": "customer.subscription.updated"
+	},
+	"renewal (test clock past the period end): invoice.updated": {
+		"id": "evt_recorded11",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083365,
+		"data": {
+			"object": {
+				"id": "in_recorded2",
+				"object": "invoice",
+				"account_country": "FR",
+				"account_name": "Scalabus Tests",
+				"account_tax_ids": null,
+				"amount_due": 1000,
+				"amount_overpaid": 0,
+				"amount_paid": 1000,
+				"amount_remaining": 0,
+				"amount_shipping": 0,
+				"application": null,
+				"attempt_count": 1,
+				"attempted": true,
+				"auto_advance": false,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null,
+					"provider": null,
+					"status": null
+				},
+				"automatically_finalizes_at": null,
+				"billing_reason": "subscription_cycle",
+				"collection_method": "charge_automatically",
+				"created": 1797675317,
+				"currency": "eur",
+				"custom_fields": null,
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"customer_address": null,
+				"customer_email": null,
+				"customer_name": "scalabus-probe",
+				"customer_phone": null,
+				"customer_shipping": null,
+				"customer_tax_exempt": "none",
+				"customer_tax_ids": [],
+				"default_payment_method": null,
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"due_date": null,
+				"effective_at": 1797678917,
+				"ending_balance": 0,
+				"footer": null,
+				"from_invoice": null,
+				"hosted_invoice_url": "https://invoice.stripe.com/i/acct_recorded1/test_recorded2?s=ap",
+				"invoice_pdf": "https://pay.stripe.com/invoice/acct_recorded1/test_recorded2/pdf?s=ap",
+				"issuer": {
+					"type": "self"
+				},
+				"last_finalization_error": null,
+				"latest_revision": null,
+				"lines": {
+					"object": "list",
+					"data": [
+						{
+							"id": "il_recorded2",
+							"object": "line_item",
+							"amount": 1000,
+							"currency": "eur",
+							"description": "1 × scalabus-probe (at €10.00 / month)",
+							"discount_amounts": [],
+							"discountable": true,
+							"discounts": [],
+							"invoice": "in_recorded2",
+							"livemode": false,
+							"metadata": {
+								"directus_subscription": "424242"
+							},
+							"parent": {
+								"invoice_item_details": null,
+								"subscription_item_details": {
+									"invoice_item": null,
+									"proration": false,
+									"proration_details": {
+										"credited_items": null
+									},
+									"subscription": "sub_recorded1",
+									"subscription_item": "si_recorded1"
+								},
+								"type": "subscription_item_details"
+							},
+							"period": {
+								"end": 1800353717,
+								"start": 1797675317
+							},
+							"pretax_credit_amounts": [],
+							"pricing": {
+								"price_details": {
+									"price": "price_recorded1",
+									"product": "scalabus_probe"
+								},
+								"type": "price_details",
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"quantity_decimal": "1",
+							"subtotal": 1000,
+							"taxes": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/invoices/in_recorded2/lines"
+				},
+				"livemode": false,
+				"metadata": {},
+				"next_payment_attempt": null,
+				"number": "4E00818B-0004",
+				"on_behalf_of": null,
+				"parent": {
+					"quote_details": null,
+					"subscription_details": {
+						"metadata": {
+							"directus_subscription": "424242"
+						},
+						"subscription": "sub_recorded1"
+					},
+					"type": "subscription_details"
+				},
+				"payment_settings": {
+					"default_mandate": null,
+					"payment_method_options": null,
+					"payment_method_types": null
+				},
+				"period_end": 1797675317,
+				"period_start": 1795083317,
+				"post_payment_credit_notes_amount": 0,
+				"pre_payment_credit_notes_amount": 0,
+				"receipt_number": null,
+				"rendering": null,
+				"shipping_cost": null,
+				"shipping_details": null,
+				"starting_balance": 0,
+				"statement_descriptor": null,
+				"status": "paid",
+				"status_transitions": {
+					"finalized_at": 1797678917,
+					"marked_uncollectible_at": null,
+					"paid_at": 1797678917,
+					"voided_at": null
+				},
+				"subtotal": 1000,
+				"subtotal_excluding_tax": 1000,
+				"test_clock": "clock_recorded1",
+				"total": 1000,
+				"total_discount_amounts": [],
+				"total_excluding_tax": 1000,
+				"total_pretax_credit_amounts": [],
+				"total_taxes": [],
+				"webhooks_delivered_at": 1797675317
+			},
+			"previous_attributes": {
+				"amount_paid": 0,
+				"amount_remaining": 1000,
+				"attempt_count": 0,
+				"attempted": false,
+				"auto_advance": true,
+				"automatically_finalizes_at": 1797678917,
+				"effective_at": null,
+				"ending_balance": null,
+				"hosted_invoice_url": null,
+				"invoice_pdf": null,
+				"next_payment_attempt": 1797678917,
+				"number": null,
+				"status": "draft",
+				"status_transitions": {
+					"finalized_at": null,
+					"paid_at": null
+				}
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": null,
+			"idempotency_key": null
+		},
+		"type": "invoice.updated"
+	},
+	"renewal (test clock past the period end): invoice.finalized": {
+		"id": "evt_recorded12",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083365,
+		"data": {
+			"object": {
+				"id": "in_recorded2",
+				"object": "invoice",
+				"account_country": "FR",
+				"account_name": "Scalabus Tests",
+				"account_tax_ids": null,
+				"amount_due": 1000,
+				"amount_overpaid": 0,
+				"amount_paid": 0,
+				"amount_remaining": 1000,
+				"amount_shipping": 0,
+				"application": null,
+				"attempt_count": 0,
+				"attempted": false,
+				"auto_advance": true,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null,
+					"provider": null,
+					"status": null
+				},
+				"automatically_finalizes_at": null,
+				"billing_reason": "subscription_cycle",
+				"collection_method": "charge_automatically",
+				"created": 1797675317,
+				"currency": "eur",
+				"custom_fields": null,
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"customer_address": null,
+				"customer_email": null,
+				"customer_name": "scalabus-probe",
+				"customer_phone": null,
+				"customer_shipping": null,
+				"customer_tax_exempt": "none",
+				"customer_tax_ids": [],
+				"default_payment_method": null,
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"due_date": null,
+				"effective_at": 1797678917,
+				"ending_balance": 0,
+				"footer": null,
+				"from_invoice": null,
+				"hosted_invoice_url": "https://invoice.stripe.com/i/acct_recorded1/test_recorded2?s=ap",
+				"invoice_pdf": "https://pay.stripe.com/invoice/acct_recorded1/test_recorded2/pdf?s=ap",
+				"issuer": {
+					"type": "self"
+				},
+				"last_finalization_error": null,
+				"latest_revision": null,
+				"lines": {
+					"object": "list",
+					"data": [
+						{
+							"id": "il_recorded2",
+							"object": "line_item",
+							"amount": 1000,
+							"currency": "eur",
+							"description": "1 × scalabus-probe (at €10.00 / month)",
+							"discount_amounts": [],
+							"discountable": true,
+							"discounts": [],
+							"invoice": "in_recorded2",
+							"livemode": false,
+							"metadata": {
+								"directus_subscription": "424242"
+							},
+							"parent": {
+								"invoice_item_details": null,
+								"subscription_item_details": {
+									"invoice_item": null,
+									"proration": false,
+									"proration_details": {
+										"credited_items": null
+									},
+									"subscription": "sub_recorded1",
+									"subscription_item": "si_recorded1"
+								},
+								"type": "subscription_item_details"
+							},
+							"period": {
+								"end": 1800353717,
+								"start": 1797675317
+							},
+							"pretax_credit_amounts": [],
+							"pricing": {
+								"price_details": {
+									"price": "price_recorded1",
+									"product": "scalabus_probe"
+								},
+								"type": "price_details",
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"quantity_decimal": "1",
+							"subtotal": 1000,
+							"taxes": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/invoices/in_recorded2/lines"
+				},
+				"livemode": false,
+				"metadata": {},
+				"next_payment_attempt": 1797678917,
+				"number": "4E00818B-0004",
+				"on_behalf_of": null,
+				"parent": {
+					"quote_details": null,
+					"subscription_details": {
+						"metadata": {
+							"directus_subscription": "424242"
+						},
+						"subscription": "sub_recorded1"
+					},
+					"type": "subscription_details"
+				},
+				"payment_settings": {
+					"default_mandate": null,
+					"payment_method_options": null,
+					"payment_method_types": null
+				},
+				"period_end": 1797675317,
+				"period_start": 1795083317,
+				"post_payment_credit_notes_amount": 0,
+				"pre_payment_credit_notes_amount": 0,
+				"receipt_number": null,
+				"rendering": null,
+				"shipping_cost": null,
+				"shipping_details": null,
+				"starting_balance": 0,
+				"statement_descriptor": null,
+				"status": "open",
+				"status_transitions": {
+					"finalized_at": 1797678917,
+					"marked_uncollectible_at": null,
+					"paid_at": null,
+					"voided_at": null
+				},
+				"subtotal": 1000,
+				"subtotal_excluding_tax": 1000,
+				"test_clock": "clock_recorded1",
+				"total": 1000,
+				"total_discount_amounts": [],
+				"total_excluding_tax": 1000,
+				"total_pretax_credit_amounts": [],
+				"total_taxes": [],
+				"webhooks_delivered_at": 1797675317
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": null,
+			"idempotency_key": null
+		},
+		"type": "invoice.finalized"
+	},
+	"renewal (test clock past the period end): invoice.paid": {
+		"id": "evt_recorded13",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083365,
+		"data": {
+			"object": {
+				"id": "in_recorded2",
+				"object": "invoice",
+				"account_country": "FR",
+				"account_name": "Scalabus Tests",
+				"account_tax_ids": null,
+				"amount_due": 1000,
+				"amount_overpaid": 0,
+				"amount_paid": 1000,
+				"amount_remaining": 0,
+				"amount_shipping": 0,
+				"application": null,
+				"attempt_count": 1,
+				"attempted": true,
+				"auto_advance": false,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null,
+					"provider": null,
+					"status": null
+				},
+				"automatically_finalizes_at": null,
+				"billing_reason": "subscription_cycle",
+				"collection_method": "charge_automatically",
+				"created": 1797675317,
+				"currency": "eur",
+				"custom_fields": null,
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"customer_address": null,
+				"customer_email": null,
+				"customer_name": "scalabus-probe",
+				"customer_phone": null,
+				"customer_shipping": null,
+				"customer_tax_exempt": "none",
+				"customer_tax_ids": [],
+				"default_payment_method": null,
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"due_date": null,
+				"effective_at": 1797678917,
+				"ending_balance": 0,
+				"footer": null,
+				"from_invoice": null,
+				"hosted_invoice_url": "https://invoice.stripe.com/i/acct_recorded1/test_recorded3?s=ap",
+				"invoice_pdf": "https://pay.stripe.com/invoice/acct_recorded1/test_recorded3/pdf?s=ap",
+				"issuer": {
+					"type": "self"
+				},
+				"last_finalization_error": null,
+				"latest_revision": null,
+				"lines": {
+					"object": "list",
+					"data": [
+						{
+							"id": "il_recorded2",
+							"object": "line_item",
+							"amount": 1000,
+							"currency": "eur",
+							"description": "1 × scalabus-probe (at €10.00 / month)",
+							"discount_amounts": [],
+							"discountable": true,
+							"discounts": [],
+							"invoice": "in_recorded2",
+							"livemode": false,
+							"metadata": {
+								"directus_subscription": "424242"
+							},
+							"parent": {
+								"invoice_item_details": null,
+								"subscription_item_details": {
+									"invoice_item": null,
+									"proration": false,
+									"proration_details": {
+										"credited_items": null
+									},
+									"subscription": "sub_recorded1",
+									"subscription_item": "si_recorded1"
+								},
+								"type": "subscription_item_details"
+							},
+							"period": {
+								"end": 1800353717,
+								"start": 1797675317
+							},
+							"pretax_credit_amounts": [],
+							"pricing": {
+								"price_details": {
+									"price": "price_recorded1",
+									"product": "scalabus_probe"
+								},
+								"type": "price_details",
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"quantity_decimal": "1",
+							"subtotal": 1000,
+							"taxes": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/invoices/in_recorded2/lines"
+				},
+				"livemode": false,
+				"metadata": {},
+				"next_payment_attempt": null,
+				"number": "4E00818B-0004",
+				"on_behalf_of": null,
+				"parent": {
+					"quote_details": null,
+					"subscription_details": {
+						"metadata": {
+							"directus_subscription": "424242"
+						},
+						"subscription": "sub_recorded1"
+					},
+					"type": "subscription_details"
+				},
+				"payment_settings": {
+					"default_mandate": null,
+					"payment_method_options": null,
+					"payment_method_types": null
+				},
+				"period_end": 1797675317,
+				"period_start": 1795083317,
+				"post_payment_credit_notes_amount": 0,
+				"pre_payment_credit_notes_amount": 0,
+				"receipt_number": null,
+				"rendering": null,
+				"shipping_cost": null,
+				"shipping_details": null,
+				"starting_balance": 0,
+				"statement_descriptor": null,
+				"status": "paid",
+				"status_transitions": {
+					"finalized_at": 1797678917,
+					"marked_uncollectible_at": null,
+					"paid_at": 1797678917,
+					"voided_at": null
+				},
+				"subtotal": 1000,
+				"subtotal_excluding_tax": 1000,
+				"test_clock": "clock_recorded1",
+				"total": 1000,
+				"total_discount_amounts": [],
+				"total_excluding_tax": 1000,
+				"total_pretax_credit_amounts": [],
+				"total_taxes": [],
+				"webhooks_delivered_at": 1797675317
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": null,
+			"idempotency_key": null
+		},
+		"type": "invoice.paid"
+	},
+	"renewal (test clock past the period end): invoice.payment_succeeded": {
+		"id": "evt_recorded14",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083365,
+		"data": {
+			"object": {
+				"id": "in_recorded2",
+				"object": "invoice",
+				"account_country": "FR",
+				"account_name": "Scalabus Tests",
+				"account_tax_ids": null,
+				"amount_due": 1000,
+				"amount_overpaid": 0,
+				"amount_paid": 1000,
+				"amount_remaining": 0,
+				"amount_shipping": 0,
+				"application": null,
+				"attempt_count": 1,
+				"attempted": true,
+				"auto_advance": false,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null,
+					"provider": null,
+					"status": null
+				},
+				"automatically_finalizes_at": null,
+				"billing_reason": "subscription_cycle",
+				"collection_method": "charge_automatically",
+				"created": 1797675317,
+				"currency": "eur",
+				"custom_fields": null,
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"customer_address": null,
+				"customer_email": null,
+				"customer_name": "scalabus-probe",
+				"customer_phone": null,
+				"customer_shipping": null,
+				"customer_tax_exempt": "none",
+				"customer_tax_ids": [],
+				"default_payment_method": null,
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"due_date": null,
+				"effective_at": 1797678917,
+				"ending_balance": 0,
+				"footer": null,
+				"from_invoice": null,
+				"hosted_invoice_url": "https://invoice.stripe.com/i/acct_recorded1/test_recorded3?s=ap",
+				"invoice_pdf": "https://pay.stripe.com/invoice/acct_recorded1/test_recorded3/pdf?s=ap",
+				"issuer": {
+					"type": "self"
+				},
+				"last_finalization_error": null,
+				"latest_revision": null,
+				"lines": {
+					"object": "list",
+					"data": [
+						{
+							"id": "il_recorded2",
+							"object": "line_item",
+							"amount": 1000,
+							"currency": "eur",
+							"description": "1 × scalabus-probe (at €10.00 / month)",
+							"discount_amounts": [],
+							"discountable": true,
+							"discounts": [],
+							"invoice": "in_recorded2",
+							"livemode": false,
+							"metadata": {
+								"directus_subscription": "424242"
+							},
+							"parent": {
+								"invoice_item_details": null,
+								"subscription_item_details": {
+									"invoice_item": null,
+									"proration": false,
+									"proration_details": {
+										"credited_items": null
+									},
+									"subscription": "sub_recorded1",
+									"subscription_item": "si_recorded1"
+								},
+								"type": "subscription_item_details"
+							},
+							"period": {
+								"end": 1800353717,
+								"start": 1797675317
+							},
+							"pretax_credit_amounts": [],
+							"pricing": {
+								"price_details": {
+									"price": "price_recorded1",
+									"product": "scalabus_probe"
+								},
+								"type": "price_details",
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"quantity_decimal": "1",
+							"subtotal": 1000,
+							"taxes": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/invoices/in_recorded2/lines"
+				},
+				"livemode": false,
+				"metadata": {},
+				"next_payment_attempt": null,
+				"number": "4E00818B-0004",
+				"on_behalf_of": null,
+				"parent": {
+					"quote_details": null,
+					"subscription_details": {
+						"metadata": {
+							"directus_subscription": "424242"
+						},
+						"subscription": "sub_recorded1"
+					},
+					"type": "subscription_details"
+				},
+				"payment_settings": {
+					"default_mandate": null,
+					"payment_method_options": null,
+					"payment_method_types": null
+				},
+				"period_end": 1797675317,
+				"period_start": 1795083317,
+				"post_payment_credit_notes_amount": 0,
+				"pre_payment_credit_notes_amount": 0,
+				"receipt_number": null,
+				"rendering": null,
+				"shipping_cost": null,
+				"shipping_details": null,
+				"starting_balance": 0,
+				"statement_descriptor": null,
+				"status": "paid",
+				"status_transitions": {
+					"finalized_at": 1797678917,
+					"marked_uncollectible_at": null,
+					"paid_at": 1797678917,
+					"voided_at": null
+				},
+				"subtotal": 1000,
+				"subtotal_excluding_tax": 1000,
+				"test_clock": "clock_recorded1",
+				"total": 1000,
+				"total_discount_amounts": [],
+				"total_excluding_tax": 1000,
+				"total_pretax_credit_amounts": [],
+				"total_taxes": [],
+				"webhooks_delivered_at": 1797675317
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": null,
+			"idempotency_key": null
+		},
+		"type": "invoice.payment_succeeded"
+	},
+	"canceled now: customer.subscription.deleted": {
+		"id": "evt_recorded15",
+		"object": "event",
+		"api_version": "2026-10-28.endive",
+		"created": 1795083381,
+		"data": {
+			"object": {
+				"id": "sub_recorded1",
+				"object": "subscription",
+				"application": null,
+				"application_fee_percent": null,
+				"automatic_tax": {
+					"disabled_reason": null,
+					"enabled": false,
+					"liability": null
+				},
+				"billing_cycle_anchor": 1795083317,
+				"billing_cycle_anchor_config": null,
+				"billing_mode": {
+					"flexible": {
+						"proration_discounts": "included"
+					},
+					"type": "flexible",
+					"updated_at": 1795083317
+				},
+				"billing_thresholds": null,
+				"cancel_at": null,
+				"cancel_at_period_end": false,
+				"canceled_at": 1797682517,
+				"cancellation_details": {
+					"comment": null,
+					"feedback": null,
+					"feedback_option": null,
+					"reason": "cancellation_requested"
+				},
+				"collection_method": "charge_automatically",
+				"created": 1795083317,
+				"currency": "eur",
+				"customer": "cus_recorded1",
+				"customer_account": null,
+				"days_until_due": null,
+				"default_payment_method": "pm_recorded1",
+				"default_source": null,
+				"default_tax_rates": [],
+				"description": null,
+				"discounts": [],
+				"ended_at": 1797682517,
+				"invoice_settings": {
+					"account_tax_ids": null,
+					"custom_fields": null,
+					"description": null,
+					"footer": null,
+					"issuer": {
+						"type": "self"
+					}
+				},
+				"items": {
+					"object": "list",
+					"data": [
+						{
+							"id": "si_recorded1",
+							"object": "subscription_item",
+							"billing_thresholds": null,
+							"created": 1795083317,
+							"current_period_end": 1800353717,
+							"current_period_start": 1797675317,
+							"current_trial": null,
+							"discounts": [],
+							"metadata": {},
+							"plan": {
+								"id": "price_recorded1",
+								"object": "plan",
+								"active": false,
+								"amount": 1000,
+								"amount_decimal": "1000",
+								"billing_scheme": "per_unit",
+								"created": 1795083319,
+								"currency": "eur",
+								"interval": "month",
+								"interval_count": 1,
+								"livemode": false,
+								"metadata": {},
+								"meter": null,
+								"nickname": null,
+								"product": "scalabus_probe",
+								"tiers_mode": null,
+								"transform_usage": null,
+								"trial_period_days": null,
+								"usage_type": "licensed"
+							},
+							"price": {
+								"id": "price_recorded1",
+								"object": "price",
+								"active": false,
+								"billing_scheme": "per_unit",
+								"created": 1795083319,
+								"currency": "eur",
+								"custom_unit_amount": null,
+								"livemode": false,
+								"lookup_key": null,
+								"metadata": {},
+								"nickname": null,
+								"product": "scalabus_probe",
+								"recurring": {
+									"interval": "month",
+									"interval_count": 1,
+									"meter": null,
+									"trial_period_days": null,
+									"usage_type": "licensed"
+								},
+								"tax_behavior": "unspecified",
+								"tiers_mode": null,
+								"transform_quantity": null,
+								"type": "recurring",
+								"unit_amount": 1000,
+								"unit_amount_decimal": "1000"
+							},
+							"quantity": 1,
+							"subscription": "sub_recorded1",
+							"tax_rates": []
+						}
+					],
+					"has_more": false,
+					"total_count": 1,
+					"url": "/v1/subscription_items?subscription=sub_recorded1"
+				},
+				"latest_invoice": "in_recorded2",
+				"livemode": false,
+				"managed_payments": {
+					"enabled": false
+				},
+				"metadata": {
+					"directus_subscription": "424242"
+				},
+				"next_pending_invoice_item_invoice": null,
+				"on_behalf_of": null,
+				"pause_collection": null,
+				"payment_settings": {
+					"payment_method_options": null,
+					"payment_method_types": null,
+					"save_default_payment_method": "off"
+				},
+				"pending_invoice_item_interval": null,
+				"pending_setup_intent": null,
+				"pending_update": null,
+				"plan": {
+					"id": "price_recorded1",
+					"object": "plan",
+					"active": false,
+					"amount": 1000,
+					"amount_decimal": "1000",
+					"billing_scheme": "per_unit",
+					"created": 1795083319,
+					"currency": "eur",
+					"interval": "month",
+					"interval_count": 1,
+					"livemode": false,
+					"metadata": {},
+					"meter": null,
+					"nickname": null,
+					"product": "scalabus_probe",
+					"tiers_mode": null,
+					"transform_usage": null,
+					"trial_period_days": null,
+					"usage_type": "licensed"
+				},
+				"quantity": 1,
+				"schedule": null,
+				"start_date": 1795083317,
+				"status": "canceled",
+				"test_clock": "clock_recorded1",
+				"transfer_data": null,
+				"trial_end": null,
+				"trial_settings": {
+					"end_behavior": {
+						"billing_cycle_anchor": "now",
+						"missing_payment_method": "create_invoice"
+					}
+				},
+				"trial_start": null,
+				"billing_schedules": []
+			}
+		},
+		"livemode": false,
+		"pending_webhooks": 1,
+		"request": {
+			"id": "req_recorded4",
+			"idempotency_key": null
+		},
+		"type": "customer.subscription.deleted"
+	}
+}

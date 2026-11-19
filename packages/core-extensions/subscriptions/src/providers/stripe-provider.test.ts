@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import Stripe from 'stripe';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
@@ -10,6 +11,17 @@ import { createStripeProvider } from './stripe-provider.js';
 afterEach(() => {
 	vi.restoreAllMocks();
 });
+
+// What Stripe's test mode sent, recorded by
+// scripts/stripe-behaviour/stripe-webhook-probe.mjs.
+const recordedEvents = JSON.parse(readFileSync(
+	new URL(
+		'../../../../../scripts/stripe-behaviour/'
+		+ 'stripe-behaviour.recorded-events.json',
+		import.meta.url,
+	),
+	'utf8',
+));
 
 describe('verifyWebhook', () => {
 	test('resolves a subscription event to the subscription id', async () => {
@@ -492,5 +504,86 @@ describe('composeResourceId', () => {
 		expect(createStripeProvider(new Stripe('sk_test_1'), 'whsec_1')
 			.composeResourceId({ subscriptionId: 'sub_1', customerId: 'cus_1' }))
 			.toBe('sub_1');
+	});
+});
+
+describe('recorded Stripe events', () => {
+	test.each([
+		'subscription created: customer.subscription.created',
+		'subscription created: invoice.created',
+		'subscription created: invoice.finalized',
+		'subscription created: invoice.paid',
+		'subscription created: invoice.payment_succeeded',
+		'cancel_at_period_end true: customer.subscription.updated',
+		'cancel_at_period_end false: customer.subscription.updated',
+		'renewal (test clock past the period end): customer.subscription.updated',
+		'renewal (test clock past the period end): invoice.created',
+		'renewal (test clock past the period end): invoice.finalized',
+		'renewal (test clock past the period end): invoice.paid',
+		'renewal (test clock past the period end): invoice.payment_succeeded',
+		'renewal (test clock past the period end): invoice.upcoming',
+		'renewal (test clock past the period end): invoice.updated',
+		'canceled now: customer.subscription.deleted',
+	])('verifyWebhook resolves %s to its subscription', async (recordedKey) => {
+		const stripeClient = new Stripe('sk_test_1');
+		const stripeProvider = createStripeProvider(stripeClient, 'whsec_1');
+		const payload = JSON.stringify(recordedEvents[recordedKey]);
+
+		const signatureHeader = stripeClient.webhooks.generateTestHeaderString({
+			payload,
+			secret: 'whsec_1',
+		});
+
+		await expect(stripeProvider.verifyWebhook(
+			Buffer.from(payload),
+			{ 'stripe-signature': signatureHeader },
+		)).resolves.toBe('sub_recorded1');
+	});
+
+	test('fetchSubscription reads a subscription set to cancel', async () => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		vi.spyOn(stripeClient.subscriptions, 'retrieve').mockResolvedValue(
+			recordedEvents['cancel_at_period_end true: customer.subscription.updated']
+				.data.object,
+		);
+
+		await expect(createStripeProvider(stripeClient, 'whsec_1')
+			.fetchSubscription('sub_recorded1')).resolves.toEqual({
+			subscriptionId: 'sub_recorded1',
+			customerId: 'cus_recorded1',
+			status: 'active',
+			currentPeriodEnd: new Date('2026-12-19T10:15:17Z'),
+			cancelAtPeriodEnd: true,
+			directusSubscription: 424242,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
+		});
+	});
+
+	test('fetchSubscription reads a subscription canceled now', async () => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		vi.spyOn(stripeClient.subscriptions, 'retrieve').mockResolvedValue(
+			recordedEvents['canceled now: customer.subscription.deleted'].data.object,
+		);
+
+		await expect(createStripeProvider(stripeClient, 'whsec_1')
+			.fetchSubscription('sub_recorded1')).resolves.toEqual({
+			subscriptionId: 'sub_recorded1',
+			customerId: 'cus_recorded1',
+			status: 'canceled',
+			currentPeriodEnd: new Date('2027-01-19T10:15:17Z'),
+			cancelAtPeriodEnd: false,
+			directusSubscription: 424242,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
+		});
 	});
 });
