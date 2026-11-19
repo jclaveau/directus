@@ -4,6 +4,7 @@ import type { CacheConfigLocal } from '../types/config.js';
 
 export class CacheLocal implements Cache {
 	private store: Kv;
+	private generation = 0;
 
 	constructor(config: Omit<CacheConfigLocal, 'type'>) {
 		this.store = createKv({ type: 'local', ...config });
@@ -26,6 +27,21 @@ export class CacheLocal implements Cache {
 	}
 
 	async clear(): Promise<void> {
+		this.generation++;
 		await this.store.clear();
+	}
+
+	async readGeneration() {
+		return this.generation;
+	}
+
+	async setUnlessCleared(key: string, value: unknown, generation: number) {
+		if (generation !== this.generation) {
+			return false;
+		}
+
+		await this.store.set(key, value);
+
+		return true;
 	}
 }

@@ -18,18 +18,22 @@ export function withCache<F extends (arg0: Arg0, ...args: any[]) => R, R, Arg0 =
 ) {
 	const cache = useCache();
 
+	// `isCurrent` is false when a clear came during the handler: the result may
+	// hold what that clear removed, so it is neither stored nor shared.
 	const readThrough = async (key: string, arg0: Arg0, args: any[]) => {
 		const cached = await cache.get(key);
 
 		if (cached !== undefined) {
-			return cached as R;
+			return { result: cached as R, isCurrent: true };
 		}
 
-		const res = await handler(arg0, ...args);
+		const generation = await cache.readGeneration();
+		const result = await handler(arg0, ...args);
 
-		cache.set(key, res);
-
-		return res;
+		return {
+			result,
+			isCurrent: await cache.setUnlessCleared(key, result, generation),
+		};
 	};
 
 	// A call made while another one in this process reads the same key waits
@@ -42,24 +46,33 @@ export function withCache<F extends (arg0: Arg0, ...args: any[]) => R, R, Arg0 =
 		}
 
 		const key = `${namespace}-${getSimpleHash(JSON.stringify(arg0))}`;
-		const runningRead = runningReads.get(key) as Promise<R> | undefined;
+
+		const runningRead = runningReads.get(key) as
+			| Promise<{ result: R; isCurrent: boolean }>
+			| undefined;
 
 		// The read runs on the first caller's context, which can be a transaction
 		// that already failed: that error is the first caller's, so read anew.
 		if (runningRead) {
 			try {
-				return structuredClone(await runningRead);
+				const { result, isCurrent } = await runningRead;
+
+				if (isCurrent) {
+					return structuredClone(result);
+				}
 			}
 			catch {
-				return readThrough(key, arg0, args);
+				// read anew below
 			}
+
+			return (await readThrough(key, arg0, args)).result;
 		}
 
 		const keyRead = readThrough(key, arg0, args);
 		runningReads.set(key, keyRead);
 
 		try {
-			return structuredClone(await keyRead);
+			return structuredClone((await keyRead).result);
 		}
 		finally {
 			// A clear made during this read may have let a newer one take the key.

@@ -79,6 +79,29 @@ export class CacheMulti implements Cache {
 		await this.clearOthers(key);
 	}
 
+	async readGeneration() {
+		return await this.redis.readGeneration();
+	}
+
+	// Redis decides for every process; the local copy is skipped when a peer's
+	// clear reached this process after redis kept the value.
+	async setUnlessCleared(key: string, value: unknown, generation: number) {
+		const generationBeforeWrite = this.clearGeneration;
+
+		if (!await this.redis.setUnlessCleared(key, value, generation)) {
+			return false;
+		}
+
+		if (this.clearGeneration === generationBeforeWrite) {
+			this.clearGeneration++;
+			await this.local.set(key, value);
+		}
+
+		await this.clearOthers(key);
+
+		return true;
+	}
+
 	async delete(key: string) {
 		this.clearGeneration++;
 		await Promise.all([this.local.delete(key), this.redis.delete(key)]);

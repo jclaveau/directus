@@ -33,4 +33,20 @@ export interface Cache {
 	 * Remove all keys from the cache
 	 */
 	clear(): Promise<void>;
+
+	/**
+	 * The number of clears so far, to hand back to `setUnlessCleared`
+	 */
+	readGeneration(): Promise<number>;
+
+	/**
+	 * Save the given value unless a clear came since `generation` was read
+	 *
+	 * @returns Whether the value was saved
+	 */
+	setUnlessCleared(
+		key: string,
+		value: unknown,
+		generation: number,
+	): Promise<boolean>;
 }
