@@ -23,6 +23,11 @@ data:
     display_template: '{{ role.name }}'
     sort_field: sort
 
+  - collection: directus_invites
+    icon: mail
+    note: $t:directus_collection.directus_invites
+    hidden: true
+
   - collection: directus_activity
     note: $t:directus_collection.directus_activity
     accountability: null

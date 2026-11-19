@@ -1185,6 +1185,17 @@ export class PayloadService {
 				nested: [...this.nested, oneField],
 			});
 
+			// Only a new user's own memberships are new to every cache: a new
+			// role's memberships give it to users that exist already.
+			const isNewUserMemberships = opts?.createsNewUserMemberships === true
+				&& this.collection === 'directus_users'
+				&& relation.collection === 'directus_role_members';
+
+			const relationMutationOptions: MutationOptions = {
+				...nestedMutationOptions,
+				createsNewUserMemberships: isNewUserMemberships || undefined,
+			};
+
 			for (const parentRun of parentRuns) {
 				if (parentRun.listsChildren) {
 					await this.saveO2MLists(
@@ -1194,7 +1205,7 @@ export class PayloadService {
 						parentRun.parentIndexes.map((parentIndex) => {
 							return revisionsByParent[parentIndex]!;
 						}),
-						nestedMutationOptions,
+						relationMutationOptions,
 					);
 
 					continue;
@@ -1251,6 +1262,8 @@ export class PayloadService {
 						mutationTracker: opts?.mutationTracker,
 						mutationBatching: opts?.mutationBatching,
 						nestedUpdates: opts?.nestedUpdates,
+						createsNewUserMemberships:
+							relationMutationOptions.createsNewUserMemberships,
 					});
 				}
 

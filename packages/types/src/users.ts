@@ -63,8 +63,8 @@ export enum UserIntegrityCheckFlag {
 
 /**
  * One row of `directus_role_members`: who granted it, when not set by hand.
- * `managed_by` is `auth:<provider>` for an SSO group, `invite:<user id>` for
- * an invitation.
+ * `managed_by` is `auth:<provider>` for an SSO group, `invite` while an
+ * invite of the role is left, `ext:<extension name>` for an extension.
  */
 export type RoleMembership = {
 	id: string;

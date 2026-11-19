@@ -101,11 +101,11 @@ describe('a role held twice from one manager (23505)', () => {
 			table: 'directus_role_members',
 			constraint: 'directus_role_members_user_role_managed_by_unique',
 			detail: 'Key ("user", role, COALESCE(managed_by,'
-				+ ' \'\'::character varying))=(user-2, role-press, invite:a)'
+				+ ' \'\'::character varying))=(user-2, role-press, invite)'
 				+ ' already exists.',
 		}), {})).toEqual(new InvalidPayloadError({
 			reason: 'The user "user-2" already holds the role "role-press"'
-				+ ' with managed_by "invite:a"',
+				+ ' with managed_by "invite"',
 		}));
 	});
 

@@ -8,6 +8,7 @@ import {
 	FilesService,
 	FlowsService,
 	FoldersService,
+	InvitesService,
 	ItemsService,
 	NotificationsService,
 	OperationsService,
@@ -52,6 +53,8 @@ export function getService(collection: string, opts: AbstractServiceOptions): It
 			return new OperationsService(opts);
 		case 'directus_panels':
 			return new PanelsService(opts);
+		case 'directus_invites':
+			return new InvitesService(opts);
 		case 'directus_permissions':
 			return new PermissionsService(opts);
 		case 'directus_presets':

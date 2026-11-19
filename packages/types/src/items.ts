@@ -199,6 +199,18 @@ export type MutationOptions = {
 	deletesManagedAccess?: boolean | undefined;
 
 	/**
+	 * A delete of memberships takes the managed ones too, as a role delete
+	 * does: the database's cascade does the same for a deleted user.
+	 */
+	deletesManagedMemberships?: boolean | undefined;
+
+	/**
+	 * The memberships are created in the same write as their user: no cache
+	 * holds the user yet, so none is cleared.
+	 */
+	createsNewUserMemberships?: boolean | undefined;
+
+	/**
 	 * An update refuses with a 404 a key no row holds, told off the UPDATE's
 	 * count: the filter hooks run before it, and the rollback undoes what they
 	 * wrote through the transaction. On a transaction the caller passed, that

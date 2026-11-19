@@ -135,7 +135,11 @@ export class RolesService extends ItemsService {
 					// Past QUERY_LIMIT_DEFAULT the cascade would drop the rest unseen.
 					limit: -1,
 				},
-				{ ...holdingOpts, bypassLimits: true },
+				{
+					...holdingOpts,
+					bypassLimits: true,
+					deletesManagedMemberships: true,
+				},
 			);
 
 			// If the about to be deleted roles are the parent of other roles set those parents to null

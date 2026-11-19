@@ -2,11 +2,14 @@ import { createInspector } from '@directus/schema';
 import type { Knex } from 'knex';
 import { randomUUID } from 'node:crypto';
 
+const INVITES_UNIQUE_INDEX_NAME = 'directus_invites_user_role_user_created_unique';
+
 /**
  * A user holds several roles (#746): `directus_role_members` replaces
  * `directus_users.role`. Each user's role becomes their one membership,
  * managed by `auth:<provider>` for a user of a provider other than "default",
- * then the column goes. `down` puts each user's one membership back in the column,
+ * then the column goes. `directus_invites` records who invited a user to
+ * which role (D8). `down` puts each user's one membership back in the column,
  * and refuses, changing nothing, while a user holds several roles.
  */
 export async function up(knex: Knex): Promise<void> {
@@ -29,6 +32,45 @@ export async function up(knex: Knex): Promise<void> {
 		// Every request reads the roles of its user: Postgres indexes no FK.
 		table.index(['user']);
 	});
+
+	// One row per user, role and inviter; null for an invite naming no user.
+	await knex.schema.createTable('directus_invites', (table) => {
+		table.uuid('id').primary();
+
+		table.uuid('user')
+			.references('directus_users.id')
+			.notNullable()
+			.onDelete('CASCADE');
+
+		table.uuid('role')
+			.references('directus_roles.id')
+			.notNullable()
+			.onDelete('CASCADE');
+
+		table.uuid('user_created')
+			.references('directus_users.id')
+			.nullable()
+			.onDelete('SET NULL');
+
+		table.timestamp('date_created').defaultTo(knex.fn.now());
+	});
+
+	// TODO(#610): MariaDB indexes no expression, so two invites naming no user
+	// to the same role still pass there.
+	if (String(knex.client.dialect).startsWith('mysql')) {
+		await knex.schema.alterTable('directus_invites', (table) => {
+			table.unique(['user', 'role', 'user_created'], {
+				indexName: INVITES_UNIQUE_INDEX_NAME,
+			});
+		});
+	}
+	else {
+		// A plain unique index counts every null as distinct.
+		await knex.raw(
+			`create unique index "${INVITES_UNIQUE_INDEX_NAME}" on "directus_invites"`
+			+ ' ("user", "role", coalesce(cast("user_created" as text), \'\'))',
+		);
+	}
 
 	const usersWithRole: {
 		id: string;
@@ -108,5 +150,6 @@ export async function down(knex: Knex): Promise<void> {
 			.where({ id: user });
 	}
 
+	await knex.schema.dropTable('directus_invites');
 	await knex.schema.dropTable('directus_role_members');
 }

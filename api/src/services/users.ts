@@ -15,6 +15,7 @@ import { getSimpleHash, toArray, validatePayload } from '@directus/utils';
 import { FailedValidationError, joiValidationErrorItemToErrorExtensions } from '@directus/validation';
 import Joi from 'joi';
 import jwt from 'jsonwebtoken';
+import type { Knex } from 'knex';
 import type { StringValue } from 'ms';
 import { performance } from 'node:perf_hooks';
 import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
@@ -22,16 +23,22 @@ import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
+import {
+	processPayload,
+} from '../permissions/modules/process-payload/process-payload.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
 import { getSecret } from '../utils/get-secret.js';
 import isUrlAllowed from '../utils/is-url-allowed.js';
 import { verifyJWT } from '../utils/jwt.js';
+import { transaction } from '../utils/transaction.js';
 import { chunk, isEmpty } from '../utils/lodash-es-used.js';
 import { stall } from '../utils/stall.js';
 import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { Url } from '../utils/url.js';
+import { InvitesService } from './invites.js';
 import { ItemsService } from './items.js';
 import { MailService } from './mail/index.js';
+import { RoleMembersService } from './role-members.js';
 import { SettingsService } from './settings.js';
 
 const env = useEnv();
@@ -250,7 +257,11 @@ export class UsersService extends ItemsService {
 			knex: this.knex,
 		});
 
-		return await itemsService.createMany(data, opts);
+		// The users' memberships are created in the same write: no cache holds them.
+		return await itemsService.createMany(data, {
+			...opts,
+			createsNewUserMemberships: true,
+		});
 	}
 
 	/**
@@ -471,11 +482,13 @@ export class UsersService extends ItemsService {
 	}
 
 	/**
-	 * The memberships an invite grants are its inviter's: `managed_by` is
-	 * `invite:<inviter id>`, or `invite:system` from a service naming no user
-	 * (an extension, a flow). A re-invite by the same inviter replaces them,
-	 * keeping the row of a role it gives again, one by another inviter adds
-	 * its own (D8 of #746).
+	 * An invite is a row of `directus_invites` per user, role and inviter: the
+	 * inviting user, or null from a service naming none (an extension, a flow).
+	 * A re-invite by the same inviter replaces its own rows; one by another
+	 * inviter adds its own. A role invited holds one `managed_by: invite`
+	 * membership while any invite of it is left (D8 of #746). Both are written
+	 * without accountability, so the inviter's right to create each membership
+	 * is checked first.
 	 */
 	async inviteUser(
 		email: string | string[],
@@ -493,12 +506,7 @@ export class UsersService extends ItemsService {
 			opts.preMutationError = err;
 		}
 
-		const inviteManager = `invite:${this.accountability?.user ?? 'system'}`;
-
-		const invitedMemberships = roles.map((role) => {
-			return { role, managed_by: inviteManager };
-		});
-
+		const invitedRoles = [...new Set(roles)];
 		const emails = toArray(email);
 
 		const mailService = new MailService({
@@ -509,51 +517,29 @@ export class UsersService extends ItemsService {
 		for (const email of emails) {
 			// Check if user is known
 			const user = await this.getUserByEmail(email);
+			const isNewUser = isEmpty(user);
 
-			// Create user first to verify uniqueness if unknown
-			if (isEmpty(user)) {
-				await this.createOne(
-					{ email, roles: invitedMemberships, status: 'invited' },
-					opts,
-				);
-			}
-			else if (user.status === 'invited') {
-				const inviterMemberships: { id: string; role: string }[] = await this.knex
-					.select('id', 'role')
-					.from('directus_role_members')
-					.where({ user: user.id, managed_by: inviteManager });
-
-				const heldRoles = inviterMemberships.map(({ role }) => role);
-
-				// A role the inviter already gave keeps its row and its sort
-				const addedMemberships = invitedMemberships.filter(
-					({ role }) => !heldRoles.includes(role),
-				);
-
-				const droppedMembershipIds = inviterMemberships
-					.filter(({ role }) => !roles.includes(role))
-					.map(({ id }) => id);
-
-				if (addedMemberships.length > 0 || droppedMembershipIds.length > 0) {
-					await this.updateOne(
-						user.id,
-						{
-							roles: {
-								create: addedMemberships,
-								update: [],
-								delete: droppedMembershipIds,
-							},
-						},
-						opts,
-					);
-				}
-				else if (opts.preMutationError) {
-					throw opts.preMutationError;
-				}
-			}
-			else if (opts.preMutationError) {
+			// A user created here fails on its own with the error, through `opts`
+			if (!isNewUser && opts.preMutationError) {
 				throw opts.preMutationError;
 			}
+
+			if (!isNewUser && user.status !== 'invited') {
+				continue;
+			}
+
+			await transaction(this.knex, async (trx) => {
+				// Create user first to verify uniqueness if unknown
+				const invitedUser = isNewUser
+					? await new UsersService({
+						knex: trx,
+						schema: this.schema,
+						accountability: this.accountability,
+					}).createOne({ email, status: 'invited' }, opts)
+					: user.id;
+
+				await this.grantInvitedRoles(trx, invitedUser, invitedRoles, isNewUser);
+			});
 
 			// Send invite for new and already invited users
 			if (isEmpty(user) || user.status === 'invited') {
@@ -578,6 +564,127 @@ export class UsersService extends ItemsService {
 		}
 	}
 
+	/**
+	 * Writes the invites of the inviter to `invitedRoles`, and the memberships
+	 * they hold: one per role while any invite of it is left.
+	 */
+	private async grantInvitedRoles(
+		trx: Knex,
+		invitedUser: PrimaryKey,
+		invitedRoles: string[],
+		isNewUser: boolean,
+	): Promise<void> {
+		const inviter = this.accountability?.user ?? null;
+
+		const invites: { id: string; role: string; user_created: string | null }[]
+			= isNewUser
+				? []
+				: await trx
+					.select('id', 'role', 'user_created')
+					.from('directus_invites')
+					.where({ user: invitedUser });
+
+		const memberships: {
+			id: string;
+			role: string;
+			managed_by: string | null;
+			sort: number | null;
+		}[] = isNewUser
+			? []
+			: await trx
+				.select('id', 'role', 'managed_by', 'sort')
+				.from('directus_role_members')
+				.where({ user: invitedUser });
+
+		const inviterInvites = invites.filter(({ user_created }) => {
+			return user_created === inviter;
+		});
+
+		const addedRoles = invitedRoles.filter((role) => {
+			return !inviterInvites.some((invite) => invite.role === role);
+		});
+
+		const droppedInvites = inviterInvites.filter(({ role }) => {
+			return !invitedRoles.includes(role);
+		});
+
+		const inviteMemberships = memberships.filter(({ managed_by }) => {
+			return managed_by === 'invite';
+		});
+
+		const membershipRoles = addedRoles.filter((role) => {
+			return !inviteMemberships.some((membership) => membership.role === role);
+		});
+
+		const remainingInviteRoles = [
+			...invites
+				.filter((invite) => !droppedInvites.includes(invite))
+				.map(({ role }) => role),
+			...addedRoles,
+		];
+
+		const strandedMemberships = inviteMemberships.filter(({ role }) => {
+			return !remainingInviteRoles.includes(role);
+		});
+
+		const lastSort = Math.max(0, ...memberships.map(({ sort }) => sort ?? 0));
+
+		if (this.accountability) {
+			for (const role of membershipRoles) {
+				await processPayload(
+					{
+						accountability: this.accountability,
+						action: 'create',
+						collection: 'directus_role_members',
+						payload: { user: invitedUser, role },
+						nested: [],
+					},
+					{ knex: trx, schema: this.schema },
+				);
+			}
+		}
+
+		const invitesService = new InvitesService({ knex: trx, schema: this.schema });
+
+		const membersService = new RoleMembersService({
+			knex: trx,
+			schema: this.schema,
+		});
+
+		if (addedRoles.length > 0) {
+			await invitesService.createMany(
+				addedRoles.map((role) => {
+					return { user: invitedUser, role, user_created: inviter };
+				}),
+				{},
+			);
+		}
+
+		if (membershipRoles.length > 0) {
+			await membersService.createMany(
+				membershipRoles.map((role, roleIndex) => {
+					return {
+						user: invitedUser,
+						role,
+						managed_by: 'invite',
+						sort: lastSort + roleIndex + 1,
+					};
+				}),
+				isNewUser
+					? { createsNewUserMemberships: true }
+					: {},
+			);
+		}
+
+		if (droppedInvites.length > 0) {
+			await invitesService.deleteMany(droppedInvites.map(({ id }) => id));
+		}
+
+		if (strandedMemberships.length > 0) {
+			await membersService.deleteMany(strandedMemberships.map(({ id }) => id));
+		}
+	}
+
 	async acceptInvite(token: string, password: string): Promise<void> {
 		const { email, scope } = verifyJWT(token, getSecret()) as {
 			email: string;
@@ -595,13 +702,61 @@ export class UsersService extends ItemsService {
 			throw new InvalidPayloadError({ reason: `Email address ${email} hasn't been invited` });
 		}
 
-		// Allow unauthenticated update
-		const service = new UsersService({
-			knex: this.knex,
+		await transaction(this.knex, async (trx) => {
+			// Allow unauthenticated update
+			await new UsersService({ knex: trx, schema: this.schema })
+				.updateOne(user.id, { password, status: 'active' });
+
+			await this.handInvitedRolesToAdmins(trx, user.id);
+		});
+	}
+
+	/**
+	 * Once the user is active, the invites are history: the admins own the
+	 * roles they gave. One the user also holds by hand is deleted, the unique
+	 * (user, role, managed_by) refusing a second null row.
+	 */
+	private async handInvitedRolesToAdmins(
+		trx: Knex,
+		acceptingUser: PrimaryKey,
+	): Promise<void> {
+		const memberships: {
+			id: string;
+			role: string;
+			managed_by: string | null;
+		}[] = await trx
+			.select('id', 'role', 'managed_by')
+			.from('directus_role_members')
+			.where({ user: acceptingUser });
+
+		const handRoles = memberships
+			.filter(({ managed_by }) => managed_by === null)
+			.map(({ role }) => role);
+
+		const inviteMemberships = memberships.filter(({ managed_by }) => {
+			return managed_by === 'invite';
+		});
+
+		const handedKeys = inviteMemberships
+			.filter(({ role }) => !handRoles.includes(role))
+			.map(({ id }) => id);
+
+		const doubledKeys = inviteMemberships
+			.filter(({ role }) => handRoles.includes(role))
+			.map(({ id }) => id);
+
+		const membersService = new RoleMembersService({
+			knex: trx,
 			schema: this.schema,
 		});
 
-		await service.updateOne(user.id, { password, status: 'active' });
+		if (handedKeys.length > 0) {
+			await membersService.updateMany(handedKeys, { managed_by: null });
+		}
+
+		if (doubledKeys.length > 0) {
+			await membersService.deleteMany(doubledKeys);
+		}
 	}
 
 	async registerUser(input: RegisterUserInput) {
