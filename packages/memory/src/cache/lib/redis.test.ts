@@ -88,11 +88,19 @@ describe('clear', () => {
 	});
 });
 
-describe('readGeneration', () => {
-	test('Returns the generation of the kv store', async () => {
-		vi.mocked(cache['store'].readGeneration).mockResolvedValue(7);
+describe('getWithGeneration', () => {
+	test('Returns what the kv store read', async () => {
+		vi.mocked(cache['store'].getWithGeneration).mockResolvedValue({
+			found: false,
+			generation: 7,
+		});
 
-		await expect(cache.readGeneration()).resolves.toBe(7);
+		await expect(cache.getWithGeneration(mockKey)).resolves.toEqual({
+			found: false,
+			generation: 7,
+		});
+
+		expect(cache['store'].getWithGeneration).toHaveBeenCalledWith(mockKey);
 	});
 });
 

@@ -66,23 +66,50 @@ describe('has', () => {
 	});
 });
 
+describe('getWithGeneration', () => {
+	test('Returns the value of a cached key', async () => {
+		vi.mocked(cache['store'].get).mockResolvedValue(mockValue);
+
+		await expect(cache.getWithGeneration(mockKey)).resolves.toEqual({
+			found: true,
+			value: mockValue,
+		});
+	});
+
+	test('Returns the number of clears so far for a missing key', async () => {
+		await cache.clear();
+
+		await expect(cache.getWithGeneration(mockKey)).resolves.toEqual({
+			found: false,
+			generation: 1,
+		});
+	});
+});
+
 describe('setUnlessCleared', () => {
 	test('Sets the value when no clear came since the generation read', async () => {
-		const generation = await cache.readGeneration();
+		await expect(cache.getWithGeneration(mockKey)).resolves.toEqual({
+			found: false,
+			generation: 0,
+		});
 
 		await expect(
-			cache.setUnlessCleared(mockKey, mockValue, generation),
+			cache.setUnlessCleared(mockKey, mockValue, 0),
 		).resolves.toBe(true);
 
 		expect(cache['store'].set).toHaveBeenCalledWith(mockKey, mockValue);
 	});
 
 	test('Refuses the value when a clear came since the generation read', async () => {
-		const generation = await cache.readGeneration();
+		await expect(cache.getWithGeneration(mockKey)).resolves.toEqual({
+			found: false,
+			generation: 0,
+		});
+
 		await cache.clear();
 
 		await expect(
-			cache.setUnlessCleared(mockKey, mockValue, generation),
+			cache.setUnlessCleared(mockKey, mockValue, 0),
 		).resolves.toBe(false);
 
 		expect(cache['store'].set).not.toHaveBeenCalled();

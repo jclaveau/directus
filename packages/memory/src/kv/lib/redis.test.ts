@@ -327,19 +327,46 @@ describe('clear', () => {
 	});
 });
 
-describe('readGeneration', () => {
-	test('Reads the generation key next to the namespace', async () => {
-		vi.mocked(kv['redis'].get).mockResolvedValue('7');
+describe('getWithGeneration', () => {
+	test('Reads the key and the generation in one MGET', async () => {
+		vi.mocked(kv['redis'].mgetBuffer).mockResolvedValue([
+			null,
+			Buffer.from('7'),
+		]);
 
-		await expect(kv.readGeneration()).resolves.toBe(7);
+		await expect(kv.getWithGeneration(mockKey)).resolves.toEqual({
+			found: false,
+			generation: 7,
+		});
 
-		expect(kv['redis'].get).toHaveBeenCalledWith('test-generation');
+		expect(kv['redis'].mgetBuffer).toHaveBeenCalledWith(
+			mockNamespacedKey,
+			'test-generation',
+		);
 	});
 
-	test('Reads 0 before the first clear', async () => {
-		vi.mocked(kv['redis'].get).mockResolvedValue(null);
+	test('Reads generation 0 before the first clear', async () => {
+		vi.mocked(kv['redis'].mgetBuffer).mockResolvedValue([null, null]);
 
-		await expect(kv.readGeneration()).resolves.toBe(0);
+		await expect(kv.getWithGeneration(mockKey)).resolves.toEqual({
+			found: false,
+			generation: 0,
+		});
+	});
+
+	test('Returns the deserialized value of a cached key', async () => {
+		vi.mocked(kv['redis'].mgetBuffer).mockResolvedValue([
+			mockBuffer,
+			Buffer.from('7'),
+		]);
+
+		await expect(kv.getWithGeneration(mockKey)).resolves.toEqual({
+			found: true,
+			value: mockValue,
+		});
+
+		expect(bufferToUint8Array).toHaveBeenCalledWith(mockBuffer);
+		expect(deserialize).toHaveBeenCalledWith(mockUint8Array);
 	});
 });
 

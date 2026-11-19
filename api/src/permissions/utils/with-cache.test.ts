@@ -7,6 +7,7 @@ vi.mock('../cache.js', () => {
 	const cacheStore = {
 		get: vi.fn(),
 		readGeneration: vi.fn(),
+		getWithGeneration: vi.fn(),
 		setUnlessCleared: vi.fn(),
 	};
 
@@ -19,6 +20,10 @@ beforeEach(() => {
 	vi.mocked(useCache().readGeneration)
 		.mockReset()
 		.mockResolvedValue(0);
+
+	vi.mocked(useCache().getWithGeneration)
+		.mockReset()
+		.mockResolvedValue({ found: false, generation: 0 });
 
 	vi.mocked(useCache().setUnlessCleared)
 		.mockReset()
@@ -56,7 +61,10 @@ test('a call made after a read ended reads the cache again', async () => {
 
 	await cachedRead({ policies: ['a'] });
 
-	vi.mocked(useCache().get).mockResolvedValueOnce(['cached row']);
+	vi.mocked(useCache().getWithGeneration).mockResolvedValueOnce({
+		found: true,
+		value: ['cached row'],
+	});
 
 	await expect(cachedRead({ policies: ['a'] })).resolves.toEqual([
 		'cached row',
@@ -134,7 +142,10 @@ test('a call made after the running reads were cleared queries again', async () 
 });
 
 test('a read stores its result under the generation read before it', async () => {
-	vi.mocked(useCache().readGeneration).mockResolvedValue(3);
+	vi.mocked(useCache().getWithGeneration).mockResolvedValue({
+		found: false,
+		generation: 3,
+	});
 
 	const cachedHandler = vi.fn(async (_options: object) => ['row']);
 
@@ -149,8 +160,18 @@ test('a read stores its result under the generation read before it', async () =>
 	// A clear landing between the handler and the generation read would let
 	// the stale result through: the generation has to come first.
 	expect(
-		vi.mocked(useCache().readGeneration).mock.invocationCallOrder[0],
+		vi.mocked(useCache().getWithGeneration).mock.invocationCallOrder[0],
 	).toBeLessThan(cachedHandler.mock.invocationCallOrder[0]!);
+});
+
+test('a miss reads the value and its generation in one call', async () => {
+	await withCache('rows', async (_options: object) => ['row'])({
+		policies: ['a'],
+	});
+
+	expect(useCache().getWithGeneration).toHaveBeenCalledOnce();
+	expect(useCache().get).not.toHaveBeenCalled();
+	expect(useCache().readGeneration).not.toHaveBeenCalled();
 });
 
 test('a call waiting on a read a clear crossed reads on its own', async () => {
