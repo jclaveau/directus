@@ -904,19 +904,57 @@ describe('Integration Tests', () => {
 				);
 			});
 
-			it('refuses an invite naming no inviting user', async () => {
+			it('manages an invite naming no user as invite:system', async () => {
 				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
-					.mockResolvedValueOnce({ id: 'active-user-id', status: 'active' });
+					.mockResolvedValueOnce(undefined);
 
-				const promise = new UsersService({ knex: db, schema })
+				await new UsersService({ knex: db, schema, accountability: null })
 					.inviteUser('user@example.com', ['invite-role'], null);
 
-				await expect(promise).rejects.toEqual(new InvalidPayloadError({
-					reason: 'An invitation is managed by its inviter,'
-						+ ' and this request names no user',
-				}));
+				expect(superCreateOneSpy).toHaveBeenCalledWith(
+					{
+						email: 'user@example.com',
+						roles: [{ role: 'invite-role', managed_by: 'invite:system' }],
+						status: 'invited',
+					},
+					{},
+				);
 
-				expect(mailService.send).not.toBeCalled();
+				expect(mailService.send).toBeCalledTimes(1);
+			});
+
+			it('a no-user re-invite replaces the invite:system rows', async () => {
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({
+						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000020',
+						status: 'invited',
+					});
+
+				tracker.on.select('directus_role_members')
+					.response([{ id: 'member-id-3' }]);
+
+				const updateOneSpy = vi.spyOn(UsersService.prototype, 'updateOne')
+					.mockResolvedValueOnce('8e2b4c10-5d3a-4f6e-9a7b-000000000020');
+
+				await new UsersService({ knex: db, schema, accountability: null })
+					.inviteUser('user@example.com', ['invite-role'], null);
+
+				expect(tracker.history.select[0]!.bindings).toEqual([
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000020',
+					'invite:system',
+				]);
+
+				expect(updateOneSpy).toHaveBeenCalledWith(
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000020',
+					{
+						roles: {
+							create: [{ role: 'invite-role', managed_by: 'invite:system' }],
+							update: [],
+							delete: ['member-id-3'],
+						},
+					},
+					{},
+				);
 			});
 
 			it(
