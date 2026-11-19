@@ -157,12 +157,7 @@ describe('getPermissionsForShare', () => {
 
 		await getPermissionsForShare(
 			{
-				user: 'manager',
-				memberRoles: ['manager'],
-				admin: false,
-				app: false,
 				ip: '',
-				roles: [],
 				share: '5',
 			},
 			undefined,
@@ -185,12 +180,7 @@ describe('getPermissionsForShare', () => {
 
 		await getPermissionsForShare(
 			{
-				user: 'user',
-				memberRoles: ['user'],
-				admin: false,
-				app: false,
 				ip: '',
-				roles: [],
 				share: '3',
 			},
 			undefined,

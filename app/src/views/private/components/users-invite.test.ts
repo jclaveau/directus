@@ -109,6 +109,7 @@ test('without a role, the first role is preselected and invited', async () => {
 	wrapper.findComponent(VTextareaStub).vm
 		.$emit('update:modelValue', 'a@example.com, b@example.com');
 
+	await flushPromises();
 	await wrapper.findAll('button')[1]!.trigger('click');
 	await flushPromises();
 
@@ -146,6 +147,7 @@ test('roles picked in the select are all invited', async () => {
 	wrapper.findComponent(VTextareaStub).vm
 		.$emit('update:modelValue', 'a@example.com');
 
+	await flushPromises();
 	await wrapper.findAll('button')[1]!.trigger('click');
 	await flushPromises();
 
@@ -180,6 +182,7 @@ test('a role prop hides the select and is the invited role', async () => {
 	wrapper.findComponent(VTextareaStub).vm
 		.$emit('update:modelValue', 'a@example.com');
 
+	await flushPromises();
 	await wrapper.findAll('button')[1]!.trigger('click');
 	await flushPromises();
 
