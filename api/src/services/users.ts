@@ -474,7 +474,8 @@ export class UsersService extends ItemsService {
 	 * The memberships an invite grants are its inviter's: `managed_by` is
 	 * `invite:<inviter id>`, or `invite:system` from a service naming no user
 	 * (an extension, a flow). A re-invite by the same inviter replaces them,
-	 * one by another inviter adds its own (D8 of #746).
+	 * keeping the row of a role it gives again, one by another inviter adds
+	 * its own (D8 of #746).
 	 */
 	async inviteUser(
 		email: string | string[],
@@ -517,22 +518,38 @@ export class UsersService extends ItemsService {
 				);
 			}
 			else if (user.status === 'invited') {
-				const inviterMemberships: { id: string }[] = await this.knex
-					.select('id')
+				const inviterMemberships: { id: string; role: string }[] = await this.knex
+					.select('id', 'role')
 					.from('directus_role_members')
 					.where({ user: user.id, managed_by: inviteManager });
 
-				await this.updateOne(
-					user.id,
-					{
-						roles: {
-							create: invitedMemberships,
-							update: [],
-							delete: inviterMemberships.map(({ id }) => id),
-						},
-					},
-					opts,
+				const heldRoles = inviterMemberships.map(({ role }) => role);
+
+				// A role the inviter already gave keeps its row and its sort
+				const addedMemberships = invitedMemberships.filter(
+					({ role }) => !heldRoles.includes(role),
 				);
+
+				const droppedMembershipIds = inviterMemberships
+					.filter(({ role }) => !roles.includes(role))
+					.map(({ id }) => id);
+
+				if (addedMemberships.length > 0 || droppedMembershipIds.length > 0) {
+					await this.updateOne(
+						user.id,
+						{
+							roles: {
+								create: addedMemberships,
+								update: [],
+								delete: droppedMembershipIds,
+							},
+						},
+						opts,
+					);
+				}
+				else if (opts.preMutationError) {
+					throw opts.preMutationError;
+				}
 			}
 			else if (opts.preMutationError) {
 				throw opts.preMutationError;

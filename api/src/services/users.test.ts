@@ -878,8 +878,10 @@ describe('Integration Tests', () => {
 						status: 'invited',
 					});
 
-				tracker.on.select('directus_role_members')
-					.response([{ id: 'member-id-1' }, { id: 'member-id-2' }]);
+				tracker.on.select('directus_role_members').response([
+					{ id: 'member-id-1', role: 'old-role-1' },
+					{ id: 'member-id-2', role: 'old-role-2' },
+				]);
 
 				const updateOneSpy = vi.spyOn(UsersService.prototype, 'updateOne')
 					.mockResolvedValueOnce('8e2b4c10-5d3a-4f6e-9a7b-000000000017');
@@ -902,6 +904,58 @@ describe('Integration Tests', () => {
 					},
 					{},
 				);
+			});
+
+			it('keeps the row of a role the same inviter gives again', async () => {
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({
+						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000021',
+						status: 'invited',
+					});
+
+				tracker.on.select('directus_role_members').response([
+					{ id: 'member-id-4', role: 'invite-role' },
+					{ id: 'member-id-5', role: 'old-role-5' },
+				]);
+
+				const updateOneSpy = vi.spyOn(UsersService.prototype, 'updateOne')
+					.mockResolvedValueOnce('8e2b4c10-5d3a-4f6e-9a7b-000000000021');
+
+				await service.inviteUser(
+					'user@example.com',
+					['invite-role', 'new-role'],
+					null,
+				);
+
+				expect(updateOneSpy).toHaveBeenCalledWith(
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000021',
+					{
+						roles: {
+							create: [{ role: 'new-role', managed_by: 'invite:system' }],
+							update: [],
+							delete: ['member-id-5'],
+						},
+					},
+					{},
+				);
+			});
+
+			it('writes nothing on a re-invite to the same roles', async () => {
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({
+						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000022',
+						status: 'invited',
+					});
+
+				tracker.on.select('directus_role_members')
+					.response([{ id: 'member-id-6', role: 'invite-role' }]);
+
+				const updateOneSpy = vi.spyOn(UsersService.prototype, 'updateOne');
+
+				await service.inviteUser('user@example.com', ['invite-role'], null);
+
+				expect(updateOneSpy).not.toHaveBeenCalled();
+				expect(mailService.send).toBeCalledTimes(1);
 			});
 
 			it('manages an invite naming no user as invite:system', async () => {
@@ -931,7 +985,7 @@ describe('Integration Tests', () => {
 					});
 
 				tracker.on.select('directus_role_members')
-					.response([{ id: 'member-id-3' }]);
+					.response([{ id: 'member-id-3', role: 'old-role-3' }]);
 
 				const updateOneSpy = vi.spyOn(UsersService.prototype, 'updateOne')
 					.mockResolvedValueOnce('8e2b4c10-5d3a-4f6e-9a7b-000000000020');
