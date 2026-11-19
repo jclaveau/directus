@@ -64,3 +64,9 @@ Feature: A role's users list moves users in and takes the others out
       |                                      |     - email: third-<run>@example.com  |
       |                                      |       status: active                  |
       |                                      |       role: <second-role>             |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | 3       | (none) | 0      | 0      | 0      | 0      |
+      | 4       | (none) | 0      | 0      | 0      | 0      |

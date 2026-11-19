@@ -4,16 +4,20 @@ import {
 } from '@common/functions';
 import { defineSingularWriteFeature } from '../system/singular-write-steps';
 
-const NOTES = 'role_change_notes';
+const NOTES_COLLECTIONS = ['role_change_notes', 'role_refresh_notes'];
 
 defineSingularWriteFeature(
 	'./tests/db/routes/roles/role-change-session.feature',
 	{
 		async beforeFeature(vendor) {
-			await DeleteCollectionIfPresent(vendor, { collection: NOTES });
+			for (const collection of NOTES_COLLECTIONS) {
+				await DeleteCollectionIfPresent(vendor, { collection });
+			}
 		},
 		async afterFeature(vendor) {
-			await DeleteCollection(vendor, { collection: NOTES });
+			for (const collection of NOTES_COLLECTIONS) {
+				await DeleteCollection(vendor, { collection });
+			}
 		},
 	},
 );

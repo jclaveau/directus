@@ -113,6 +113,10 @@ Feature: A user's one role resolves the role variables and orders the presets
       | query:                                       |     label: from the user |
       |   fields: label,note,tag                     |     note: from the child |
       |                                              |     tag: from the parent |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
 
   Scenario: the role variables resolve to the user's role and its chain
     Given these requests are sent:
@@ -215,6 +219,13 @@ Feature: A user's one role resolves the role variables and orders the presets
       | query:                                 |   data:                             |
       |   fields: role_tag,created_role        |     - role_tag: <child-role>        |
       |   filter[label][_eq]: preset row       |       created_role: <child-role>    |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | 3       | (none) | 0      | 0      | 0      | 0      |
+      | 4       | (none) | 0      | 0      | 0      | 0      |
+      | 5       | (none) | 0      | 0      | 0      | 0      |
 
   Scenario: an app user reads the presets of their own role, not the parent's
     Given these requests are sent:
@@ -265,3 +276,6 @@ Feature: A user's one role resolves the role variables and orders the presets
       |   fields: bookmark                     |     - bookmark: everyone-<run> |
       |   sort: bookmark                       |                                |
       |   filter[bookmark][_ends_with]: -<run> |                                |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |

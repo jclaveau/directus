@@ -68,3 +68,6 @@ Feature: A flow run sees the role of the user who triggered it
       | eventually: true            |   roles:             |
       |                             |     - <parent-role>  |
       |                             |     - <child-role>   |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |

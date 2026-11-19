@@ -45,6 +45,11 @@ defineSsoFeature(
 			AUTH_MOCKOPENID_ALLOW_PUBLIC_REGISTRATION: 'true',
 			AUTH_MOCKOPENID_SYNC_USER_INFO: 'true',
 			AUTH_MOCKOPENID_DEFAULT_ROLE_ID: ROLE.TESTS_FLOW.ID,
+			AUTH_MOCKOPENID_ROLE_MAPPING:
+				`json:${JSON.stringify({
+					staff: STAFF_ROLE_ID,
+					auditors: AUDITORS_ROLE_ID,
+				})}`,
 		};
 	},
 	{

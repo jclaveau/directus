@@ -423,3 +423,64 @@ Feature: Comments are written one at a time or in batches, and notify who they m
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
       | 1       | directus_users | 2      | 0      | 0      | 0      |
+
+  Scenario: a comment notifies a mentioned user who reads through a parent role
+    Given these requests are sent:
+      | request                                  | response  |
+      | method: POST                             | code: 200 |+
+      | path: /items/test_singular_comments      |           |
+      | payload:                                 |           |
+      |   name: role-mentioned-<run>             |           |
+      | remember: entry                          |           |
+      | method: POST                             | code: 200 |+
+      | path: /policies                          |           |
+      | payload:                                 |           |
+      |   id: <reader-policy>                    |           |
+      |   name: reader-<run>                     |           |
+      |   app_access: true                       |           |
+      |   admin_access: false                    |           |
+      |   permissions:                           |           |
+      |     - collection: test_singular_comments |           |
+      |       action: read                       |           |
+      |       fields:                            |           |
+      |         - '*'                            |           |
+      | method: POST                             | code: 200 |+
+      | path: /roles                             |           |
+      | payload:                                 |           |
+      |   id: <parent-role>                      |           |
+      |   name: parent-<run>                     |           |
+      |   policies:                              |           |
+      |     - policy: <reader-policy>            |           |
+      | method: POST                             | code: 200 |+
+      | path: /roles                             |           |
+      | payload:                                 |           |
+      |   id: <child-role>                       |           |
+      |   name: child-<run>                      |           |
+      |   parent: <parent-role>                  |           |
+      | method: POST                             | code: 200 |+
+      | path: /users                             |           |
+      | payload:                                 |           |
+      |   id: <reader>                           |           |
+      |   email: role-reader-<run>@example.com   |           |
+      |   email_notifications: false             |           |
+      |   role: <child-role>                     |           |
+    Then these requests get these responses:
+      | request                              | response                                 |
+      | method: POST                         | code: 200                                |+
+      | path: /comments                      |                                          |
+      | payload:                             |                                          |
+      |   collection: test_singular_comments |                                          |
+      |   item: '<entry>'                    |                                          |
+      |   comment: '@<reader> please look'   |                                          |
+      | method: GET                          | code: 200                                |+
+      | path: /notifications                 | body:                                    |
+      | query:                               |   data:                                  |
+      |   fields: subject,collection,item    |     - subject: >-                        |
+      |   filter[recipient][_eq]: <reader>   |         You were mentioned in            |
+      |                                      |         test_singular_comments           |
+      |                                      |       collection: test_singular_comments |
+      |                                      |       item: '<entry>'                    |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |

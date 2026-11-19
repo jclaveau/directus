@@ -119,3 +119,82 @@ Feature: A share reads with its sender's role chain and its own
       |                                      |         "role_share_notes" or it   |
       |                                      |         does not exist. Queried in |
       |                                      |         root.                      |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | 3       | (none) | 0      | 0      | 0      | 0      |
+      | 4       | (none) | 0      | 0      | 0      | 0      |
+      | 5       | (none) | 0      | 0      | 0      | 0      |
+      | 6       | (none) | 0      | 0      | 0      | 0      |
+
+  Scenario: a refreshed share session keeps reading with the share's role
+    Given these requests are sent:
+      | request                                    | response  |
+      | method: POST                               | code: 200 |+
+      | path: /collections                         |           |
+      | payload:                                   |           |
+      |   collection: role_share_refresh_notes     |           |
+      |   schema: {}                               |           |
+      |   meta: {}                                 |           |
+      |   fields:                                  |           |
+      |     - field: label                         |           |
+      |       type: string                         |           |
+      |       meta: {}                             |           |
+      | method: POST                               | code: 200 |+
+      | path: /items/role_share_refresh_notes      |           |
+      | payload:                                   |           |
+      |   label: shared                            |           |
+      | remember: note                             |           |
+      | method: POST                               | code: 200 |+
+      | path: /policies                            |           |
+      | payload:                                   |           |
+      |   id: <reader-policy>                      |           |
+      |   name: reader-<run>                       |           |
+      |   app_access: false                        |           |
+      |   admin_access: false                      |           |
+      |   permissions:                             |           |
+      |     - collection: role_share_refresh_notes |           |
+      |       action: read                         |           |
+      |       fields: ['*']                        |           |
+      | method: POST                               | code: 200 |+
+      | path: /roles                               |           |
+      | payload:                                   |           |
+      |   id: <reader-role>                        |           |
+      |   name: reader-<run>                       |           |
+      |   policies:                                |           |
+      |     - policy: <reader-policy>              |           |
+      | method: POST                               | code: 200 |+
+      | path: /shares                              |           |
+      | payload:                                   |           |
+      |   id: <share>                              |           |
+      |   collection: role_share_refresh_notes     |           |
+      |   item: '<note>'                           |           |
+      |   role: <reader-role>                      |           |
+      | method: POST                               | code: 200 |+
+      | path: /shares/auth                         |           |
+      | as: public                                 |           |
+      | payload:                                   |           |
+      |   share: <share>                           |           |
+      |   mode: session                            |           |
+      | remember_session: share-session            |           |
+    Then these requests get these responses:
+      | request                                      | response          |
+      | as: public                                   | code: 200         |+
+      | method: POST                                 |                   |
+      | path: /auth/refresh                          |                   |
+      | headers:                                     |                   |
+      |   Cookie: >-                                 |                   |
+      |     directus_session_token=<share-session>   |                   |
+      | payload:                                     |                   |
+      |   mode: session                              |                   |
+      | remember_session: refreshed-session          |                   |
+      | as: <refreshed-session>                      | code: 200         |+
+      | method: GET                                  | body:             |
+      | path: /items/role_share_refresh_notes/<note> |   data:           |
+      | query:                                       |     label: shared |
+      |   fields: label                              |                   |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |

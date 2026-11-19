@@ -56,3 +56,7 @@ Feature: An asset is cached publicly with no role, privately with one
       | as: in-role-<run>      | code: 200                                 |+
       | method: GET            | headers:                                  |
       | path: /assets/<cached> |   cache-control: private, max-age=2592000 |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |

@@ -62,3 +62,10 @@ Feature: A deleted role suspends its users and drops its presets
       | query:                                 |   data: []             |
       |   fields: id                           |                        |
       |   filter[bookmark][_eq]: deleted-<run> |                        |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | 3       | (none) | 0      | 0      | 0      | 0      |
+      | 4       | (none) | 0      | 0      | 0      | 0      |
+      | 5       | (none) | 0      | 0      | 0      | 0      |

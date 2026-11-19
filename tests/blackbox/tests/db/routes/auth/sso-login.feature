@@ -9,10 +9,10 @@ Feature: A first SSO login creates the user, a later one updates it
   - The providers hand `<sub>-refresh-<n>` out as refresh tokens, n counting
     the ones that subject got. Directus stores the one a login brings, then
     trades it at once, and again on every refresh: it keeps the last one.
-  - `mockoauth` gives the group "staff" the role 5b3e8f0a-... (sso_staff),
-    the group "auditors" the role 0c6f2a9d-... (sso_auditors), anyone else
-    the default role d70c0943-...; `mockopenid` maps no group. A user in
-    several mapped groups gets one role: the first the mapping lists.
+  - Both give the group "staff" the role 5b3e8f0a-... (sso_staff), the
+    group "auditors" the role 0c6f2a9d-... (sso_auditors), anyone else the
+    default role d70c0943-... A user in several mapped groups gets one role:
+    the first the mapping lists.
   - Any other row is a request as the admin.
 
   Scenario: an OAuth2 login creates the user, a later one updates it
@@ -158,3 +158,47 @@ Feature: A first SSO login creates the user, a later one updates it
       |     - role                   |       0c6f2a9d-3e18-4b57-9d40-7a1e5c8b2f63 |
       |   filter[email][_eq]: >-     |                                            |
       |     kay@sso.example.com      |                                            |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | 3       | (none) | 0      | 0      | 0      | 0      |
+      | 4       | (none) | 0      | 0      | 0      | 0      |
+
+  Scenario: an OpenID user's group maps their role, a later login changes it
+    Then these requests get these responses:
+      | request                      | response                                   |
+      | login: mockopenid            | code: 200                                  |+
+      | profile:                     |                                            |
+      |   sub: lin-openid            |                                            |
+      |   email: lin@sso.example.com |                                            |
+      |   given_name: Lin            |                                            |
+      |   family_name: Hua           |                                            |
+      |   groups: [staff]            |                                            |
+      | method: GET                  | code: 200                                  |+
+      | path: /users                 | body:                                      |
+      | query:                       |   data:                                    |
+      |   fields:                    |   - role: >-                               |
+      |     - role                   |       5b3e8f0a-9c41-4d6e-8a2f-1c7d3e9b6a04 |
+      |   filter[email][_eq]: >-     |                                            |
+      |     lin@sso.example.com      |                                            |
+      | login: mockopenid            | code: 200                                  |+
+      | profile:                     |                                            |
+      |   sub: lin-openid            |                                            |
+      |   email: lin@sso.example.com |                                            |
+      |   given_name: Lin            |                                            |
+      |   family_name: Hua           |                                            |
+      |   groups: [auditors]         |                                            |
+      | method: GET                  | code: 200                                  |+
+      | path: /users                 | body:                                      |
+      | query:                       |   data:                                    |
+      |   fields:                    |   - role: >-                               |
+      |     - role                   |       0c6f2a9d-3e18-4b57-9d40-7a1e5c8b2f63 |
+      |   filter[email][_eq]: >-     |                                            |
+      |     lin@sso.example.com      |                                            |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | 3       | (none) | 0      | 0      | 0      | 0      |
+      | 4       | (none) | 0      | 0      | 0      | 0      |

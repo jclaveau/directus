@@ -75,6 +75,11 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       | path: /policies/me/globals           |   data:                              |
       |                                      |     app_access: true                 |
       |                                      |     admin_access: false              |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | 3       | (none) | 0      | 0      | 0      | 0      |
 
   Scenario: a user of a child role is an admin when the parent role is
     Given these requests are sent:
@@ -118,6 +123,10 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       | path: /users/<child-user>  |   data:                |
       | query:                     |     role: <child-role> |
       |   fields: role             |                        |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
 
   Scenario: a user with no role reaches the me endpoints, no credentials do not
     Then these requests get these responses:
@@ -151,3 +160,83 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       | method: GET                | body:                    |
       | path: /policies/me/globals |   data:                  |
       |                            |     app_access: false    |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | 3       | (none) | 0      | 0      | 0      | 0      |
+      | 4       | (none) | 0      | 0      | 0      | 0      |
+      | 5       | (none) | 0      | 0      | 0      | 0      |
+      | 6       | (none) | 0      | 0      | 0      | 0      |
+
+  Scenario: a user who cannot read the roles gets the ids of their chain
+    Given these requests are sent:
+      | request                          | response  |
+      | method: POST                     | code: 200 |+
+      | path: /roles                     |           |
+      | payload:                         |           |
+      |   id: <parent-role>              |           |
+      |   name: parent-<run>             |           |
+      | method: POST                     | code: 200 |+
+      | path: /roles                     |           |
+      | payload:                         |           |
+      |   id: <child-role>               |           |
+      |   name: child-<run>              |           |
+      |   parent: <parent-role>          |           |
+      | method: POST                     | code: 200 |+
+      | path: /users                     |           |
+      | payload:                         |           |
+      |   email: blind-<run>@example.com |           |
+      |   role: <child-role>             |           |
+      |   token: blind-<run>             |           |
+    Then these requests get these responses:
+      | request         | response                |
+      | as: blind-<run> | code: 200               |+
+      | method: GET     | body:                   |
+      | path: /roles/me |   data:                 |
+      | query:          |     - id: <parent-role> |
+      |   fields: name  |     - id: <child-role>  |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+
+  Scenario: graphql lists the roles of the user's chain
+    Given these requests are sent:
+      | request                            | response  |
+      | method: POST                       | code: 200 |+
+      | path: /policies                    |           |
+      | payload:                           |           |
+      |   id: <app-policy>                 |           |
+      |   name: app-<run>                  |           |
+      |   app_access: true                 |           |
+      |   admin_access: false              |           |
+      | method: POST                       | code: 200 |+
+      | path: /roles                       |           |
+      | payload:                           |           |
+      |   id: <parent-role>                |           |
+      |   name: parent-<run>               |           |
+      | method: POST                       | code: 200 |+
+      | path: /roles                       |           |
+      | payload:                           |           |
+      |   id: <child-role>                 |           |
+      |   name: child-<run>                |           |
+      |   parent: <parent-role>            |           |
+      |   policies:                        |           |
+      |     - policy: <app-policy>         |           |
+      | method: POST                       | code: 200 |+
+      | path: /users                       |           |
+      | payload:                           |           |
+      |   email: graphql-<run>@example.com |           |
+      |   role: <child-role>               |           |
+      |   token: graphql-<run>             |           |
+    Then these requests get these responses:
+      | request                                        | response                   |
+      | as: graphql-<run>                              | code: 200                  |+
+      | method: POST                                   | body:                      |
+      | path: /graphql/system                          |   data:                    |
+      | payload:                                       |     roles_me:              |
+      |   query: '{ roles_me(sort: "name") { name } }' |       - name: child-<run>  |
+      |                                                |       - name: parent-<run> |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |

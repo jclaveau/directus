@@ -178,3 +178,7 @@ Feature: A visitor registers and verifies the email address
       | query:                                       |   data:                         |
       |   fields: status,role                        |     - status: active            |
       |   filter[email][_eq]: role-<run>@example.com |       role: <registration-role> |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
