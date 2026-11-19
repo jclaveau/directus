@@ -1,3 +1,4 @@
+import { InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import knex from 'knex';
@@ -174,10 +175,10 @@ describe('Services / RoleMembers', () => {
 
 			await expect(new RoleMembersService({ knex: database, schema })
 				.createMany([{ user: 'user-id-12', role: 'role-staff' }]))
-				.rejects.toThrow(new Error(
-					'Invalid payload. The user "user-id-12" already holds the role'
-					+ ' "role-staff" with managed_by null.',
-				));
+				.rejects.toEqual(new InvalidPayloadError({
+					reason: 'The user "user-id-12" already holds the role'
+						+ ' "role-staff" with managed_by null',
+				}));
 
 			expect(createMany).not.toHaveBeenCalled();
 		});
@@ -193,10 +194,10 @@ describe('Services / RoleMembers', () => {
 					{ user: 'user-id-13', role: 'role-press', managed_by: 'invite:b' },
 					{ user: 'user-id-13', role: 'role-press', managed_by: 'invite:a' },
 				]))
-				.rejects.toThrow(new Error(
-					'Invalid payload. The user "user-id-13" already holds the role'
-					+ ' "role-press" with managed_by "invite:a".',
-				));
+				.rejects.toEqual(new InvalidPayloadError({
+					reason: 'The user "user-id-13" already holds the role'
+						+ ' "role-press" with managed_by "invite:a"',
+				}));
 		});
 	});
 
