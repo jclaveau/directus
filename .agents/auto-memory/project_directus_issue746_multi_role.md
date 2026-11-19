@@ -5,7 +5,9 @@ metadata:
   type: project
 ---
 
-Issue #746 "A user can hold only one role": `directus_role_members {user, role}` m2m replacing `directus_users.role`. Branch `multi-role`. Design phase, nothing coded.
+Issue #746 "A user can hold only one role": `directus_role_members {user, role, sort, managed_by}` m2m replacing `directus_users.role`. Branch `multi-role`. Design phase, nothing coded. **The issue body IS the design** (rewritten 2026-11-19, open points D1-D10 there); this file holds only what a fresh session must not re-derive.
+
+**Plan ruled by jean: 2 PRs.** PR 1 = bb Gherkin scenarios pinning TODAY's single-role behaviour on every impacted logic branch (no source change; table in the issue). PR 2 = everything else in one: API + migration + `$CURRENT_MEMBER_ROLES` + app, SSO multi-group (D6), admin UI roles m2m + policy-source list; each PR 1 scenario it edits is a contract change listed in its body.
 
 **Settled by jean (2026-11-19):**
 - Drop `$CURRENT_ROLE` entirely (no "primary role"). Keep `$CURRENT_ROLES` (memberships + ancestors).
