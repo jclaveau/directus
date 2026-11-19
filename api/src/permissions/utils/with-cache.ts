@@ -19,7 +19,8 @@ export function withCache<F extends (arg0: Arg0, ...args: any[]) => R, R, Arg0 =
 	const cache = useCache();
 
 	// `isCurrent` is false when a clear came during the handler: the result may
-	// hold what that clear removed, so it is neither stored nor shared.
+	// hold what that clear removed, so it is neither stored nor shared. A miss
+	// costs one more redis round trip for the generation, and waits for the store.
 	const readThrough = async (key: string, arg0: Arg0, args: any[]) => {
 		const cached = await cache.get(key);
 
