@@ -284,8 +284,115 @@ describe.each(vendors)('%s', (vendor) => {
 		fakeProviders.forgetSubscription(subscriptionId);
 	}
 
+	// The providers of the scenario's pending subscriptions: a table holding a
+	// column or rows per provider is read for the one provider found there.
+	let scenarioProviders: string[] = [];
+
+	function readScenarioProvider(): string {
+		if (scenarioProviders.length !== 1) {
+			throw new Error(
+				'A table per provider is read for the one provider of the'
+				+ ' scenario\'s pending subscriptions, which seeded'
+				+ ` ${JSON.stringify(scenarioProviders)}`,
+			);
+		}
+
+		return scenarioProviders[0]!;
+	}
+
+	// `| column | mollie | stripe |`: an empty cell leaves its row out.
+	function readProviderColumn(
+		providerTable: Record<string, string>[],
+	): ColumnValueRow[] {
+		const scenarioProvider = readScenarioProvider();
+
+		if (!(scenarioProvider in providerTable[0]!)) {
+			throw new Error(
+				`This table holds no column for ${JSON.stringify(scenarioProvider)}:`
+				+ ` ${JSON.stringify(Object.keys(providerTable[0]!))}`,
+			);
+		}
+
+		return providerTable
+			.filter((providerRow) => providerRow[scenarioProvider] !== '')
+			.map((providerRow) => {
+				return {
+					column: providerRow['column']!,
+					value: providerRow[scenarioProvider]!,
+				};
+			});
+	}
+
+	// A table with a `provider` column keeps the rows of the scenario's provider,
+	// and any other table is kept whole.
+	function keepProviderRows<TableRow extends Record<string, string>>(
+		rowsTable: TableRow[],
+	): TableRow[] {
+		if (!('provider' in rowsTable[0]!)) {
+			return rowsTable;
+		}
+
+		const scenarioProvider = readScenarioProvider();
+
+		const providerRows = rowsTable
+			.filter((tableRow) => tableRow['provider'] === scenarioProvider)
+			.map(({ provider: _provider, ...keptCells }) => keptCells as TableRow);
+
+		if (providerRows.length === 0) {
+			throw new Error(
+				`This table holds no row for ${JSON.stringify(scenarioProvider)}:`
+				+ ` ${JSON.stringify(rowsTable)}`,
+			);
+		}
+
+		return providerRows;
+	}
+
+	function holdProviderSubscription(providerTable: Record<string, string>[]) {
+		const columnsTable = readProviderColumn(providerTable);
+		const scenarioProvider = readScenarioProvider();
+
+		if (scenarioProvider === 'mollie') {
+			return holdSubscription(columnsTable);
+		}
+
+		if (scenarioProvider === 'stripe') {
+			return holdStripeSubscription(columnsTable);
+		}
+
+		throw new Error(
+			`No fake provider holds a subscription for`
+			+ ` ${JSON.stringify(scenarioProvider)}`,
+		);
+	}
+
+	function sendProviderEvents(
+		rowsTable: { provider: string; type: string; entity: string }[],
+	) {
+		const providerRows = keepProviderRows(rowsTable);
+		const scenarioProvider = readScenarioProvider();
+
+		if (scenarioProvider === 'mollie') {
+			return sendMollieEvents(providerRows);
+		}
+
+		if (scenarioProvider === 'stripe') {
+			return sendStripeEvents(providerRows.map(({ type, entity }) => {
+				return { type, subscription: entity };
+			}));
+		}
+
+		throw new Error(
+			`No fake provider sends events for ${JSON.stringify(scenarioProvider)}`,
+		);
+	}
+
 	async function seedPendingSubscriptions(rowsTable: Record<string, string>[]) {
 		const seededRows = parseGherkinTable<PendingSubscriptionSeed>(rowsTable);
+
+		scenarioProviders = [...new Set(seededRows.map((pendingSeed) => {
+			return pendingSeed.provider;
+		}))];
 
 		for (const pendingSeed of seededRows) {
 			const { id: seedId, manager: managerSeed } = pendingSeed;
@@ -508,13 +615,15 @@ describe.each(vendors)('%s', (vendor) => {
 		subscriptionId: string,
 		rowsTable: Record<string, string>[],
 	) {
+		const providerRows = keepProviderRows(rowsTable);
+
 		return expectEventualRows(
 			() => {
 				return database('subscriptions')
-					.select(Object.keys(rowsTable[0]!))
+					.select(Object.keys(providerRows[0]!))
 					.where('provider_subscription_id', subscriptionId);
 			},
-			readExpectedRows(rowsTable),
+			readExpectedRows(providerRows),
 		);
 	}
 
@@ -592,6 +701,8 @@ describe.each(vendors)('%s', (vendor) => {
 		subscriptionId: string,
 		rowsTable: Record<string, string>[],
 	) {
+		const providerRows = keepProviderRows(rowsTable);
+
 		return expectEventualRows(
 			() => {
 				return database('subscription_events')
@@ -600,13 +711,13 @@ describe.each(vendors)('%s', (vendor) => {
 						'subscriptions.id',
 						'subscription_events.subscription',
 					)
-					.select(Object.keys(rowsTable[0]!).map((columnName) => {
+					.select(Object.keys(providerRows[0]!).map((columnName) => {
 						return `subscription_events.${columnName}`;
 					}))
 					.where('subscriptions.provider_subscription_id', subscriptionId)
 					.orderBy('subscription_events.id');
 			},
-			readExpectedRows(rowsTable),
+			readExpectedRows(providerRows),
 		);
 	}
 
@@ -657,11 +768,36 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 	}
 
+	function expectNoProviderQueueRow(
+		rowsTable: { provider: string; resource_id: string }[],
+	) {
+		const [{ resource_id: resourceId }] = keepProviderRows(rowsTable) as [
+			{ resource_id: string },
+		];
+
+		return expectNoQueueRow(resourceId);
+	}
+
+	// A `write` cell is the YAML of one write, a write without `body` having none.
+	function readExpectedWrites(
+		rowsTable: Record<string, string>[],
+	): ReceivedWrite[] {
+		const providerRows = keepProviderRows(rowsTable);
+
+		if (!('write' in providerRows[0]!)) {
+			return parseGherkinTable<ReceivedWrite>(providerRows);
+		}
+
+		return providerRows.map(({ write: writeYaml }) => {
+			return { body: null, ...loadYaml(writeYaml!) as object } as ReceivedWrite;
+		});
+	}
+
 	async function expectReceivedWrites(rowsTable: Record<string, string>[]) {
 		await expect.poll(() => {
 			return fakeProviders.receivedWrites;
 		}, SYNC_POLL)
-			.toEqual(parseGherkinTable<ReceivedWrite>(rowsTable));
+			.toEqual(readExpectedWrites(rowsTable));
 
 		fakeProviders.receivedWrites.length = 0;
 	}
@@ -796,29 +932,38 @@ describe.each(vendors)('%s', (vendor) => {
 		[/^Mollie holds this subscription:$/, holdSubscription],
 		[/^Mollie holds this mandate:$/, holdMandate],
 		[/^Stripe holds this subscription:$/, holdStripeSubscription],
-		[/^(?:Mollie|Stripe) no longer holds subscription (\w+)$/, forgetSubscription],
+		[/^the provider holds this subscription:$/, holdProviderSubscription],
+		[
+			/^(?:Mollie|Stripe|the provider) no longer holds subscription (\S+)$/,
+			forgetSubscription,
+		],
 		[/^these requests get these responses:$/, sendRequestRows],
 		[/^Stripe sends these events:$/, sendStripeEvents],
 		[/^Mollie sends these events:$/, sendMollieEvents],
+		[/^the provider sends these events:$/, sendProviderEvents],
 		[/^these Mollie events get these responses:$/, sendSignedMollieEvents],
 		[/^this access is eventually stored:$/, expectStoredAccess],
 		[/^this user eventually holds no access:$/, expectNoAccess],
-		[/^subscription (\w+) is eventually stored:$/, expectStoredSubscription],
-		[/^the events of subscription (\w+) are eventually:$/, expectSubscriptionEvents],
+		[/^subscription (\S+) is eventually stored:$/, expectStoredSubscription],
+		[/^the events of subscription (\S+) are eventually:$/, expectSubscriptionEvents],
 		[
 			/^these unreadable webhooks are eventually stored:$/,
 			expectUnreadableWebhooks,
 		],
 		[
-			/^subscription (\w+) eventually continues (\w+)$/,
+			/^subscription (\S+) eventually continues (\S+)$/,
 			expectContinuedSubscription,
 		],
 		[
-			/^the beneficiaries of subscription (\w+) are eventually:$/,
+			/^the beneficiaries of subscription (\S+) are eventually:$/,
 			expectBeneficiaries,
 		],
 		[/^the instance eventually logged:$/, expectLoggedMessage],
 		[/^these sync queue rows are eventually stored:$/, expectQueueRows],
+		[
+			/^the sync queue eventually holds no row for this resource:$/,
+			expectNoProviderQueueRow,
+		],
 		[/^the sync queue eventually holds no row for (\S+)$/, expectNoQueueRow],
 		[/^the providers eventually received these writes:$/, expectReceivedWrites],
 		[
@@ -917,11 +1062,17 @@ describe.each(vendors)('%s', (vendor) => {
 		expect(await database.schema.hasTable(tableName)).toBe(false);
 	}
 
-	// Bound off each scenario's own steps: the library binds by position.
+	// Bound off each scenario's own steps: the library binds by position. An
+	// outline's steps still read `<column>`, which the library fills per example.
 	defineFeature(lifecycleFeature, (scenario) => {
-		for (const { title, steps: scenarioSteps } of lifecycleFeature.scenarios) {
+		const lifecycleScenarios = [
+			...lifecycleFeature.scenarios,
+			...lifecycleFeature.scenarioOutlines,
+		];
+
+		for (const { title, steps: scenarioSteps } of lifecycleScenarios) {
 			scenario(title, ({ defineStep }) => {
-				for (const { stepText } of scenarioSteps) {
+				for (const [stepIndex, { stepText }] of scenarioSteps.entries()) {
 					const boundStep = lifecycleSteps.find(([stepMatcher]) => {
 						return stepMatcher.test(stepText);
 					});
@@ -930,7 +1081,20 @@ describe.each(vendors)('%s', (vendor) => {
 						throw new Error(`No step reads ${JSON.stringify(stepText)}`);
 					}
 
-					defineStep(...boundStep);
+					const [stepMatcher, stepCallback] = boundStep;
+
+					if (stepIndex > 0) {
+						defineStep(stepMatcher, stepCallback);
+
+						continue;
+					}
+
+					// A scenario seeding no pending subscription has no provider.
+					defineStep(stepMatcher, (...stepArguments: unknown[]) => {
+						scenarioProviders = [];
+
+						return stepCallback(...stepArguments);
+					});
 				}
 			}, 180_000);
 		}
