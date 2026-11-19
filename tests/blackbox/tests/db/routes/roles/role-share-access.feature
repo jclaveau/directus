@@ -114,7 +114,8 @@ Feature: A share reads with its sender's role chain and its own
       | path: /items/role_share_notes/<note> |   errors:                          |
       | query:                               |     - message: >-                  |
       |   fields: label                      |         You don't have permission  |
-      |                                      |         to access collection       |
+      |                                      |         to access field "id" in    |
+      |                                      |         collection                 |
       |                                      |         "role_share_notes" or it   |
       |                                      |         does not exist. Queried in |
       |                                      |         root.                      |
