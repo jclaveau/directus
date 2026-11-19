@@ -1,5 +1,5 @@
 import { createKv, type Kv } from '../../kv/index.js';
-import type { Cache } from '../types/class.js';
+import type { Cache, CacheRead } from '../types/class.js';
 import type { CacheConfigLocal } from '../types/config.js';
 
 export class CacheLocal implements Cache {
@@ -31,8 +31,15 @@ export class CacheLocal implements Cache {
 		await this.store.clear();
 	}
 
-	async readGeneration() {
-		return this.generation;
+	async getWithGeneration<T = unknown>(key: string): Promise<CacheRead<T>> {
+		const generation = this.generation;
+		const value = await this.store.get<T>(key);
+
+		if (value !== undefined) {
+			return { found: true, value };
+		}
+
+		return { found: false, generation };
 	}
 
 	async setUnlessCleared(key: string, value: unknown, generation: number) {

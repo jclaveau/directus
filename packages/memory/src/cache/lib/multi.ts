@@ -1,6 +1,6 @@
 import { processId } from '@directus/utils/node';
 import { createBus, type Bus } from '../../bus/index.js';
-import type { Cache } from '../types/class.js';
+import type { Cache, CacheRead } from '../types/class.js';
 import type { CacheConfigMulti } from '../types/config.js';
 import { CacheLocal } from './local.js';
 import { CacheRedis } from './redis.js';
@@ -79,8 +79,22 @@ export class CacheMulti implements Cache {
 		await this.clearOthers(key);
 	}
 
-	async readGeneration() {
-		return await this.redis.readGeneration();
+	// Refills the local tier as `get` does, and for the same reason.
+	async getWithGeneration<T = unknown>(key: string): Promise<CacheRead<T>> {
+		const local = await this.local.get<T>(key);
+
+		if (local !== undefined) {
+			return { found: true, value: local };
+		}
+
+		const generationBeforeRead = this.clearGeneration;
+		const shared = await this.redis.getWithGeneration<T>(key);
+
+		if (shared.found && this.clearGeneration === generationBeforeRead) {
+			await this.local.set(key, shared.value);
+		}
+
+		return shared;
 	}
 
 	// Redis decides for every process; the local copy is skipped when a peer's

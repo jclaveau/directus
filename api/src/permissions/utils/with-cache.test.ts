@@ -6,7 +6,6 @@ import { withCache } from './with-cache.js';
 vi.mock('../cache.js', () => {
 	const cacheStore = {
 		get: vi.fn(),
-		readGeneration: vi.fn(),
 		getWithGeneration: vi.fn(),
 		setUnlessCleared: vi.fn(),
 	};
@@ -16,10 +15,6 @@ vi.mock('../cache.js', () => {
 
 beforeEach(() => {
 	vi.mocked(useCache().get).mockReset();
-
-	vi.mocked(useCache().readGeneration)
-		.mockReset()
-		.mockResolvedValue(0);
 
 	vi.mocked(useCache().getWithGeneration)
 		.mockReset()
@@ -171,7 +166,6 @@ test('a miss reads the value and its generation in one call', async () => {
 
 	expect(useCache().getWithGeneration).toHaveBeenCalledOnce();
 	expect(useCache().get).not.toHaveBeenCalled();
-	expect(useCache().readGeneration).not.toHaveBeenCalled();
 });
 
 test('a call waiting on a read a clear crossed reads on its own', async () => {

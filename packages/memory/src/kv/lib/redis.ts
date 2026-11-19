@@ -8,6 +8,7 @@ import {
 	uint8ArrayToBuffer,
 	withNamespace,
 } from '../../utils/index.js';
+import type { CacheRead } from '../../cache/types/class.js';
 import type { ExtendedRedis, KvConfigRedis } from '../index.js';
 import type { Kv } from '../types/class.js';
 
@@ -78,6 +79,10 @@ export class KvRedis implements Kv {
 			return undefined;
 		}
 
+		return await this.decodeValue<T>(value);
+	}
+
+	private async decodeValue<T>(value: Buffer) {
 		let binaryArray = bufferToUint8Array(value);
 
 		if (this.compression === true && isCompressed(binaryArray)) {
@@ -120,8 +125,18 @@ export class KvRedis implements Kv {
 		return `${this.namespace}-generation`;
 	}
 
-	async readGeneration() {
-		return Number(await this.redis.get(this.generationKey) ?? 0);
+	// One MGET: the generation is read at the instant the key was found missing.
+	async getWithGeneration<T = unknown>(key: string): Promise<CacheRead<T>> {
+		const [value, generation] = await this.redis.mgetBuffer(
+			withNamespace(key, this.namespace),
+			this.generationKey,
+		);
+
+		if (value) {
+			return { found: true, value: await this.decodeValue<T>(value) };
+		}
+
+		return { found: false, generation: Number(generation?.toString() ?? 0) };
 	}
 
 	async bumpGeneration() {

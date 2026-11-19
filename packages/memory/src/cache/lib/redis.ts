@@ -33,8 +33,8 @@ export class CacheRedis implements Cache {
 		await this.store.clear();
 	}
 
-	async readGeneration() {
-		return await this.store.readGeneration();
+	async getWithGeneration<T = unknown>(key: string) {
+		return await this.store.getWithGeneration<T>(key);
 	}
 
 	async setUnlessCleared(key: string, value: unknown, generation: number) {
