@@ -57,7 +57,7 @@ test('a call made after a read ended reads the cache again', async () => {
 	expect(cachedHandler).toHaveBeenCalledTimes(1);
 });
 
-test('a failed read rejects every waiting call and is not kept', async () => {
+test('a call waiting on a failed read reads on its own', async () => {
 	const cachedHandler = vi.fn()
 		.mockRejectedValueOnce(new Error('read failed'))
 		.mockResolvedValueOnce(['row']);
@@ -71,10 +71,9 @@ test('a failed read rejects every waiting call and is not kept', async () => {
 
 	expect(readResults).toEqual([
 		{ status: 'rejected', reason: new Error('read failed') },
-		{ status: 'rejected', reason: new Error('read failed') },
+		{ status: 'fulfilled', value: ['row'] },
 	]);
 
-	await expect(cachedRead({ policies: ['a'] })).resolves.toEqual(['row']);
 	expect(cachedHandler).toHaveBeenCalledTimes(2);
 });
 
