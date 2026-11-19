@@ -2,7 +2,8 @@
 // Probes what Stripe's test mode really sends and answers for the calls and
 // events the subscriptions bundle relies on, then compares that with
 // stripe-behaviour.baseline.json. The bundle's unit tests and the blackbox
-// fake Stripe are written from that baseline, not from Stripe's docs.
+// fake Stripe read the events it records,
+// stripe-behaviour.recorded-events.json, not Stripe's docs.
 //
 // A run:
 //   1. deletes the test clocks and webhook endpoints a previous run left;
@@ -14,7 +15,8 @@
 //      clock past the period end (renewal), cancels it now;
 //   5. retrieves a subscription that does not exist;
 //   6. after --listen-seconds, writes what each step returned and what reached
-//      the webhook, and diffs it with the baseline.
+//      the webhook, and diffs it with the baseline; --update-baseline rewrites
+//      the baseline and the recorded events.
 //
 // Usage:
 //   SUBSCRIPTIONS_STRIPE_SECRET_KEY=sk_test_... \
@@ -63,6 +65,11 @@ const baselinePath = join(
 	'stripe-behaviour.baseline.json',
 );
 
+const recordedEventsPath = join(
+	dirname(fileURLToPath(import.meta.url)),
+	'stripe-behaviour.recorded-events.json',
+);
+
 // The version stripe@23.1.0 (the catalog's) sends: the bundle reads payloads
 // shaped by it, so the probe asks for the same.
 const stripeApiVersion = '2026-10-28.endive';
@@ -90,6 +97,7 @@ mkdirSync(outputDirectory, { recursive: true });
 const capturesPath = join(outputDirectory, 'captures.jsonl');
 const cloudflaredLogPath = join(outputDirectory, 'cloudflared.log');
 const capturedEvents = [];
+const recordedEvents = {};
 const signatureHeaderKeys = new Set();
 const unhandledEventTypes = new Set();
 let webhookSecret = null;
@@ -602,6 +610,9 @@ function describeActionEvents(actionRequestIds, probeSubscriptionId) {
 		const eventLine = `${capturedEvent.eventBody.type}; ${subscriptionRead};`
 			+ ` signature ${capturedEvent.signatureStatus}`;
 
+		recordedEvents[`${actionName}: ${capturedEvent.eventBody.type}`] ??=
+			capturedEvent.eventBody;
+
 		describedEvents[actionName] ??= [];
 
 		if (!describedEvents[actionName].includes(eventLine)) {
@@ -614,6 +625,31 @@ function describeActionEvents(actionRequestIds, probeSubscriptionId) {
 	}
 
 	return describedEvents;
+}
+
+// The handled events as Stripe sent them, for the bundle's unit tests and
+// the blackbox fake Stripe. Each Stripe id becomes `<prefix>_recorded<N>`,
+// so the file does not change with every run's random ids, and names no
+// account.
+function composeRecordedEventsJson() {
+	const recordedIds = new Map();
+	const prefixCounts = new Map();
+
+	const recordedJson = JSON.stringify(recordedEvents, null, '\t').replace(
+		/\b([a-z]+(?:_[a-z]+)*)_(?=[a-z\d]*[A-Z\d])[A-Za-z\d]{14,}\b/g,
+		(stripeId, idPrefix) => {
+			if (!recordedIds.has(stripeId)) {
+				const prefixCount = (prefixCounts.get(idPrefix) ?? 0) + 1;
+
+				prefixCounts.set(idPrefix, prefixCount);
+				recordedIds.set(stripeId, `${idPrefix}_recorded${prefixCount}`);
+			}
+
+			return recordedIds.get(stripeId);
+		},
+	);
+
+	return `${redactSecrets(recordedJson)}\n`;
 }
 
 function describeEnvelopes() {
@@ -869,6 +905,9 @@ try {
 
 	observedBehaviour.envelopes = describeEnvelopes();
 
+	const recordedEventsJson = composeRecordedEventsJson();
+	writeFileSync(join(outputDirectory, 'recorded-events.json'), recordedEventsJson);
+
 	writeFileSync(
 		join(outputDirectory, 'unhandled-event-types.json'),
 		`${JSON.stringify([...unhandledEventTypes].sort(), null, '\t')}\n`,
@@ -884,6 +923,7 @@ try {
 
 	if (cliOptions['update-baseline']) {
 		writeFileSync(baselinePath, observedJson);
+		writeFileSync(recordedEventsPath, recordedEventsJson);
 		console.log(`\n== baseline rewritten: ${baselinePath}`);
 	}
 	else if (!existsSync(baselinePath)) {

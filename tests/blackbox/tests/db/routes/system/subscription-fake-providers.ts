@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
@@ -41,6 +42,18 @@ type FakeAnswer = { code: number; body: object };
 
 // 2099-01-01T00:00:00Z
 const STRIPE_PERIOD_END = 4_070_908_800;
+
+// The subscription Stripe's test mode sent, recorded by
+// scripts/stripe-behaviour/stripe-webhook-probe.mjs: the fake answers its
+// shape, with the holding's ids and state.
+const RECORDED_STRIPE_SUBSCRIPTION = JSON.parse(readFileSync(
+	new URL(
+		'../../../../../../scripts/stripe-behaviour/'
+		+ 'stripe-behaviour.recorded-events.json',
+		import.meta.url,
+	),
+	'utf8',
+))['subscription created: customer.subscription.created'].data.object;
 
 const MOLLIE_NOT_FOUND: FakeAnswer = {
 	code: 404,
@@ -307,8 +320,8 @@ export async function startFakeProviders() {
 		return {
 			code: 200,
 			body: {
+				...RECORDED_STRIPE_SUBSCRIPTION,
 				id: subscriptionId,
-				object: 'subscription',
 				customer: stripeHolding.customer,
 				status: stripeHolding.status,
 				cancel_at_period_end: stripeHolding.cancel_at_period_end === true,
@@ -320,16 +333,10 @@ export async function startFakeProviders() {
 						),
 					},
 				items: {
-					object: 'list',
+					...RECORDED_STRIPE_SUBSCRIPTION.items,
 					data: [{
-						id: `si_${subscriptionId}`,
+						...RECORDED_STRIPE_SUBSCRIPTION.items.data[0],
 						current_period_end: STRIPE_PERIOD_END,
-						price: {
-							id: `price_${subscriptionId}`,
-							unit_amount: 1000,
-							currency: 'eur',
-							recurring: { interval: 'month', interval_count: 1 },
-						},
 					}],
 				},
 			},
