@@ -1113,6 +1113,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | customer              | cus_stripe |
       | directus_subscription | 91         |
       | status                | active     |
+    And Stripe holds this subscription:
+      | column                | value       |
+      | subscription          | sub_unbound |
+      | customer              | cus_unbound |
+      | directus_subscription |             |
+      | status                | active      |
     When these requests get these responses:
       | request                              | response                                 |
       | as: anonymous                        | code: 400                                |+
@@ -1137,6 +1143,21 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | type             | subscription |
       | customer.created | sub_ignored  |
     Then the sync queue eventually holds no row for sub_ignored
+    And the instance eventually logged:
+      """
+      Webhook from "stripe" ignored: event type "customer.created" is not
+      handled
+      """
+    When Stripe sends these events:
+      | type                          | subscription |
+      | customer.subscription.updated | sub_unbound  |
+    Then the sync queue eventually holds no row for sub_unbound
+    And the instance eventually logged:
+      """
+      Subscription sync of "stripe" "sub_unbound" dropped: "\"stripe\"
+      subscription \"sub_unbound\" names no pending subscription: its metadata
+      \"directus_subscription\" is null"
+      """
     When Stripe sends these events:
       | type                          | subscription |
       | customer.subscription.updated | sub_stripe   |
@@ -1207,6 +1228,52 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
     And this user eventually holds no access:
       | user      |
       | <user_92> |
+
+  Scenario: a user takes back a Stripe cancel: the same subscription goes on
+    Given these pending subscriptions, each with its own plan:
+      | id | provider | manager | beneficiaries_max | plan_status |
+      | 93 | stripe   | 93      | 1                 | active      |
+    And Stripe holds this subscription:
+      | column                | value        |
+      | subscription          | sub_takeback |
+      | customer              | cus_takeback |
+      | directus_subscription | 93           |
+      | status                | active       |
+      | cancel_at_period_end  | true         |
+    When Stripe sends these events:
+      | type                          | subscription |
+      | customer.subscription.updated | sub_takeback |
+    Then subscription sub_takeback is eventually stored:
+      | status | cancel_at_period_end | current_period_end       |
+      | active | true                 | 2099-01-01T00:00:00.000Z |
+    When these requests get these responses:
+      | request                     | response  |
+      | as: lifecycle-93-token      | code: 204 |+
+      | method: POST                |           |
+      | path: /subscriptions/resume |           |
+    Then the providers eventually received these writes:
+      | method | path                           | body                       |
+      | POST   | /v1/subscriptions/sub_takeback | cancel_at_period_end=false |
+    And subscription sub_takeback is eventually stored:
+      | status | cancel_at_period_end | current_period_end       |
+      | active | false                | 2099-01-01T00:00:00.000Z |
+    And the events of subscription sub_takeback are eventually:
+      | source | status | cancel_at_period_end | user      |
+      | sync   | active | true                 |           |
+      | user   | active | false                | <user_93> |
+    And this access is eventually stored:
+      | user      | policy      | managed_by              |
+      | <user_93> | <policy_93> | @scalabus/subscriptions |
+    And these requests get these responses:
+      | request                     | response                                |
+      | as: lifecycle-93-token      | code: 404                               |+
+      | method: POST                | body:                                   |
+      | path: /subscriptions/resume |   errors:                               |
+      |                             |     - message: >-                       |
+      |                             |         No canceled subscription to     |
+      |                             |         resume                          |
+      |                             |       extensions:                       |
+      |                             |         code: NO_SUBSCRIPTION_TO_RESUME |
 
   Scenario: each sync announces the access it changed to the extensions listening
     Given these pending subscriptions, each with its own plan:
