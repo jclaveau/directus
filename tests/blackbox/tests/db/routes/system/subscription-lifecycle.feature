@@ -439,86 +439,99 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | mollie   | 33 |
       | stripe   | 36 |
 
-  Scenario: archiving a plan ends its subscriptions once the admin typed the sentence
+  Scenario Outline: archiving a <provider> plan ends its subscriptions once confirmed
     Given these pending subscriptions, each with its own plan:
-      | id | provider | manager | beneficiaries_max | plan_status |
-      | 41 | mollie   | 41      | 1                 | active      |
-      | 42 | mollie   | 42      | 1                 | active      |
-    And Mollie holds this subscription:
-      | column                | value        |
-      | payment               | tr_archived  |
-      | customer              | cst_archived |
-      | subscription          | sub_archived |
-      | directus_subscription | 41           |
-      | status                | active       |
-      | paid_at               | 2099-01-01   |
-    When Mollie sends these events:
-      | type         | entity      |
-      | payment.paid | tr_archived |
-    Then subscription sub_archived is eventually stored:
+      | id      | provider   | manager | beneficiaries_max | plan_status |
+      | <id>    | <provider> | <id>    | 1                 | active      |
+      | <other> | <provider> | <other> | 1                 | active      |
+    And the provider holds this subscription:
+      | column                | mollie            | stripe            |
+      | payment               | tr_archived_<id>  |                   |
+      | customer              | cst_archived_<id> | cus_archived_<id> |
+      | subscription          | sub_archived_<id> | sub_archived_<id> |
+      | directus_subscription | <id>              | <id>              |
+      | status                | active            | active            |
+      | paid_at               | 2099-01-01        |                   |
+    When the provider sends these events:
+      | provider | type                          | entity            |
+      | mollie   | payment.paid                  | tr_archived_<id>  |
+      | stripe   | customer.subscription.updated | sub_archived_<id> |
+    Then subscription sub_archived_<id> is eventually stored:
       | status | cancel_at_period_end |
       | active | false                |
     And these requests get these responses:
-      | request                                | response                               |
-      | as: lifecycle-41-token                 | code: 403                              |+
-      | method: POST                           | body:                                  |
-      | path: /subscriptions/plans/41/archive  |   errors:                              |
-      |                                        |     - message: >-                      |
-      |                                        |         You don't have permission to   |
-      |                                        |         access this.                   |
-      |                                        |       extensions:                      |
-      |                                        |         code: FORBIDDEN                |
-      | method: POST                           | code: 403                              |+
-      | path: /subscriptions/plans/999/archive | body:                                  |
-      |                                        |   errors:                              |
-      |                                        |     - message: >-                      |
-      |                                        |         You don't have permission to   |
-      |                                        |         access this.                   |
-      |                                        |       extensions:                      |
-      |                                        |         code: FORBIDDEN                |
-      | method: POST                           | code: 400                              |+
-      | path: /subscriptions/plans/one/archive | body:                                  |
-      |                                        |   errors:                              |
-      |                                        |     - message: >-                      |
-      |                                        |         Invalid payload. Plan id "one" |
-      |                                        |         must be an integer.            |
-      |                                        |       extensions:                      |
-      |                                        |         code: INVALID_PAYLOAD          |
-      | method: POST                           | code: 400                              |+
-      | path: /subscriptions/plans/41/archive  | body:                                  |
-      |                                        |   errors:                              |
-      |                                        |     - message: >-                      |
-      |                                        |         Invalid payload. Type "End 1   |
-      |                                        |         subscription and lose this     |
-      |                                        |         customer" in "confirmation".   |
-      |                                        |       extensions:                      |
-      |                                        |         code: INVALID_PAYLOAD          |
-      | method: POST                           | code: 200                              |+
-      | path: /subscriptions/plans/42/archive  | body:                                  |
-      |                                        |   data:                                |
-      |                                        |     status: archived                   |
-      |                                        |     ending_subscriptions: 0            |
-      | method: POST                           | code: 200                              |+
-      | path: /subscriptions/plans/41/archive  | body:                                  |
-      | payload:                               |   data:                                |
-      |   confirmation: >-                     |     status: archived                   |
-      |     End 1 subscription and lose this   |     ending_subscriptions: 1            |
-      |     customer                           |                                        |
-      | method: GET                            | code: 200                              |+
-      | path: /items/subscription_plans/41     | body:                                  |
-      |                                        |   data:                                |
-      |                                        |     status: archived                   |
+      | request                                    | response                           |
+      | as: lifecycle-<id>-token                   | code: 403                          |+
+      | method: POST                               | body:                              |
+      | path: /subscriptions/plans/<id>/archive    |   errors:                          |
+      |                                            |     - message: >-                  |
+      |                                            |         You don't have permission  |
+      |                                            |         to access this.            |
+      |                                            |       extensions:                  |
+      |                                            |         code: FORBIDDEN            |
+      | method: POST                               | code: 403                          |+
+      | path: /subscriptions/plans/999/archive     | body:                              |
+      |                                            |   errors:                          |
+      |                                            |     - message: >-                  |
+      |                                            |         You don't have permission  |
+      |                                            |         to access this.            |
+      |                                            |       extensions:                  |
+      |                                            |         code: FORBIDDEN            |
+      | method: POST                               | code: 400                          |+
+      | path: /subscriptions/plans/one/archive     | body:                              |
+      |                                            |   errors:                          |
+      |                                            |     - message: >-                  |
+      |                                            |         Invalid payload. Plan id   |
+      |                                            |         "one" must be an integer.  |
+      |                                            |       extensions:                  |
+      |                                            |         code: INVALID_PAYLOAD      |
+      | method: POST                               | code: 400                          |+
+      | path: /subscriptions/plans/<id>/archive    | body:                              |
+      |                                            |   errors:                          |
+      |                                            |     - message: >-                  |
+      |                                            |         Invalid payload. Type "End |
+      |                                            |         1 subscription and lose    |
+      |                                            |         this customer" in          |
+      |                                            |         "confirmation".            |
+      |                                            |       extensions:                  |
+      |                                            |         code: INVALID_PAYLOAD      |
+      | method: POST                               | code: 200                          |+
+      | path: /subscriptions/plans/<other>/archive | body:                              |
+      |                                            |   data:                            |
+      |                                            |     status: archived               |
+      |                                            |     ending_subscriptions: 0        |
+      | method: POST                               | code: 200                          |+
+      | path: /subscriptions/plans/<id>/archive    | body:                              |
+      | payload:                                   |   data:                            |
+      |   confirmation: >-                         |     status: archived               |
+      |     End 1 subscription and lose this       |     ending_subscriptions: 1        |
+      |     customer                               |                                    |
+      | method: GET                                | code: 200                          |+
+      | path: /items/subscription_plans/<id>       | body:                              |
+      |                                            |   data:                            |
+      |                                            |     status: archived               |
     Then the providers eventually received these writes:
-      | method | path                                                  | body |
-      | DELETE | /v2/customers/cst_archived/subscriptions/sub_archived |      |
-    And the events of subscription sub_archived are eventually:
-      | source        | status   | cancel_at_period_end |
-      | sync          | active   | false                |
-      | plan_archived | active   | true                 |
-      | sync          | canceled | true                 |
+      | provider | write                                                                |
+      | mollie   | method: DELETE                                                       |+
+      |          | path: /v2/customers/cst_archived_<id>/subscriptions/sub_archived_<id> |
+      | stripe   | method: POST                                                         |+
+      |          | path: /v1/subscriptions/sub_archived_<id>                            |
+      |          | body: cancel_at_period_end=true                                      |
+    And the events of subscription sub_archived_<id> are eventually:
+      | provider | source        | status   | cancel_at_period_end |
+      | mollie   | sync          | active   | false                |
+      | mollie   | plan_archived | active   | true                 |
+      | mollie   | sync          | canceled | true                 |
+      | stripe   | sync          | active   | false                |
+      | stripe   | plan_archived | active   | true                 |
     And this access is eventually stored:
-      | user      | policy      | managed_by              |
-      | <user_41> | <policy_41> | @scalabus/subscriptions |
+      | user        | policy        | managed_by              |
+      | <user_<id>> | <policy_<id>> | @scalabus/subscriptions |
+
+    Examples:
+      | provider | id | other |
+      | mollie   | 41 | 42    |
+      | stripe   | 43 | 44    |
 
   Scenario Outline: a deleted user's <provider> subscription is canceled at its provider
     Given these pending subscriptions, each with its own plan:
