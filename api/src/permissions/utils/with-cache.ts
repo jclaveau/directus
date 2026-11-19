@@ -16,10 +16,9 @@ export function withCache<F extends (arg0: Arg0, ...args: any[]) => R, R, Arg0 =
 	prepareArg?: (arg0: Arg0) => Arg0,
 ) {
 	const cache = useCache();
+	const runningReads = new Map<string, Promise<R>>();
 
-	return (async (arg0: Arg0, ...args: any[]) => {
-		arg0 = prepareArg ? prepareArg(arg0) : arg0;
-		const key = namespace + '-' + getSimpleHash(JSON.stringify(arg0));
+	const readThrough = async (key: string, arg0: Arg0, args: any[]) => {
 		const cached = await cache.get(key);
 
 		if (cached !== undefined) {
@@ -31,5 +30,31 @@ export function withCache<F extends (arg0: Arg0, ...args: any[]) => R, R, Arg0 =
 		cache.set(key, res);
 
 		return res;
+	};
+
+	// A call made while another one in this process reads the same key waits
+	// for that read instead of querying a second time; a peer process still
+	// queries on its own.
+	return (async (arg0: Arg0, ...args: any[]) => {
+		if (prepareArg) {
+			arg0 = prepareArg(arg0);
+		}
+
+		const key = `${namespace}-${getSimpleHash(JSON.stringify(arg0))}`;
+		const runningRead = runningReads.get(key);
+
+		if (runningRead) {
+			return runningRead;
+		}
+
+		const keyRead = readThrough(key, arg0, args);
+		runningReads.set(key, keyRead);
+
+		try {
+			return await keyRead;
+		}
+		finally {
+			runningReads.delete(key);
+		}
 	}) as F;
 }
