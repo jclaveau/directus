@@ -50,3 +50,4 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [File storage bugs → #709 (oos)](../project_directus_file_storage_bugs.md) — every new upload/storage/thumbnail finding goes to #709, never into the PR under review
 - [Issue #414 status](../project_directus_issue414_status.md) — fork PRs shipped, sameRowAs dedup design, 2026-11-13 re-measure (41,207 → 8,383 statements), what is left
 - [Large `_or` filter = planning time](../project_directus_or_filter_planning_time.md) — pgss hides it, `EXPLAIN (GENERIC_PLAN)`; `values`/`unnest` rewrites exact and flat (fork #735)
+- [#746 multi-role design](../project_directus_issue746_multi_role.md) — $CURRENT_ROLE dropped, $CURRENT_MEMBER_ROLES = stored m2m rows, migration _eq→_in rewrite; union facts; open D1-D8
