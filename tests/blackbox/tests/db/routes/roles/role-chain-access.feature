@@ -260,5 +260,9 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       |   query: '{ roles_me { name } }' |       - name: chain-<run> |
       |                                  |       - name: chain-<run> |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_access      | 3      | 0      | 0      | 0      |
+      | 1       | directus_permissions | 5      | 0      | 0      | 0      |
+      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles       | 3      | 0      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
