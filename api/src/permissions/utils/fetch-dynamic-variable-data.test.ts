@@ -55,8 +55,8 @@ test('Returns filter context for current user', async () => {
 		{
 			accountability: {
 				user: 'user',
-				memberRoles: [],
-				roles: [],
+				memberRoles: [] as string[],
+				roles: [] as string[],
 			} as Accountability,
 			policies: [],
 			dynamicVariableContext,
@@ -115,7 +115,10 @@ test('Returns filter context for current policies', async () => {
 	const res = await fetchDynamicVariableData(
 		{
 			dynamicVariableContext,
-			accountability: { memberRoles: [], roles: [] as string[] } as Accountability,
+			accountability: {
+				memberRoles: [] as string[],
+				roles: [] as string[],
+			} as Accountability,
 			policies: ['policy-1'],
 		},
 		{} as Context,
@@ -139,8 +142,8 @@ test('reads no filter context from a cache that is not serving', async () => {
 		{
 			accountability: {
 				user: 'user',
-				memberRoles: [],
-				roles: [],
+				memberRoles: [] as string[],
+				roles: [] as string[],
 			} as Accountability,
 			policies: [],
 			dynamicVariableContext: {

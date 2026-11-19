@@ -196,7 +196,7 @@ describe('Integration Tests', () => {
 
 				await service.createMany([{ role: testRoleId }], opts);
 
-				expect(opts.preMutationError).toStrictEqual(new InvalidPayloadError({
+				expect(opts.preMutationError).toEqual(new InvalidPayloadError({
 					reason: '"role" is replaced by the memberships in "roles":'
 						+ ' send "roles": [{ "role": <role id> }]',
 				}));
@@ -230,7 +230,7 @@ describe('Integration Tests', () => {
 					opts,
 				);
 
-				expect(opts.preMutationErrorsByKey).toStrictEqual(new Map([[
+				expect(opts.preMutationErrorsByKey).toEqual(new Map([[
 					'8e2b4c10-5d3a-4f6e-9a7b-000000000060',
 					new InvalidPayloadError({
 						reason: '"role" is replaced by the memberships in "roles":'
@@ -617,7 +617,10 @@ describe('Integration Tests', () => {
 
 				await service.updateBatch([
 					{ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000029', status: 'active' },
-					{ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000030', role: testRoleId },
+					{
+						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000030',
+						roles: [{ role: testRoleId }],
+					},
 				], { onRequireUserIntegrityCheck });
 
 				expect(onRequireUserIntegrityCheck).toHaveBeenCalledTimes(1);
@@ -823,11 +826,14 @@ describe('Integration Tests', () => {
 
 				// mock an invited user
 				vi.spyOn(UsersService.prototype as any, 'getUserByEmail').mockResolvedValueOnce({
-					id: 'invited-user-id',
+					id: '8e2b4c10-5d3a-4f6e-9a7b-000000000018',
 					status: 'invited',
 				});
 
 				tracker.on.select('directus_role_members').response([]);
+
+				vi.spyOn(UsersService.prototype, 'updateOne')
+					.mockResolvedValueOnce('8e2b4c10-5d3a-4f6e-9a7b-000000000018');
 
 				const promise = service
 					.inviteUser('user@example.com', ['invite-role'], null);
@@ -917,9 +923,15 @@ describe('Integration Tests', () => {
 				'refuses re-inviting an invited user to a URL off the allow list',
 				async () => {
 					vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
-						.mockResolvedValueOnce({ id: 'invited-user-id', status: 'invited' });
+						.mockResolvedValueOnce({
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000019',
+							status: 'invited',
+						});
 
 					tracker.on.select('directus_role_members').response([]);
+
+					vi.spyOn(UsersService.prototype, 'updateOne')
+						.mockResolvedValueOnce('8e2b4c10-5d3a-4f6e-9a7b-000000000019');
 
 					const promise = service.inviteUser(
 						'user@example.com',
@@ -1684,6 +1696,7 @@ describe('Integration Tests', () => {
 					schema,
 					accountability: {
 						user: null,
+						memberRoles: [],
 						roles: [],
 						admin: false,
 						app: false,

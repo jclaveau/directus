@@ -9,7 +9,7 @@ export type FieldMap = Record<string, string[]>;
 export interface FetchAllowedFieldMapOptions {
 	accountability: Pick<
 		Accountability,
-		'user' | 'role' | 'memberRoles' | 'roles' | 'ip' | 'admin' | 'app'
+		'user' | 'memberRoles' | 'roles' | 'ip' | 'admin' | 'app'
 	>;
 	action: PermissionsAction;
 }

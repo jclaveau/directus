@@ -114,7 +114,9 @@ vi.mock('./fetch-share-info.js', () => ({
 }));
 
 vi.mock('../modules/fetch-allowed-field-map/fetch-allowed-field-map.js', () => ({
-	fetchAllowedFieldMap: vi.fn().mockImplementation((accountability) => {
+	fetchAllowedFieldMap: vi.fn().mockImplementation((
+		{ accountability }: { accountability: Accountability },
+	) => {
 		if (
 			accountability.user === 'admin'
 			|| accountability.memberRoles.includes('admin')

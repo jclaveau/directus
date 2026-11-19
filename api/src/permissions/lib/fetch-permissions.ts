@@ -12,7 +12,7 @@ export interface FetchPermissionsOptions {
 	collections?: string[];
 	accountability?: Pick<
 		Accountability,
-		'user' | 'role' | 'memberRoles' | 'roles' | 'app' | 'share' | 'ip'
+		'user' | 'memberRoles' | 'roles' | 'app' | 'share' | 'ip'
 	>;
 	bypassDynamicVariableProcessing?: boolean;
 }

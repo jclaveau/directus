@@ -41,8 +41,8 @@ describe('the migration', () => {
 
 	test('up turns the role of each user into one membership', async () => {
 		vi.mocked(randomUUID)
-			.mockReturnValueOnce('membership-1')
-			.mockReturnValueOnce('membership-2');
+			.mockReturnValueOnce('00000000-0000-4000-8000-000000000001')
+			.mockReturnValueOnce('00000000-0000-4000-8000-000000000002');
 
 		vi.mocked(createInspector).mockReturnValue({
 			foreignKeys: vi.fn().mockResolvedValue([
@@ -62,11 +62,11 @@ describe('the migration', () => {
 
 		expect(tracker.history.insert.map(({ bindings }) => bindings)).toEqual([
 			[
-				'membership-1',
+				'00000000-0000-4000-8000-000000000001',
 				'role-a',
 				1,
 				'user-1',
-				'membership-2',
+				'00000000-0000-4000-8000-000000000002',
 				'role-b',
 				1,
 				'user-2',

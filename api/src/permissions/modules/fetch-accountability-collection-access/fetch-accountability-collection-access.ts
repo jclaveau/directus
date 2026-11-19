@@ -12,7 +12,7 @@ import type { Context } from '../../types.js';
 export async function fetchAccountabilityCollectionAccess(
 	accountability: Pick<
 		Accountability,
-		'user' | 'roles' | 'role' | 'memberRoles' | 'ip' | 'admin' | 'app'
+		'user' | 'roles' | 'memberRoles' | 'ip' | 'admin' | 'app'
 	>,
 	context: Context,
 ): Promise<CollectionAccess> {

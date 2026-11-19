@@ -142,6 +142,7 @@ import { allSystemMcpTools, findSystemMcpTool, systemMcpTools } from './tools.js
 
 const context = {
 	accountability: {
+		memberRoles: [],
 		roles: [],
 		user: null,
 		admin: true,

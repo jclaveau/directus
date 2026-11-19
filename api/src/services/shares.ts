@@ -228,7 +228,6 @@ export class SharesService extends ItemsService {
 		const tokenPayload: DirectusTokenPayload = {
 			app_access: false,
 			admin_access: false,
-			role: null,
 			share: record.share_id,
 		};
 

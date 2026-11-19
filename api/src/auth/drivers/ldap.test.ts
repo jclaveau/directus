@@ -1737,6 +1737,7 @@ describe('createLDAPAuthRouter', () => {
 		expect(AuthenticationService).toHaveBeenCalledWith({
 			accountability: {
 				user: null,
+				memberRoles: [],
 				roles: [],
 				admin: false,
 				app: false,

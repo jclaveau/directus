@@ -190,7 +190,8 @@ describe('Services / Collections', () => {
 				knex: db,
 				schema,
 				accountability: {
-					role: 'admin',
+					memberRoles: ['admin'],
+					roles: ['admin'],
 					admin: true,
 					user: 'admin-user',
 				} as Accountability,
@@ -207,7 +208,8 @@ describe('Services / Collections', () => {
 				knex: db,
 				schema,
 				accountability: {
-					role: 'admin',
+					memberRoles: ['admin'],
+					roles: ['admin'],
 					admin: true,
 					user: 'admin-user',
 				} as Accountability,

@@ -77,7 +77,7 @@ describe('WebSocketService', () => {
 			mockClient(
 				{ user: 'test', memberRoles: ['other', 'test'] } as Accountability,
 			),
-			mockClient({ user: 'test2', memberRoles: [] } as Accountability),
+			mockClient({ user: 'test2', memberRoles: [] as string[] } as Accountability),
 		];
 
 		vi.mocked(getWebSocketController).mockReturnValue({

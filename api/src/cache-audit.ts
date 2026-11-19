@@ -718,7 +718,7 @@ class CacheAudit {
 
 	/**
 	 * A minted access token for the user the entry was filled for, `''` for a
-	 * public fill, null for a user that no longer exists. `{ id, role }` is all
+	 * public fill, null for a user that no longer exists. `{ id }` is all
 	 * the token needs to carry: the app rebuilds the rest from the database, as
 	 * it does for any access token.
 	 */

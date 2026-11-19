@@ -3879,6 +3879,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				{ id: 'b6d7c3f0-6a2e-4f0b-9a51-2f4a8e1c0d22' },
 			]);
 
+			tracker.on.select('directus_role_members').response([]);
 			tracker.on.update('directus_users').response(1);
 
 			const transactionStates: string[][] = [];
@@ -3896,17 +3897,32 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 						c.field('id').uuid()
 							.primary();
 
+						c.field('roles').o2m(
+							'directus_role_members',
+							'user',
+							(relation) => {
+								return relation.options({
+									meta: { one_deselect_action: 'delete' },
+								});
+							},
+						);
+					})
+					.collection('directus_role_members', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('user').uuid();
 						c.field('role').uuid();
 					})
 					.build(),
 			}).upsertMany([
 				{
 					id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
-					role: '4ccdb196-14b3-4ed1-b9da-c1978be07ca2',
+					roles: [],
 				},
 				{
 					id: 'b6d7c3f0-6a2e-4f0b-9a51-2f4a8e1c0d22',
-					role: '4ccdb196-14b3-4ed1-b9da-c1978be07ca2',
+					roles: [],
 				},
 			]);
 
@@ -3923,6 +3939,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' },
 			]);
 
+			tracker.on.select('directus_role_members').response([]);
 			tracker.on.update('directus_users').response(1);
 
 			const onResponseCacheFlushDeferred = vi.fn();
@@ -3934,6 +3951,21 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 						c.field('id').uuid()
 							.primary();
 
+						c.field('roles').o2m(
+							'directus_role_members',
+							'user',
+							(relation) => {
+								return relation.options({
+									meta: { one_deselect_action: 'delete' },
+								});
+							},
+						);
+					})
+					.collection('directus_role_members', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('user').uuid();
 						c.field('role').uuid();
 					})
 					.build(),
@@ -3941,7 +3973,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				[
 					{
 						id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
-						role: '4ccdb196-14b3-4ed1-b9da-c1978be07ca2',
+						roles: [],
 					},
 				],
 				{ autoPurgeCache: false, onResponseCacheFlushDeferred },
@@ -3956,6 +3988,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' },
 			]);
 
+			tracker.on.select('directus_role_members').response([]);
 			tracker.on.update('directus_users').response(1);
 
 			const flushFailure = new Error('connect ECONNREFUSED 127.0.0.1:6379');
@@ -3969,13 +4002,28 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 						c.field('id').uuid()
 							.primary();
 
+						c.field('roles').o2m(
+							'directus_role_members',
+							'user',
+							(relation) => {
+								return relation.options({
+									meta: { one_deselect_action: 'delete' },
+								});
+							},
+						);
+					})
+					.collection('directus_role_members', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('user').uuid();
 						c.field('role').uuid();
 					})
 					.build(),
 			}).upsertMany([
 				{
 					id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
-					role: '4ccdb196-14b3-4ed1-b9da-c1978be07ca2',
+					roles: [],
 				},
 			]);
 
@@ -7572,8 +7620,13 @@ describe('Services / Items / a batched upsert', () => {
 
 			await database.schema.createTable('directus_users', (table) => {
 				table.uuid('id').primary();
-				table.uuid('role');
 				table.string('status');
+			});
+
+			await database.schema.createTable('directus_role_members', (table) => {
+				table.uuid('id').primary();
+				table.uuid('user');
+				table.uuid('role');
 			});
 
 			await database.schema.createTable('directus_roles', (table) => {
@@ -7614,8 +7667,13 @@ describe('Services / Items / a batched upsert', () => {
 
 			await database('directus_users').insert({
 				id: '10000000-0000-4000-8000-000000000001',
-				role: 'a0000000-0000-4000-8000-000000000001',
 				status: 'active',
+			});
+
+			await database('directus_role_members').insert({
+				id: 'b0000000-0000-4000-8000-000000000001',
+				user: '10000000-0000-4000-8000-000000000001',
+				role: 'a0000000-0000-4000-8000-000000000001',
 			});
 		});
 
@@ -7631,33 +7689,61 @@ describe('Services / Items / a batched upsert', () => {
 						c.field('id').uuid()
 							.primary();
 
-						c.field('role').uuid();
 						c.field('status').string();
+
+						c.field('roles').o2m(
+							'directus_role_members',
+							'user',
+							(relation) => {
+								return relation.options({
+									meta: { one_deselect_action: 'delete' },
+								});
+							},
+						);
+					})
+					.collection('directus_role_members', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('user').uuid();
+						c.field('role').uuid();
 					})
 					.build(),
 			}).upsertMany([
 				{
 					id: '20000000-0000-4000-8000-000000000002',
-					role: 'a0000000-0000-4000-8000-000000000001',
+					roles: [
+						{
+							id: 'b0000000-0000-4000-8000-000000000003',
+							role: 'a0000000-0000-4000-8000-000000000001',
+						},
+					],
 					status: 'active',
 				},
 				{
 					id: '10000000-0000-4000-8000-000000000001',
-					role: 'e0000000-0000-4000-8000-000000000001',
+					roles: [
+						{
+							id: 'b0000000-0000-4000-8000-000000000002',
+							role: 'e0000000-0000-4000-8000-000000000001',
+						},
+					],
 				},
 			])).resolves.toStrictEqual([
 				'20000000-0000-4000-8000-000000000002',
 				'10000000-0000-4000-8000-000000000001',
 			]);
 
-			await expect(database('directus_users').select('id', 'role')
-				.orderBy('id')).resolves.toStrictEqual([
+			await expect(database('directus_role_members').select('id', 'user', 'role')
+				.orderBy('user')).resolves.toStrictEqual([
 				{
-					id: '10000000-0000-4000-8000-000000000001',
+					id: 'b0000000-0000-4000-8000-000000000002',
+					user: '10000000-0000-4000-8000-000000000001',
 					role: 'e0000000-0000-4000-8000-000000000001',
 				},
 				{
-					id: '20000000-0000-4000-8000-000000000002',
+					id: 'b0000000-0000-4000-8000-000000000003',
+					user: '20000000-0000-4000-8000-000000000002',
 					role: 'a0000000-0000-4000-8000-000000000001',
 				},
 			]);
@@ -7673,15 +7759,36 @@ describe('Services / Items / a batched upsert', () => {
 						c.field('id').uuid()
 							.primary();
 
-						c.field('role').uuid();
 						c.field('status').string();
+
+						c.field('roles').o2m(
+							'directus_role_members',
+							'user',
+							(relation) => {
+								return relation.options({
+									meta: { one_deselect_action: 'delete' },
+								});
+							},
+						);
+					})
+					.collection('directus_role_members', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('user').uuid();
+						c.field('role').uuid();
 					})
 					.build(),
 			}).upsertMany(
 				[
 					{
 						id: '10000000-0000-4000-8000-000000000001',
-						role: 'e0000000-0000-4000-8000-000000000001',
+						roles: [
+							{
+								id: 'b0000000-0000-4000-8000-000000000002',
+								role: 'e0000000-0000-4000-8000-000000000001',
+							},
+						],
 					},
 				],
 				{ onRequireUserIntegrityCheck },
@@ -7699,31 +7806,63 @@ describe('Services / Items / a batched upsert', () => {
 						c.field('id').uuid()
 							.primary();
 
-						c.field('role').uuid();
 						c.field('status').string();
+
+						c.field('roles').o2m(
+							'directus_role_members',
+							'user',
+							(relation) => {
+								return relation.options({
+									meta: { one_deselect_action: 'delete' },
+								});
+							},
+						);
+					})
+					.collection('directus_role_members', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('user').uuid();
+						c.field('role').uuid();
 					})
 					.build(),
 			}).upsertMany([
 				{
 					id: '20000000-0000-4000-8000-000000000002',
-					role: 'e0000000-0000-4000-8000-000000000001',
+					roles: [
+						{
+							id: 'b0000000-0000-4000-8000-000000000003',
+							role: 'e0000000-0000-4000-8000-000000000001',
+						},
+					],
 					status: 'active',
 				},
 				{
 					id: '10000000-0000-4000-8000-000000000001',
-					role: 'e0000000-0000-4000-8000-000000000001',
+					roles: [
+						{
+							id: 'b0000000-0000-4000-8000-000000000002',
+							role: 'e0000000-0000-4000-8000-000000000001',
+						},
+					],
 				},
 			])).rejects.toMatchObject({
 				message: "Can't process content. "
 					+ 'Cannot remove the last admin user from the system.',
 			});
 
-			await expect(database('directus_users').select('id', 'role'))
+			await expect(database('directus_role_members').select('id', 'user', 'role'))
 				.resolves.toStrictEqual([
 					{
-						id: '10000000-0000-4000-8000-000000000001',
+						id: 'b0000000-0000-4000-8000-000000000001',
+						user: '10000000-0000-4000-8000-000000000001',
 						role: 'a0000000-0000-4000-8000-000000000001',
 					},
+				]);
+
+			await expect(database('directus_users').select('id'))
+				.resolves.toStrictEqual([
+					{ id: '10000000-0000-4000-8000-000000000001' },
 				]);
 		});
 	});

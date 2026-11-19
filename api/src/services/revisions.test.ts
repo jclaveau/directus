@@ -56,6 +56,7 @@ describe('Services / Revisions', () => {
 					admin: false,
 					app: true,
 					ip: null,
+					memberRoles: [],
 					roles: [],
 					user: 'editor',
 				},

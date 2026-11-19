@@ -55,6 +55,7 @@ import { handleSystemMcpRequest, MCP_PROTOCOL_VERSION } from './handle-request.j
 
 const context = {
 	accountability: {
+		memberRoles: [],
 		roles: [],
 		user: null,
 		admin: true,

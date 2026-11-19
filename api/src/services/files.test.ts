@@ -776,6 +776,7 @@ describe('Integration Tests', () => {
 						admin: false,
 						app: false,
 						ip: null,
+						memberRoles: [],
 						roles: ['uploader-role'],
 						user: 'uploader-id',
 					},

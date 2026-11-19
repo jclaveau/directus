@@ -8,7 +8,7 @@ export interface FetchAllowedCollectionsOptions {
 	action: PermissionsAction;
 	accountability: Pick<
 		Accountability,
-		'user' | 'role' | 'memberRoles' | 'roles' | 'ip' | 'admin' | 'app'
+		'user' | 'memberRoles' | 'roles' | 'ip' | 'admin' | 'app'
 	>;
 }
 

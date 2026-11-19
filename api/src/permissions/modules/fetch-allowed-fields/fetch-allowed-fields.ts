@@ -9,7 +9,7 @@ export interface FetchAllowedFieldsOptions {
 	action: PermissionsAction;
 	accountability: Pick<
 		Accountability,
-		'user' | 'role' | 'memberRoles' | 'roles' | 'ip' | 'app'
+		'user' | 'memberRoles' | 'roles' | 'ip' | 'app'
 	>;
 }
 
