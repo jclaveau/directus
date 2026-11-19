@@ -98,7 +98,36 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | query:                                                   |   data: [] |
       |   filter[user][email][_eq]: policies-emptied@write.email |            |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete | with |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_permissions  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies     | 1      | 1      | 0      | 0      | 0    |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_access       | 3      | 0      | 0      | 0      | 0    |
+      | 2       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_role_members | 2      | 0      | 0      | 0      | 0    |
+      | 2       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users        | 3      | 1      | 0      | 0      | 0    |
+      | 3       | directus_access       | 1      | 1      | 0      | 0      | 0    |
+      | 3       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 3       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 3       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_access       | 7      | 0      | 0      | 1      | 0    |
+      | 4       | directus_activity     | 0      | 2      | 0      | 0      | 0    |
+      | 4       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_role_members | 3      | 0      | 0      | 0      | 0    |
+      | 4       | directus_roles        | 2      | 0      | 0      | 0      | 0    |
+      | 4       | directus_users        | 5      | 0      | 0      | 0      | 0    |
+      | 4       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
+      | 4       | information_schema    | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_index              | 2      | 0      | 0      | 0      | 0    |
+      | 4       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a user's policies deleting an access row delete it
     When these requests get these responses:

@@ -135,7 +135,8 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       | 1       | directus_policies      | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_relations     | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_revisions     | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_roles         | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_role_members  | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_roles         | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_users         | 6      | 0      | 0      | 0      | 0    |
       | 1       | geometry_columns       | 0      | 0      | 0      | 0      | 1    |
       | 1       | information_schema     | 1      | 0      | 0      | 0      | 0    |

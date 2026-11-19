@@ -102,17 +102,18 @@ Feature: A write casts each field by its special, and reads it back cast
       |   filter[role_updated][_nnull]: true     |                   |
       |   fields: id                             |                   |
     And on postgres the requests ran these statements:
-      | request | table               | select | insert | update | delete |
-      | 1       | directus_access     | 2      | 0      | 0      | 0      |
-      | 1       | directus_activity   | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
-      | 1       | directus_roles      | 1      | 0      | 0      | 0      |
-      | 1       | directus_users      | 1      | 0      | 0      | 0      |
-      | 1       | test_write_cast_row | 1      | 1      | 0      | 0      |
-      | 2       | directus_activity   | 0      | 1      | 0      | 0      |
-      | 2       | directus_revisions  | 0      | 1      | 0      | 0      |
-      | 2       | directus_users      | 1      | 0      | 0      | 0      |
-      | 2       | test_write_cast_row | 2      | 0      | 1      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles        | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | test_write_cast_row   | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | test_write_cast_row   | 2      | 0      | 1      | 0      |
 
   Scenario: a date that does not parse is refused
     When these requests get these responses:
