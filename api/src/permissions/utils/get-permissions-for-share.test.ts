@@ -1,8 +1,12 @@
 import { beforeAll, describe, expect, test, vi } from 'vitest';
 import { getPermissionsForShare } from './get-permissions-for-share.js';
+import {
+	fetchGlobalAccess,
+} from '../modules/fetch-global-access/fetch-global-access.js';
 import type { Accountability } from '@directus/types';
 import type { Context } from '../types.js';
 import { SchemaBuilder } from '@directus/schema-builder';
+import { oneLine } from '@directus/utils';
 
 vi.mock('../modules/fetch-global-access/fetch-global-access.js', () => ({
 	fetchGlobalAccess: vi.fn()
@@ -144,6 +148,64 @@ describe('getPermissionsForShare', () => {
 			schema,
 			knex: null as any,
 		};
+	});
+
+	test(oneLine`
+		the share accountability carries its role as the one member role
+	`, async () => {
+		vi.mocked(fetchGlobalAccess).mockClear();
+
+		await getPermissionsForShare(
+			{
+				user: 'manager',
+				memberRoles: ['manager'],
+				admin: false,
+				app: false,
+				ip: '',
+				roles: [],
+				share: '5',
+			},
+			undefined,
+			context,
+		);
+
+		expect(vi.mocked(fetchGlobalAccess).mock.calls[0]![0])
+			.toEqual({
+				user: null,
+				memberRoles: ['manager'],
+				roles: ['manager'],
+				admin: false,
+				app: false,
+				ip: '',
+			});
+	});
+
+	test('a share with no role has no member role', async () => {
+		vi.mocked(fetchGlobalAccess).mockClear();
+
+		await getPermissionsForShare(
+			{
+				user: 'user',
+				memberRoles: ['user'],
+				admin: false,
+				app: false,
+				ip: '',
+				roles: [],
+				share: '3',
+			},
+			undefined,
+			context,
+		);
+
+		expect(vi.mocked(fetchGlobalAccess).mock.calls[0]![0])
+			.toEqual({
+				user: null,
+				memberRoles: [],
+				roles: [null],
+				admin: false,
+				app: false,
+				ip: '',
+			});
 	});
 
 	test('no role selected and created by admin user', async () => {
