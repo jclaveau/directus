@@ -43,6 +43,7 @@ describe('actions', () => {
 			const mockUser = {
 				id: sample.user.id,
 				roles: [{ role: { id: sample.role.id } }],
+				effectiveRoles: [{ id: sample.role.id }],
 			} as unknown as User;
 
 			const userStore = useUserStore();
@@ -75,6 +76,7 @@ describe('actions', () => {
 			const mockUser = {
 				id: sample.user.id,
 				roles: [{ role: { id: sample.role.id } }],
+				effectiveRoles: [{ id: sample.role.id }],
 			} as unknown as User;
 
 			const userStore = useUserStore();

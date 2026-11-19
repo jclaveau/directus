@@ -18,7 +18,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	vi.restoreAllMocks();
+	vi.resetAllMocks();
 });
 
 describe('hydrate', () => {
