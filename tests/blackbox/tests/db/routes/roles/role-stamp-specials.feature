@@ -78,8 +78,24 @@ Feature: The role stamps list the member roles that allowed the write
       | payload:                           |     created_roles:     |
       |   label: first                     |       - <editors-role> |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions  | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_roles        | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index              | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+      | 1       | stamp_inherited_notes | 1      | 1      | 0      | 0      | 0    |
 
   Scenario: a policy given to the user directly counts as no role
     Given these requests are sent:
@@ -137,8 +153,24 @@ Feature: The role stamps list the member roles that allowed the write
       | payload:                        |     created_roles: [] |
       |   label: first                  |                       |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions  | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index              | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+      | 1       | stamp_direct_notes    | 1      | 1      | 0      | 0      | 0    |
 
   Scenario: an update counts only the roles whose rule matches the row
     Given these requests are sent:
@@ -241,9 +273,28 @@ Feature: The role stamps list the member roles that allowed the write
       |   label: edited                                    |       - <editors-role>   |
       |                                                    |       - <reviewers-role> |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions  | 4      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_roles        | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index              | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+      | 1       | stamp_reviewed_notes  | 4      | 0      | 1      | 0      | 0    |
+      | 2       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | stamp_reviewed_notes  | 4      | 0      | 1      | 0      | 0    |
 
   Scenario: an update stamps each row with the roles whose rule matches it
     Given these requests are sent:
@@ -357,9 +408,29 @@ Feature: The role stamps list the member roles that allowed the write
       |                                      |       updated_roles:       |
       |                                      |         - <reviewers-role> |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions  | 4      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_roles        | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index              | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+      | 1       | stamp_split_notes     | 5      | 0      | 1      | 0      | 0    |
+      | 2       | directus_access       | 2      | 0      | 0      | 0      | 0    |
+      | 2       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | stamp_split_notes     | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: an update counts only the roles allowed to set a written field
     Given these requests are sent:
@@ -451,9 +522,28 @@ Feature: The role stamps list the member roles that allowed the write
       | payload:                                    |     updated_roles:       |
       |   label: relabelled                         |       - <editors-role>   |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions  | 4      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_roles        | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index              | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+      | 1       | stamp_field_notes     | 3      | 0      | 1      | 0      | 0    |
+      | 2       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | stamp_field_notes     | 3      | 0      | 1      | 0      | 0    |
 
   Scenario: an admin records the member roles giving it admin access
     Given these requests are sent:
@@ -482,8 +572,14 @@ Feature: The role stamps list the member roles that allowed the write
       | payload:                       |     created_roles:                           |
       |   label: first                 |       - d70c0943-5b55-4c5d-a613-f539a27a57f5 |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles        | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | stamp_admin_notes     | 1      | 1      | 0      | 0      |
 
   Scenario: a field written with a removed role special is refused
     Given these requests are sent:
@@ -521,6 +617,23 @@ Feature: The role stamps list the member roles that allowed the write
       |                                   |         user can hold several roles, use  |
       |                                   |         "roles-updated" on a json field.  |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | alter |
+      | 1       | directus_access       | 2      | 0      | 0      | 0      | 0     |
+      | 1       | directus_fields       | 2      | 0      | 0      | 0      | 0     |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0     |
+      | 1       | directus_roles        | 1      | 0      | 0      | 0      | 0     |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0     |
+      | 1       | stamp_refused_notes   | 0      | 0      | 0      | 0      | 1     |
+      | 2       | directus_access       | 2      | 0      | 0      | 0      | 0     |
+      | 2       | directus_collections  | 1      | 0      | 0      | 0      | 0     |
+      | 2       | directus_fields       | 3      | 0      | 0      | 0      | 0     |
+      | 2       | directus_relations    | 1      | 0      | 0      | 0      | 0     |
+      | 2       | directus_role_members | 1      | 0      | 0      | 0      | 0     |
+      | 2       | directus_roles        | 1      | 0      | 0      | 0      | 0     |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      | 0     |
+      | 2       | geometry_columns      | 0      | 0      | 0      | 0      | 0     |
+      | 2       | information_schema    | 1      | 0      | 0      | 0      | 0     |
+      | 2       | pg_constraint         | 1      | 0      | 0      | 0      | 0     |
+      | 2       | pg_index              | 2      | 0      | 0      | 0      | 0     |
+      | 2       | pg_proc               | 1      | 0      | 0      | 0      | 0     |
+      | 2       | stamp_refused_notes   | 0      | 0      | 0      | 0      | 1     |
