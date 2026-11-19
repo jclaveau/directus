@@ -126,6 +126,7 @@ Feature: A read runs the statements its query needs, and no more
       | 1       | directus_access          | 3      | 0      | 0      | 0      |
       | 1       | directus_permissions     | 4      | 0      | 0      | 0      |
       | 1       | directus_policies        | 1      | 0      | 0      | 0      |
+      | 1       | directus_role_members    | 1      | 0      | 0      | 0      |
       | 1       | directus_roles           | 1      | 0      | 0      | 0      |
       | 1       | directus_users           | 1      | 0      | 0      | 0      |
       | 1       | test_read_counts_article | 1      | 0      | 0      | 0      |
@@ -353,31 +354,32 @@ Feature: A read runs the statements its query needs, and no more
       | method: GET                | code: 200 |+
       | path: /policies/me/globals |           |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete | show | with |
-      | 1       | directus_access      | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 1       | directus_users       | 2      | 0      | 0      | 0      | 0    | 0    |
-      | 2       | directus_files       | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 2       | directus_settings    | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 2       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 3       | directus_settings    | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 3       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 4       | directus_collections | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 4       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 4       | pg_class             | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 5       | (no table)           | 0      | 0      | 0      | 0      | 1    | 0    |
-      | 5       | directus_fields      | 2      | 0      | 0      | 0      | 0    | 0    |
-      | 5       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 5       | geometry_columns     | 0      | 0      | 0      | 0      | 0    | 1    |
-      | 5       | pg_attribute         | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 5       | pg_depend            | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 5       | pg_proc              | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 6       | directus_relations   | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 6       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 6       | pg_constraint        | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 7       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 8       | directus_access      | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 8       | directus_policies    | 2      | 0      | 0      | 0      | 0    | 0    |
-      | 8       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
+    | request | table                 | select | insert | update | delete | show | with |
+    | 1       | directus_access       | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 1       | directus_users        | 2      | 0      | 0      | 0      | 0    | 0    |
+    | 2       | directus_files        | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 2       | directus_settings     | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 2       | directus_users        | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 3       | directus_settings     | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 3       | directus_users        | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 4       | directus_collections  | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 4       | directus_users        | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 4       | pg_class              | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 5       | (no table)            | 0      | 0      | 0      | 0      | 1    | 0    |
+    | 5       | directus_fields       | 2      | 0      | 0      | 0      | 0    | 0    |
+    | 5       | directus_users        | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 5       | geometry_columns      | 0      | 0      | 0      | 0      | 0    | 1    |
+    | 5       | pg_attribute          | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 5       | pg_depend             | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 5       | pg_proc               | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 6       | directus_relations    | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 6       | directus_users        | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 6       | pg_constraint         | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 7       | directus_users        | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 8       | directus_access       | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 8       | directus_policies     | 2      | 0      | 0      | 0      | 0    | 0    |
+    | 8       | directus_users        | 1      | 0      | 0      | 0      | 0    | 0    |
 
   Scenario: a user whose policy filters the articles opens the app
     When these requests get these responses:

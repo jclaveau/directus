@@ -80,18 +80,27 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       |                                      |     app_access: true                 |
       |                                      |     admin_access: false              |
     And on postgres the requests ran these statements:
-      | request | table                   | select | insert | update | delete |
-      | 1       | directus_access         | 3      | 0      | 0      | 0      |
-      | 1       | directus_permissions    | 2      | 0      | 0      | 0      |
-      | 1       | directus_policies       | 1      | 0      | 0      | 0      |
-      | 1       | directus_roles          | 2      | 0      | 0      | 0      |
-      | 1       | directus_users          | 1      | 0      | 0      | 0      |
-      | 1       | role_chain_parent_notes | 1      | 0      | 0      | 0      |
-      | 2       | directus_permissions    | 1      | 0      | 0      | 0      |
-      | 2       | directus_roles          | 1      | 0      | 0      | 0      |
-      | 2       | directus_users          | 1      | 0      | 0      | 0      |
-      | 3       | directus_policies       | 1      | 0      | 0      | 0      |
-      | 3       | directus_users          | 1      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete | with |
+      | 1       | directus_access         | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_collections    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions    | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations      | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_role_members   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_roles          | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns        | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema      | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint           | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index                | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc                 | 1      | 0      | 0      | 0      | 0    |
+      | 1       | role_chain_parent_notes | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_permissions    | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_roles          | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_policies       | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_users          | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a user of a child role is an admin when the parent role is
     Given these requests are sent:
@@ -137,12 +146,22 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       | query:                     |     roles:                 |
       |   fields: roles.role       |       - role: <child-role> |
     And on postgres the requests ran these statements:
-      | request | table             | select | insert | update | delete |
-      | 1       | directus_access   | 3      | 0      | 0      | 0      |
-      | 1       | directus_policies | 2      | 0      | 0      | 0      |
-      | 1       | directus_roles    | 2      | 0      | 0      | 0      |
-      | 1       | directus_users    | 1      | 0      | 0      | 0      |
-      | 2       | directus_users    | 2      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies     | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_roles        | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index              | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users        | 2      | 0      | 0      | 0      | 0    |
 
   Scenario: a user with no role reaches the me endpoints, no credentials do not
     Then these requests get these responses:
@@ -177,18 +196,19 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       | path: /policies/me/globals |   data:                  |
       |                            |     app_access: false    |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 3      | 0      | 0      | 0      |
-      | 1       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
-      | 1       | directus_users       | 1      | 0      | 0      | 0      |
-      | 2       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 2       | directus_users       | 1      | 0      | 0      | 0      |
-      | 3       | directus_policies    | 1      | 0      | 0      | 0      |
-      | 3       | directus_users       | 1      | 0      | 0      | 0      |
-      | 4       | (none)               | 0      | 0      | 0      | 0      |
-      | 5       | (none)               | 0      | 0      | 0      | 0      |
-      | 6       | (none)               | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      |
+      | 1       | directus_permissions  | 1      | 0      | 0      | 0      |
+      | 1       | directus_policies     | 1      | 0      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | directus_permissions  | 1      | 0      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
+      | 3       | directus_policies     | 1      | 0      | 0      | 0      |
+      | 3       | directus_users        | 1      | 0      | 0      | 0      |
+      | 4       | (none)                | 0      | 0      | 0      | 0      |
+      | 5       | (none)                | 0      | 0      | 0      | 0      |
+      | 6       | (none)                | 0      | 0      | 0      | 0      |
 
   Scenario: a user who cannot read the roles gets the ids of their chain
     Given these requests are sent:
@@ -219,11 +239,20 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       | query:          |     - id: <parent-role> |
       |   fields: name  |     - id: <child-role>  |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 3      | 0      | 0      | 0      |
-      | 1       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 1       | directus_roles       | 2      | 0      | 0      | 0      |
-      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_roles        | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index              | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: graphql lists the roles of the user's chain
     Given these requests are sent:
@@ -264,9 +293,18 @@ Feature: A user holds one role and gets the policies of its whole parent chain
       |   query: '{ roles_me { name } }' |       - name: chain-<run> |
       |                                  |       - name: chain-<run> |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 3      | 0      | 0      | 0      |
-      | 1       | directus_permissions | 5      | 0      | 0      | 0      |
-      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
-      | 1       | directus_roles       | 3      | 0      | 0      | 0      |
-      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions  | 5      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_roles        | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index              | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
