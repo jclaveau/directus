@@ -90,4 +90,68 @@ describe('fetchUserRoles', () => {
 		expect(fetchRolesTree).toHaveBeenNthCalledWith(1, 'role-b', knex);
 		expect(fetchRolesTree).toHaveBeenNthCalledWith(2, 'role-c', knex);
 	});
+
+	test('puts a parent of another member role before every leaf', async () => {
+		vi.mocked(knex.orderBy as any).mockResolvedValue([
+			{ role: 'press' },
+			{ role: 'editors' },
+		]);
+
+		vi.mocked(fetchRolesTree)
+			.mockResolvedValueOnce(['press'])
+			.mockResolvedValueOnce(['staff', 'editors']);
+
+		await expect(fetchUserRoles('user-1', knex)).resolves.toEqual({
+			memberRoles: ['press', 'editors'],
+			roles: ['staff', 'press', 'editors'],
+		});
+	});
+
+	test('counts a member role parenting another one as a parent', async () => {
+		vi.mocked(knex.orderBy as any).mockResolvedValue([
+			{ role: 'editors' },
+			{ role: 'staff' },
+		]);
+
+		vi.mocked(fetchRolesTree)
+			.mockResolvedValueOnce(['staff', 'editors'])
+			.mockResolvedValueOnce(['staff']);
+
+		await expect(fetchUserRoles('user-1', knex)).resolves.toEqual({
+			memberRoles: ['editors', 'staff'],
+			roles: ['staff', 'editors'],
+		});
+	});
+
+	test('orders leaf roles by membership sort, not by chain depth', async () => {
+		vi.mocked(knex.orderBy as any).mockResolvedValue([
+			{ role: 'editors' },
+			{ role: 'press' },
+		]);
+
+		vi.mocked(fetchRolesTree)
+			.mockResolvedValueOnce(['company', 'staff', 'editors'])
+			.mockResolvedValueOnce(['press']);
+
+		await expect(fetchUserRoles('user-1', knex)).resolves.toEqual({
+			memberRoles: ['editors', 'press'],
+			roles: ['company', 'staff', 'editors', 'press'],
+		});
+	});
+
+	test('orders parents root first, one depth by membership sort', async () => {
+		vi.mocked(knex.orderBy as any).mockResolvedValue([
+			{ role: 'role-a' },
+			{ role: 'role-d' },
+		]);
+
+		vi.mocked(fetchRolesTree)
+			.mockResolvedValueOnce(['root-1', 'role-a'])
+			.mockResolvedValueOnce(['root-2', 'mid-2', 'role-d']);
+
+		await expect(fetchUserRoles('user-1', knex)).resolves.toEqual({
+			memberRoles: ['role-a', 'role-d'],
+			roles: ['root-1', 'root-2', 'mid-2', 'role-a', 'role-d'],
+		});
+	});
 });

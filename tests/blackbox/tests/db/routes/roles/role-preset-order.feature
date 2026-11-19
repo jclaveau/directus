@@ -1,0 +1,142 @@
+Feature: The presets of several member roles apply parents first, then leaves
+
+  - Presets apply role after role, the last one winning on a field: first the
+    parents, every role that is an ancestor of another role of the user, root
+    first; then the leaf roles, the member roles that are no ancestor of
+    another, by membership `sort`. A member role that is also the parent of
+    another member role counts as a parent (#746).
+  - A request authenticates as the admin, unless it names the token it sends
+    `as`. `<run>` stands for a value unique to the scenario, and any other
+    `<name>` for a uuid of its own. A response cell states the keys it checks.
+
+  Scenario: a leaf role's preset beats the parent of another member role
+    Given the rows of directus_policies:
+      | id          | name          | app_access | admin_access |
+      | <p-staff>   | staff-<run>   | false      | false        |
+      | <p-press>   | press-<run>   | false      | false        |
+      | <p-editors> | editors-<run> | false      | false        |
+    And the rows of directus_permissions:
+      | policy      | collection       | action | fields | presets                   |
+      | <p-staff>   | role_order_notes | create | ["*"]  | {"visibility":"internal"} |
+      | <p-press>   | role_order_notes | create | ["*"]  | {"visibility":"public"}   |
+      | <p-press>   | role_order_notes | read   | ["*"]  |                           |
+      | <p-editors> | role_order_notes | create | ["*"]  | {"lang":"fr"}             |
+    And the rows of directus_roles:
+      | id        | name          | parent  |
+      | <staff>   | staff-<run>   |         |
+      | <press>   | press-<run>   |         |
+      | <editors> | editors-<run> | <staff> |
+    And the rows of directus_access:
+      | role      | policy      |
+      | <staff>   | <p-staff>   |
+      | <press>   | <p-press>   |
+      | <editors> | <p-editors> |
+    And the rows of directus_users:
+      | id      | email                   | token       |
+      | <alice> | alice-<run>@example.com | alice-<run> |
+    And the rows of directus_role_members:
+      | user    | role      | sort |
+      | <alice> | <press>   | 1    |
+      | <alice> | <editors> | 2    |
+    Then these requests get these responses:
+      | request                                    | response           |
+      | as: alice-<run>                            | code: 200          |+
+      | method: POST                               |                    |
+      | path: /items/role_order_notes              |                    |
+      | payload: {}                                |                    |
+      | remember: alice-note                       |                    |
+      | as: alice-<run>                            | code: 200          |+
+      | method: GET                                | body:              |
+      | path: /items/role_order_notes/<alice-note> | data:              |
+      | query:                                     | visibility: public |
+      | fields: visibility,lang                    | lang: fr           |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+
+  Scenario: a member role that is the parent of another one counts as a parent
+    Given the rows of directus_policies:
+      | id          | name          | app_access | admin_access |
+      | <p-staff>   | staff-<run>   | false      | false        |
+      | <p-editors> | editors-<run> | false      | false        |
+    And the rows of directus_permissions:
+      | policy      | collection       | action | fields | presets                   |
+      | <p-staff>   | role_order_notes | create | ["*"]  | {"visibility":"internal"} |
+      | <p-staff>   | role_order_notes | read   | ["*"]  |                           |
+      | <p-editors> | role_order_notes | create | ["*"]  | {"visibility":"external"} |
+    And the rows of directus_roles:
+      | id        | name          | parent  |
+      | <staff>   | staff-<run>   |         |
+      | <editors> | editors-<run> | <staff> |
+    And the rows of directus_access:
+      | role      | policy      |
+      | <staff>   | <p-staff>   |
+      | <editors> | <p-editors> |
+    And the rows of directus_users:
+      | id    | email                 | token     |
+      | <bob> | bob-<run>@example.com | bob-<run> |
+    And the rows of directus_role_members:
+      | user  | role      | sort |
+      | <bob> | <editors> | 1    |
+      | <bob> | <staff>   | 2    |
+    Then these requests get these responses:
+      | request                                  | response             |
+      | as: bob-<run>                            | code: 200            |+
+      | method: POST                             |                      |
+      | path: /items/role_order_notes            |                      |
+      | payload: {}                              |                      |
+      | remember: bob-note                       |                      |
+      | as: bob-<run>                            | code: 200            |+
+      | method: GET                              | body:                |
+      | path: /items/role_order_notes/<bob-note> | data:                |
+      | query:                                   | visibility: external |
+      | fields: visibility                       |                      |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+
+  Scenario: between two leaf roles the later sort wins, not the deeper chain
+    Given the rows of directus_policies:
+      | id          | name          | app_access | admin_access |
+      | <p-press>   | press-<run>   | false      | false        |
+      | <p-editors> | editors-<run> | false      | false        |
+    And the rows of directus_permissions:
+      | policy      | collection       | action | fields | presets                   |
+      | <p-press>   | role_order_notes | create | ["*"]  | {"visibility":"public"}   |
+      | <p-press>   | role_order_notes | read   | ["*"]  |                           |
+      | <p-editors> | role_order_notes | create | ["*"]  | {"visibility":"internal"} |
+    And the rows of directus_roles:
+      | id        | name          | parent    |
+      | <company> | company-<run> |           |
+      | <staff>   | staff-<run>   | <company> |
+      | <editors> | editors-<run> | <staff>   |
+      | <press>   | press-<run>   |           |
+    And the rows of directus_access:
+      | role      | policy      |
+      | <press>   | <p-press>   |
+      | <editors> | <p-editors> |
+    And the rows of directus_users:
+      | id      | email                   | token       |
+      | <carol> | carol-<run>@example.com | carol-<run> |
+    And the rows of directus_role_members:
+      | user    | role      | sort |
+      | <carol> | <editors> | 1    |
+      | <carol> | <press>   | 2    |
+    Then these requests get these responses:
+      | request                                    | response           |
+      | as: carol-<run>                            | code: 200          |+
+      | method: POST                               |                    |
+      | path: /items/role_order_notes              |                    |
+      | payload: {}                                |                    |
+      | remember: carol-note                       |                    |
+      | as: carol-<run>                            | code: 200          |+
+      | method: GET                                | body:              |
+      | path: /items/role_order_notes/<carol-note> | data:              |
+      | query:                                     | visibility: public |
+      | fields: visibility                         |                    |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |

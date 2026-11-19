@@ -33,6 +33,17 @@ type RequestCell = {
 	eventually?: boolean;
 };
 
+const ROWS_STEP = /^the rows of (\S+):$/;
+
+// A system collection has no /items route: its rows go to its own.
+const SYSTEM_ROWS_PATHS: Record<string, string> = {
+	directus_access: '/access',
+	directus_permissions: '/permissions',
+	directus_policies: '/policies',
+	directus_roles: '/roles',
+	directus_users: '/users',
+};
+
 const REQUEST_CELL_KEYS = [
 	'as',
 	'method',
@@ -123,7 +134,20 @@ export function defineSingularWriteFeature(
 						return createCollectionRows(sentTo, collection, table);
 					};
 
-					given.optional(/^the rows of (\S+):$/, createRows);
+					given.optional(ROWS_STEP, createRows);
+
+					// The library binds one definition per step: a scenario seeding
+					// several collections holds one `the rows of` step for each.
+					const rowsStepCount = feature.scenarios
+						.find((parsedScenario) => parsedScenario.title === title)!
+						.steps
+						.filter((step) => ROWS_STEP.test(step.stepText))
+						.length;
+
+					for (let seedIndex = 1; seedIndex < rowsStepCount; seedIndex++) {
+						and(ROWS_STEP, createRows);
+					}
+
 					and.optional(/^their children in (\S+):$/, createRows);
 					and.optional(/^their grandchildren in (\S+):$/, createRows);
 
@@ -314,16 +338,62 @@ async function createCollectionRows(
 	collection: string,
 	table: Record<string, string>[],
 ) {
+	const tableRows = parseGherkinTable(table.map((row) => {
+		return Object.fromEntries(Object.entries(row).map(([column, cell]) => {
+			return [column, withKeys(cell, scenarioKeys)];
+		}));
+	}));
+
+	if (collection === 'directus_role_members') {
+		return createRoleMembers(instanceUrl, tableRows);
+	}
+
+	const rowsPath = collection.startsWith('directus_')
+		? SYSTEM_ROWS_PATHS[collection]
+		: `/items/${collection}`;
+
+	if (!rowsPath) {
+		throw new Error(
+			`The rows of ${JSON.stringify(collection)} have no route to seed them:`
+			+ ` only ${JSON.stringify(Object.keys(SYSTEM_ROWS_PATHS))} and`
+			+ ' "directus_role_members" do',
+		);
+	}
+
 	const response = await request(instanceUrl())
-		.post(`/items/${collection}`)
-		.send(parseGherkinTable(table.map((row) => {
-			return Object.fromEntries(Object.entries(row).map(([column, cell]) => {
-				return [column, withKeys(cell, scenarioKeys)];
-			}));
-		})))
+		.post(rowsPath)
+		.send(tableRows)
 		.set('Authorization', AUTH);
 
 	expect(response.statusCode).toEqual(200);
+}
+
+// directus_role_members has no route of its own: each user's rows are created
+// through the user's `roles`, in the order of the table.
+async function createRoleMembers(
+	instanceUrl: SentTo['instanceUrl'],
+	memberRows: Record<string, unknown>[],
+) {
+	const memberUsers = [...new Set(memberRows.map((row) => row['user']))];
+
+	for (const memberUser of memberUsers) {
+		const response = await request(instanceUrl())
+			.patch(`/users/${memberUser}`)
+			.send({
+				roles: {
+					create: memberRows
+						.filter((row) => row['user'] === memberUser)
+						.map((row) => {
+							return Object.fromEntries(Object.entries(row).filter(
+								([column]) => column !== 'user',
+							));
+						}),
+				},
+			})
+			.set('Authorization', AUTH);
+
+		expect(response.statusCode).toEqual(200);
+	}
 }
 
 // One policy per row: a policy's read rules on a collection are one case each,
