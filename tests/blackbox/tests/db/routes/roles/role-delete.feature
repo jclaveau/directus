@@ -71,7 +71,7 @@ Feature: A deleted role suspends its users and drops its presets
       | 1       | directus_activity     | 0      | 4      | 0      | 0      | 0    |
       | 1       | directus_presets      | 1      | 0      | 0      | 1      | 0    |
       | 1       | directus_revisions    | 0      | 2      | 0      | 0      | 0    |
-      | 1       | directus_role_members | 4      | 0      | 0      | 1      | 0    |
+      | 1       | directus_role_members | 4      | 0      | 0      | 1      | 1    |
       | 1       | directus_roles        | 8      | 0      | 1      | 1      | 0    |
       | 1       | directus_sessions     | 0      | 0      | 0      | 1      | 0    |
       | 1       | directus_users        | 7      | 0      | 1      | 0      | 0    |

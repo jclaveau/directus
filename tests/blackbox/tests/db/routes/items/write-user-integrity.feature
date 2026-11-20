@@ -57,18 +57,18 @@ Feature: A nested write to users, roles or policies hands its user checks up
       |                                                   |   data:            |
       |                                                   |     status: active |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete |
-      | 1       | directus_access       | 1      | 0      | 0      | 0      |
-      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
-      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
-      | 1       | directus_users        | 3      | 1      | 0      | 0      |
-      | 2       | directus_access       | 1      | 0      | 0      | 0      |
-      | 2       | directus_activity     | 0      | 2      | 0      | 0      |
-      | 2       | directus_revisions    | 0      | 2      | 1      | 0      |
-      | 2       | directus_role_members | 1      | 0      | 0      | 0      |
-      | 2       | directus_users        | 3      | 0      | 1      | 0      |
-      | 2       | test_write_user_link  | 1      | 1      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 3      | 1      | 0      | 0      | 0    |
+      | 2       | directus_access       | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_activity     | 0      | 2      | 0      | 0      | 0    |
+      | 2       | directus_revisions    | 0      | 2      | 1      | 0      | 0    |
+      | 2       | directus_role_members | 1      | 0      | 0      | 0      | 1    |
+      | 2       | directus_users        | 3      | 0      | 1      | 0      | 0    |
+      | 2       | test_write_user_link  | 1      | 1      | 0      | 0      | 0    |
 
   Scenario: a user's policies given as an empty list delete its access rows
     When these requests get these responses:
@@ -272,18 +272,18 @@ Feature: A nested write to users, roles or policies hands its user checks up
       |     - status                                      |         - role:             |
       |     - roles.role.name                             |             name: integrity |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete |
-      | 1       | directus_access       | 1      | 0      | 0      | 0      |
-      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
-      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
-      | 1       | directus_users        | 3      | 1      | 0      | 0      |
-      | 2       | directus_access       | 3      | 0      | 0      | 0      |
-      | 2       | directus_activity     | 0      | 3      | 0      | 0      |
-      | 2       | directus_revisions    | 0      | 2      | 1      | 0      |
-      | 2       | directus_role_members | 3      | 1      | 0      | 0      |
-      | 2       | directus_roles        | 5      | 0      | 0      | 0      |
-      | 2       | directus_users        | 3      | 0      | 1      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 3      | 1      | 0      | 0      | 0    |
+      | 2       | directus_access       | 3      | 0      | 0      | 0      | 0    |
+      | 2       | directus_activity     | 0      | 3      | 0      | 0      | 0    |
+      | 2       | directus_revisions    | 0      | 2      | 1      | 0      | 0    |
+      | 2       | directus_role_members | 3      | 1      | 0      | 0      | 1    |
+      | 2       | directus_roles        | 5      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users        | 3      | 0      | 1      | 0      | 0    |
 
   Scenario: a role's users deleting a user take it out of the role
     When these requests get these responses:

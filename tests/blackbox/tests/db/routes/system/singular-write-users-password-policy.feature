@@ -101,14 +101,14 @@ Feature: A single user's password is checked against the password policy
       |     hash: 33c587                           |                                  |
       |   password: long-enough-to-pass-the-policy |                                  |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete |
-      | 1       | directus_settings     | 2      | 0      | 0      | 0      |
-      | 1       | directus_users        | 2      | 0      | 0      | 0      |
-      | 2       | directus_access       | 1      | 0      | 0      | 0      |
-      | 2       | directus_activity     | 0      | 1      | 0      | 0      |
-      | 2       | directus_revisions    | 0      | 1      | 0      | 0      |
-      | 2       | directus_role_members | 1      | 0      | 0      | 0      |
-      | 2       | directus_sessions     | 0      | 0      | 0      | 1      |
-      | 2       | directus_settings     | 2      | 0      | 0      | 0      |
-      | 2       | directus_users        | 3      | 0      | 1      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_settings     | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 2      | 0      | 0      | 0      | 0    |
+      | 2       | directus_access       | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_role_members | 1      | 0      | 0      | 0      | 1    |
+      | 2       | directus_sessions     | 0      | 0      | 0      | 1      | 0    |
+      | 2       | directus_settings     | 2      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users        | 3      | 0      | 1      | 0      | 0    |
 
