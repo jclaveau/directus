@@ -13,7 +13,7 @@ const COLLECTIONS = [
 	'cache_user_delete_notes',
 	'cache_user_accept_notes',
 	'cache_user_reinvite_notes',
-	'cache_user_second_invite_notes',
+	'cache_user_second_notes',
 ];
 
 defineSpawnedWriteFeature(

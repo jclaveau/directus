@@ -2,7 +2,8 @@ Feature: A user's role, status and deletion purge the cache as today
 
   - Pins today's single-role contract (#746) before the memberships replace
     the role column: what a user write purges, and the statements it runs.
-    A role change sends no purged tags: the mover's next read misses.
+    A role change, or an invite into another role, sends no purged tags and
+    the next read misses; a re-invite into the same role writes nothing.
   - The feature runs against an instance of its own with the response cache
     on, in Redis, and `CACHE_AUTO_PURGE` scoped: a write names the pins it
     purged in `x-scoped-cache-purged-tags`, and a cached read tells a flush by
@@ -209,22 +210,24 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                               |   x-cache-status: HIT |
       |   fields: label                      |                       |
     Then these requests get these responses:
-      | request                                | response  |
-      | method: POST                           | code: 204 |+
-      | path: /users/invite/accept             |           |
-      | payload:                               |           |
-      |   token: !jwt                          |           |
-      |     email: accepting-<run>@example.com |           |
-      |     scope: invite                      |           |
-      |   password: accepted-password          |           |
-      | method: GET                            | code: 200 |+
-      | path: /items/cache_user_accept_notes   |           |
-      | query:                                 |           |
-      |   fields: label                        |           |
+      | request                                | response                         |
+      | method: POST                           | code: 204                        |+
+      | path: /users/invite/accept             | headers:                         |
+      | payload:                               |   x-scoped-cache-purged-tags: >- |
+      |   token: !jwt                          |     directus_users,              |
+      |     email: accepting-<run>@example.com |     directus_users:id=<invitee>  |
+      |     scope: invite                      |                                  |
+      |   password: accepted-password          |                                  |
+      | method: GET                            | code: 200                        |+
+      | path: /items/cache_user_accept_notes   | headers:                         |
+      | query:                                 |   x-cache-status: HIT            |
+      |   fields: label                        |                                  |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_sessions | 0      | 0      | 0      | 1      |
+      | 1       | directus_settings | 1      | 0      | 0      | 0      |
+      | 1       | directus_users    | 2      | 0      | 1      | 0      |
+      | 2       | directus_users    | 1      | 0      | 0      | 0      |
 
   Scenario: a user invited again into the same role keeps the cached read
     Given the rows of directus_roles:
@@ -243,20 +246,20 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                                 |   x-cache-status: HIT |
       |   fields: label                        |                       |
     Then these requests get these responses:
-      | request                                | response  |
-      | method: POST                           | code: 204 |+
-      | path: /users/invite                    |           |
-      | payload:                               |           |
-      |   email: same-<run>@example.com        |           |
-      |   role: <same-role>                    |           |
-      | method: GET                            | code: 200 |+
-      | path: /items/cache_user_reinvite_notes |           |
-      | query:                                 |           |
-      |   fields: label                        |           |
+      | request                                | response              |
+      | method: POST                           | code: 204             |+
+      | path: /users/invite                    |                       |
+      | payload:                               |                       |
+      |   email: same-<run>@example.com        |                       |
+      |   role: <same-role>                    |                       |
+      | method: GET                            | code: 200             |+
+      | path: /items/cache_user_reinvite_notes | headers:              |
+      | query:                                 |   x-cache-status: HIT |
+      |   fields: label                        |                       |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 2      | 0      | 0      | 0      |
+      | 2       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a pending invitee invited into a second role drops the cached read
     Given the rows of directus_roles:
@@ -266,33 +269,51 @@ Feature: A user's role, status and deletion purge the cache as today
     And the rows of directus_users:
       | id        | email                    | role         | status  |
       | <invitee> | second-<run>@example.com | <first-role> | invited |
-    And the rows of cache_user_second_invite_notes:
+    And the rows of cache_user_second_notes:
       | label |
       | v1    |
     And this read is cached:
-      | request                                     | response              |
-      | method: GET                                 | code: 200             |+
-      | path: /items/cache_user_second_invite_notes | headers:              |
-      | query:                                      |   x-cache-status: HIT |
-      |   fields: label                             |                       |
+      | request                              | response              |
+      | method: GET                          | code: 200             |+
+      | path: /items/cache_user_second_notes | headers:              |
+      | query:                               |   x-cache-status: HIT |
+      |   fields: label                      |                       |
     Then these requests get these responses:
-      | request                                     | response                |
-      | method: POST                                | code: 204               |+
-      | path: /users/invite                         |                         |
-      | payload:                                    |                         |
-      |   email: second-<run>@example.com           |                         |
-      |   role: <second-role>                       |                         |
-      | method: GET                                 | code: 200               |+
-      | path: /users/<invitee>                      | body:                   |
-      | query:                                      |   data:                 |
-      |   fields: status,role                       |     status: invited     |
-      |                                             |     role: <second-role> |
-      | method: GET                                 | code: 200               |+
-      | path: /items/cache_user_second_invite_notes |                         |
-      | query:                                      |                         |
-      |   fields: label                             |                         |
+      | request                              | response                |
+      | method: POST                         | code: 204               |+
+      | path: /users/invite                  |                         |
+      | payload:                             |                         |
+      |   email: second-<run>@example.com    |                         |
+      |   role: <second-role>                |                         |
+      | method: GET                          | code: 200               |+
+      | path: /users/<invitee>               | body:                   |
+      | query:                               |   data:                 |
+      |   fields: status,role                |     status: invited     |
+      |                                      |     role: <second-role> |
+      | method: GET                          | code: 200               |+
+      | path: /items/cache_user_second_notes | headers:                |
+      | query:                               |   x-cache-status: MISS  |
+      |   fields: label                      |                         |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
-      | 3       | (none) | 0      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete | with |
+      | 1       | directus_access         | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity       | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_revisions      | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_roles          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users          | 4      | 0      | 1      | 0      | 0    |
+      | 2       | directus_access         | 4      | 0      | 0      | 0      | 0    |
+      | 2       | directus_collections    | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_fields         | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_permissions    | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_policies       | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_relations      | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_roles          | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users          | 2      | 0      | 0      | 0      | 0    |
+      | 2       | geometry_columns        | 0      | 0      | 0      | 0      | 1    |
+      | 2       | information_schema      | 1      | 0      | 0      | 0      | 0    |
+      | 2       | pg_constraint           | 1      | 0      | 0      | 0      | 0    |
+      | 2       | pg_index                | 2      | 0      | 0      | 0      | 0    |
+      | 2       | pg_proc                 | 1      | 0      | 0      | 0      | 0    |
+      | 3       | cache_user_second_notes | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_permissions    | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_users          | 1      | 0      | 0      | 0      | 0    |
