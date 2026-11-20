@@ -278,6 +278,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('should request all user integrity checks if status is changed to not "active"', async () => {
+				tracker.on.select('directus_role_members').response([]);
+
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
 
@@ -297,6 +299,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('should request user limit checks if status is changed to "active"', async () => {
+				tracker.on.select('directus_role_members').response([]);
+
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
 
@@ -386,6 +390,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('logs out the users a users.update hook suspends', async () => {
+				tracker.on.select('directus_role_members').response([]);
+
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
 
@@ -632,6 +638,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('requests the union of every row\'s integrity checks once', async () => {
+				tracker.on.select('directus_role_members').response([]);
+
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
 
@@ -652,6 +660,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('logs out the users a row suspends', async () => {
+				tracker.on.select('directus_role_members').response([]);
+
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
 
@@ -671,6 +681,8 @@ describe('Integration Tests', () => {
 			vi.spyOn(ItemsService.prototype, 'deleteMany').mockResolvedValue(['user-id-15']);
 
 			it('should validate remaining admin users', async () => {
+				tracker.on.select('directus_role_members').response([]);
+
 				const getKeysByQuerySpy = vi
 					.spyOn(ItemsService.prototype, 'getKeysByQuery')
 					.mockResolvedValue([]);
@@ -696,6 +708,8 @@ describe('Integration Tests', () => {
 				ItemsService, so the purge sees each row before and after the write, and
 				skips the versions with none
 			`, async () => {
+				tracker.on.select('directus_role_members').response([]);
+
 				const unlinkCalls: unknown[] = [];
 
 				const getKeysByQuerySpy = vi
@@ -776,6 +790,8 @@ describe('Integration Tests', () => {
 				unlinks 10 000 rows per update, since one statement past 65 535 keys would
 				overflow Postgres's bind parameters
 			`, async () => {
+				tracker.on.select('directus_role_members').response([]);
+
 				const getKeysByQuerySpy = vi
 					.spyOn(ItemsService.prototype, 'getKeysByQuery')
 					.mockImplementation(async function (this: ItemsService) {
@@ -1790,6 +1806,8 @@ describe('Integration Tests', () => {
 
 		describe('user sessions', () => {
 			it('deletes every session of the deleted users', async () => {
+				tracker.on.select('directus_role_members').response([]);
+
 				clearUserSessionsSpy.mockImplementationOnce(usersClearUserSessions);
 				tracker.on.select('directus_comments').response([]);
 				tracker.on.select('directus_notifications').response([]);
@@ -1887,6 +1905,8 @@ describe('Integration Tests', () => {
 
 		describe('deleteMany retried', () => {
 			it('fires only the action of the attempt that committed', async () => {
+				tracker.on.select('directus_role_members').response([]);
+
 				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
 
 				const emitActionSpy = vi

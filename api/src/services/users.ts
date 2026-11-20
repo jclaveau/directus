@@ -526,17 +526,17 @@ export class UsersService extends ItemsService {
 				invites
 					.select(1)
 					.from('directus_invites')
-					.whereColumn('directus_invites.user', 'directus_role_members.user')
-					.whereColumn('directus_invites.role', 'directus_role_members.role')
+					.where('directus_invites.user', trx.ref('directus_role_members.user'))
+					.where('directus_invites.role', trx.ref('directus_role_members.role'))
 					.whereIn('directus_invites.user_created', deletedUsers);
 			})
 			.whereNotExists((invites) => {
 				invites
 					.select(1)
 					.from('directus_invites')
-					.whereColumn('directus_invites.user', 'directus_role_members.user')
-					.whereColumn('directus_invites.role', 'directus_role_members.role')
-					.where((inviter) => {
+					.where('directus_invites.user', trx.ref('directus_role_members.user'))
+					.where('directus_invites.role', trx.ref('directus_role_members.role'))
+					.where((inviter: Knex.QueryBuilder) => {
 						inviter
 							.whereNull('directus_invites.user_created')
 							.orWhereNotIn('directus_invites.user_created', deletedUsers);
