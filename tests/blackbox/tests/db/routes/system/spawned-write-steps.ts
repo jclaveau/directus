@@ -20,7 +20,7 @@ import { type ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { load as loadYaml } from 'js-yaml';
-import { cloneDeep, get } from 'lodash-es';
+import { cloneDeep } from 'lodash-es';
 import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 import { yamlSchemaFor } from './singular-write-steps';
@@ -34,7 +34,7 @@ type RequestCell = {
 	upload_metadata?: Record<string, string>;
 	payload?: unknown;
 	body?: string;
-	remember?: string | Record<string, string>;
+	remember?: string;
 	remember_headers?: Record<string, string>;
 };
 
@@ -294,15 +294,6 @@ function lowercaseHeaders(expectedResponse: ResponseCell) {
 	};
 }
 
-// `remember: name` keeps `body.data.id`; a mapping keeps each named path.
-function rememberedPaths(remember: RequestCell['remember']) {
-	if (typeof remember === 'string') {
-		return { [remember]: 'body.data.id' };
-	}
-
-	return remember ?? {};
-}
-
 // One row at a time, so a row can name the key one before it remembered. A
 // remembered header keeps its last path segment: the upload a `Location`
 // names, or the `Directus-File-Id` whole.
@@ -340,12 +331,10 @@ async function sendRows(
 			lowercaseHeaders(expectedResponse),
 		);
 
-		for (const [name, dottedPath] of Object.entries(
-			rememberedPaths(requestCell.remember),
-		)) {
-			scenarioKeys.keysByName[name] = rememberedText(
-				name,
-				get(response, dottedPath),
+		if (requestCell.remember !== undefined) {
+			scenarioKeys.keysByName[requestCell.remember] = rememberedText(
+				requestCell.remember,
+				response.body.data?.id,
 			);
 		}
 

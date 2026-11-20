@@ -11,7 +11,9 @@ const TABLE_ROWS_STEP = /^the rows of (\S+):$/;
  * run that endpoint's statements, hooks and cache purges, and `/items`
  * refuses the `directus_*` tables outright. A cell reads as JSON, as
  * `parseGherkinTable` reads it, and an object or array is stored as its JSON
- * text, which is how a JSON column holds it.
+ * text, which is how a JSON column holds it. The instance hears nothing of
+ * the write and purges no cache: a row under a key an entry already caches
+ * stays unseen, so a Given seeds fresh `<name>` keys.
  */
 export async function insertTableRows(
 	vendor: Vendor,
