@@ -42,7 +42,7 @@ type ResponseCell = {
 	code?: number;
 	body?: unknown;
 	text?: string;
-	headers?: Record<string, string | string[]>;
+	headers?: Record<string, string | string[] | null>;
 };
 
 const REQUEST_CELL_KEYS = [
@@ -250,7 +250,8 @@ function sendRequest(instanceUrl: string, requestCell: RequestCell) {
 }
 
 // Only what the response cell states is compared: a header by its lowercase
-// name, `text` against the raw body.
+// name, `text` against the raw body. A header the response does not send
+// reads as `null`, so a cell can state its absence.
 function receivedPart(response: Response, expectedResponse: ResponseCell) {
 	return {
 		code: response.statusCode,
@@ -259,7 +260,15 @@ function receivedPart(response: Response, expectedResponse: ResponseCell) {
 			? {}
 			: { text: response.text }),
 		headers: Object.fromEntries(
-			Object.entries(response.headers).map(([name, value]) => {
+			Object.entries({
+				...Object.fromEntries(
+					Object.keys(lowercaseHeaders(expectedResponse).headers ?? {})
+						.map((name) => {
+							return [name, null];
+						}),
+				),
+				...response.headers,
+			}).map(([name, value]) => {
 				return [
 					name,
 					Array.isArray(lowercaseHeaders(expectedResponse).headers?.[name])
