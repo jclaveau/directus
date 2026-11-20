@@ -9,9 +9,9 @@ Feature: A user is invited, re-invited and accepts the invitation
     `directus_users` row with the `invited` status, a `directus_role_members`
     row per role, `managed_by: invite`, and the `directus_invites` row of
     each; a `user_created` of null names no inviter.
-  - A request authenticates as the admin. `<run>` stands for a value unique to
-    the scenario, and any other `<name>` for a uuid of its own. A response
-    cell states the keys it checks.
+  - A request authenticates as the admin, unless it names the token it sends
+    `as`. `<run>` stands for a value unique to the scenario, and any other
+    `<name>` for a uuid of its own. A response cell states the keys it checks.
 
   Scenario: an invited user takes the role of their latest invitation
     Given the rows of directus_roles:
@@ -217,27 +217,37 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   filter[email][_eq]: >-                |       roles:                   |
       |     graphql-<run>@example.com           |         - role: <graphql-role> |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_users     | 3      | 1      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_invites      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 0      | 1      | 0      | 0      |
+      | 1       | directus_users        | 3      | 1      | 0      | 0      |
 
   Scenario: a user invited again into the same role keeps their invitation
-    Given the rows of directus_roles:
+    Given the rows of directus_policies:
+      | id               | name          | app_access | admin_access |
+      | <inviter-policy> | inviter-<run> | true       | true         |
+    And the rows of directus_roles:
       | id          | name       |
       | <same-role> | same-<run> |
     And the rows of directus_users:
-      | id          | email                  | status  |
-      | <same-user> | same-<run>@example.com | invited |
+      | id          | email                     | status  | token         |
+      | <inviter>   | inviter-<run>@example.com | active  | inviter-<run> |
+      | <same-user> | same-<run>@example.com    | invited | null          |
+    And the rows of directus_access:
+      | id               | user      | policy           |
+      | <inviter-access> | <inviter> | <inviter-policy> |
     And the rows of directus_role_members:
       | id           | user        | role        | sort | managed_by |
       | <membership> | <same-user> | <same-role> | 1    | invite     |
     And the rows of directus_invites:
       | id       | user        | role        | user_created |
-      | <invite> | <same-user> | <same-role> | null         |
+      | <invite> | <same-user> | <same-role> | <inviter>    |
     Then these requests get these responses:
       | request                         | response                    |
-      | method: POST                    | code: 204                   |+
+      | as: inviter-<run>               | code: 204                   |+
+      | method: POST                    |                             |
       | path: /users/invite             |                             |
       | payload:                        |                             |
       |   email: same-<run>@example.com |                             |
