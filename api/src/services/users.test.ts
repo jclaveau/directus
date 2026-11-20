@@ -1413,7 +1413,7 @@ describe('Integration Tests', () => {
 					collection: 'directus_users',
 					keys: ['user-id-21'],
 					data: { password: 'new-password', status: 'active' },
-					isTransaction: false,
+					isTransaction: undefined,
 				}]);
 			});
 		});
