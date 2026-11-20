@@ -71,6 +71,8 @@ Feature: A flow run sees the roles of the user who triggered it
       |                             |   roles:            |
       |                             |     - <parent-role> |
       |                             |     - <child-role>  |
+      | method: DELETE              | code: 204           |+
+      | path: /flows/<flow>         |                     |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
       | 1       | directus_access       | 2      | 0      | 0      | 0      |
