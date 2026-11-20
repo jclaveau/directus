@@ -226,3 +226,33 @@ Feature: A user is invited, re-invited and accepts the invitation
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
       | 1       | directus_users | 0      | 0      | 0      | 0      |
+
+  Scenario: a user invited again into the same role keeps their invitation
+    Given these requests are sent:
+      | request                         | response  |
+      | method: POST                    | code: 200 |+
+      | path: /roles                    |           |
+      | payload:                        |           |
+      |   id: <same-role>               |           |
+      |   name: same-<run>              |           |
+      | method: POST                    | code: 204 |+
+      | path: /users/invite             |           |
+      | payload:                        |           |
+      |   email: same-<run>@example.com |           |
+      |   role: <same-role>             |           |
+    Then these requests get these responses:
+      | request                         | response                |
+      | method: POST                    | code: 204               |+
+      | path: /users/invite             |                         |
+      | payload:                        |                         |
+      |   email: same-<run>@example.com |                         |
+      |   role: <same-role>             |                         |
+      | method: GET                     | code: 200               |+
+      | path: /users                    | body:                   |
+      | query:                          |   data:                 |
+      |   fields: status,role           |     - status: invited   |
+      |   filter[email][_eq]: >-        |       role: <same-role> |
+      |     same-<run>@example.com      |                         |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 0      | 0      | 0      | 0      |
