@@ -18,81 +18,41 @@ Feature: A user holds several roles, each one a membership
   - A user holds a role once per `managed_by`: a second membership of the
     same role from the same manager is refused, whether a write creates it
     or moves another membership onto that role.
+  - A Given states the database rows a scenario starts from, written straight
+    into the database; the feature's collection is created before it runs.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own. A response cell states the keys it checks.
 
   Scenario: a member of two roles reads what either role's policy allows
-    Given these requests are sent:
-      | request                            | response  |
-      | method: POST                       | code: 200 |+
-      | path: /collections                 |           |
-      | payload:                           |           |
-      |   collection: membership_notes     |           |
-      |   schema: {}                       |           |
-      |   meta: {}                         |           |
-      |   fields:                          |           |
-      |     - field: label                 |           |
-      |       type: string                 |           |
-      |       meta: {}                     |           |
-      | method: POST                       | code: 200 |+
-      | path: /items/membership_notes      |           |
-      | payload:                           |           |
-      |   - label: first                   |           |
-      |   - label: second                  |           |
-      |   - label: third                   |           |
-      | method: POST                       | code: 200 |+
-      | path: /policies                    |           |
-      | payload:                           |           |
-      |   id: <first-policy>               |           |
-      |   name: first-<run>                |           |
-      |   app_access: true                 |           |
-      |   admin_access: false              |           |
-      |   permissions:                     |           |
-      |     - collection: membership_notes |           |
-      |       action: read                 |           |
-      |       fields: ['*']                |           |
-      |       permissions:                 |           |
-      |         label:                     |           |
-      |           _eq: first               |           |
-      | method: POST                       | code: 200 |+
-      | path: /roles                       |           |
-      | payload:                           |           |
-      |   id: <first-role>                 |           |
-      |   name: first-<run>                |           |
-      |   policies:                        |           |
-      |     - policy: <first-policy>       |           |
-      | method: POST                       | code: 200 |+
-      | path: /policies                    |           |
-      | payload:                           |           |
-      |   id: <second-policy>              |           |
-      |   name: second-<run>               |           |
-      |   app_access: false                |           |
-      |   admin_access: false              |           |
-      |   permissions:                     |           |
-      |     - collection: membership_notes |           |
-      |       action: read                 |           |
-      |       fields: ['*']                |           |
-      |       permissions:                 |           |
-      |         label:                     |           |
-      |           _eq: second              |           |
-      | method: POST                       | code: 200 |+
-      | path: /roles                       |           |
-      | payload:                           |           |
-      |   id: <second-role>                |           |
-      |   name: second-<run>               |           |
-      |   policies:                        |           |
-      |     - policy: <second-policy>      |           |
-      | method: POST                       | code: 200 |+
-      | path: /users                       |           |
-      | payload:                           |           |
-      |   email: member-<run>@example.com  |           |
-      |   token: member-<run>              |           |
-      |   roles:                           |           |
-      |     - role: <first-role>           |           |
-      |       sort: 1                      |           |
-      |     - role: <second-role>          |           |
-      |       sort: 2                      |           |
+    Given the rows of membership_notes:
+      | label  |
+      | first  |
+      | second |
+      | third  |
+    And the rows of directus_policies:
+      | id         | name         | app_access | admin_access |
+      | <p-first>  | first-<run>  | true       | false        |
+      | <p-second> | second-<run> | false      | false        |
+    And the rows of directus_permissions:
+      | policy     | collection       | action | fields | permissions                |
+      | <p-first>  | membership_notes | read   | *      | {"label":{"_eq":"first"}}  |
+      | <p-second> | membership_notes | read   | *      | {"label":{"_eq":"second"}} |
+    And the rows of directus_roles:
+      | id            | name         |
+      | <first-role>  | first-<run>  |
+      | <second-role> | second-<run> |
+    And the rows of directus_access:
+      | id         | role          | policy     |
+      | <access-1> | <first-role>  | <p-first>  |
+      | <access-2> | <second-role> | <p-second> |
+    And the rows of directus_users:
+      | id       | email                    | token        |
+      | <member> | member-<run>@example.com | member-<run> |
+    And the rows of directus_role_members:
+      | id         | user     | role          | sort |
+      | <member-1> | <member> | <first-role>  | 1    |
+      | <member-2> | <member> | <second-role> | 2    |
     Then these requests get these responses:
       | request                         | response                    |
       | as: member-<run>                | code: 200                   |+
@@ -111,18 +71,12 @@ Feature: A user holds several roles, each one a membership
       |                                 |         sort: 2             |
 
   Scenario: a user write sending the single role field is refused
-    Given these requests are sent:
-      | request                         | response  |
-      | method: POST                    | code: 200 |+
-      | path: /roles                    |           |
-      | payload:                        |           |
-      |   id: <refused-role>            |           |
-      |   name: refused-<run>           |           |
-      | method: POST                    | code: 200 |+
-      | path: /users                    |           |
-      | payload:                        |           |
-      |   id: <kept-user>               |           |
-      |   email: kept-<run>@example.com |           |
+    Given the rows of directus_roles:
+      | id             | name          |
+      | <refused-role> | refused-<run> |
+    And the rows of directus_users:
+      | id          | email                  |
+      | <kept-user> | kept-<run>@example.com |
     Then these requests get these responses:
       | request                       | response                               |
       | method: POST                  | code: 400                              |+
@@ -147,36 +101,19 @@ Feature: A user holds several roles, each one a membership
       |   fields: roles               |     roles: []                          |
 
   Scenario: a deleted role suspends only the users it leaves with no role
-    Given these requests are sent:
-      | request                           | response  |
-      | method: POST                      | code: 200 |+
-      | path: /roles                      |           |
-      | payload:                          |           |
-      |   id: <deleted-role>              |           |
-      |   name: deleted-<run>             |           |
-      | method: POST                      | code: 200 |+
-      | path: /roles                      |           |
-      | payload:                          |           |
-      |   id: <kept-role>                 |           |
-      |   name: kept-<run>                |           |
-      | method: POST                      | code: 200 |+
-      | path: /users                      |           |
-      | payload:                          |           |
-      |   id: <only-member>               |           |
-      |   email: only-<run>@example.com   |           |
-      |   roles:                          |           |
-      |     - role: <deleted-role>        |           |
-      |       sort: 1                     |           |
-      | method: POST                      | code: 200 |+
-      | path: /users                      |           |
-      | payload:                          |           |
-      |   id: <double-member>             |           |
-      |   email: double-<run>@example.com |           |
-      |   roles:                          |           |
-      |     - role: <deleted-role>        |           |
-      |       sort: 1                     |           |
-      |     - role: <kept-role>           |           |
-      |       sort: 2                     |           |
+    Given the rows of directus_roles:
+      | id             | name          |
+      | <deleted-role> | deleted-<run> |
+      | <kept-role>    | kept-<run>    |
+    And the rows of directus_users:
+      | id              | email                    |
+      | <only-member>   | only-<run>@example.com   |
+      | <double-member> | double-<run>@example.com |
+    And the rows of directus_role_members:
+      | id         | user            | role           | sort |
+      | <member-1> | <only-member>   | <deleted-role> | 1    |
+      | <member-2> | <double-member> | <deleted-role> | 1    |
+      | <member-3> | <double-member> | <kept-role>    | 2    |
     Then these requests get these responses:
       | request                      | response                  |
       | method: DELETE               | code: 204                 |+
@@ -194,50 +131,25 @@ Feature: A user holds several roles, each one a membership
       |                              |       - role: <kept-role> |
 
   Scenario: a role invited by two inviters is held once, until both drop it
-    Given these requests are sent:
-      | request                              | response  |
-      | method: POST                         | code: 200 |+
-      | path: /policies                      |           |
-      | payload:                             |           |
-      |   id: <inviter-policy>               |           |
-      |   name: inviter-<run>                |           |
-      |   app_access: true                   |           |
-      |   admin_access: true                 |           |
-      | method: POST                         | code: 200 |+
-      | path: /roles                         |           |
-      | payload:                             |           |
-      |   id: <inviter-role>                 |           |
-      |   name: inviter-<run>                |           |
-      |   policies:                          |           |
-      |     - policy: <inviter-policy>       |           |
-      | method: POST                         | code: 200 |+
-      | path: /roles                         |           |
-      | payload:                             |           |
-      |   id: <role-a>                       |           |
-      |   name: role-a-<run>                 |           |
-      | method: POST                         | code: 200 |+
-      | path: /roles                         |           |
-      | payload:                             |           |
-      |   id: <role-b>                       |           |
-      |   name: role-b-<run>                 |           |
-      | method: POST                         | code: 200 |+
-      | path: /users                         |           |
-      | payload:                             |           |
-      |   id: <inviter-a>                    |           |
-      |   email: inviter-a-<run>@example.com |           |
-      |   token: inviter-a-<run>             |           |
-      |   roles:                             |           |
-      |     - role: <inviter-role>           |           |
-      |       sort: 1                        |           |
-      | method: POST                         | code: 200 |+
-      | path: /users                         |           |
-      | payload:                             |           |
-      |   id: <inviter-b>                    |           |
-      |   email: inviter-b-<run>@example.com |           |
-      |   token: inviter-b-<run>             |           |
-      |   roles:                             |           |
-      |     - role: <inviter-role>           |           |
-      |       sort: 1                        |           |
+    Given the rows of directus_policies:
+      | id               | name          | app_access | admin_access |
+      | <inviter-policy> | inviter-<run> | true       | true         |
+    And the rows of directus_roles:
+      | id             | name          |
+      | <inviter-role> | inviter-<run> |
+      | <role-a>       | role-a-<run>  |
+      | <role-b>       | role-b-<run>  |
+    And the rows of directus_access:
+      | id         | role           | policy           |
+      | <access-1> | <inviter-role> | <inviter-policy> |
+    And the rows of directus_users:
+      | id          | email                       | token           |
+      | <inviter-a> | inviter-a-<run>@example.com | inviter-a-<run> |
+      | <inviter-b> | inviter-b-<run>@example.com | inviter-b-<run> |
+    And the rows of directus_role_members:
+      | id         | user        | role           | sort |
+      | <member-1> | <inviter-a> | <inviter-role> | 1    |
+      | <member-2> | <inviter-b> | <inviter-role> | 1    |
     Then these requests get these responses:
       | request                                    | response                     |
       | as: inviter-a-<run>                        | code: 204                    |+
