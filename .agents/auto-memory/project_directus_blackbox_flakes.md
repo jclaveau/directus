@@ -254,6 +254,7 @@ Run 37846335608 (2026-10-08, shard 8, slot "one") and run 42213640914 (2026-11-0
 - #680 `92bdc85524`, 2026-11-19, postgres shard 7: `singular-write-flows` request 3 ran 4 `directus_operations` selects vs 3, red on the `--failed` rerun too: NOT a flake. Likely cause: `role-flow-accountability` (hhh-dev 9c5cdcfdea, 2026-11-19) POSTs a `status: active` flow and never deletes it; #680's added files reshard it next to `singular-write-flows`, so each operation write's flow reload also reads operations. Same family as the `event-flow-runs` diagnosis above.
 - `common/assets/concurrency` on #686 `b3a28e8c76` (tests-only), 2026-11-08: sqlite3, `expected true to be false`; the next push passed it.
 - `common/assets/concurrency` on #683, 2026-11-07: sqlite3, a43f19bd30, one `--failed` rerun cleared it (merged 05eeca0e73).
+- `common/assets/concurrency` on #680 `3c0c9697bf`, 2026-11-20: sqlite3 / minio, round 2 `errors: 1` out of 1004 requests, all 200: rerun `--failed` once.
 
 ## 2026-11-06 (#688 shard 1): query-audit-header rows
 - Fixed by #692, merged as `21de5319ac` on 2026-11-07: the GET filters out the POST's title, so commit order no longer changes `rows`. A branch without that merge can still hit it.
