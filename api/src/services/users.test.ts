@@ -1479,7 +1479,7 @@ describe('Integration Tests', () => {
 					was_doubled: true,
 				}]);
 
-				await service.updateOne('user-id-41', { status: 'active' });
+				await service.updateBatch([{ id: 'user-id-41', status: 'active' }]);
 
 				expect(clearPermissionsCacheAfterCommit).toHaveBeenCalledTimes(1);
 				expect(flushResponseCacheAfterCommit).toHaveBeenCalledTimes(1);
@@ -1503,7 +1503,7 @@ describe('Integration Tests', () => {
 					},
 				]);
 
-				await service.updateOne('user-id-41', { status: 'active' });
+				await service.updateBatch([{ id: 'user-id-41', status: 'active' }]);
 
 				expect(clearPermissionsCacheAfterCommit).not.toHaveBeenCalled();
 				expect(flushResponseCacheAfterCommit).not.toHaveBeenCalled();
@@ -1523,7 +1523,7 @@ describe('Integration Tests', () => {
 			it('clears no cache when it writes no membership', async () => {
 				tracker.on.select('doubled').response([]);
 
-				await service.updateOne('user-id-41', { status: 'active' });
+				await service.updateBatch([{ id: 'user-id-41', status: 'active' }]);
 
 				expect(clearPermissionsCacheAfterCommit).not.toHaveBeenCalled();
 				expect(flushResponseCacheAfterCommit).not.toHaveBeenCalled();
