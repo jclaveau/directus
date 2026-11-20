@@ -18,7 +18,8 @@ Feature: A user's role, status and deletion purge the cache as today
   - `!jwt` signs its claims with the instance's secret, as Directus signs the
     invitation token it mails.
   - A header stated as a list matches its comma-separated values in any
-    order: a user's deletion purges its cascades in no fixed order.
+    order: a user's deletion purges its cascades in no fixed order. A
+    header stated as `null` is one the response does not send.
 
   Scenario: a user's name change keeps the cached read, a role change drops it
     Given the rows of directus_policies:
@@ -50,28 +51,28 @@ Feature: A user's role, status and deletion purge the cache as today
       |   fields: label                      |   data:               |
       |                                      |     - label: v1       |
     Then these requests get these responses:
-      | request                              | response                         |
-      | method: PATCH                        | code: 200                        |+
-      | path: /users/<mover>                 | headers:                         |
-      | payload:                             |   x-scoped-cache-purged-tags: >- |
-      |   first_name: renamed                |     directus_users,              |
-      |                                      |     directus_users:id=<mover>    |
-      | as: mover-<run>                      | code: 200                        |+
-      | method: GET                          | headers:                         |
-      | path: /items/cache_user_rename_notes |   x-cache-status: HIT            |
-      | query:                               | body:                            |
-      |   fields: label                      |   data:                          |
-      |                                      |     - label: v1                  |
-      | method: PATCH                        | code: 200                        |+
-      | path: /users/<mover>                 |                                  |
-      | payload:                             |                                  |
-      |   role: <second-role>                |                                  |
-      | as: mover-<run>                      | code: 200                        |+
-      | method: GET                          | headers:                         |
-      | path: /items/cache_user_rename_notes |   x-cache-status: MISS           |
-      | query:                               | body:                            |
-      |   fields: label                      |   data:                          |
-      |                                      |     - label: v1                  |
+      | request                              | response                           |
+      | method: PATCH                        | code: 200                          |+
+      | path: /users/<mover>                 | headers:                           |
+      | payload:                             |   x-scoped-cache-purged-tags: >-   |
+      |   first_name: renamed                |     directus_users,                |
+      |                                      |     directus_users:id=<mover>      |
+      | as: mover-<run>                      | code: 200                          |+
+      | method: GET                          | headers:                           |
+      | path: /items/cache_user_rename_notes |   x-cache-status: HIT              |
+      | query:                               | body:                              |
+      |   fields: label                      |   data:                            |
+      |                                      |     - label: v1                    |
+      | method: PATCH                        | code: 200                          |+
+      | path: /users/<mover>                 | headers:                           |
+      | payload:                             |   x-scoped-cache-purged-tags: null |
+      |   role: <second-role>                |                                    |
+      | as: mover-<run>                      | code: 200                          |+
+      | method: GET                          | headers:                           |
+      | path: /items/cache_user_rename_notes |   x-cache-status: MISS             |
+      | query:                               | body:                              |
+      |   fields: label                      |   data:                            |
+      |                                      |     - label: v1                    |
     And on postgres the requests ran these statements:
       | request | table                   | select | insert | update | delete | with |
       | 1       | directus_access         | 2      | 0      | 0      | 0      | 0    |
@@ -246,16 +247,16 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                                 |   x-cache-status: HIT |
       |   fields: label                        |                       |
     Then these requests get these responses:
-      | request                                | response              |
-      | method: POST                           | code: 204             |+
-      | path: /users/invite                    |                       |
-      | payload:                               |                       |
-      |   email: same-<run>@example.com        |                       |
-      |   role: <same-role>                    |                       |
-      | method: GET                            | code: 200             |+
-      | path: /items/cache_user_reinvite_notes | headers:              |
-      | query:                                 |   x-cache-status: HIT |
-      |   fields: label                        |                       |
+      | request                                | response                           |
+      | method: POST                           | code: 204                          |+
+      | path: /users/invite                    | headers:                           |
+      | payload:                               |   x-scoped-cache-purged-tags: null |
+      |   email: same-<run>@example.com        |                                    |
+      |   role: <same-role>                    |                                    |
+      | method: GET                            | code: 200                          |+
+      | path: /items/cache_user_reinvite_notes | headers:                           |
+      | query:                                 |   x-cache-status: HIT              |
+      |   fields: label                        |                                    |
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
       | 1       | directus_users | 2      | 0      | 0      | 0      |
@@ -279,21 +280,21 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                               |   x-cache-status: HIT |
       |   fields: label                      |                       |
     Then these requests get these responses:
-      | request                              | response                |
-      | method: POST                         | code: 204               |+
-      | path: /users/invite                  |                         |
-      | payload:                             |                         |
-      |   email: second-<run>@example.com    |                         |
-      |   role: <second-role>                |                         |
-      | method: GET                          | code: 200               |+
-      | path: /users/<invitee>               | body:                   |
-      | query:                               |   data:                 |
-      |   fields: status,role                |     status: invited     |
-      |                                      |     role: <second-role> |
-      | method: GET                          | code: 200               |+
-      | path: /items/cache_user_second_notes | headers:                |
-      | query:                               |   x-cache-status: MISS  |
-      |   fields: label                      |                         |
+      | request                              | response                           |
+      | method: POST                         | code: 204                          |+
+      | path: /users/invite                  | headers:                           |
+      | payload:                             |   x-scoped-cache-purged-tags: null |
+      |   email: second-<run>@example.com    |                                    |
+      |   role: <second-role>                |                                    |
+      | method: GET                          | code: 200                          |+
+      | path: /users/<invitee>               | body:                              |
+      | query:                               |   data:                            |
+      |   fields: status,role                |     status: invited                |
+      |                                      |     role: <second-role>            |
+      | method: GET                          | code: 200                          |+
+      | path: /items/cache_user_second_notes | headers:                           |
+      | query:                               |   x-cache-status: MISS             |
+      |   fields: label                      |                                    |
     And on postgres the requests ran these statements:
       | request | table                   | select | insert | update | delete | with |
       | 1       | directus_access         | 2      | 0      | 0      | 0      | 0    |
