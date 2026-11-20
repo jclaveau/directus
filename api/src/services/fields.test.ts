@@ -56,6 +56,25 @@ describe('Services / Fields', () => {
 				'does not have the permission to create the field',
 			);
 		});
+
+		it('refuses a removed role special before running a statement', async () => {
+			const service = new FieldsService({ knex: db, schema, accountability: admin });
+
+			await expect(
+				service.createField('test', {
+					field: 'made_by_role',
+					type: 'uuid',
+					meta: { special: ['role-created'] },
+				} as RawField),
+			).rejects.toHaveProperty(
+				'message',
+				'Invalid payload. Field "made_by_role" of collection "test" uses the'
+					+ ' removed special "role-created": a user can hold several roles,'
+					+ ' use "roles-created" on a json field.',
+			);
+
+			expect(tracker.history.all).toEqual([]);
+		});
 	});
 
 	describe('updateField', () => {
@@ -69,6 +88,26 @@ describe('Services / Fields', () => {
 			await expect(service.updateField('test', field)).rejects.toThrowError(
 				'does not have the permission to update the field',
 			);
+		});
+
+		it('refuses a removed role special before running a statement', async () => {
+			const service = new FieldsService({ knex: db, schema, accountability: admin });
+
+			await expect(
+				service.updateField('test', {
+					field: 'id',
+					type: 'uuid',
+					schema: { is_nullable: true },
+					meta: { special: ['role-updated'] },
+				} as RawField),
+			).rejects.toHaveProperty(
+				'message',
+				'Invalid payload. Field "id" of collection "test" uses the removed'
+					+ ' special "role-updated": a user can hold several roles, use'
+					+ ' "roles-updated" on a json field.',
+			);
+
+			expect(tracker.history.all).toEqual([]);
 		});
 
 		it('rejects with the error the column builder throws', async () => {

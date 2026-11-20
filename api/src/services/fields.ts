@@ -39,6 +39,9 @@ import { getSystemFieldRowsWithAuthProviders } from '../utils/get-field-system-r
 import getLocalType from '../utils/get-local-type.js';
 import { isEqual, isNil, merge } from '../utils/lodash-es-used.js';
 import { withMeta } from '../utils/read-meta.js';
+import {
+	refuseRemovedRoleStampSpecial,
+} from '../utils/refuse-removed-role-stamp-special.js';
 import { sanitizeColumn } from '../utils/sanitize-schema.js';
 import {
 	clearCachesThenFireActions,
@@ -390,6 +393,16 @@ export class FieldsService {
 			});
 		}
 
+		// Before the column change: refused after it, the field would still have
+		// altered the table and flushed the caches.
+		if (field.meta) {
+			refuseRemovedRoleStampSpecial('directus_fields', {
+				...field.meta,
+				collection,
+				field: field.field,
+			});
+		}
+
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
 		const nestedActionEvents: ActionEventParams[] = [];
 
@@ -511,6 +524,16 @@ export class FieldsService {
 		if (this.accountability && this.accountability.admin !== true) {
 			throw new ForbiddenError({
 				reason: `'${this.accountability.user}' does not have the permission to update the field '${field}' in '${collection}'`,
+			});
+		}
+
+		// Before the column change: refused after it, the field would still have
+		// altered the table and flushed the caches.
+		if (field.meta) {
+			refuseRemovedRoleStampSpecial('directus_fields', {
+				...field.meta,
+				collection,
+				field: field.field,
 			});
 		}
 
