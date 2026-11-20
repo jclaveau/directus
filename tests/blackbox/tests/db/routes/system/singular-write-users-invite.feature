@@ -4,23 +4,18 @@ Feature: A user is invited, re-invited and accepts the invitation
     the user it writes, never the mail.
   - `!jwt` signs its claims with the instance's secret, as Directus signs the
     token it mails.
+  - A Given states the database rows a scenario starts from, written straight
+    into the database. An invited user is the row `/users/invite` writes: a
+    `directus_users` row with the `invited` status and its role.
   - A request authenticates as the admin. `<run>` stands for a value unique to
     the scenario, and any other `<name>` for a uuid of its own. A response
     cell states the keys it checks.
 
   Scenario: an invited user takes the role of their latest invitation
-    Given these requests are sent:
-      | request              | response  |
-      | method: POST         | code: 200 |+
-      | path: /roles         |           |
-      | payload:             |           |
-      |   id: <first-role>   |           |
-      |   name: first-<run>  |           |
-      | method: POST         | code: 200 |+
-      | path: /roles         |           |
-      | payload:             |           |
-      |   id: <second-role>  |           |
-      |   name: second-<run> |           |
+    Given the rows of directus_roles:
+      | id            | name         |
+      | <first-role>  | first-<run>  |
+      | <second-role> | second-<run> |
     Then these requests get these responses:
       | request                            | response                  |
       | method: POST                       | code: 204                 |+
@@ -57,18 +52,12 @@ Feature: A user is invited, re-invited and accepts the invitation
       | 3       | directus_users     | 4      | 0      | 1      | 0      |
 
   Scenario: an invitation accepted with its token activates the user
-    Given these requests are sent:
-      | request                              | response  |
-      | method: POST                         | code: 200 |+
-      | path: /roles                         |           |
-      | payload:                             |           |
-      |   id: <invitee-role>                 |           |
-      |   name: invitee-<run>                |           |
-      | method: POST                         | code: 204 |+
-      | path: /users/invite                  |           |
-      | payload:                             |           |
-      |   email: accepting-<run>@example.com |           |
-      |   role: <invitee-role>               |           |
+    Given the rows of directus_roles:
+      | id             | name          |
+      | <invitee-role> | invitee-<run> |
+    And the rows of directus_users:
+      | id          | email                       | role           | status  |
+      | <accepting> | accepting-<run>@example.com | <invitee-role> | invited |
     Then these requests get these responses:
       | request                                | response                     |
       | method: POST                           | code: 204                    |+
@@ -102,12 +91,9 @@ Feature: A user is invited, re-invited and accepts the invitation
       | 3       | directus_users    | 3      | 0      | 1      | 0      |
 
   Scenario: an invitation token is refused for another scope or a user not invited
-    Given these requests are sent:
-      | request                           | response  |
-      | method: POST                      | code: 200 |+
-      | path: /users                      |           |
-      | payload:                          |           |
-      |   email: active-<run>@example.com |           |
+    Given the rows of directus_users:
+      | id       | email                    |
+      | <active> | active-<run>@example.com |
     Then these requests get these responses:
       | request                             | response                                |
       | method: POST                        | code: 403                               |+
@@ -136,13 +122,9 @@ Feature: A user is invited, re-invited and accepts the invitation
       | 2       | directus_users | 2      | 0      | 0      | 0      |
 
   Scenario: an invitation to a URL off the allow list creates no user
-    Given these requests are sent:
-      | request               | response  |
-      | method: POST          | code: 200 |+
-      | path: /roles          |           |
-      | payload:              |           |
-      |   id: <refused-role>  |           |
-      |   name: refused-<run> |           |
+    Given the rows of directus_roles:
+      | id             | name          |
+      | <refused-role> | refused-<run> |
     Then these requests get these responses:
       | request                            | response                                |
       | method: POST                       | code: 400                               |+
@@ -163,22 +145,13 @@ Feature: A user is invited, re-invited and accepts the invitation
       | 1       | directus_users | 3      | 0      | 0      | 0      |
 
   Scenario: a user invited again to a URL off the allow list is refused
-    Given these requests are sent:
-      | request                          | response  |
-      | method: POST                     | code: 200 |+
-      | path: /roles                     |           |
-      | payload:                         |           |
-      |   id: <again-role>               |           |
-      |   name: again-<run>              |           |
-      | method: POST                     | code: 204 |+
-      | path: /users/invite              |           |
-      | payload:                         |           |
-      |   email: again-<run>@example.com |           |
-      |   role: <again-role>             |           |
-      | method: POST                     | code: 200 |+
-      | path: /users                     |           |
-      | payload:                         |           |
-      |   email: known-<run>@example.com |           |
+    Given the rows of directus_roles:
+      | id           | name        |
+      | <again-role> | again-<run> |
+    And the rows of directus_users:
+      | id      | email                   | role         | status  |
+      | <again> | again-<run>@example.com | <again-role> | invited |
+      | <known> | known-<run>@example.com | null         | active  |
     Then these requests get these responses:
       | request                           | response                                |
       | method: POST                      | code: 400                               |+
@@ -199,3 +172,52 @@ Feature: A user is invited, re-invited and accepts the invitation
       | request | table          | select | insert | update | delete |
       | 1       | directus_users | 2      | 0      | 0      | 0      |
       | 2       | directus_users | 2      | 0      | 0      | 0      |
+
+  Scenario: graphql invites a user into the one role it names
+    Given the rows of directus_roles:
+      | id             | name          |
+      | <graphql-role> | graphql-<run> |
+    Then these requests get these responses:
+      | request                                 | response                   |
+      | method: POST                            | code: 200                  |+
+      | path: /graphql/system                   | body:                      |
+      | payload:                                |   data:                    |
+      |   query: >-                             |     users_invite: true     |
+      |     mutation { users_invite(            |                            |
+      |     email: "graphql-<run>@example.com", |                            |
+      |     role: "<graphql-role>") }           |                            |
+      | method: GET                             | code: 200                  |+
+      | path: /users                            | body:                      |
+      | query:                                  |   data:                    |
+      |   fields: status,role                   |     - status: invited      |
+      |   filter[email][_eq]: >-                |       role: <graphql-role> |
+      |     graphql-<run>@example.com           |                            |
+    And on postgres the requests ran these statements:
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_users     | 3      | 1      | 0      | 0      |
+
+  Scenario: a user invited again into the same role keeps their invitation
+    Given the rows of directus_roles:
+      | id          | name       |
+      | <same-role> | same-<run> |
+    And the rows of directus_users:
+      | id          | email                  | role        | status  |
+      | <same-user> | same-<run>@example.com | <same-role> | invited |
+    Then these requests get these responses:
+      | request                         | response                |
+      | method: POST                    | code: 204               |+
+      | path: /users/invite             |                         |
+      | payload:                        |                         |
+      |   email: same-<run>@example.com |                         |
+      |   role: <same-role>             |                         |
+      | method: GET                     | code: 200               |+
+      | path: /users                    | body:                   |
+      | query:                          |   data:                 |
+      |   fields: status,role           |     - status: invited   |
+      |   filter[email][_eq]: >-        |       role: <same-role> |
+      |     same-<run>@example.com      |                         |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 2      | 0      | 0      | 0      |
