@@ -33,7 +33,8 @@ export async function up(knex: Knex): Promise<void> {
 		table.index(['user']);
 	});
 
-	// One row per user, role and inviter; null for an invite naming no user.
+	// One row per user, role and inviter; null for an invite naming no user. An
+	// inviter deleted takes their invites along.
 	await knex.schema.createTable('directus_invites', (table) => {
 		table.uuid('id').primary();
 
@@ -50,7 +51,7 @@ export async function up(knex: Knex): Promise<void> {
 		table.uuid('user_created')
 			.references('directus_users.id')
 			.nullable()
-			.onDelete('SET NULL');
+			.onDelete('CASCADE');
 
 		table.timestamp('date_created').defaultTo(knex.fn.now());
 	});
@@ -141,7 +142,7 @@ export async function down(knex: Knex): Promise<void> {
 		table.uuid('role')
 			.references('directus_roles.id')
 			.nullable()
-			.onDelete('SET NULL');
+			.onDelete('CASCADE');
 	});
 
 	for (const [user, role] of roleByUser) {

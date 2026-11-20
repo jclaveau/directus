@@ -1402,8 +1402,8 @@ describe('Integration Tests', () => {
 			});
 
 			it(oneLine`
-				hands the invite memberships to the admins on accept, deleting
-				one whose role the user also holds by hand
+				activates the user in a transaction, whose update hands the invite
+				memberships to the admins
 			`, async () => {
 				vi.mocked(verifyJWT).mockReturnValue({
 					email: 'user@example.com',
@@ -1412,17 +1412,6 @@ describe('Integration Tests', () => {
 
 				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
 					.mockResolvedValueOnce({ id: 'user-id-21', status: 'invited' });
-
-				tracker.on.select('directus_role_members').response([
-					{ id: 'member-id-21', role: 'role-id-21', managed_by: 'invite' },
-					{ id: 'member-id-22', role: 'role-id-22', managed_by: 'invite' },
-					{ id: 'member-id-23', role: 'role-id-22', managed_by: null },
-					{
-						id: 'member-id-24',
-						role: 'role-id-24',
-						managed_by: 'auth:mockoauth',
-					},
-				]);
 
 				const writes: unknown[] = [];
 
@@ -1439,68 +1428,18 @@ describe('Integration Tests', () => {
 						return key;
 					});
 
-				const updateMembersSpy = vi
-					.spyOn(RoleMembersService.prototype, 'updateMany')
-					.mockImplementation(async function (
-						this: RoleMembersService,
-						keys,
-						data,
-					) {
-						writes.push({
-							collection: this.collection,
-							keys,
-							data,
-							isTransaction: this.knex.isTransaction,
-						});
-
-						return keys;
-					});
-
-				const deleteMembersSpy = vi
-					.spyOn(RoleMembersService.prototype, 'deleteMany')
-					.mockImplementation(async function (this: RoleMembersService, keys) {
-						writes.push({
-							collection: this.collection,
-							keys,
-							isTransaction: this.knex.isTransaction,
-						});
-
-						return keys;
-					});
-
 				onTestFinished(() => {
 					updateUserSpy.mockRestore();
-					updateMembersSpy.mockRestore();
-					deleteMembersSpy.mockRestore();
 				});
 
 				await service.acceptInvite('invite-token', 'new-password');
 
-				expect(tracker.history.select).toMatchObject([{
-					sql: 'select "id", "role", "managed_by"'
-						+ ' from "directus_role_members" where "user" = ?',
-					bindings: ['user-id-21'],
+				expect(writes).toEqual([{
+					collection: 'directus_users',
+					keys: ['user-id-21'],
+					data: { password: 'new-password', status: 'active' },
+					isTransaction: true,
 				}]);
-
-				expect(writes).toEqual([
-					{
-						collection: 'directus_users',
-						keys: ['user-id-21'],
-						data: { password: 'new-password', status: 'active' },
-						isTransaction: true,
-					},
-					{
-						collection: 'directus_role_members',
-						keys: ['member-id-21'],
-						data: { managed_by: null },
-						isTransaction: true,
-					},
-					{
-						collection: 'directus_role_members',
-						keys: ['member-id-22'],
-						isTransaction: true,
-					},
-				]);
 			});
 		});
 

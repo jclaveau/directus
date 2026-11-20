@@ -395,6 +395,25 @@ export class UsersService extends ItemsService {
 	}
 
 	/**
+	 * A user leaving `invited`, by accept or by a write of their status, keeps
+	 * the roles of their invites: the admins own them from then on.
+	 */
+	protected override async writeBeforeUpdate(
+		groups: UpdateGroup<Item>[],
+		trx: Knex,
+	): Promise<void> {
+		const leavingInvitedKeys = groups
+			.filter(({ data }) => {
+				return data['status'] !== undefined && data['status'] !== 'invited';
+			})
+			.flatMap(({ keys }) => keys);
+
+		if (leavingInvitedKeys.length > 0) {
+			await this.handInvitedRolesToAdmins(trx, leavingInvitedKeys);
+		}
+	}
+
+	/**
 	 * Delete multiple users by primary key
 	 */
 	override async deleteMany(keys: PrimaryKey[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
@@ -449,6 +468,8 @@ export class UsersService extends ItemsService {
 						);
 					}
 				}
+
+				await this.dropMembershipsOfLastInvites(trx, keys);
 			}
 
 			await new ItemsService('directus_users', {
@@ -479,6 +500,53 @@ export class UsersService extends ItemsService {
 		await this.clearUserSessions(keys);
 
 		return keys;
+	}
+
+	/**
+	 * An inviter's invites go with them (`on delete cascade`). A user still
+	 * invited loses the `invite` membership of a role whose last invite goes:
+	 * an invite naming no user, or another inviter's, keeps it.
+	 */
+	private async dropMembershipsOfLastInvites(
+		trx: Knex,
+		deletedUsers: PrimaryKey[],
+	): Promise<void> {
+		const strandedMemberships: { id: string }[] = await trx
+			.select('directus_role_members.id')
+			.from('directus_role_members')
+			.join(
+				'directus_users',
+				'directus_users.id',
+				'directus_role_members.user',
+			)
+			.where('directus_users.status', 'invited')
+			.where('directus_role_members.managed_by', 'invite')
+			.whereNotIn('directus_role_members.user', deletedUsers)
+			.whereExists((invites) => {
+				invites
+					.select(1)
+					.from('directus_invites')
+					.whereColumn('directus_invites.user', 'directus_role_members.user')
+					.whereColumn('directus_invites.role', 'directus_role_members.role')
+					.whereIn('directus_invites.user_created', deletedUsers);
+			})
+			.whereNotExists((invites) => {
+				invites
+					.select(1)
+					.from('directus_invites')
+					.whereColumn('directus_invites.user', 'directus_role_members.user')
+					.whereColumn('directus_invites.role', 'directus_role_members.role')
+					.where((inviter) => {
+						inviter
+							.whereNull('directus_invites.user_created')
+							.orWhereNotIn('directus_invites.user_created', deletedUsers);
+					});
+			});
+
+		if (strandedMemberships.length > 0) {
+			await new RoleMembersService({ knex: trx, schema: this.schema })
+				.deleteMany(strandedMemberships.map(({ id }) => id));
+		}
 	}
 
 	/**
@@ -718,43 +786,58 @@ export class UsersService extends ItemsService {
 			// Allow unauthenticated update
 			await new UsersService({ knex: trx, schema: this.schema })
 				.updateOne(user.id, { password, status: 'active' });
-
-			await this.handInvitedRolesToAdmins(trx, user.id);
 		});
 	}
 
 	/**
-	 * Once the user is active, the invites are history: the admins own the
-	 * roles they gave. One the user also holds by hand is deleted, the unique
-	 * (user, role, managed_by) refusing a second null row.
+	 * Once a user leaves `invited`, the invites are history: the admins own
+	 * the roles they gave. One the user also holds by hand is deleted, the
+	 * unique (user, role, managed_by) refusing a second null row.
 	 */
 	private async handInvitedRolesToAdmins(
 		trx: Knex,
-		acceptingUser: PrimaryKey,
+		leavingUsers: PrimaryKey[],
 	): Promise<void> {
 		const memberships: {
 			id: string;
+			user: string;
 			role: string;
 			managed_by: string | null;
 		}[] = await trx
-			.select('id', 'role', 'managed_by')
+			.select(
+				'directus_role_members.id',
+				'directus_role_members.user',
+				'directus_role_members.role',
+				'directus_role_members.managed_by',
+			)
 			.from('directus_role_members')
-			.where({ user: acceptingUser });
+			.join(
+				'directus_users',
+				'directus_users.id',
+				'directus_role_members.user',
+			)
+			.where('directus_users.status', 'invited')
+			.whereIn('directus_role_members.user', leavingUsers)
+			.where((manager) => {
+				manager
+					.where('directus_role_members.managed_by', 'invite')
+					.orWhereNull('directus_role_members.managed_by');
+			});
 
-		const handRoles = memberships
+		const handRoles = new Set(memberships
 			.filter(({ managed_by }) => managed_by === null)
-			.map(({ role }) => role);
+			.map(({ user, role }) => JSON.stringify([user, role])));
 
 		const inviteMemberships = memberships.filter(({ managed_by }) => {
 			return managed_by === 'invite';
 		});
 
 		const handedKeys = inviteMemberships
-			.filter(({ role }) => !handRoles.includes(role))
+			.filter(({ user, role }) => !handRoles.has(JSON.stringify([user, role])))
 			.map(({ id }) => id);
 
 		const doubledKeys = inviteMemberships
-			.filter(({ role }) => handRoles.includes(role))
+			.filter(({ user, role }) => handRoles.has(JSON.stringify([user, role])))
 			.map(({ id }) => id);
 
 		const membersService = new RoleMembersService({
