@@ -1247,6 +1247,53 @@ describe('Integration Tests', () => {
 				},
 			);
 
+			it(oneLine`
+				refuses a re-invite from a user without the permission before
+				the URL off the allow list
+			`, async () => {
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({
+						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000023',
+						status: 'invited',
+					});
+
+				tracker.on.select('directus_role_members').response([
+					{ id: 'member-id-8', role: 'invite-role', managed_by: 'invite', sort: 1 },
+				]);
+
+				tracker.on.select('directus_invites').response([
+					{ id: 'invite-id-8', role: 'invite-role', user_created: 'inviter-id' },
+				]);
+
+				vi.mocked(processPayload).mockRejectedValueOnce(new ForbiddenError());
+
+				const promise = new UsersService({
+					knex: db,
+					schema,
+					accountability: {
+						user: 'inviter-id',
+						admin: false,
+						app: true,
+						ip: null,
+						memberRoles: [],
+						roles: ['inviter-role'],
+					},
+				}).inviteUser(
+					'user@example.com',
+					['invite-role'],
+					'https://elsewhere.example.com/invite',
+				);
+
+				await expect(promise).rejects.toEqual(new ForbiddenError());
+
+				await expect(promise).rejects.toHaveProperty(
+					'message',
+					'You don\'t have permission to access this.',
+				);
+
+				expect(mailService.send).not.toBeCalled();
+			});
+
 			it(
 				'refuses inviting an active user to a URL off the allow list',
 				async () => {

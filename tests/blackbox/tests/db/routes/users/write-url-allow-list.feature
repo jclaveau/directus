@@ -41,9 +41,10 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |     allowed-<run>@example.com            |         - role: <invitee-role> |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
-      | 1       | directus_activity     | 0      | 2      | 0      | 0      |
-      | 1       | directus_revisions    | 0      | 2      | 1      | 0      |
-      | 1       | directus_role_members | 1      | 1      | 0      | 0      |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_invites      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 0      | 1      | 0      | 0      |
       | 1       | directus_users        | 3      | 1      | 0      | 0      |
 
   Scenario: an invited user invited again to the same role stays as they were
@@ -83,19 +84,10 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |   filter[email][_eq]: >-         |       roles:                |
       |     again-<run>@example.com      |         - role: <same-role> |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete | with |
-      | 1       | directus_access       | 2      | 0      | 0      | 0      | 0    |
-      | 1       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_role_members | 2      | 0      | 0      | 0      | 0    |
-      | 1       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_users        | 2      | 0      | 0      | 0      | 0    |
-      | 1       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
-      | 1       | information_schema    | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_index              | 2      | 0      | 0      | 0      | 0    |
-      | 1       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_invites      | 1      | 0      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 2      | 0      | 0      | 0      |
 
   Scenario: an invitation of an active user leaves the user as they were
     Given these requests are sent:
@@ -131,19 +123,8 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |   filter[email][_eq]: >-          |       roles:                |
       |     active-<run>@example.com      |         - role: <kept-role> |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete | with |
-      | 1       | directus_access       | 2      | 0      | 0      | 0      | 0    |
-      | 1       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_users        | 2      | 0      | 0      | 0      | 0    |
-      | 1       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
-      | 1       | information_schema    | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_index              | 2      | 0      | 0      | 0      | 0    |
-      | 1       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 2      | 0      | 0      | 0      |
 
   Scenario: a registration needing no verification makes an active user
     Given these requests are sent:

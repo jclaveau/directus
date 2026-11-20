@@ -49,16 +49,16 @@ Feature: A user is invited, re-invited and accepts the invitation
       |     invited-<run>@example.com      |         - role: <second-role> |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
-      | 1       | directus_activity     | 0      | 2      | 0      | 0      |
-      | 1       | directus_revisions    | 0      | 2      | 1      | 0      |
-      | 1       | directus_role_members | 1      | 1      | 0      | 0      |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_invites      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 0      | 1      | 0      | 0      |
       | 1       | directus_users        | 3      | 1      | 0      | 0      |
-      | 3       | directus_access       | 2      | 0      | 0      | 0      |
-      | 3       | directus_activity     | 0      | 3      | 0      | 0      |
-      | 3       | directus_revisions    | 0      | 1      | 0      | 0      |
-      | 3       | directus_role_members | 4      | 1      | 0      | 1      |
+      | 3       | directus_access       | 1      | 0      | 0      | 0      |
+      | 3       | directus_invites      | 1      | 1      | 0      | 1      |
+      | 3       | directus_role_members | 1      | 1      | 0      | 1      |
       | 3       | directus_roles        | 1      | 0      | 0      | 0      |
-      | 3       | directus_users        | 5      | 0      | 0      | 0      |
+      | 3       | directus_users        | 3      | 0      | 0      | 0      |
 
   Scenario: an invitation accepted with its token activates the user
     Given these requests are sent:
@@ -95,28 +95,20 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   email: accepting-<run>@example.com   |                              |
       |   password: accepted-password          |                              |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete | with |
-      | 1       | directus_access       | 2      | 0      | 0      | 0      | 0    |
-      | 1       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_sessions     | 0      | 0      | 0      | 1      | 0    |
-      | 1       | directus_settings     | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_users        | 2      | 0      | 1      | 0      | 0    |
-      | 1       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
-      | 1       | information_schema    | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_index              | 2      | 0      | 0      | 0      | 0    |
-      | 1       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_access       | 2      | 0      | 0      | 0      | 0    |
-      | 3       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
-      | 3       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_sessions     | 0      | 1      | 0      | 1      | 0    |
-      | 3       | directus_settings     | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_users        | 3      | 0      | 1      | 0      | 0    |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 1      | 0      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 1      | 0      |
+      | 1       | directus_roles        | 1      | 0      | 0      | 0      |
+      | 1       | directus_sessions     | 0      | 0      | 0      | 1      |
+      | 1       | directus_settings     | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 3      | 0      | 1      | 0      |
+      | 3       | directus_access       | 2      | 0      | 0      | 0      |
+      | 3       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 3       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 3       | directus_roles        | 1      | 0      | 0      | 0      |
+      | 3       | directus_sessions     | 0      | 1      | 0      | 1      |
+      | 3       | directus_settings     | 1      | 0      | 0      | 0      |
+      | 3       | directus_users        | 3      | 0      | 1      | 0      |
 
   Scenario: an invitation token is refused for another scope or a user not invited
     Given these requests are sent:

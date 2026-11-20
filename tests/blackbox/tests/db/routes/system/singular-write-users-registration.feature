@@ -182,20 +182,10 @@ Feature: A visitor registers and verifies the email address
       |                                              |       - role:                 |
       |                                              |           <registration-role> |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete | with |
-      | 1       | directus_access       | 2      | 0      | 0      | 0      | 0    |
-      | 1       | directus_role_members | 1      | 1      | 0      | 0      | 0    |
-      | 1       | directus_settings     | 2      | 0      | 0      | 0      | 0    |
-      | 1       | directus_users        | 3      | 1      | 0      | 0      | 0    |
-      | 2       | directus_access       | 2      | 0      | 0      | 0      | 0    |
-      | 2       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_role_members | 2      | 0      | 0      | 0      | 0    |
-      | 2       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_users        | 2      | 0      | 0      | 0      | 0    |
-      | 2       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
-      | 2       | information_schema    | 1      | 0      | 0      | 0      | 0    |
-      | 2       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
-      | 2       | pg_index              | 2      | 0      | 0      | 0      | 0    |
-      | 2       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 2      | 0      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 1      | 0      | 0      |
+      | 1       | directus_settings     | 2      | 0      | 0      | 0      |
+      | 1       | directus_users        | 3      | 1      | 0      | 0      |
+      | 2       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 2       | directus_users        | 2      | 0      | 0      | 0      |
