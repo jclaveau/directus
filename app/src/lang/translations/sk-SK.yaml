@@ -1548,7 +1548,7 @@ no_value: Žiadna hodnota
 do_nothing: Nerobiť nič
 generate_and_save_uuid: Generovať a uložiť UUID
 save_current_user_id: Uložiť ID aktuálneho používateľa
-save_current_user_roles: Uložiť rolu aktuálneho používateľa
+save_current_user_roles: Uložiť roly aktuálneho používateľa
 save_current_datetime: Uložiť aktuálny dátum/čas
 always_open: Vždy otvorené
 start_open: Začať otvorené

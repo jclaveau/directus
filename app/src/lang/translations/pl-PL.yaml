@@ -1522,7 +1522,7 @@ no_value: Brak wartości
 do_nothing: Nic nie rób
 generate_and_save_uuid: Generuj i zapisz UUID
 save_current_user_id: Zapisz bieżący identyfikator użytkownika
-save_current_user_roles: Zapisz bieżącą rolę użytkownika
+save_current_user_roles: Zapisz bieżące role użytkownika
 save_current_datetime: Zapisz bieżącą datę/czas
 always_open: Zawsze otwarte
 start_open: Rozpocznij rozwinięty

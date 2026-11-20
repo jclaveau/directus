@@ -1519,7 +1519,7 @@ no_value: Nema vrijednosti
 do_nothing: Ne čini ništa
 generate_and_save_uuid: Generiraj i spremi UUID
 save_current_user_id: Spremi ID trenutnog korisnika
-save_current_user_roles: Spremi ulogu trenutnog korisnika
+save_current_user_roles: Spremi uloge trenutnog korisnika
 save_current_datetime: Spremi trenutni datum/vrijeme
 always_open: Uvijek otvoreno
 start_open: Počni otvoren

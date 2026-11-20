@@ -452,6 +452,15 @@ export class FieldsService {
 							)
 						: field;
 
+				// Again on what the filter hooks return, still before the DDL.
+				if (hookAdjustedField.meta) {
+					refuseRemovedRoleStampSpecial('directus_fields', {
+						...hookAdjustedField.meta,
+						collection,
+						field: hookAdjustedField.field,
+					});
+				}
+
 				if (hookAdjustedField.type && ALIAS_TYPES.includes(hookAdjustedField.type) === false) {
 					if (table) {
 						this.addColumnToTable(table, collection, hookAdjustedField as Field);
@@ -567,6 +576,15 @@ export class FieldsService {
 							},
 						)
 					: field;
+
+			// Again on what the filter hooks return, still before the DDL.
+			if (hookAdjustedField.meta) {
+				refuseRemovedRoleStampSpecial('directus_fields', {
+					...hookAdjustedField.meta,
+					collection,
+					field: hookAdjustedField.field,
+				});
+			}
 
 			const record = field.meta
 				? await this.knex.select('id').from('directus_fields').where({ collection, field: field.field }).first()

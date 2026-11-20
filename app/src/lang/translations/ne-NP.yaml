@@ -1190,7 +1190,6 @@ field_options:
 do_nothing: केहि नगर
 generate_and_save_uuid: UUID उत्पन्न र बचत गर्नुहोस्
 save_current_user_id: हालको प्रयोगकर्ता आईडी बचत गर्नुहोस्
-save_current_user_roles: हालको प्रयोगकर्ता भूमिका बचत गर्नुहोस्
 save_current_datetime: हालको मिति/समय बचत गर्नुहोस्
 always_open: सधैं खुला राख्नुहोस
 comment: टिप्पणी

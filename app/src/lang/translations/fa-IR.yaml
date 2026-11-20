@@ -1549,7 +1549,7 @@ no_value: بدون مقدار
 do_nothing: کاری انجام نشود
 generate_and_save_uuid: Generate and Save UUID
 save_current_user_id: ذخیره نقش کاربر فعلی
-save_current_user_roles: ذخیره نقش کاربر فعلی
+save_current_user_roles: ذخیره نقش‌های کاربر فعلی
 save_current_datetime: ذخیره تاریخ و ساعت فعلی
 always_open: همیشه در
 start_open: هنگام باز کردن

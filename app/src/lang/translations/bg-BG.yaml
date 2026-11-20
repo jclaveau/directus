@@ -1470,7 +1470,7 @@ no_value: Няма стойност
 do_nothing: Без действие
 generate_and_save_uuid: Генериране и запазване на UUID
 save_current_user_id: Запазване на ID на текущия потребител
-save_current_user_roles: Запазване на ролята на текущия потребител
+save_current_user_roles: Запазване на ролите на текущия потребител
 save_current_datetime: Запазване на текущия дата/час
 always_open: Винаги отворена
 start_open: Отворена в началото

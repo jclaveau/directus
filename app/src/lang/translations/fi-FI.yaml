@@ -1186,7 +1186,7 @@ no_value: Ei arvoa
 do_nothing: Älä tee mitään
 generate_and_save_uuid: Luo ja tallenna UUID
 save_current_user_id: Tallenna nykyisen käyttäjän tunnus
-save_current_user_roles: Tallenna nykyinen käyttäjärooli
+save_current_user_roles: Tallenna nykyisen käyttäjän roolit
 save_current_datetime: Tallenna nykyinen päivämäärä/aika
 always_open: Aina auki
 start_open: Aloita avattuna

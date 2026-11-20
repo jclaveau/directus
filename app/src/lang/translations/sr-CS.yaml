@@ -835,7 +835,7 @@ no_fields_in_collection: 'Trenutno ne postoji nijedno polje u "{collection}" kol
 do_nothing: Ne radi ništa
 generate_and_save_uuid: Generiši i Sačuvaj UUID
 save_current_user_id: Sačuvaj ID vrijednost Trenutnog korisnika
-save_current_user_roles: Sačuvaj Trenutnu Korisničku Ulogu
+save_current_user_roles: Sačuvaj Trenutne Korisničke Uloge
 save_current_datetime: Sačuvaj Trenutni Datum/Vrijeme
 block: Blok
 inline: Linijski

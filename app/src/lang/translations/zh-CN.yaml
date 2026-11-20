@@ -1567,7 +1567,7 @@ no_value: 没有值
 do_nothing: 什么都不做
 generate_and_save_uuid: 生成并保存 UUID
 save_current_user_id: 保存当前用户 ID
-save_current_user_roles: 保存当前用户角色
+save_current_user_roles: 保存当前用户的所有角色
 save_current_datetime: 保存当前日期/时间
 always_open: 总是展开
 start_open: 默认打开

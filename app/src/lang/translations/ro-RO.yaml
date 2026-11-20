@@ -1245,7 +1245,7 @@ no_value: Nicio valoare
 do_nothing: Nu face nimic
 generate_and_save_uuid: Generează și salvează UUID
 save_current_user_id: Salvează ID-ul utilizatorului curent
-save_current_user_roles: Salvează rolul utilizatorului curent
+save_current_user_roles: Salvează rolurile utilizatorului curent
 save_current_datetime: Salvează Data/Ora Curentă
 always_open: Întotdeauna deschis
 start_open: Începe deschis

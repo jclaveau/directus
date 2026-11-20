@@ -1074,7 +1074,7 @@ no_fields_in_collection: 'Ainda não há nenhum campo em "{collection}"'
 do_nothing: Não fazer nada
 generate_and_save_uuid: Gerar e guardar UUID
 save_current_user_id: Salvar ID de usuário atual
-save_current_user_roles: Salvar a função de usuário atual
+save_current_user_roles: Salvar as funções do usuário atual
 save_current_datetime: Guardar data/hora atual
 block: Bloquear
 inline: Em linha

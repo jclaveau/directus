@@ -1562,7 +1562,6 @@ no_value: هیچ بەهایەک نییە
 do_nothing: هیچ مەکە
 generate_and_save_uuid: UUID دروستبکە و پاشەکەوتی بکە
 save_current_user_id: ID بەکارهێنەری ئێستا پاشەکەوت بکە
-save_current_user_roles: پلەی بەکارهێنەری ئێستا پاشەکەوت بکە
 save_current_datetime: ڕێکەوت و کاتی ئێستا پاشەکەوت بکە
 always_open: هەمیشە کراوە
 start_open: کرانەوەی دەستپێک

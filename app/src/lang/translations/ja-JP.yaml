@@ -1172,7 +1172,7 @@ field_options:
       value: 値
 no_fields_in_collection: 'まだ「{collection}」にフィールドがありません'
 do_nothing: 何もしない
-save_current_user_roles: 現在のユーザーロールを保存
+save_current_user_roles: 現在のユーザーの全ロールを保存
 save_current_datetime: 現在の日付/時刻を保存
 inline: インライン
 comment: コメント

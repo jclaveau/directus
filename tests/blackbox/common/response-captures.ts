@@ -14,6 +14,8 @@
  * binds `new-invite` to the id the purged tag names.
  */
 
+import { expect } from 'vitest';
+
 const UUID_PATTERN
 	= /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 
@@ -56,16 +58,54 @@ export function bindCaptures(
 	keysByName: Record<string, string>,
 	captureNames: string[],
 ) {
-	bindPartCaptures(expectedPart, receivedPart, keysByName);
+	try {
+		bindPartCaptures(expectedPart, receivedPart, keysByName);
 
-	for (const captureName of captureNames) {
-		if (keysByName[captureName] === undefined) {
-			throw new Error(
-				`Placeholder ${JSON.stringify(`<${captureName}>`)} finds no spot`
-				+ ` in the response: ${JSON.stringify(receivedPart)}`,
-			);
+		for (const captureName of captureNames) {
+			if (keysByName[captureName] === undefined) {
+				throw new Error(
+					`Placeholder ${JSON.stringify(`<${captureName}>`)} finds no spot`
+					+ ` in the response: ${JSON.stringify(receivedPart)}`,
+				);
+			}
 		}
 	}
+	catch (captureError) {
+		// A wrong response holds no uuid at the spot either: its diff, which
+		// the capture error would hide, fails the step first.
+		expect(receivedPart).toMatchObject(
+			capturePatternsOf(expectedPart) as object,
+		);
+
+		throw captureError;
+	}
+}
+
+// The cell with each capture turned into the text it accepts at its spot.
+function capturePatternsOf(expectedPart: unknown): unknown {
+	if (typeof expectedPart === 'string') {
+		return expectedPart.match(CAPTURE_MARKER_PATTERN) === null
+			? expectedPart
+			: expect.stringMatching(markerPatternOf(expectedPart));
+	}
+
+	if (Array.isArray(expectedPart)) {
+		const expectedItems = expectedPart.map(capturePatternsOf);
+
+		// A list of strings is order-free, as `bindListCaptures` reads it.
+		return expectedPart.every((expectedItem) => typeof expectedItem === 'string')
+			? expect.arrayContaining(expectedItems)
+			: expectedItems;
+	}
+
+	if (expectedPart === null || typeof expectedPart !== 'object') {
+		return expectedPart;
+	}
+
+	return Object.fromEntries(Object.entries(expectedPart)
+		.map(([partKey, expectedValue]) => {
+			return [partKey, capturePatternsOf(expectedValue)];
+		}));
 }
 
 function bindPartCaptures(

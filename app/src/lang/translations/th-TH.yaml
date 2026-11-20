@@ -977,7 +977,7 @@ no_value: ไม่มีค่า
 do_nothing: ไม่ต้องทำอะไร
 generate_and_save_uuid: สร้างและบันทึก UUID โดยอัตโนมัติ
 save_current_user_id: บันทึกID ของผู้ใช้ปัจจุบัน
-save_current_user_roles: บันทึกบทบาทของผู้ใช้ปัจจุบัน
+save_current_user_roles: บันทึกบทบาททั้งหมดของผู้ใช้ปัจจุบัน
 save_current_datetime: บันทึกวันเวลาปัจจุบัน
 always_open: เปิดตลอดเวลา
 block: ปิดกั้น

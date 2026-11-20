@@ -32,6 +32,7 @@ import { yamlSchemaFor } from './singular-write-steps';
 
 type RequestCell = {
 	as?: string;
+	on?: 'peer';
 	method: 'DELETE' | 'GET' | 'HEAD' | 'PATCH' | 'POST';
 	path: string;
 	query?: Record<string, string>;
@@ -52,6 +53,7 @@ type ResponseCell = {
 
 const REQUEST_CELL_KEYS = [
 	'as',
+	'on',
 	'method',
 	'path',
 	'query',
@@ -72,6 +74,11 @@ const RESPONSE_CELL_KEYS = [
 
 type Row = { request: string; response: string };
 
+type InstanceUrls = {
+	main: string;
+	peer: string | null;
+};
+
 type ScenarioKeys = {
 	run: string;
 	keysByName: Record<string, string>;
@@ -79,6 +86,8 @@ type ScenarioKeys = {
 
 type SpawnedFeatureOptions = {
 	envOverrides: Record<string, string>;
+	// A second instance on the same env, which a row reaches by `on: peer`.
+	spawnsPeer?: boolean;
 	beforeFeature?: (vendor: Vendor, instanceUrl: string) => Promise<void>;
 	afterFeature?: (vendor: Vendor) => Promise<void>;
 };
@@ -101,7 +110,18 @@ export function defineSpawnedWriteFeature(
 
 	describe.each(vendors)('%s', (vendor) => {
 		const env = cloneDeep(config.envs);
+		const peerEnv = cloneDeep(config.envs);
 		let instance: ChildProcess;
+		let peerInstance: ChildProcess | null = null;
+
+		const instanceUrls = (): InstanceUrls => {
+			return {
+				main: getUrl(vendor, env),
+				peer: peerInstance === null
+					? null
+					: getUrl(vendor, peerEnv),
+			};
+		};
 
 		beforeAll(async () => {
 			const port = await freePortOfWorker();
@@ -122,10 +142,34 @@ export function defineSpawnedWriteFeature(
 			await awaitDirectusConnection(port);
 			await featureOptions.beforeFeature?.(vendor, getUrl(vendor, env));
 			await warmUpAuditedInstance(feature, vendor, getUrl(vendor, env));
+
+			// Started once the feature's collections exist, so it loads them.
+			if (featureOptions.spawnsPeer) {
+				const peerPort = await freePortOfWorker();
+
+				peerEnv[vendor] = {
+					...env[vendor],
+					PORT: String(peerPort),
+				};
+
+				peerEnv[vendor]['PUBLIC_URL'] = getUrl(vendor, peerEnv);
+
+				peerInstance = spawn('node', [paths.cli, 'start'], {
+					cwd: paths.cwd,
+					env: peerEnv[vendor],
+				});
+
+				await awaitDirectusConnection(peerPort);
+			}
 		}, 60_000);
 
 		afterAll(async () => {
 			await stopSpawnedInstance(instance);
+
+			if (peerInstance !== null) {
+				await stopSpawnedInstance(peerInstance);
+			}
+
 			await featureOptions.afterFeature?.(vendor);
 		}, 60_000);
 
@@ -140,7 +184,7 @@ export function defineSpawnedWriteFeature(
 					const receivedResponses: Response[] = [];
 
 					given.optional('these requests are sent:', async (table: Row[]) => {
-						await sendRows(getUrl(vendor, env), scenarioKeys, table, true, vendor);
+						await sendRows(instanceUrls(), scenarioKeys, table, true, vendor);
 					});
 
 					bindTableRowsSteps(given, feature, title, (tableName, tableRows) => {
@@ -154,7 +198,7 @@ export function defineSpawnedWriteFeature(
 					// The first send fills the cache; the row's response is the second's.
 					and.optional('this read is cached:', async (table: Row[]) => {
 						await sendRows(
-							getUrl(vendor, env),
+							instanceUrls(),
 							scenarioKeys,
 							table.map(({ request: requestText }) => {
 								return { request: requestText, response: '' };
@@ -164,7 +208,7 @@ export function defineSpawnedWriteFeature(
 						);
 
 						await sendRows(
-							getUrl(vendor, env),
+							instanceUrls(),
 							scenarioKeys,
 							table,
 							false,
@@ -174,7 +218,7 @@ export function defineSpawnedWriteFeature(
 
 					then('these requests get these responses:', async (table: Row[]) => {
 						receivedResponses.push(...await sendRows(
-							getUrl(vendor, env),
+							instanceUrls(),
 							scenarioKeys,
 							table,
 							false,
@@ -210,6 +254,21 @@ function uploadMetadataHeader(uploadMetadata: Record<string, string>) {
 			return `${metadataKey} ${Buffer.from(metadataValue).toString('base64')}`;
 		})
 		.join(',');
+}
+
+function instanceUrlOf(instanceUrls: InstanceUrls, requestCell: RequestCell) {
+	if (requestCell.on === undefined) {
+		return instanceUrls.main;
+	}
+
+	if (requestCell.on !== 'peer' || instanceUrls.peer === null) {
+		throw new Error(
+			`A row sent on ${JSON.stringify(requestCell.on)} needs the feature`
+			+ ' to start that instance: pass `spawnsPeer: true`',
+		);
+	}
+
+	return instanceUrls.peer;
 }
 
 function sendRequest(instanceUrl: string, requestCell: RequestCell) {
@@ -312,7 +371,7 @@ function lowercaseHeaders(expectedResponse: ResponseCell) {
 // captured (see response-captures.ts). A remembered header keeps its last path
 // segment: the upload a `Location` names, or the `Directus-File-Id` whole.
 async function sendRows(
-	instanceUrl: string,
+	instanceUrls: InstanceUrls,
 	scenarioKeys: ScenarioKeys,
 	table: Row[],
 	allowsBlankResponse: boolean,
@@ -351,7 +410,11 @@ async function sendRows(
 			markedCaptures(responseText, captureNames),
 		);
 
-		const response = await sendRequest(instanceUrl, requestCell);
+		const response = await sendRequest(
+			instanceUrlOf(instanceUrls, requestCell),
+			requestCell,
+		);
+
 		responses.push(response);
 
 		bindCaptures(

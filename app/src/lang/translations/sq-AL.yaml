@@ -1550,7 +1550,7 @@ no_value: Pa vlerë
 do_nothing: Mos bëj asgjë
 generate_and_save_uuid: Gjenero dhe Ruaj UUID
 save_current_user_id: Ruaj ID e Përdoruesit Aktual
-save_current_user_roles: Ruaj Rolin e Përdoruesit Aktual
+save_current_user_roles: Ruaj Rolet e Përdoruesit Aktual
 save_current_datetime: Ruaj Datën/Ora Aktuale
 always_open: Gjithmonë e Hapur
 start_open: Fillon e Hapur
