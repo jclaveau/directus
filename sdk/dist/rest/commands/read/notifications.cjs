@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=e=>()=>({path:`/notifications`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/notifications/${t}`,params:n??{},method:`GET`});exports.readNotification=n,exports.readNotifications=t;
+//# sourceMappingURL=notifications.cjs.map

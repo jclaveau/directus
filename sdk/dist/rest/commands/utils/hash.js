@@ -1,0 +1,2 @@
+const e=e=>()=>({method:`POST`,path:`/utils/hash/generate`,body:JSON.stringify({string:e})}),t=(e,t)=>()=>({method:`POST`,path:`/utils/hash/verify`,body:JSON.stringify({string:e,hash:t})});export{e as generateHash,t as verifyHash};
+//# sourceMappingURL=hash.js.map

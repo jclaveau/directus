@@ -1,0 +1,2 @@
+const e=require(`../utils/query-to-params.cjs`);require(`../index.cjs`);function t(t){return()=>{let n=t();return n.method===`GET`&&n.params&&(n.method=`SEARCH`,n.body=JSON.stringify({query:{...n.params,fields:e.formatFields(n.params.fields??[])}}),delete n.params),n}}exports.withSearch=t;
+//# sourceMappingURL=with-search.cjs.map

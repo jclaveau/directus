@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=(t,n)=>()=>(e(t,`ID cannot be empty`),{path:`/versions/${t}/save`,method:`POST`,body:JSON.stringify(n)}),n=t=>()=>(e(t,`ID cannot be empty`),{path:`/versions/${t}/compare`,method:`GET`}),r=(t,n,r)=>()=>(e(t,`ID cannot be empty`),{path:`/versions/${t}/promote`,method:`POST`,body:JSON.stringify(r?{mainHash:n,fields:r}:{mainHash:n})});export{n as compareContentVersion,r as promoteContentVersion,t as saveToContentVersion};
+//# sourceMappingURL=versions.js.map

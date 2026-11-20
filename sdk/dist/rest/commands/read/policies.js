@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=e=>()=>({path:`/policies`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/policies/${t}`,params:n??{},method:`GET`}),r=()=>()=>({path:`/policies/me/globals`,method:`GET`});export{t as readPolicies,n as readPolicy,r as readPolicyGlobals};
+//# sourceMappingURL=policies.js.map

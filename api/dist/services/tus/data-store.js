@@ -1,0 +1,183 @@
+import { omit } from "../../utils/lodash-es-used.js";
+import { useLogger } from "../../logger/index.js";
+import database_default from "../../database/index.js";
+import { ItemsService } from "../items.js";
+import { unnormalisedDiskNameReason } from "../files/lib/disk-name.js";
+import { deleteFileAndThumbnails } from "../files.js";
+import { extname, posix } from "node:path";
+import formatTitle from "@directus/format-title";
+import { extension } from "mime-types";
+import { DataStore, ERRORS, Upload } from "@tus/utils";
+
+//#region src/services/tus/data-store.ts
+var TusDataStore = class extends DataStore {
+	chunkSize;
+	maxSize;
+	expirationTime;
+	location;
+	storageDriver;
+	schema;
+	accountability;
+	constructor(config) {
+		super();
+		if (config.constants.CHUNK_SIZE !== null) this.chunkSize = config.constants.CHUNK_SIZE;
+		if (config.constants.MAX_SIZE !== null) this.maxSize = config.constants.MAX_SIZE;
+		this.expirationTime = config.constants.EXPIRATION_TIME;
+		this.location = config.location;
+		this.storageDriver = config.driver;
+		this.extensions = this.storageDriver.tusExtensions;
+		this.schema = config.schema;
+		this.accountability = config.accountability;
+	}
+	async create(upload) {
+		const logger = useLogger();
+		const knex = database_default();
+		const filesItemsService = new ItemsService("directus_files", {
+			accountability: this.accountability,
+			schema: this.schema,
+			knex
+		});
+		upload.creation_date = (/* @__PURE__ */ new Date()).toISOString();
+		if (!upload.size || !upload.metadata || !upload.metadata["filename_download"]) throw ERRORS.INVALID_METADATA;
+		if (!upload.metadata["type"]) upload.metadata["type"] = "application/octet-stream";
+		if (!upload.metadata["title"]) upload.metadata["title"] = formatTitle(upload.metadata["filename_download"]);
+		const requestedDiskName = upload.metadata["filename_disk"];
+		if (requestedDiskName && (posix.join("/", requestedDiskName) === "/" || requestedDiskName.endsWith("/"))) throw {
+			status_code: 400,
+			body: "\"filename_disk\" must name a file, not a directory"
+		};
+		const unnormalisedReason = requestedDiskName && unnormalisedDiskNameReason(requestedDiskName);
+		if (unnormalisedReason) throw {
+			status_code: 400,
+			body: unnormalisedReason
+		};
+		let existingFile = null;
+		if (upload.metadata["id"]) {
+			existingFile = await knex.select("folder", "filename_download", "filename_disk", "title", "description", "metadata", "tus_id").from("directus_files").andWhere({ id: upload.metadata["id"] }).first() ?? null;
+			if (existingFile && existingFile["tus_id"] !== null) throw ERRORS.INVALID_METADATA;
+		}
+		if (requestedDiskName && (await this.storageDriver.exists(requestedDiskName) || await knex.select("id").from("directus_files").where("filename_disk", requestedDiskName).first())) throw {
+			status_code: 400,
+			body: `"filename_disk" "${requestedDiskName}" is already used`
+		};
+		const isReplacement = existingFile !== null && !!upload.metadata["id"];
+		if (isReplacement === true && upload.metadata["id"]) upload.metadata["replace_id"] = upload.metadata["id"];
+		const fileData = {
+			...omit(upload.metadata, ["id"]),
+			tus_id: upload.id,
+			tus_data: upload,
+			filesize: upload.size,
+			storage: this.location
+		};
+		if ("folder" in fileData === false) {
+			const settings = await knex.select("storage_default_folder").from("directus_settings").first();
+			if (settings?.storage_default_folder) fileData.folder = settings.storage_default_folder;
+		}
+		const primaryKey = await filesItemsService.createOne(fileData, { emitEvents: false });
+		if (!isReplacement) upload.metadata["id"] = primaryKey;
+		const typeExtension = extension(upload.metadata["type"]);
+		const fileExtension = extname(upload.metadata["filename_download"]) || (typeExtension ? `.${typeExtension}` : "");
+		fileData.filename_disk ||= primaryKey + (fileExtension || "");
+		try {
+			upload = await this.storageDriver.createChunkedUpload(fileData.filename_disk, upload);
+			fileData.tus_data = upload;
+			await filesItemsService.updateOne(primaryKey, fileData, { emitEvents: false });
+			return upload;
+		} catch (err) {
+			logger.warn(`Couldn't create chunked upload for ${fileData.filename_disk}`);
+			logger.warn(err);
+			await new ItemsService("directus_files", {
+				schema: this.schema,
+				knex
+			}).deleteOne(primaryKey, { emitEvents: false });
+			const errorCode = err?.code;
+			if (errorCode === "EEXIST" || errorCode === "ENOTDIR") throw {
+				status_code: 400,
+				body: "\"filename_disk\" must not name a path below an existing file"
+			};
+			try {
+				await this.storageDriver.delete(fileData.filename_disk);
+			} catch (deleteError) {
+				logger.warn(`Couldn't delete chunk file ${fileData.filename_disk}`);
+				logger.warn(deleteError);
+			}
+			throw ERRORS.UNKNOWN_ERROR;
+		}
+	}
+	async write(readable, tus_id, offset) {
+		const logger = useLogger();
+		const fileData = await this.getFileById(tus_id);
+		const filePath = fileData.filename_disk;
+		const sudoFilesItemsService = new ItemsService("directus_files", { schema: this.schema });
+		try {
+			const newOffset = await this.storageDriver.writeChunk(filePath, readable, offset, fileData.tus_data);
+			await sudoFilesItemsService.updateOne(fileData.id, { tus_data: {
+				...fileData.tus_data,
+				offset: newOffset
+			} });
+			if (Number(fileData.filesize) === newOffset) {
+				try {
+					await this.storageDriver.finishChunkedUpload(filePath, fileData.tus_data);
+				} catch (err) {
+					await this.remove(fileData.tus_id);
+					throw err;
+				}
+				if (Boolean(fileData.tus_data?.["metadata"]?.["replace_id"]) === true) {
+					const replaceId = fileData.tus_data["metadata"]["replace_id"];
+					const replaceData = await sudoFilesItemsService.readOne(replaceId, { fields: ["filename_disk"] });
+					await deleteFileAndThumbnails(this.storageDriver, replaceData.filename_disk);
+					await this.storageDriver.move(filePath, replaceData.filename_disk);
+				}
+			}
+			return newOffset;
+		} catch (err) {
+			logger.error(err, "Error writing chunk for upload \"%s\" at offset %d", tus_id, offset);
+			if ("status_code" in err && err.status_code === 500) throw err;
+			throw ERRORS.FILE_WRITE_ERROR;
+		}
+	}
+	async remove(tus_id) {
+		const sudoFilesItemsService = new ItemsService("directus_files", { schema: this.schema });
+		const fileData = await this.getFileById(tus_id);
+		await this.storageDriver.deleteChunkedUpload(fileData.filename_disk, fileData.tus_data);
+		await sudoFilesItemsService.deleteOne(fileData.id);
+	}
+	async deleteExpired() {
+		const sudoFilesItemsService = new ItemsService("directus_files", { schema: this.schema });
+		const now = /* @__PURE__ */ new Date();
+		const toDelete = [];
+		const uploadFiles = await sudoFilesItemsService.readByQuery({
+			fields: [
+				"modified_on",
+				"tus_id",
+				"tus_data"
+			],
+			filter: { tus_id: { _nnull: true } }
+		});
+		if (!uploadFiles) return 0;
+		for (const fileData of uploadFiles) if (fileData && fileData.tus_data && this.getExpiration() > 0 && fileData.tus_data["size"] !== fileData.tus_data["offset"] && fileData.modified_on) {
+			const modified = new Date(fileData.modified_on);
+			if (now > new Date(modified.getTime() + this.getExpiration())) toDelete.push(this.remove(fileData.tus_id));
+		}
+		await Promise.allSettled(toDelete);
+		return toDelete.length;
+	}
+	getExpiration() {
+		return this.expirationTime;
+	}
+	async getUpload(id) {
+		return new Upload((await this.getFileById(id)).tus_data);
+	}
+	async getFileById(tus_id) {
+		const results = await new ItemsService("directus_files", { schema: this.schema }).readByQuery({ filter: {
+			tus_id: { _eq: tus_id },
+			storage: { _eq: this.location },
+			...this.accountability?.user ? { uploaded_by: { _eq: this.accountability.user } } : {}
+		} });
+		if (!results || !results[0]) throw ERRORS.FILE_NOT_FOUND;
+		return results[0];
+	}
+};
+
+//#endregion
+export { TusDataStore };
