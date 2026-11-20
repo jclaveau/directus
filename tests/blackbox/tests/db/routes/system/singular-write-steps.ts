@@ -224,7 +224,8 @@ async function awaitFreshTotpStep() {
 	}
 }
 
-function yamlSchemaFor(vendor: Vendor) {
+// Spawned-write signs its `!jwt` cells with it too.
+export function yamlSchemaFor(vendor: Vendor) {
 	const secret = config.envs[vendor]['SECRET']!;
 
 	return DEFAULT_SCHEMA.extend([

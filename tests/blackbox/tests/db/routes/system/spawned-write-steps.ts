@@ -23,6 +23,7 @@ import { load as loadYaml } from 'js-yaml';
 import { cloneDeep, get } from 'lodash-es';
 import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
+import { yamlSchemaFor } from './singular-write-steps';
 
 type RequestCell = {
 	as?: string;
@@ -134,7 +135,7 @@ export function defineSpawnedWriteFeature(
 					const receivedResponses: Response[] = [];
 
 					given.optional('these requests are sent:', async (table: Row[]) => {
-						await sendRows(getUrl(vendor, env), scenarioKeys, table, true);
+						await sendRows(getUrl(vendor, env), scenarioKeys, table, true, vendor);
 					});
 
 					bindTableRowsSteps(given, feature, title, (tableName, tableRows) => {
@@ -154,9 +155,16 @@ export function defineSpawnedWriteFeature(
 								return { request: requestText, response: '' };
 							}),
 							true,
+							vendor,
 						);
 
-						await sendRows(getUrl(vendor, env), scenarioKeys, table, false);
+						await sendRows(
+							getUrl(vendor, env),
+							scenarioKeys,
+							table,
+							false,
+							vendor,
+						);
 					});
 
 					then('these requests get these responses:', async (table: Row[]) => {
@@ -165,6 +173,7 @@ export function defineSpawnedWriteFeature(
 							scenarioKeys,
 							table,
 							false,
+							vendor,
 						));
 					});
 
@@ -302,13 +311,16 @@ async function sendRows(
 	scenarioKeys: ScenarioKeys,
 	table: Row[],
 	allowsBlankResponse: boolean,
+	vendor: Vendor,
 ) {
 	const responses: Response[] = [];
 
 	for (const { request: requestText, response: responseText } of table) {
 		const requestCell = cellOfKnownKeys<RequestCell>(
 			'request',
-			loadYaml(withKeys(requestText, scenarioKeys)),
+			loadYaml(withKeys(requestText, scenarioKeys), {
+				schema: yamlSchemaFor(vendor),
+			}),
 			REQUEST_CELL_KEYS,
 			'spawned-write-steps.ts',
 		);
@@ -323,6 +335,14 @@ async function sendRows(
 
 		const response = await sendRequest(instanceUrl, requestCell);
 		responses.push(response);
+
+		// TEMP PROBE (#755): removed once the header values are copied.
+		process.stdout.write(`PROBE-755 ${JSON.stringify({
+			method: requestCell.method,
+			path: requestCell.path,
+			cacheStatus: response.headers['x-cache-status'],
+			purgedTags: response.headers['x-scoped-cache-purged-tags'],
+		})}\n`);
 
 		expect(receivedPart(response, expectedResponse)).toMatchObject(
 			lowercaseHeaders(expectedResponse),

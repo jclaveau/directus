@@ -14,6 +14,8 @@ Feature: A user's role, status and deletion purge the cache as today
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own. A response cell states the keys it checks.
+  - `!jwt` signs its claims with the instance's secret, as Directus signs the
+    invitation token it mails.
   - A header stated as a list matches its comma-separated values in any
     order: a user's deletion purges its cascades in no fixed order.
 
@@ -189,3 +191,108 @@ Feature: A user's role, status and deletion purge the cache as today
       | 1       | directus_users         | 2      | 0      | 0      | 1      |
       | 1       | directus_versions      | 1      | 0      | 0      | 0      |
       | 2       | directus_users         | 1      | 0      | 0      | 0      |
+
+  Scenario: an invitation accepted with its token keeps the cached read
+    Given the rows of directus_roles:
+      | id             | name          |
+      | <invitee-role> | invitee-<run> |
+    And the rows of directus_users:
+      | id        | email                       | role           | status  |
+      | <invitee> | accepting-<run>@example.com | <invitee-role> | invited |
+    And the rows of cache_user_accept_notes:
+      | label |
+      | v1    |
+    And this read is cached:
+      | request                              | response              |
+      | method: GET                          | code: 200             |+
+      | path: /items/cache_user_accept_notes | headers:              |
+      | query:                               |   x-cache-status: HIT |
+      |   fields: label                      |                       |
+    Then these requests get these responses:
+      | request                                | response  |
+      | method: POST                           | code: 204 |+
+      | path: /users/invite/accept             |           |
+      | payload:                               |           |
+      |   token: !jwt                          |           |
+      |     email: accepting-<run>@example.com |           |
+      |     scope: invite                      |           |
+      |   password: accepted-password          |           |
+      | method: GET                            | code: 200 |+
+      | path: /items/cache_user_accept_notes   |           |
+      | query:                                 |           |
+      |   fields: label                        |           |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+
+  Scenario: a user invited again into the same role keeps the cached read
+    Given the rows of directus_roles:
+      | id          | name       |
+      | <same-role> | same-<run> |
+    And the rows of directus_users:
+      | id        | email                  | role        | status  |
+      | <invitee> | same-<run>@example.com | <same-role> | invited |
+    And the rows of cache_user_reinvite_notes:
+      | label |
+      | v1    |
+    And this read is cached:
+      | request                                | response              |
+      | method: GET                            | code: 200             |+
+      | path: /items/cache_user_reinvite_notes | headers:              |
+      | query:                                 |   x-cache-status: HIT |
+      |   fields: label                        |                       |
+    Then these requests get these responses:
+      | request                                | response  |
+      | method: POST                           | code: 204 |+
+      | path: /users/invite                    |           |
+      | payload:                               |           |
+      |   email: same-<run>@example.com        |           |
+      |   role: <same-role>                    |           |
+      | method: GET                            | code: 200 |+
+      | path: /items/cache_user_reinvite_notes |           |
+      | query:                                 |           |
+      |   fields: label                        |           |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+
+  Scenario: a pending invitee invited into a second role drops the cached read
+    Given the rows of directus_roles:
+      | id            | name         |
+      | <first-role>  | first-<run>  |
+      | <second-role> | second-<run> |
+    And the rows of directus_users:
+      | id        | email                    | role         | status  |
+      | <invitee> | second-<run>@example.com | <first-role> | invited |
+    And the rows of cache_user_second_invite_notes:
+      | label |
+      | v1    |
+    And this read is cached:
+      | request                                     | response              |
+      | method: GET                                 | code: 200             |+
+      | path: /items/cache_user_second_invite_notes | headers:              |
+      | query:                                      |   x-cache-status: HIT |
+      |   fields: label                             |                       |
+    Then these requests get these responses:
+      | request                                     | response                |
+      | method: POST                                | code: 204               |+
+      | path: /users/invite                         |                         |
+      | payload:                                    |                         |
+      |   email: second-<run>@example.com           |                         |
+      |   role: <second-role>                       |                         |
+      | method: GET                                 | code: 200               |+
+      | path: /users/<invitee>                      | body:                   |
+      | query:                                      |   data:                 |
+      |   fields: status,role                       |     status: invited     |
+      |                                             |     role: <second-role> |
+      | method: GET                                 | code: 200               |+
+      | path: /items/cache_user_second_invite_notes |                         |
+      | query:                                      |                         |
+      |   fields: label                             |                         |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | 3       | (none) | 0      | 0      | 0      | 0      |
