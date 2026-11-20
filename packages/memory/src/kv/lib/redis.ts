@@ -8,6 +8,7 @@ import {
 	uint8ArrayToBuffer,
 	withNamespace,
 } from '../../utils/index.js';
+import type { CacheRead } from '../../cache/types/class.js';
 import type { ExtendedRedis, KvConfigRedis } from '../index.js';
 import type { Kv } from '../types/class.js';
 
@@ -30,6 +31,20 @@ export const SET_MAX_SCRIPT = `
   return true
 `;
 
+// Stores ARGV[2] only while the generation is still the one read before the
+// value was computed: a clear moved it, so that value predates the clear.
+export const SET_UNLESS_CLEARED_SCRIPT = `
+  local current = redis.call('GET', KEYS[1])
+
+  if (current or '0') ~= ARGV[1] then
+    return 0
+  end
+
+  redis.call('SET', KEYS[2], ARGV[2])
+
+  return 1
+`;
+
 export class KvRedis implements Kv {
 	private redis: ExtendedRedis;
 	private namespace: string;
@@ -41,6 +56,13 @@ export class KvRedis implements Kv {
 			config.redis.defineCommand('setMax', {
 				numberOfKeys: 1,
 				lua: SET_MAX_SCRIPT,
+			});
+		}
+
+		if ('setUnlessCleared' in config.redis === false) {
+			config.redis.defineCommand('setUnlessCleared', {
+				numberOfKeys: 2,
+				lua: SET_UNLESS_CLEARED_SCRIPT,
 			});
 		}
 
@@ -57,6 +79,10 @@ export class KvRedis implements Kv {
 			return undefined;
 		}
 
+		return await this.decodeValue<T>(value);
+	}
+
+	private async decodeValue<T>(value: Buffer) {
 		let binaryArray = bufferToUint8Array(value);
 
 		if (this.compression === true && isCompressed(binaryArray)) {
@@ -66,20 +92,66 @@ export class KvRedis implements Kv {
 		return <T>deserialize(binaryArray);
 	}
 
-	async set<T = unknown>(key: string, value: T) {
+	private async encodeValue(value: unknown) {
 		if (typeof value === 'number') {
-			await this.redis.set(withNamespace(key, this.namespace), value);
-		} else {
-			// serialize() infers Uint8Array<ArrayBuffer> (TextEncoder) but compress() returns
-			// Uint8Array<ArrayBufferLike>; widen so the reassignment below type-checks under TS 5.9
-			let binaryArray: Uint8Array = serialize(value);
-
-			if (this.compression === true && binaryArray.byteLength >= this.compressionMinSize) {
-				binaryArray = await compress(binaryArray);
-			}
-
-			await this.redis.set(withNamespace(key, this.namespace), uint8ArrayToBuffer(binaryArray));
+			return value;
 		}
+
+		// serialize() infers Uint8Array<ArrayBuffer> (TextEncoder) but compress()
+		// returns Uint8Array<ArrayBufferLike>; widen so the reassignment below
+		// type-checks under TS 5.9
+		let binaryArray: Uint8Array = serialize(value);
+
+		if (
+			this.compression === true
+			&& binaryArray.byteLength >= this.compressionMinSize
+		) {
+			binaryArray = await compress(binaryArray);
+		}
+
+		return uint8ArrayToBuffer(binaryArray);
+	}
+
+	async set<T = unknown>(key: string, value: T) {
+		await this.redis.set(
+			withNamespace(key, this.namespace),
+			await this.encodeValue(value),
+		);
+	}
+
+	// Outside the `namespace:*` pattern `clear()` removes, so a clear never
+	// resets it back to a generation a running read already holds.
+	private get generationKey() {
+		return `${this.namespace}-generation`;
+	}
+
+	// One MGET: the generation is read at the instant the key was found missing.
+	async getWithGeneration<T = unknown>(key: string): Promise<CacheRead<T>> {
+		const [value, generation] = await this.redis.mgetBuffer(
+			withNamespace(key, this.namespace),
+			this.generationKey,
+		);
+
+		if (value) {
+			return { found: true, value: await this.decodeValue<T>(value) };
+		}
+
+		return { found: false, generation: Number(generation?.toString() ?? 0) };
+	}
+
+	async bumpGeneration() {
+		await this.redis.incr(this.generationKey);
+	}
+
+	async setUnlessCleared(key: string, value: unknown, generation: number) {
+		const wasSet = await this.redis.setUnlessCleared(
+			this.generationKey,
+			withNamespace(key, this.namespace),
+			generation,
+			await this.encodeValue(value),
+		);
+
+		return wasSet !== 0;
 	}
 
 	async delete(key: string) {

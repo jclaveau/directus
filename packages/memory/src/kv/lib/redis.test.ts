@@ -11,7 +11,7 @@ import {
 	withNamespace,
 } from '../../utils/index.js';
 import type { ExtendedRedis } from '../index.js';
-import { KvRedis, SET_MAX_SCRIPT } from './redis.js';
+import { KvRedis, SET_MAX_SCRIPT, SET_UNLESS_CLEARED_SCRIPT } from './redis.js';
 
 vi.mock('ioredis');
 vi.mock('../../utils/index.js');
@@ -84,8 +84,19 @@ describe('constructor', () => {
 		});
 	});
 
+	test('Defines redis setUnlessCleared command if it does not exist yet', () => {
+		expect(kv['redis'].defineCommand).toHaveBeenCalledWith('setUnlessCleared', {
+			numberOfKeys: 2,
+			lua: SET_UNLESS_CLEARED_SCRIPT,
+		});
+	});
+
 	test('Skips defining command if setMax already exists on redis', () => {
-		const mockRedis = { defineCommand: vi.fn(), setMax: vi.fn() } as unknown as ExtendedRedis;
+		const mockRedis = {
+			defineCommand: vi.fn(),
+			setMax: vi.fn(),
+			setUnlessCleared: vi.fn(),
+		} as unknown as ExtendedRedis;
 
 		new KvRedis({ redis: mockRedis, namespace: mockNamespace, compression: false });
 
@@ -313,5 +324,81 @@ describe('clear', () => {
 
 		expect(unlinkFn).toHaveBeenCalledTimes(2); // See the mocked key chunks from `scanStream`
 		expect(execFn).toHaveBeenCalledOnce();
+	});
+});
+
+describe('getWithGeneration', () => {
+	test('Reads the key and the generation in one MGET', async () => {
+		vi.mocked(kv['redis'].mgetBuffer).mockResolvedValue([
+			null,
+			Buffer.from('7'),
+		]);
+
+		await expect(kv.getWithGeneration(mockKey)).resolves.toEqual({
+			found: false,
+			generation: 7,
+		});
+
+		expect(kv['redis'].mgetBuffer).toHaveBeenCalledWith(
+			mockNamespacedKey,
+			'test-generation',
+		);
+	});
+
+	test('Reads generation 0 before the first clear', async () => {
+		vi.mocked(kv['redis'].mgetBuffer).mockResolvedValue([null, null]);
+
+		await expect(kv.getWithGeneration(mockKey)).resolves.toEqual({
+			found: false,
+			generation: 0,
+		});
+	});
+
+	test('Returns the deserialized value of a cached key', async () => {
+		vi.mocked(kv['redis'].mgetBuffer).mockResolvedValue([
+			mockBuffer,
+			Buffer.from('7'),
+		]);
+
+		await expect(kv.getWithGeneration(mockKey)).resolves.toEqual({
+			found: true,
+			value: mockValue,
+		});
+
+		expect(bufferToUint8Array).toHaveBeenCalledWith(mockBuffer);
+		expect(deserialize).toHaveBeenCalledWith(mockUint8Array);
+	});
+});
+
+describe('bumpGeneration', () => {
+	test('Increments the generation key next to the namespace', async () => {
+		await kv.bumpGeneration();
+
+		expect(kv['redis'].incr).toHaveBeenCalledWith('test-generation');
+	});
+});
+
+describe('setUnlessCleared', () => {
+	test('Sets the serialized value under the generation it was read at', async () => {
+		// ioredis makes custom functions available as methods, but those aren't typeable
+		(kv['redis'] as any).setUnlessCleared = vi.fn().mockResolvedValue(1);
+
+		await expect(kv.setUnlessCleared(mockKey, mockValue, 7)).resolves.toBe(true);
+
+		expect(serialize).toHaveBeenCalledWith(mockValue);
+
+		expect((kv['redis'] as any).setUnlessCleared).toHaveBeenCalledWith(
+			'test-generation',
+			mockNamespacedKey,
+			7,
+			mockBuffer,
+		);
+	});
+
+	test('Returns false when a clear moved the generation', async () => {
+		// ioredis makes custom functions available as methods, but those aren't typeable
+		(kv['redis'] as any).setUnlessCleared = vi.fn().mockResolvedValue(0);
+
+		await expect(kv.setUnlessCleared(mockKey, mockValue, 7)).resolves.toBe(false);
 	});
 });
