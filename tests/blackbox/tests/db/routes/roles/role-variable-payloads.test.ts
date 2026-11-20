@@ -1,4 +1,5 @@
 import {
+	CreateCollection,
 	DeleteCollection,
 	DeleteCollectionIfPresent,
 } from '@common/functions';
@@ -11,6 +12,11 @@ defineSingularWriteFeature(
 	{
 		async beforeFeature(vendor) {
 			await DeleteCollectionIfPresent(vendor, { collection: NOTES });
+
+			await CreateCollection(vendor, {
+				collection: NOTES,
+				fields: [{ field: 'label', type: 'string', meta: {} }],
+			});
 		},
 		async afterFeature(vendor) {
 			await DeleteCollection(vendor, { collection: NOTES });

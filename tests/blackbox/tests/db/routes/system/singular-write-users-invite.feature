@@ -4,6 +4,8 @@ Feature: A user is invited, re-invited and accepts the invitation
     the user it writes, never the mail.
   - `!jwt` signs its claims with the instance's secret, as Directus signs the
     token it mails.
+  - A Given's `the rows of` a system table are written straight into the
+    database.
   - A request authenticates as the admin. `<run>` stands for a value unique to
     the scenario, and any other `<name>` for a uuid of its own. A response
     cell states the keys it checks.
@@ -201,13 +203,9 @@ Feature: A user is invited, re-invited and accepts the invitation
       | 2       | directus_users | 2      | 0      | 0      | 0      |
 
   Scenario: graphql invites a user into the one role it names
-    Given these requests are sent:
-      | request               | response  |
-      | method: POST          | code: 200 |+
-      | path: /roles          |           |
-      | payload:              |           |
-      |   id: <graphql-role>  |           |
-      |   name: graphql-<run> |           |
+    Given the rows of directus_roles:
+      | id             | name          |
+      | <graphql-role> | graphql-<run> |
     Then these requests get these responses:
       | request                                 | response                   |
       | method: POST                            | code: 200                  |+
@@ -230,18 +228,12 @@ Feature: A user is invited, re-invited and accepts the invitation
       | 1       | directus_users     | 3      | 1      | 0      | 0      |
 
   Scenario: a user invited again into the same role keeps their invitation
-    Given these requests are sent:
-      | request                         | response  |
-      | method: POST                    | code: 200 |+
-      | path: /roles                    |           |
-      | payload:                        |           |
-      |   id: <same-role>               |           |
-      |   name: same-<run>              |           |
-      | method: POST                    | code: 204 |+
-      | path: /users/invite             |           |
-      | payload:                        |           |
-      |   email: same-<run>@example.com |           |
-      |   role: <same-role>             |           |
+    Given the rows of directus_roles:
+      | id          | name       |
+      | <same-role> | same-<run> |
+    And the rows of directus_users:
+      | id          | email                  | role        | status  |
+      | <same-user> | same-<run>@example.com | <same-role> | invited |
     Then these requests get these responses:
       | request                         | response                |
       | method: POST                    | code: 204               |+

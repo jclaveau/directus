@@ -4,6 +4,8 @@ Feature: A setting naming the user's one role is stored as written
     a preset's filter, created or updated, a field's validation, a panel's
     options and an operation's options, and stored as written; a field takes
     the `role-updated` special.
+  - A Given states the database rows a scenario starts from, written straight
+    into the database; the feature's collection is created before it runs.
   - A request authenticates as the admin. `<run>` stands for a value unique to
     the scenario, and any other `<name>` for a uuid of its own. A response
     cell states the keys it checks.
@@ -12,20 +14,12 @@ Feature: A setting naming the user's one role is stored as written
     feature line takes.
 
   Scenario: a preset, a panel and an operation take $CURRENT_ROLE
-    Given these requests are sent:
-      | request               | response  |
-      | method: POST          | code: 200 |+
-      | path: /dashboards     |           |
-      | payload:              |           |
-      |   id: <dashboard>     |           |
-      |   name: payload-<run> |           |
-      | method: POST          | code: 200 |+
-      | path: /flows          |           |
-      | payload:              |           |
-      |   id: <flow>          |           |
-      |   name: payload-<run> |           |
-      |   status: inactive    |           |
-      |   trigger: manual     |           |
+    Given the rows of directus_dashboards:
+      | id          | name          |
+      | <dashboard> | payload-<run> |
+    And the rows of directus_flows:
+      | id     | name          | status   | trigger |
+      | <flow> | payload-<run> | inactive | manual  |
     Then these requests get these responses:
       | request                                | response                      |
       | method: POST                           | code: 200                     |+
@@ -73,22 +67,14 @@ Feature: A setting naming the user's one role is stored as written
       |   filter[bookmark][_eq]: payload-<run> |         role:                 |
       |                                        |           _neq: $CURRENT_ROLE |
     And on postgres the requests ran these statements:
-      | request | table            | select | insert | update | delete |
-      | 1       | directus_presets | 0      | 0      | 0      | 0      |
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
+      | 2       | (none) | 0      | 0      | 0      | 0      |
+      | 3       | (none) | 0      | 0      | 0      | 0      |
+      | 4       | (none) | 0      | 0      | 0      | 0      |
+      | 5       | (none) | 0      | 0      | 0      | 0      |
 
   Scenario: a field takes $CURRENT_ROLE in its validation and the role-updated special
-    Given these requests are sent:
-      | request                      | response  |
-      | method: POST                 | code: 200 |+
-      | path: /collections           |           |
-      | payload:                     |           |
-      |   collection: role_var_notes |           |
-      |   schema: {}                 |           |
-      |   meta: {}                   |           |
-      |   fields:                    |           |
-      |     - field: label           |           |
-      |       type: string           |           |
-      |       meta: {}               |           |
     Then these requests get these responses:
       | request                                   | response                      |
       | method: POST                              | code: 200                     |+

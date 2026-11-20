@@ -12,6 +12,7 @@ import {
 	defineStatementCountsStep,
 	warmUpAuditedInstance,
 } from '@common/query-audit-steps';
+import { bindTableRowsSteps, insertTableRows } from '@common/table-rows';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
@@ -72,7 +73,7 @@ type ScenarioKeys = {
 
 type SpawnedFeatureOptions = {
 	envOverrides: Record<string, string>;
-	beforeFeature?: (vendor: Vendor) => Promise<void>;
+	beforeFeature?: (vendor: Vendor, instanceUrl: string) => Promise<void>;
 	afterFeature?: (vendor: Vendor) => Promise<void>;
 };
 
@@ -81,8 +82,10 @@ const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 /**
  * Binds every scenario of a feature run against an instance of its own,
  * started with `envOverrides`: each holds an optional `Given these requests
- * are sent:` and a `Then these requests get these responses:`, both a
- * request|response table run row after row.
+ * are sent:` or the rows of its tables, an optional `this read is cached:`,
+ * and a `Then these requests get these responses:`, the request|response
+ * tables run row after row. `beforeFeature` gets the instance's url, so a
+ * collection it creates is in the schema the instance holds.
  */
 export function defineSpawnedWriteFeature(
 	featurePath: string,
@@ -111,7 +114,7 @@ export function defineSpawnedWriteFeature(
 			});
 
 			await awaitDirectusConnection(port);
-			await featureOptions.beforeFeature?.(vendor);
+			await featureOptions.beforeFeature?.(vendor, getUrl(vendor, env));
 			await warmUpAuditedInstance(feature, vendor, getUrl(vendor, env));
 		}, 60_000);
 
@@ -132,6 +135,27 @@ export function defineSpawnedWriteFeature(
 
 					given.optional('these requests are sent:', async (table: Row[]) => {
 						await sendRows(getUrl(vendor, env), scenarioKeys, table, true);
+					});
+
+					bindTableRowsSteps(given, feature, title, (tableName, tableRows) => {
+						return insertTableRows(vendor, tableName, tableRows.map((row) => {
+							return Object.fromEntries(Object.entries(row).map(([column, cell]) => {
+								return [column, withKeys(cell, scenarioKeys)];
+							}));
+						}));
+					});
+
+					// The first send fills the cache; the row's response is the second's.
+					and.optional('this read is cached:', async (table: Row[]) => {
+						await sendRows(
+							getUrl(vendor, env),
+							scenarioKeys,
+							table.map(({ request: requestText }) => {
+								return { request: requestText, response: '' };
+							}),
+							true,
+						);
+						await sendRows(getUrl(vendor, env), scenarioKeys, table, false);
 					});
 
 					then('these requests get these responses:', async (table: Row[]) => {

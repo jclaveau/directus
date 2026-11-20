@@ -12,6 +12,7 @@ import {
 	defineStatementCountsStep,
 	instanceUrlForFeature,
 } from '@common/query-audit-steps';
+import { bindTableRowsSteps, insertTableRows } from '@common/table-rows';
 import { USER } from '@common/variables';
 import { createHmac, randomUUID } from 'crypto';
 import { DEFAULT_SCHEMA, load as loadYaml, Type } from 'js-yaml';
@@ -123,7 +124,7 @@ export function defineSingularWriteFeature(
 						return createCollectionRows(sentTo, collection, table);
 					};
 
-					given.optional(/^the rows of (\S+):$/, createRows);
+					bindTableRowsSteps(given, feature, title, createRows);
 					and.optional(/^their children in (\S+):$/, createRows);
 					and.optional(/^their grandchildren in (\S+):$/, createRows);
 
@@ -309,11 +310,20 @@ function comparableResponse(response: Response) {
 	};
 }
 
+// A system table's rows go straight into the database: `/items` refuses it.
 async function createCollectionRows(
-	{ instanceUrl, scenarioKeys }: SentTo,
+	{ vendor, instanceUrl, scenarioKeys }: SentTo,
 	collection: string,
 	table: Record<string, string>[],
 ) {
+	if (collection.startsWith('directus_')) {
+		return insertTableRows(vendor, collection, table.map((row) => {
+			return Object.fromEntries(Object.entries(row).map(([column, cell]) => {
+				return [column, withKeys(cell, scenarioKeys)];
+			}));
+		}));
+	}
+
 	const response = await request(instanceUrl())
 		.post(`/items/${collection}`)
 		.send(parseGherkinTable(table.map((row) => {

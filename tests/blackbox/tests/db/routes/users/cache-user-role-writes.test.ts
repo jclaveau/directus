@@ -2,6 +2,9 @@ import {
 	DeleteCollection,
 	DeleteCollectionIfPresent,
 } from '@common/functions';
+import { USER } from '@common/variables';
+import request from 'supertest';
+import { expect } from 'vitest';
 import { defineSpawnedWriteFeature } from '../system/spawned-write-steps';
 
 const COLLECTIONS = [
@@ -24,9 +27,22 @@ defineSpawnedWriteFeature(
 			REDIS_PORT: '6108',
 			CACHE_NAMESPACE: 'directus-cache-user-role-writes',
 		},
-		async beforeFeature(vendor) {
+		// Created through the feature's own instance, so its schema holds them.
+		async beforeFeature(vendor, instanceUrl) {
 			for (const collection of COLLECTIONS) {
 				await DeleteCollectionIfPresent(vendor, { collection });
+
+				const response = await request(instanceUrl)
+					.post('/collections')
+					.send({
+						collection,
+						schema: {},
+						meta: {},
+						fields: [{ field: 'label', type: 'string', meta: {} }],
+					})
+					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+				expect(response.statusCode).toEqual(200);
 			}
 		},
 		async afterFeature(vendor) {
