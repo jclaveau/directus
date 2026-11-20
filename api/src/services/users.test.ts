@@ -22,6 +22,7 @@ import { useLogger } from '../logger/index.js';
 import {
 	clearPermissionsCacheAfterCommit,
 	flushResponseCacheAfterCommit,
+	purgeMutatedRowsAfterCommit,
 } from '../utils/clear-caches-after-commit.js';
 import { verifyJWT } from '../utils/jwt.js';
 import { transaction } from '../utils/transaction.js';
@@ -79,6 +80,7 @@ vi.mock('../utils/clear-caches-after-commit.js', async (importOriginal) => {
 		clearPermissionsCacheAfterCommit:
 			vi.fn(original.clearPermissionsCacheAfterCommit),
 		flushResponseCacheAfterCommit: vi.fn(original.flushResponseCacheAfterCommit),
+		purgeMutatedRowsAfterCommit: vi.fn(original.purgeMutatedRowsAfterCommit),
 	};
 });
 
@@ -1481,22 +1483,41 @@ describe('Integration Tests', () => {
 
 				expect(clearPermissionsCacheAfterCommit).toHaveBeenCalledTimes(1);
 				expect(flushResponseCacheAfterCommit).toHaveBeenCalledTimes(1);
+				expect(purgeMutatedRowsAfterCommit).not.toHaveBeenCalled();
 			});
 
 			it(oneLine`
-				flushes the responses, but keeps the permissions cache, when it only
-				hands memberships over
+				purges the responses of the memberships it hands over, but flushes no
+				response and keeps the permissions cache, when it deletes none
 			`, async () => {
-				tracker.on.select('doubled').response([{
-					id: 'membership-press-invite',
-					user: 'user-id-41',
-					was_doubled: false,
-				}]);
+				tracker.on.select('doubled').response([
+					{
+						id: 'membership-press-invite',
+						user: 'user-id-41',
+						was_doubled: false,
+					},
+					{
+						id: 'membership-staff-invite',
+						user: 'user-id-41',
+						was_doubled: false,
+					},
+				]);
 
 				await service.updateOne('user-id-41', { status: 'active' });
 
 				expect(clearPermissionsCacheAfterCommit).not.toHaveBeenCalled();
-				expect(flushResponseCacheAfterCommit).toHaveBeenCalledTimes(1);
+				expect(flushResponseCacheAfterCommit).not.toHaveBeenCalled();
+
+				expect(purgeMutatedRowsAfterCommit).toHaveBeenCalledExactlyOnceWith(
+					expect.anything(),
+					schema,
+					'directus_role_members',
+					[
+						{ id: 'membership-press-invite' },
+						{ id: 'membership-staff-invite' },
+					],
+					expect.anything(),
+				);
 			});
 
 			it('clears no cache when it writes no membership', async () => {
@@ -1506,6 +1527,7 @@ describe('Integration Tests', () => {
 
 				expect(clearPermissionsCacheAfterCommit).not.toHaveBeenCalled();
 				expect(flushResponseCacheAfterCommit).not.toHaveBeenCalled();
+				expect(purgeMutatedRowsAfterCommit).not.toHaveBeenCalled();
 			});
 
 			it('writes no membership when no row writes a status', async () => {
