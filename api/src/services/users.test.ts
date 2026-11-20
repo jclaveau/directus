@@ -19,6 +19,10 @@ import {
 } from '../permissions/modules/process-payload/process-payload.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
+import {
+	clearPermissionsCacheAfterCommit,
+	flushResponseCacheAfterCommit,
+} from '../utils/clear-caches-after-commit.js';
 import { verifyJWT } from '../utils/jwt.js';
 import { transaction } from '../utils/transaction.js';
 import { withMeta } from '../utils/read-meta.js';
@@ -63,6 +67,18 @@ vi.mock('../cache.js', async (importOriginal) => {
 	return {
 		...await importOriginal<typeof import('../cache.js')>(),
 		clearSystemCache: vi.fn(),
+	};
+});
+
+vi.mock('../utils/clear-caches-after-commit.js', async (importOriginal) => {
+	const original =
+		await importOriginal<typeof import('../utils/clear-caches-after-commit.js')>();
+
+	return {
+		...original,
+		clearPermissionsCacheAfterCommit:
+			vi.fn(original.clearPermissionsCacheAfterCommit),
+		flushResponseCacheAfterCommit: vi.fn(original.flushResponseCacheAfterCommit),
 	};
 });
 
@@ -273,8 +289,7 @@ describe('Integration Tests', () => {
 			});
 
 			it('should request all user integrity checks if status is changed to not "active"', async () => {
-				tracker.on.delete('directus_role_members').response(0);
-				tracker.on.update('directus_role_members').response(0);
+				tracker.on.select('doubled').response([]);
 
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
@@ -295,8 +310,7 @@ describe('Integration Tests', () => {
 			});
 
 			it('should request user limit checks if status is changed to "active"', async () => {
-				tracker.on.delete('directus_role_members').response(0);
-				tracker.on.update('directus_role_members').response(0);
+				tracker.on.select('doubled').response([]);
 
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
@@ -633,8 +647,7 @@ describe('Integration Tests', () => {
 			});
 
 			it('requests the union of every row\'s integrity checks once', async () => {
-				tracker.on.delete('directus_role_members').response(0);
-				tracker.on.update('directus_role_members').response(0);
+				tracker.on.select('doubled').response([]);
 
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
@@ -656,8 +669,7 @@ describe('Integration Tests', () => {
 			});
 
 			it('logs out the users a row suspends', async () => {
-				tracker.on.delete('directus_role_members').response(0);
-				tracker.on.update('directus_role_members').response(0);
+				tracker.on.select('doubled').response([]);
 
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
@@ -1420,11 +1432,11 @@ describe('Integration Tests', () => {
 
 		describe('hand-over of the invite memberships', () => {
 			it(oneLine`
-				deletes the invite memberships of a user leaving invited whose role the
-				user also holds by hand, then hands the others to the admins
+				deletes, in one statement, the invite memberships of a user leaving
+				invited whose role the user also holds by hand, and hands the others,
+				but those, to the admins
 			`, async () => {
-				tracker.on.delete('directus_role_members').response(1);
-				tracker.on.update('directus_role_members').response(1);
+				tracker.on.select('doubled').response([]);
 
 				await service.updateBatch([
 					{ id: 'user-id-41', status: 'suspended' },
@@ -1432,23 +1444,68 @@ describe('Integration Tests', () => {
 					{ id: 'user-id-43', first_name: 'Bob' },
 				]);
 
-				expect(tracker.history.delete).toMatchObject([{
-					sql: 'delete from "directus_role_members" as "membership"'
-						+ ' where "membership"."user" in (?)'
+				expect(tracker.history.select).toMatchObject([{
+					sql: 'with "doubled" as (delete from "directus_role_members"'
+						+ ' as "membership" where "membership"."user" in (?)'
 						+ ' and "membership"."managed_by" = ?'
 						+ ' and exists (select 1'
 						+ ' from "directus_role_members" as "hand_membership"'
 						+ ' where "hand_membership"."user" = "membership"."user"'
 						+ ' and "hand_membership"."role" = "membership"."role"'
-						+ ' and "hand_membership"."managed_by" is null)',
-					bindings: ['user-id-41', 'invite'],
+						+ ' and "hand_membership"."managed_by" is null)),'
+						+ ' "handed" as (update "directus_role_members"'
+						+ ' set "managed_by" = ? where "user" in (?)'
+						+ ' and "managed_by" = ?'
+						+ ' and "id" not in (select "id" from "doubled"))'
+						+ ' select "id", "user", true as was_doubled from "doubled"'
+						+ ' union all'
+						+ ' select "id", "user", false as was_doubled from "handed"',
+					bindings: ['user-id-41', 'invite', null, 'user-id-41', 'invite'],
 				}]);
 
-				expect(tracker.history.update).toMatchObject([{
-					sql: 'update "directus_role_members" set "managed_by" = ?'
-						+ ' where "user" in (?) and "managed_by" = ?',
-					bindings: [null, 'user-id-41', 'invite'],
+				expect(tracker.history.delete).toEqual([]);
+				expect(tracker.history.update).toEqual([]);
+			});
+
+			it(oneLine`
+				clears the permissions cache and flushes the responses once it deletes
+				the invite membership of a role the user also holds by hand
+			`, async () => {
+				tracker.on.select('doubled').response([{
+					id: 'membership-staff-invite',
+					user: 'user-id-41',
+					was_doubled: true,
 				}]);
+
+				await service.updateOne('user-id-41', { status: 'active' });
+
+				expect(clearPermissionsCacheAfterCommit).toHaveBeenCalledTimes(1);
+				expect(flushResponseCacheAfterCommit).toHaveBeenCalledTimes(1);
+			});
+
+			it(oneLine`
+				flushes the responses, but keeps the permissions cache, when it only
+				hands memberships over
+			`, async () => {
+				tracker.on.select('doubled').response([{
+					id: 'membership-press-invite',
+					user: 'user-id-41',
+					was_doubled: false,
+				}]);
+
+				await service.updateOne('user-id-41', { status: 'active' });
+
+				expect(clearPermissionsCacheAfterCommit).not.toHaveBeenCalled();
+				expect(flushResponseCacheAfterCommit).toHaveBeenCalledTimes(1);
+			});
+
+			it('clears no cache when it writes no membership', async () => {
+				tracker.on.select('doubled').response([]);
+
+				await service.updateOne('user-id-41', { status: 'active' });
+
+				expect(clearPermissionsCacheAfterCommit).not.toHaveBeenCalled();
+				expect(flushResponseCacheAfterCommit).not.toHaveBeenCalled();
 			});
 
 			it('writes no membership when no row writes a status', async () => {
@@ -1856,8 +1913,7 @@ describe('Integration Tests', () => {
 
 		describe('verifyRegistration by email', () => {
 			it('activates the unverified user the token names', async () => {
-				tracker.on.delete('directus_role_members').response(0);
-				tracker.on.update('directus_role_members').response(0);
+				tracker.on.select('doubled').response([]);
 
 				vi.mocked(verifyJWT).mockReturnValue({
 					email: 'Ada@Example.com',
@@ -2136,8 +2192,7 @@ describe('Integration Tests', () => {
 
 		describe('resetPassword as admin', () => {
 			it('updates as an admin built from the default accountability', async () => {
-				tracker.on.delete('directus_role_members').response(0);
-				tracker.on.update('directus_role_members').response(0);
+				tracker.on.select('doubled').response([]);
 
 				vi.mocked(verifyJWT).mockReturnValue({
 					email: 'ada@example.com',
@@ -2169,8 +2224,7 @@ describe('Integration Tests', () => {
 			});
 
 			it('updates as an admin built from the caller', async () => {
-				tracker.on.delete('directus_role_members').response(0);
-				tracker.on.update('directus_role_members').response(0);
+				tracker.on.select('doubled').response([]);
 
 				vi.mocked(verifyJWT).mockReturnValue({
 					email: 'ada@example.com',

@@ -119,6 +119,22 @@ describe('the migration', () => {
 		);
 	});
 
+	test('up indexes the invite memberships by user and role', async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			foreignKeys: vi.fn().mockResolvedValue([]),
+		} as any);
+
+		tracker.on.select('directus_users').response([]);
+
+		await up(db);
+
+		expect(tracker.history.any.map(({ sql }) => sql)).toContain(
+			'create index "directus_role_members_invite_index"'
+			+ ' on "directus_role_members" ("user", "role")'
+			+ ' where "managed_by" = \'invite\'',
+		);
+	});
+
 	test('up records invites, one per user, role and inviter', async () => {
 		vi.mocked(createInspector).mockReturnValue({
 			foreignKeys: vi.fn().mockResolvedValue([]),
@@ -156,8 +172,12 @@ describe('the migration', () => {
 
 		await down(db);
 
-		expect(tracker.history.any.map(({ sql }) => sql))
-			.toContain('drop table "directus_invites"');
+		expect(tracker.history.any.map(({ sql }) => sql)).toEqual(
+			expect.arrayContaining([
+				'drop index "directus_role_members_invite_index"',
+				'drop table "directus_invites"',
+			]),
+		);
 	});
 
 	test('down gives each user the role of its one membership', async () => {
