@@ -1,6 +1,6 @@
 import { ForbiddenError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
-import type { Accountability, RawField } from '@directus/types';
+import type { Accountability, Field, RawField } from '@directus/types';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -65,7 +65,7 @@ describe('Services / Fields', () => {
 					field: 'made_by_role',
 					type: 'uuid',
 					meta: { special: ['role-created'] },
-				} as RawField),
+				} as Field),
 			).rejects.toHaveProperty(
 				'message',
 				'Invalid payload. Field "made_by_role" of collection "test" uses the'
