@@ -260,5 +260,8 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   filter[email][_eq]: >-        |       roles:                |
       |     same-<run>@example.com      |         - role: <same-role> |
     And on postgres the requests ran these statements:
-      | request | table          | select | insert | update | delete |
-      | 1       | directus_users | 2      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 2      | 0      | 0      | 0      |
+      | 1       | directus_invites      | 1      | 0      | 0      | 0      |
+      | 1       | directus_role_members | 2      | 0      | 0      | 0      |
+      | 1       | directus_users        | 2      | 0      | 0      | 0      |

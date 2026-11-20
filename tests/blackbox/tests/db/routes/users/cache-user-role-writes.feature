@@ -153,14 +153,16 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                                 |   x-cache-status: HIT                 |
       |   fields: label                        |                                       |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 2      | 0      | 0      | 0      |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
-      | 1       | directus_users       | 3      | 0      | 1      | 0      |
-      | 2       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 2       | directus_users       | 2      | 0      | 0      | 0      |
-      | 3       | directus_users       | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 2      | 0      | 0      | 0      | 1    |
+      | 1       | directus_users        | 3      | 0      | 1      | 0      | 0    |
+      | 2       | directus_permissions  | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users        | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_users        | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a deleted inviter drops the invite membership and the cached read
     Given the rows of directus_roles:
@@ -197,16 +199,23 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                               |   x-cache-status: MISS             |
       |   fields: label                      |                                    |
     And on postgres the requests ran these statements:
-      | request | table                  | select | insert | update | delete |
-      | 1       | directus_access        | 1      | 0      | 0      | 0      |
-      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
-      | 1       | directus_comments      | 1      | 0      | 0      | 0      |
-      | 1       | directus_notifications | 1      | 0      | 0      | 0      |
-      | 1       | directus_roles         | 1      | 0      | 0      | 0      |
-      | 1       | directus_sessions      | 0      | 0      | 0      | 1      |
-      | 1       | directus_users         | 2      | 0      | 0      | 1      |
-      | 1       | directus_versions      | 1      | 0      | 0      | 0      |
-      | 2       | directus_users         | 1      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_access         | 1      | 0      | 0      | 0      |
+      | 1       | directus_activity       | 0      | 1      | 0      | 0      |
+      | 1       | directus_comments       | 1      | 0      | 0      | 0      |
+      | 1       | directus_notifications  | 1      | 0      | 0      | 0      |
+      | 1       | directus_role_members   | 0      | 0      | 0      | 1      |
+      | 1       | directus_roles          | 1      | 0      | 0      | 0      |
+      | 1       | directus_sessions       | 0      | 0      | 0      | 1      |
+      | 1       | directus_users          | 2      | 0      | 0      | 1      |
+      | 1       | directus_versions       | 1      | 0      | 0      | 0      |
+      | 2       | cache_user_delete_notes | 1      | 0      | 0      | 0      |
+      | 2       | directus_access         | 4      | 0      | 0      | 0      |
+      | 2       | directus_permissions    | 1      | 0      | 0      | 0      |
+      | 2       | directus_policies       | 1      | 0      | 0      | 0      |
+      | 2       | directus_role_members   | 1      | 0      | 0      | 0      |
+      | 2       | directus_roles          | 1      | 0      | 0      | 0      |
+      | 2       | directus_users          | 1      | 0      | 0      | 0      |
 
   Scenario: an invitation accepted with its token keeps the cached read
     Given the rows of directus_roles:
@@ -244,11 +253,12 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                                 |   x-cache-status: HIT                 |
       |   fields: label                        |                                       |
     And on postgres the requests ran these statements:
-      | request | table             | select | insert | update | delete |
-      | 1       | directus_sessions | 0      | 0      | 0      | 1      |
-      | 1       | directus_settings | 1      | 0      | 0      | 0      |
-      | 1       | directus_users    | 2      | 0      | 1      | 0      |
-      | 2       | directus_users    | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_role_members | 0      | 0      | 0      | 0      | 1    |
+      | 1       | directus_sessions     | 0      | 0      | 0      | 1      | 0    |
+      | 1       | directus_settings     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 2      | 0      | 1      | 0      | 0    |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a user invited again into the same role keeps the cached read
     Given the rows of directus_policies:
@@ -293,9 +303,12 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                                 |   x-cache-status: HIT              |
       |   fields: label                        |                                    |
     And on postgres the requests ran these statements:
-      | request | table          | select | insert | update | delete |
-      | 1       | directus_users | 2      | 0      | 0      | 0      |
-      | 2       | directus_users | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 2      | 0      | 0      | 0      |
+      | 1       | directus_invites      | 1      | 0      | 0      | 0      |
+      | 1       | directus_role_members | 2      | 0      | 0      | 0      |
+      | 1       | directus_users        | 2      | 0      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: a pending invitee invited into a second role drops the cached read
     Given the rows of directus_roles:
