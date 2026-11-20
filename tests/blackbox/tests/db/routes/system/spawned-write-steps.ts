@@ -155,6 +155,7 @@ export function defineSpawnedWriteFeature(
 							}),
 							true,
 						);
+
 						await sendRows(getUrl(vendor, env), scenarioKeys, table, false);
 					});
 
