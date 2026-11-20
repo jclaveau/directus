@@ -12,6 +12,11 @@ import {
 	defineStatementCountsStep,
 	warmUpAuditedInstance,
 } from '@common/query-audit-steps';
+import {
+	bindCaptures,
+	captureNamesOf,
+	markedCaptures,
+} from '@common/response-captures';
 import { bindTableRowsSteps, insertTableRows } from '@common/table-rows';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
@@ -303,9 +308,9 @@ function lowercaseHeaders(expectedResponse: ResponseCell) {
 	};
 }
 
-// One row at a time, so a row can name the key one before it remembered. A
-// remembered header keeps its last path segment: the upload a `Location`
-// names, or the `Directus-File-Id` whole.
+// One row at a time, so a row can name the key one before it remembered or
+// captured (see response-captures.ts). A remembered header keeps its last path
+// segment: the upload a `Location` names, or the `Directus-File-Id` whole.
 async function sendRows(
 	instanceUrl: string,
 	scenarioKeys: ScenarioKeys,
@@ -314,6 +319,18 @@ async function sendRows(
 	vendor: Vendor,
 ) {
 	const responses: Response[] = [];
+
+	const responseCellFrom = (responseText: string) => {
+		const responseCell = loadYaml(withKeys(responseText, scenarioKeys));
+
+		return responseCellOf<ResponseCell>(
+			allowsBlankResponse
+				? responseCell ?? {}
+				: responseCell,
+			RESPONSE_CELL_KEYS,
+			'spawned-write-steps.ts',
+		);
+	};
 
 	for (const { request: requestText, response: responseText } of table) {
 		const requestCell = cellOfKnownKeys<RequestCell>(
@@ -325,16 +342,26 @@ async function sendRows(
 			'spawned-write-steps.ts',
 		);
 
-		const expectedResponse = responseCellOf<ResponseCell>(
-			allowsBlankResponse
-				? loadYaml(withKeys(responseText, scenarioKeys)) ?? {}
-				: loadYaml(withKeys(responseText, scenarioKeys)),
-			RESPONSE_CELL_KEYS,
-			'spawned-write-steps.ts',
+		const captureNames = captureNamesOf(
+			responseText,
+			scenarioKeys.keysByName,
+		);
+
+		const markedResponse = responseCellFrom(
+			markedCaptures(responseText, captureNames),
 		);
 
 		const response = await sendRequest(instanceUrl, requestCell);
 		responses.push(response);
+
+		bindCaptures(
+			lowercaseHeaders(markedResponse),
+			receivedPart(response, markedResponse),
+			scenarioKeys.keysByName,
+			captureNames,
+		);
+
+		const expectedResponse = responseCellFrom(responseText);
 
 		expect(receivedPart(response, expectedResponse)).toMatchObject(
 			lowercaseHeaders(expectedResponse),

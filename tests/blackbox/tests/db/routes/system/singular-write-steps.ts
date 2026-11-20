@@ -12,6 +12,11 @@ import {
 	defineStatementCountsStep,
 	instanceUrlForFeature,
 } from '@common/query-audit-steps';
+import {
+	bindCaptures,
+	captureNamesOf,
+	markedCaptures,
+} from '@common/response-captures';
 import { bindTableRowsSteps, insertTableRows } from '@common/table-rows';
 import { USER } from '@common/variables';
 import { createHmac, randomUUID } from 'crypto';
@@ -379,9 +384,9 @@ async function createReader(
 	expect(response.statusCode).toEqual(200);
 }
 
-// One row at a time, so a row can name the key one before it remembered. A
-// response cell states the keys it checks; an array still has to hold as many
-// items as it states.
+// One row at a time, so a row can name the key one before it remembered or
+// captured (see response-captures.ts). A response cell states the keys it
+// checks; an array still has to hold as many items as it states.
 async function sendRows(
 	{ vendor, instanceUrl, scenarioKeys }: SentTo,
 	table: Row[],
@@ -389,6 +394,20 @@ async function sendRows(
 ) {
 	const schema = yamlSchemaFor(vendor);
 	const receivedResponses: Response[] = [];
+
+	const responseCellFrom = (responseText: string) => {
+		const responseCell = loadYaml(withKeys(responseText, scenarioKeys), {
+			schema,
+		});
+
+		return responseCellOf<object>(
+			allowsBlankResponse
+				? responseCell ?? {}
+				: responseCell,
+			RESPONSE_CELL_KEYS,
+			'singular-write-steps.ts',
+		);
+	};
 
 	for (const { request: requestText, response: responseText } of table) {
 		if (requestText.includes('!totp')) {
@@ -402,13 +421,17 @@ async function sendRows(
 			'singular-write-steps.ts',
 		);
 
-		const expectedResponse = responseCellOf<object>(
-			allowsBlankResponse
-				? loadYaml(withKeys(responseText, scenarioKeys), { schema }) ?? {}
-				: loadYaml(withKeys(responseText, scenarioKeys), { schema }),
-			RESPONSE_CELL_KEYS,
-			'singular-write-steps.ts',
+		const captureNames = captureNamesOf(
+			responseText,
+			scenarioKeys.keysByName,
 		);
+
+		if (requestCell.eventually && captureNames.length > 0) {
+			throw new Error(
+				`A row sent eventually cannot capture ${JSON.stringify(captureNames)}:`
+				+ ' each poll would capture again',
+			);
+		}
 
 		let response!: Response;
 
@@ -418,13 +441,22 @@ async function sendRows(
 
 				return comparableResponse(response);
 			}, { timeout: 10_000, interval: 250 }).toMatchObject(
-				expectedResponse,
+				responseCellFrom(responseText),
 			);
 		}
 		else {
 			response = await sendRequest(instanceUrl(), requestCell);
 
-			expect(comparableResponse(response)).toMatchObject(expectedResponse);
+			bindCaptures(
+				responseCellFrom(markedCaptures(responseText, captureNames)),
+				comparableResponse(response),
+				scenarioKeys.keysByName,
+				captureNames,
+			);
+
+			expect(comparableResponse(response)).toMatchObject(
+				responseCellFrom(responseText),
+			);
 		}
 
 		if (requestCell.remember !== undefined) {

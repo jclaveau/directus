@@ -90,7 +90,7 @@ Feature: A setting naming the removed $CURRENT_ROLE is refused
     And on postgres the requests ran these statements:
       | request | table               | select | insert | update | delete |
       | 1       | directus_users      | 1      | 0      | 0      | 0      |
-      | 2       | directus_users      | 2      | 0      | 0      | 0      |
+      | 2       | directus_users      | 1      | 0      | 0      | 0      |
       | 3       | directus_users      | 1      | 0      | 0      | 0      |
       | 4       | directus_presets    | 1      | 1      | 0      | 0      |
       | 4       | directus_users      | 1      | 0      | 0      | 0      |

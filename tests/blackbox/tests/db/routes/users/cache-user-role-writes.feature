@@ -3,9 +3,10 @@ Feature: A user's role, status and deletion purge the cache as today
   - Pins what a user write purges once the memberships replace the role
     column (#746), and the statements it runs. A role change, or an invite
     into another role, sends no purged tags and the next read misses; a
-    re-invite by the same inviter into the same role writes nothing. A user
-    leaving `invited` purges the invite membership it keeps; an inviter's
-    deletion drops the invite membership left without an invite, and flushes.
+    re-invite by the same inviter into the same role writes nothing, one by
+    another inviter adds its own invite. A user leaving `invited` purges the
+    invite membership it keeps; an inviter's deletion drops the invite
+    membership left without an invite, and flushes.
   - The feature runs against an instance of its own with the response cache
     on, in Redis, and `CACHE_AUTO_PURGE` scoped: a write names the pins it
     purged in `x-scoped-cache-purged-tags`, and a cached read tells a flush by
@@ -18,7 +19,8 @@ Feature: A user's role, status and deletion purge the cache as today
     `user_created` of null names no inviter.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
-    `<name>` for a uuid of its own. A response cell states the keys it checks.
+    `<name>` for a uuid of its own; met first in a response, it stands for
+    the uuid received there. A response cell states the keys it checks.
   - `!jwt` signs its claims with the instance's secret, as Directus signs the
     invitation token it mails.
   - A header stated as a list matches its comma-separated values in any
@@ -309,6 +311,55 @@ Feature: A user's role, status and deletion purge the cache as today
       | 1       | directus_role_members | 2      | 0      | 0      | 0      |
       | 1       | directus_users        | 2      | 0      | 0      | 0      |
       | 2       | directus_users        | 1      | 0      | 0      | 0      |
+
+  Scenario: a user invited again by another inviter keeps the cached read
+    Given the rows of directus_roles:
+      | id          | name        |
+      | <same-role> | again-<run> |
+    And the rows of directus_users:
+      | id        | email                   | status  |
+      | <invitee> | again-<run>@example.com | invited |
+    And the rows of directus_role_members:
+      | id           | user      | role        | sort | managed_by |
+      | <membership> | <invitee> | <same-role> | 1    | invite     |
+    And the rows of directus_invites:
+      | id       | user      | role        | user_created | date_created         |
+      | <invite> | <invitee> | <same-role> | null         | 2026-01-01T00:00:00Z |
+    And the rows of cache_user_again_notes:
+      | label |
+      | v1    |
+    And this read is cached:
+      | request                             | response              |
+      | method: GET                         | code: 200             |+
+      | path: /items/cache_user_again_notes | headers:              |
+      | query:                              |   x-cache-status: HIT |
+      |   fields: label                     |                       |
+    Then these requests get these responses:
+      | request                             | response                                |
+      | method: POST                        | code: 204                               |+
+      | path: /users/invite                 | headers:                                |
+      | payload:                            |   x-scoped-cache-purged-tags:           |
+      |   email: again-<run>@example.com    |     - directus_invites                  |
+      |   roles:                            |     - directus_invites:id=<new-invite>  |
+      |     - <same-role>                   |                                         |
+      | method: GET                         | code: 200                               |+
+      | path: /items/cache_user_again_notes | headers:                                |
+      | query:                              |   x-cache-status: HIT                   |
+      |   fields: label                     |                                         |
+      | method: POST                        | code: 200                               |+
+      | path: /graphql/system               | body:                                   |
+      | payload:                            |   data:                                 |
+      |   query: >-                         |     invites:                            |
+      |     { invites(                      |       - id: <invite>                    |
+      |     filter: {user: {id: {_eq:       |       - id: <new-invite>                |
+      |     "<invitee>"}}},                 |                                         |
+      |     sort: ["date_created"])         |                                         |
+      |     { id } }                        |                                         |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
+      | 2       | directus_users | 1      | 0      | 0      | 0      |
+      | 3       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a pending invitee invited into a second role drops the cached read
     Given the rows of directus_roles:

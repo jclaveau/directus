@@ -11,7 +11,8 @@ Feature: A user is invited, re-invited and accepts the invitation
     each; a `user_created` of null names no inviter.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
-    `<name>` for a uuid of its own. A response cell states the keys it checks.
+    `<name>` for a uuid of its own; met first in a response, it stands for
+    the uuid received there. A response cell states the keys it checks.
 
   Scenario: an invited user takes the role of their latest invitation
     Given the rows of directus_roles:
@@ -295,10 +296,11 @@ Feature: A user is invited, re-invited and accepts the invitation
       |     filter: {user: {id: {_eq:        |         role:                      |
       |     "<same-user>"}}},                |           id: <same-role>          |
       |     sort: ["date_created"])          |         user_created: null         |
-      |     { id role { id }                 |       - role:                      |
-      |     user_created { email } } }       |           id: <same-role>          |
+      |     { id role { id }                 |       - id: <new-invite>           |
+      |     user_created { email } } }       |         role:                      |
+      |                                      |           id: <same-role>          |
       |                                      |         user_created:              |
-      |                                      |           email: admin@default.com |
+      |                                      |           email: <new-invite>      |
       | method: GET                          | code: 200                          |+
       | path: /users                         | body:                              |
       | query:                               |   data:                            |
@@ -307,6 +309,11 @@ Feature: A user is invited, re-invited and accepts the invitation
       |     again-<run>@example.com          |         - role: <same-role>        |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
-      | 1       | directus_users        | 1      | 0      | 0      | 0      |
-      | 2       | directus_users        | 1      | 0      | 0      | 0      |
-      | 3       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | directus_invites      | 1      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 2      | 0      | 0      | 0      |
+      | 2       | directus_invites      | 1      | 0      | 0      | 0      |
+      | 2       | directus_roles        | 1      | 0      | 0      | 0      |
+      | 2       | directus_users        | 2      | 0      | 0      | 0      |
+      | 3       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 3       | directus_users        | 2      | 0      | 0      | 0      |
