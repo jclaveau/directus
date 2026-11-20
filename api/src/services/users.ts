@@ -23,7 +23,7 @@ import {
 	clearPermissionsCacheAfterCommit,
 	flushResponseCacheAfterCommit,
 } from '../utils/clear-caches-after-commit.js';
-import getDatabase from '../database/index.js';
+import getDatabase, { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
@@ -824,13 +824,87 @@ export class UsersService extends ItemsService {
 	 * the roles they gave. One the user also holds by hand is deleted, the
 	 * unique (user, role, managed_by) refusing a second null row. A user never
 	 * invited holds no `invite` membership, so nothing is written.
+	 *
+	 * Only a deleted membership clears the permissions cache: the role it
+	 * doubled stays, at the hand membership's `sort`, which orders the presets.
+	 * A membership handed over keeps its role and its `sort`.
 	 */
 	private async handInvitedRolesToAdmins(
 		leavingUsers: PrimaryKey[],
 		opts: MutationOptions,
 	): Promise<void> {
-		// TODO(#610): MariaDB refuses an alias on a single-table delete.
-		const doubledCount = await this.knex('directus_role_members as membership')
+		const { doubledCount, handedCount } =
+			getDatabaseClient(this.knex) === 'postgres'
+				? await this.handInvitedRolesInOneStatement(leavingUsers)
+				: await this.handInvitedRolesInTwoStatements(leavingUsers);
+
+		if (doubledCount > 0) {
+			await clearPermissionsCacheAfterCommit(this.knex);
+		}
+
+		if (doubledCount + handedCount > 0) {
+			await flushResponseCacheAfterCommit(this.knex, this.cache, opts);
+		}
+	}
+
+	/**
+	 * Both parts read the table as it was, so the update leaves out the rows the
+	 * delete takes: it would otherwise hand them over as a second null row.
+	 */
+	private async handInvitedRolesInOneStatement(
+		leavingUsers: PrimaryKey[],
+	): Promise<{ doubledCount: number; handedCount: number }> {
+		const writtenMemberships: { was_doubled: boolean }[] = await this.knex
+			.with(
+				'doubled',
+				this.doubledInviteMemberships(leavingUsers)
+					.delete(['membership.id', 'membership.user']),
+			)
+			.with(
+				'handed',
+				this.knex('directus_role_members')
+					.whereIn('user', leavingUsers)
+					.where('managed_by', 'invite')
+					.whereNotIn('id', this.knex.select('id').from('doubled'))
+					.update({ managed_by: null }, ['id', 'user']),
+			)
+			.select('id', 'user', this.knex.raw('true as was_doubled'))
+			.from('doubled')
+			.unionAll((handedRows) => {
+				handedRows
+					.select('id', 'user', this.knex.raw('false as was_doubled'))
+					.from('handed');
+			});
+
+		const doubledCount = writtenMemberships
+			.filter(({ was_doubled }) => was_doubled)
+			.length;
+
+		return {
+			doubledCount,
+			handedCount: writtenMemberships.length - doubledCount,
+		};
+	}
+
+	// TODO(#610): a data-modifying CTE is Postgres only.
+	private async handInvitedRolesInTwoStatements(
+		leavingUsers: PrimaryKey[],
+	): Promise<{ doubledCount: number; handedCount: number }> {
+		const doubledCount = await this.doubledInviteMemberships(leavingUsers)
+			.delete();
+
+		const handedCount = await this.knex('directus_role_members')
+			.whereIn('user', leavingUsers)
+			.where('managed_by', 'invite')
+			.update({ managed_by: null });
+
+		return { doubledCount, handedCount };
+	}
+
+	// The `invite` memberships of a role the user also holds by hand.
+	// TODO(#610): MariaDB refuses an alias on a single-table delete.
+	private doubledInviteMemberships(leavingUsers: PrimaryKey[]) {
+		return this.knex('directus_role_members as membership')
 			.whereIn('membership.user', leavingUsers)
 			.where('membership.managed_by', 'invite')
 			.whereExists((handMemberships) => {
@@ -840,17 +914,7 @@ export class UsersService extends ItemsService {
 					.where('hand_membership.user', this.knex.ref('membership.user'))
 					.where('hand_membership.role', this.knex.ref('membership.role'))
 					.whereNull('hand_membership.managed_by');
-			})
-			.delete();
-
-		const handedCount = await this.knex('directus_role_members')
-			.whereIn('user', leavingUsers)
-			.where('managed_by', 'invite')
-			.update({ managed_by: null });
-
-		if (doubledCount + handedCount > 0) {
-			await this.clearMembershipCaches(this.knex, opts);
-		}
+			});
 	}
 
 	async registerUser(input: RegisterUserInput) {

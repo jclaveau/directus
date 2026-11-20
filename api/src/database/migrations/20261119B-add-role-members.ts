@@ -3,6 +3,7 @@ import type { Knex } from 'knex';
 import { randomUUID } from 'node:crypto';
 
 const INVITES_UNIQUE_INDEX_NAME = 'directus_invites_user_role_user_created_unique';
+const INVITE_MEMBERSHIPS_INDEX_NAME = 'directus_role_members_invite_index';
 
 /**
  * A user holds several roles (#746): `directus_role_members` replaces
@@ -70,6 +71,16 @@ export async function up(knex: Knex): Promise<void> {
 		await knex.raw(
 			`create unique index "${INVITES_UNIQUE_INDEX_NAME}" on "directus_invites"`
 			+ ' ("user", "role", coalesce(cast("user_created" as text), \'\'))',
+		);
+	}
+
+	// A user deleted checks every `invite` membership for an invite left: the
+	// rest of the memberships stay out of that scan.
+	// TODO(#610): MariaDB has no partial index.
+	if (!String(knex.client.dialect).startsWith('mysql')) {
+		await knex.raw(
+			`create index "${INVITE_MEMBERSHIPS_INDEX_NAME}" on "directus_role_members"`
+			+ ' ("user", "role") where "managed_by" = \'invite\'',
 		);
 	}
 
@@ -149,6 +160,10 @@ export async function down(knex: Knex): Promise<void> {
 		await knex('directus_users')
 			.update({ role })
 			.where({ id: user });
+	}
+
+	if (!String(knex.client.dialect).startsWith('mysql')) {
+		await knex.raw(`drop index "${INVITE_MEMBERSHIPS_INDEX_NAME}"`);
 	}
 
 	await knex.schema.dropTable('directus_invites');
