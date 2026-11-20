@@ -233,6 +233,20 @@ jobs:
       # The load drill, so the panel's ramp-up button has a pool to ramp.
       PM2_AUTOSCALE_DRILL_ENABLED: 'true'
     steps:
+      # A fork's PR gets one preview per `Preview` label: a later push from the
+      # fork must not rerun unread code with the secrets. Removed at start, not
+      # at the end: that push's own `synchronize` payload still lists the label.
+      - name: Consume the Preview label on a fork's pull request
+        if: >-
+          github.event_name == 'pull_request_target'
+          && github.event.pull_request.head.repo.full_name != github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh api -X DELETE \
+            "repos/$GITHUB_REPOSITORY/issues/$PULL_NUMBER/labels/Preview"
+
       - name: Mark the preview deploying in the PR description
         if: env.PREVIEW_PR != ''
         env:
