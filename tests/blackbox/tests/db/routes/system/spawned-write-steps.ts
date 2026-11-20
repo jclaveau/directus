@@ -254,7 +254,9 @@ function receivedPart(response: Response, expectedResponse: ResponseCell) {
 				return [
 					name,
 					Array.isArray(lowercaseHeaders(expectedResponse).headers?.[name])
-						? String(value).split(', ').sort()
+						? String(value)
+							.split(', ')
+							.sort()
 						: value,
 				];
 			}),
@@ -274,7 +276,9 @@ function lowercaseHeaders(expectedResponse: ResponseCell) {
 				// A list states a comma-separated header in any order.
 				return [
 					name.toLowerCase(),
-					Array.isArray(value) ? [...value].sort() : value,
+					Array.isArray(value)
+						? [...value].sort()
+						: value,
 				];
 			}),
 		),
