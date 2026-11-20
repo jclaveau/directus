@@ -67,12 +67,22 @@ Feature: A setting naming the user's one role is stored as written
       |   filter[bookmark][_eq]: payload-<run> |         role:                 |
       |                                        |           _neq: $CURRENT_ROLE |
     And on postgres the requests ran these statements:
-      | request | table  | select | insert | update | delete |
-      | 1       | (none) | 0      | 0      | 0      | 0      |
-      | 2       | (none) | 0      | 0      | 0      | 0      |
-      | 3       | (none) | 0      | 0      | 0      | 0      |
-      | 4       | (none) | 0      | 0      | 0      | 0      |
-      | 5       | (none) | 0      | 0      | 0      | 0      |
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_presets    | 1      | 1      | 0      | 0      |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 2       | directus_panels     | 1      | 1      | 0      | 0      |
+      | 2       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 2       | directus_users      | 1      | 0      | 0      | 0      |
+      | 3       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 3       | directus_flows      | 1      | 0      | 0      | 0      |
+      | 3       | directus_operations | 1      | 1      | 0      | 0      |
+      | 3       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 3       | directus_users      | 1      | 0      | 0      | 0      |
+      | 4       | directus_presets    | 1      | 0      | 1      | 0      |
+      | 4       | directus_users      | 1      | 0      | 0      | 0      |
+      | 5       | directus_presets    | 1      | 0      | 0      | 0      |
+      | 5       | directus_users      | 1      | 0      | 0      | 0      |
 
   Scenario: a field takes $CURRENT_ROLE in its validation and the role-updated special
     Then these requests get these responses:

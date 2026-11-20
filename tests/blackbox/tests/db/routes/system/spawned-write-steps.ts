@@ -307,17 +307,6 @@ async function sendRows(
 		const response = await sendRequest(instanceUrl, requestCell);
 		responses.push(response);
 
-		// TEMP PROBE (#755): removed once the header values are copied.
-		if (response.headers['x-cache-status'] !== undefined
-			|| response.headers['x-scoped-cache-purged-tags'] !== undefined) {
-			process.stdout.write(`PROBE-755 ${JSON.stringify({
-				method: requestCell.method,
-				path: requestCell.path,
-				cacheStatus: response.headers['x-cache-status'],
-				purgedTags: response.headers['x-scoped-cache-purged-tags'],
-			})}\n`);
-		}
-
 		expect(receivedPart(response, expectedResponse)).toMatchObject(
 			lowercaseHeaders(expectedResponse),
 		);
