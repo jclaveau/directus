@@ -2229,6 +2229,16 @@ implements AbstractService<Item> {
 	): Promise<void> {}
 
 	/**
+	 * Writes what these groups set off in other collections, once they passed
+	 * `validateGroupsToUpdate`, inside the update's transaction and before the
+	 * groups themselves.
+	 */
+	protected async writeBeforeUpdate(
+		_groups: UpdateGroup<Item>[],
+		_trx: Knex,
+	): Promise<void> {}
+
+	/**
 	 * Refuses keys a delete would take. Handed them after the hooks and the access
 	 * check, inside the delete's transaction.
 	 */
@@ -2879,6 +2889,7 @@ implements AbstractService<Item> {
 				}
 
 				await this.validateGroupsToUpdate(presetGroups, trx);
+				await this.writeBeforeUpdate(presetGroups, trx);
 
 				const appliedGroups = await service.applyUpdateGroups(
 					presetGroups,

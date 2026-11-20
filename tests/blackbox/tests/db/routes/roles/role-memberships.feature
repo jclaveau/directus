@@ -10,8 +10,9 @@ Feature: A user holds several roles, each one a membership
   - An invitation is a row of `directus_invites` per inviter and role; a
     re-invite by the same inviter replaces its rows. A role invited holds one
     membership, `managed_by: invite`, while any invite of it is left. Once
-    the user accepts, the admins own it: `managed_by` turns null, and the
-    invite rows stay as history only.
+    the user leaves `invited`, by accept or by a write of their status, the
+    admins own it: `managed_by` turns null, and the invite rows stay as
+    history only. A deleted inviter takes their invites along.
   - `managed_by` names what manages a membership: `invite`, `auth:<provider>`
     or an extension; a request neither sets it nor changes such a membership.
   - A user holds a role once per `managed_by`: a second membership of the
@@ -347,6 +348,87 @@ Feature: A user holds several roles, each one a membership
       |   roles: []                           |                          |
       | method: GET                           | code: 200                |+
       | path: /users/<alice>                  | body:                    |
+      | query:                                |   data:                  |
+      |   fields: roles.role                  |     roles: []            |
+
+  Scenario: an inviter's deletion takes their invites, and the role with the last one
+    Given the rows of directus_policies:
+      | id        | name          | app_access | admin_access |
+      | <inviter> | inviter-<run> | true       | true         |
+    And the rows of directus_roles:
+      | id      | name        |
+      | <staff> | staff-<run> |
+    And the rows of directus_users:
+      | id      | email                   | token       | status  |
+      | <alice> | alice-<run>@example.com | alice-<run> | active  |
+      | <carol> | carol-<run>@example.com | carol-<run> | active  |
+      | <bob>   | bob-<run>@example.com   | bob-<run>   | invited |
+    And the rows of directus_access:
+      | user    | policy    |
+      | <alice> | <inviter> |
+      | <carol> | <inviter> |
+    Then these requests get these responses:
+      | request                               | response                   |
+      | as: alice-<run>                       | code: 204                  |+
+      | method: POST                          |                            |
+      | path: /users/invite                   |                            |
+      | payload:                              |                            |
+      |   email: bob-<run>@example.com        |                            |
+      |   roles:                              |                            |
+      |     - <staff>                         |                            |
+      | as: carol-<run>                       | code: 204                  |+
+      | method: POST                          |                            |
+      | path: /users/invite                   |                            |
+      | payload:                              |                            |
+      |   email: bob-<run>@example.com        |                            |
+      |   roles:                              |                            |
+      |     - <staff>                         |                            |
+      | method: DELETE                        | code: 204                  |+
+      | path: /users/<alice>                  |                            |
+      | method: GET                           | code: 200                  |+
+      | path: /users/<bob>                    | body:                      |
+      | query:                                |   data:                    |
+      |   fields: roles.role,roles.managed_by |     roles:                 |
+      |                                       |       - role: <staff>      |
+      |                                       |         managed_by: invite |
+      | method: DELETE                        | code: 204                  |+
+      | path: /users/<carol>                  |                            |
+      | method: GET                           | code: 200                  |+
+      | path: /users/<bob>                    | body:                      |
+      | query:                                |   data:                    |
+      |   fields: roles.role                  |     roles: []              |
+
+  Scenario: a user activated by a write of their status leaves their roles to the admins
+    Given the rows of directus_roles:
+      | id      | name        |
+      | <staff> | staff-<run> |
+    And the rows of directus_users:
+      | id    | email                 | status  |
+      | <bob> | bob-<run>@example.com | invited |
+    Then these requests get these responses:
+      | request                               | response                 |
+      | method: POST                          | code: 204                |+
+      | path: /users/invite                   |                          |
+      | payload:                              |                          |
+      |   email: bob-<run>@example.com        |                          |
+      |   roles:                              |                          |
+      |     - <staff>                         |                          |
+      | method: PATCH                         | code: 200                |+
+      | path: /users/<bob>                    |                          |
+      | payload:                              |                          |
+      |   status: active                      |                          |
+      | method: GET                           | code: 200                |+
+      | path: /users/<bob>                    | body:                    |
+      | query:                                |   data:                  |
+      |   fields: roles.role,roles.managed_by |     roles:               |
+      |                                       |       - role: <staff>    |
+      |                                       |         managed_by: null |
+      | method: PATCH                         | code: 200                |+
+      | path: /users/<bob>                    |                          |
+      | payload:                              |                          |
+      |   roles: []                           |                          |
+      | method: GET                           | code: 200                |+
+      | path: /users/<bob>                    | body:                    |
       | query:                                |   data:                  |
       |   fields: roles.role                  |     roles: []            |
 

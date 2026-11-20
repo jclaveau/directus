@@ -804,6 +804,72 @@ describe('Integration Tests', () => {
 					[[10_000], { user_updated: null }, { emitEvents: false }],
 				]);
 			});
+
+			it(oneLine`
+				deletes, in the delete's transaction, the invite membership of a user
+				still invited whose last invite of the role goes with the deleted inviter
+			`, async () => {
+				const getKeysByQuerySpy = vi
+					.spyOn(ItemsService.prototype, 'getKeysByQuery')
+					.mockResolvedValue([]);
+
+				tracker.on.select('directus_role_members').response([
+					{ id: 'member-id-31' },
+				]);
+
+				const writes: unknown[] = [];
+
+				const deleteMembersSpy = vi
+					.spyOn(RoleMembersService.prototype, 'deleteMany')
+					.mockImplementation(async function (this: RoleMembersService, keys) {
+						writes.push({
+							collection: this.collection,
+							keys,
+							isTransaction: this.knex.isTransaction,
+						});
+
+						return keys;
+					});
+
+				onTestFinished(() => {
+					getKeysByQuerySpy.mockRestore();
+					deleteMembersSpy.mockRestore();
+				});
+
+				await service.deleteMany(['user-id-31']);
+
+				expect(tracker.history.select).toMatchObject([{
+					sql: 'select "directus_role_members"."id"'
+						+ ' from "directus_role_members"'
+						+ ' inner join "directus_users"'
+						+ ' on "directus_users"."id" = "directus_role_members"."user"'
+						+ ' where "directus_users"."status" = ?'
+						+ ' and "directus_role_members"."managed_by" = ?'
+						+ ' and "directus_role_members"."user" not in (?)'
+						+ ' and exists (select 1 from "directus_invites"'
+						+ ' where "directus_invites"."user" = "directus_role_members"."user"'
+						+ ' and "directus_invites"."role" = "directus_role_members"."role"'
+						+ ' and "directus_invites"."user_created" in (?))'
+						+ ' and not exists (select 1 from "directus_invites"'
+						+ ' where "directus_invites"."user" = "directus_role_members"."user"'
+						+ ' and "directus_invites"."role" = "directus_role_members"."role"'
+						+ ' and ("directus_invites"."user_created" is null'
+						+ ' or "directus_invites"."user_created" not in (?)))',
+					bindings: [
+						'invited',
+						'invite',
+						'user-id-31',
+						'user-id-31',
+						'user-id-31',
+					],
+				}]);
+
+				expect(writes).toEqual([{
+					collection: 'directus_role_members',
+					keys: ['member-id-31'],
+					isTransaction: true,
+				}]);
+			});
 		});
 
 		describe('invite', () => {
@@ -1435,6 +1501,102 @@ describe('Integration Tests', () => {
 						isTransaction: true,
 					},
 				]);
+			});
+		});
+
+		describe('writeBeforeUpdate', () => {
+			it(oneLine`
+				hands the invite memberships of a user leaving invited to the admins,
+				deleting one whose role the user also holds by hand
+			`, async () => {
+				tracker.on.select('directus_role_members').response([
+					{
+						id: 'member-id-41',
+						user: 'user-id-41',
+						role: 'role-id-41',
+						managed_by: 'invite',
+					},
+					{
+						id: 'member-id-42',
+						user: 'user-id-41',
+						role: 'role-id-42',
+						managed_by: 'invite',
+					},
+					{
+						id: 'member-id-43',
+						user: 'user-id-41',
+						role: 'role-id-42',
+						managed_by: null,
+					},
+				]);
+
+				const writes: unknown[] = [];
+
+				const updateMembersSpy = vi
+					.spyOn(RoleMembersService.prototype, 'updateMany')
+					.mockImplementation(async function (
+						this: RoleMembersService,
+						keys,
+						data,
+					) {
+						writes.push({ collection: this.collection, keys, data });
+
+						return keys;
+					});
+
+				const deleteMembersSpy = vi
+					.spyOn(RoleMembersService.prototype, 'deleteMany')
+					.mockImplementation(async function (this: RoleMembersService, keys) {
+						writes.push({ collection: this.collection, keys });
+
+						return keys;
+					});
+
+				onTestFinished(() => {
+					updateMembersSpy.mockRestore();
+					deleteMembersSpy.mockRestore();
+				});
+
+				await service['writeBeforeUpdate']([
+					{ keys: ['user-id-41'], data: { status: 'suspended' } },
+					{ keys: ['user-id-42'], data: { status: 'invited' } },
+					{ keys: ['user-id-43'], data: { first_name: 'Bob' } },
+				], db);
+
+				expect(tracker.history.select).toMatchObject([{
+					sql: 'select "directus_role_members"."id",'
+						+ ' "directus_role_members"."user",'
+						+ ' "directus_role_members"."role",'
+						+ ' "directus_role_members"."managed_by"'
+						+ ' from "directus_role_members"'
+						+ ' inner join "directus_users"'
+						+ ' on "directus_users"."id" = "directus_role_members"."user"'
+						+ ' where "directus_users"."status" = ?'
+						+ ' and "directus_role_members"."user" in (?)'
+						+ ' and ("directus_role_members"."managed_by" = ?'
+						+ ' or "directus_role_members"."managed_by" is null)',
+					bindings: ['invited', 'user-id-41', 'invite'],
+				}]);
+
+				expect(writes).toEqual([
+					{
+						collection: 'directus_role_members',
+						keys: ['member-id-41'],
+						data: { managed_by: null },
+					},
+					{
+						collection: 'directus_role_members',
+						keys: ['member-id-42'],
+					},
+				]);
+			});
+
+			it('reads no membership when no group writes a status', async () => {
+				await service['writeBeforeUpdate']([
+					{ keys: ['user-id-44'], data: { first_name: 'Bob' } },
+				], db);
+
+				expect(tracker.history.select).toEqual([]);
 			});
 		});
 

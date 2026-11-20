@@ -143,7 +143,7 @@ describe('the migration', () => {
 				'alter table "directus_invites" add constraint'
 				+ ' "directus_invites_user_created_foreign" foreign key'
 				+ ' ("user_created") references "directus_users" ("id")'
-				+ ' on delete SET NULL',
+				+ ' on delete CASCADE',
 				'create unique index "directus_invites_user_role_user_created_unique"'
 				+ ' on "directus_invites"'
 				+ ' ("user", "role", coalesce(cast("user_created" as text), \'\'))',
