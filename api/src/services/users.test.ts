@@ -22,12 +22,7 @@ import { useLogger } from '../logger/index.js';
 import { verifyJWT } from '../utils/jwt.js';
 import { transaction } from '../utils/transaction.js';
 import { withMeta } from '../utils/read-meta.js';
-import {
-	ItemsService,
-	MailService,
-	RoleMembersService,
-	UsersService,
-} from './index.js';
+import { ItemsService, MailService, UsersService } from './index.js';
 import { SettingsService } from './settings.js';
 
 vi.mock('../../src/database/index', () => ({
@@ -278,7 +273,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('should request all user integrity checks if status is changed to not "active"', async () => {
-				tracker.on.select('directus_role_members').response([]);
+				tracker.on.delete('directus_role_members').response(0);
+				tracker.on.update('directus_role_members').response(0);
 
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
@@ -299,7 +295,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('should request user limit checks if status is changed to "active"', async () => {
-				tracker.on.select('directus_role_members').response([]);
+				tracker.on.delete('directus_role_members').response(0);
+				tracker.on.update('directus_role_members').response(0);
 
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
@@ -390,8 +387,6 @@ describe('Integration Tests', () => {
 			});
 
 			it('logs out the users a users.update hook suspends', async () => {
-				tracker.on.select('directus_role_members').response([]);
-
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
 
@@ -638,7 +633,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('requests the union of every row\'s integrity checks once', async () => {
-				tracker.on.select('directus_role_members').response([]);
+				tracker.on.delete('directus_role_members').response(0);
+				tracker.on.update('directus_role_members').response(0);
 
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
@@ -660,7 +656,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('logs out the users a row suspends', async () => {
-				tracker.on.select('directus_role_members').response([]);
+				tracker.on.delete('directus_role_members').response(0);
+				tracker.on.update('directus_role_members').response(0);
 
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
@@ -681,7 +678,7 @@ describe('Integration Tests', () => {
 			vi.spyOn(ItemsService.prototype, 'deleteMany').mockResolvedValue(['user-id-15']);
 
 			it('should validate remaining admin users', async () => {
-				tracker.on.select('directus_role_members').response([]);
+				tracker.on.delete('directus_role_members').response(0);
 
 				const getKeysByQuerySpy = vi
 					.spyOn(ItemsService.prototype, 'getKeysByQuery')
@@ -708,7 +705,7 @@ describe('Integration Tests', () => {
 				ItemsService, so the purge sees each row before and after the write, and
 				skips the versions with none
 			`, async () => {
-				tracker.on.select('directus_role_members').response([]);
+				tracker.on.delete('directus_role_members').response(0);
 
 				const unlinkCalls: unknown[] = [];
 
@@ -790,7 +787,7 @@ describe('Integration Tests', () => {
 				unlinks 10 000 rows per update, since one statement past 65 535 keys would
 				overflow Postgres's bind parameters
 			`, async () => {
-				tracker.on.select('directus_role_members').response([]);
+				tracker.on.delete('directus_role_members').response(0);
 
 				const getKeysByQuerySpy = vi
 					.spyOn(ItemsService.prototype, 'getKeysByQuery')
@@ -822,69 +819,31 @@ describe('Integration Tests', () => {
 			});
 
 			it(oneLine`
-				deletes, in the delete's transaction, the invite membership of a user
-				still invited whose last invite of the role goes with the deleted inviter
+				deletes, after the users, every invite membership left with no invite,
+				its last one gone with a deleted inviter
 			`, async () => {
 				const getKeysByQuerySpy = vi
 					.spyOn(ItemsService.prototype, 'getKeysByQuery')
 					.mockResolvedValue([]);
 
-				tracker.on.select('directus_role_members').response([
-					{ id: 'member-id-31' },
-				]);
-
-				const writes: unknown[] = [];
-
-				const deleteMembersSpy = vi
-					.spyOn(RoleMembersService.prototype, 'deleteMany')
-					.mockImplementation(async function (this: RoleMembersService, keys) {
-						writes.push({
-							collection: this.collection,
-							keys,
-							isTransaction: this.knex.isTransaction,
-						});
-
-						return keys;
-					});
-
 				onTestFinished(() => {
 					getKeysByQuerySpy.mockRestore();
-					deleteMembersSpy.mockRestore();
 				});
+
+				tracker.on.delete('directus_role_members').response(1);
 
 				await service.deleteMany(['user-id-31']);
 
-				expect(tracker.history.select).toMatchObject([{
-					sql: 'select "directus_role_members"."id"'
-						+ ' from "directus_role_members"'
-						+ ' inner join "directus_users"'
-						+ ' on "directus_users"."id" = "directus_role_members"."user"'
-						+ ' where "directus_users"."status" = ?'
-						+ ' and "directus_role_members"."managed_by" = ?'
-						+ ' and "directus_role_members"."user" not in (?)'
-						+ ' and exists (select 1 from "directus_invites"'
-						+ ' where "directus_invites"."user" = "directus_role_members"."user"'
-						+ ' and "directus_invites"."role" = "directus_role_members"."role"'
-						+ ' and "directus_invites"."user_created" in (?))'
+				expect(tracker.history.delete).toMatchObject([{
+					sql: 'delete from "directus_role_members" as "membership"'
+						+ ' where "membership"."managed_by" = ?'
 						+ ' and not exists (select 1 from "directus_invites"'
-						+ ' where "directus_invites"."user" = "directus_role_members"."user"'
-						+ ' and "directus_invites"."role" = "directus_role_members"."role"'
-						+ ' and ("directus_invites"."user_created" is null'
-						+ ' or "directus_invites"."user_created" not in (?)))',
-					bindings: [
-						'invited',
-						'invite',
-						'user-id-31',
-						'user-id-31',
-						'user-id-31',
-					],
+						+ ' where "directus_invites"."user" = "membership"."user"'
+						+ ' and "directus_invites"."role" = "membership"."role")',
+					bindings: ['invite'],
 				}]);
 
-				expect(writes).toEqual([{
-					collection: 'directus_role_members',
-					keys: ['member-id-31'],
-					isTransaction: true,
-				}]);
+				expect(tracker.history.select).toEqual([]);
 			});
 		});
 
@@ -1418,8 +1377,8 @@ describe('Integration Tests', () => {
 			});
 
 			it(oneLine`
-				activates the user in a transaction, whose update hands the invite
-				memberships to the admins
+				activates the user, whose status write hands the invite memberships to
+				the admins
 			`, async () => {
 				vi.mocked(verifyJWT).mockReturnValue({
 					email: 'user@example.com',
@@ -1454,104 +1413,51 @@ describe('Integration Tests', () => {
 					collection: 'directus_users',
 					keys: ['user-id-21'],
 					data: { password: 'new-password', status: 'active' },
-					isTransaction: true,
+					isTransaction: false,
 				}]);
 			});
 		});
 
-		describe('writeBeforeUpdate', () => {
+		describe('hand-over of the invite memberships', () => {
 			it(oneLine`
-				hands the invite memberships of a user leaving invited to the admins,
-				deleting one whose role the user also holds by hand
+				deletes the invite memberships of a user leaving invited whose role the
+				user also holds by hand, then hands the others to the admins
 			`, async () => {
-				tracker.on.select('directus_role_members').response([
-					{
-						id: 'member-id-41',
-						user: 'user-id-41',
-						role: 'role-id-41',
-						managed_by: 'invite',
-					},
-					{
-						id: 'member-id-42',
-						user: 'user-id-41',
-						role: 'role-id-42',
-						managed_by: 'invite',
-					},
-					{
-						id: 'member-id-43',
-						user: 'user-id-41',
-						role: 'role-id-42',
-						managed_by: null,
-					},
+				tracker.on.delete('directus_role_members').response(1);
+				tracker.on.update('directus_role_members').response(1);
+
+				await service.updateBatch([
+					{ id: 'user-id-41', status: 'suspended' },
+					{ id: 'user-id-42', status: 'invited' },
+					{ id: 'user-id-43', first_name: 'Bob' },
 				]);
 
-				const writes: unknown[] = [];
-
-				const updateMembersSpy = vi
-					.spyOn(RoleMembersService.prototype, 'updateMany')
-					.mockImplementation(async function (
-						this: RoleMembersService,
-						keys,
-						data,
-					) {
-						writes.push({ collection: this.collection, keys, data });
-
-						return keys;
-					});
-
-				const deleteMembersSpy = vi
-					.spyOn(RoleMembersService.prototype, 'deleteMany')
-					.mockImplementation(async function (this: RoleMembersService, keys) {
-						writes.push({ collection: this.collection, keys });
-
-						return keys;
-					});
-
-				onTestFinished(() => {
-					updateMembersSpy.mockRestore();
-					deleteMembersSpy.mockRestore();
-				});
-
-				await service['writeBeforeUpdate']([
-					{ keys: ['user-id-41'], data: { status: 'suspended' } },
-					{ keys: ['user-id-42'], data: { status: 'invited' } },
-					{ keys: ['user-id-43'], data: { first_name: 'Bob' } },
-				], db);
-
-				expect(tracker.history.select).toMatchObject([{
-					sql: 'select "directus_role_members"."id",'
-						+ ' "directus_role_members"."user",'
-						+ ' "directus_role_members"."role",'
-						+ ' "directus_role_members"."managed_by"'
-						+ ' from "directus_role_members"'
-						+ ' inner join "directus_users"'
-						+ ' on "directus_users"."id" = "directus_role_members"."user"'
-						+ ' where "directus_users"."status" = ?'
-						+ ' and "directus_role_members"."user" in (?)'
-						+ ' and ("directus_role_members"."managed_by" = ?'
-						+ ' or "directus_role_members"."managed_by" is null)',
-					bindings: ['invited', 'user-id-41', 'invite'],
+				expect(tracker.history.delete).toMatchObject([{
+					sql: 'delete from "directus_role_members" as "membership"'
+						+ ' where "membership"."user" in (?)'
+						+ ' and "membership"."managed_by" = ?'
+						+ ' and exists (select 1'
+						+ ' from "directus_role_members" as "hand_membership"'
+						+ ' where "hand_membership"."user" = "membership"."user"'
+						+ ' and "hand_membership"."role" = "membership"."role"'
+						+ ' and "hand_membership"."managed_by" is null)',
+					bindings: ['user-id-41', 'invite'],
 				}]);
 
-				expect(writes).toEqual([
-					{
-						collection: 'directus_role_members',
-						keys: ['member-id-41'],
-						data: { managed_by: null },
-					},
-					{
-						collection: 'directus_role_members',
-						keys: ['member-id-42'],
-					},
-				]);
+				expect(tracker.history.update).toMatchObject([{
+					sql: 'update "directus_role_members" set "managed_by" = ?'
+						+ ' where "user" in (?) and "managed_by" = ?',
+					bindings: [null, 'user-id-41', 'invite'],
+				}]);
 			});
 
-			it('reads no membership when no group writes a status', async () => {
-				await service['writeBeforeUpdate']([
-					{ keys: ['user-id-44'], data: { first_name: 'Bob' } },
-				], db);
+			it('writes no membership when no row writes a status', async () => {
+				await service.updateBatch([
+					{ id: 'user-id-44', first_name: 'Bob' },
+					{ id: 'user-id-45', status: 'invited' },
+				]);
 
-				expect(tracker.history.select).toEqual([]);
+				expect(tracker.history.all).toEqual([]);
 			});
 		});
 
@@ -1806,7 +1712,7 @@ describe('Integration Tests', () => {
 
 		describe('user sessions', () => {
 			it('deletes every session of the deleted users', async () => {
-				tracker.on.select('directus_role_members').response([]);
+				tracker.on.delete('directus_role_members').response(0);
 
 				clearUserSessionsSpy.mockImplementationOnce(usersClearUserSessions);
 				tracker.on.select('directus_comments').response([]);
@@ -1816,7 +1722,7 @@ describe('Integration Tests', () => {
 
 				await service.deleteMany(['user-id-41']);
 
-				expect(tracker.history.delete[0]?.bindings)
+				expect(tracker.history.delete[1]?.bindings)
 					.toStrictEqual(['user-id-41']);
 			});
 
@@ -1852,6 +1758,8 @@ describe('Integration Tests', () => {
 
 		describe('deleteMany without a caller integrity hook', () => {
 			it('keeps the last admin refusal for the mutation', async () => {
+				tracker.on.delete('directus_role_members').response(0);
+
 				const lastAdminError = new Error('last admin');
 
 				vi.mocked(validateRemainingAdminUsers)
@@ -1868,6 +1776,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('keeps the references to a last admin its refusal keeps', async () => {
+				tracker.on.delete('directus_role_members').response(0);
+
 				vi.mocked(validateRemainingAdminUsers)
 					.mockRejectedValueOnce(new Error('last admin'));
 
@@ -1879,6 +1789,8 @@ describe('Integration Tests', () => {
 
 		describe('deleteMany action hooks', () => {
 			it('fires users.delete once the delete has committed', async () => {
+				tracker.on.delete('directus_role_members').response(0);
+
 				vi.mocked(ItemsService.prototype.deleteMany)
 					.mockImplementationOnce(itemsDeleteMany);
 
@@ -1905,7 +1817,7 @@ describe('Integration Tests', () => {
 
 		describe('deleteMany retried', () => {
 			it('fires only the action of the attempt that committed', async () => {
-				tracker.on.select('directus_role_members').response([]);
+				tracker.on.delete('directus_role_members').response(0);
 
 				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
 
@@ -1944,6 +1856,9 @@ describe('Integration Tests', () => {
 
 		describe('verifyRegistration by email', () => {
 			it('activates the unverified user the token names', async () => {
+				tracker.on.delete('directus_role_members').response(0);
+				tracker.on.update('directus_role_members').response(0);
+
 				vi.mocked(verifyJWT).mockReturnValue({
 					email: 'Ada@Example.com',
 					scope: 'pending-registration',
@@ -2221,6 +2136,9 @@ describe('Integration Tests', () => {
 
 		describe('resetPassword as admin', () => {
 			it('updates as an admin built from the default accountability', async () => {
+				tracker.on.delete('directus_role_members').response(0);
+				tracker.on.update('directus_role_members').response(0);
+
 				vi.mocked(verifyJWT).mockReturnValue({
 					email: 'ada@example.com',
 					scope: 'password-reset',
@@ -2251,6 +2169,9 @@ describe('Integration Tests', () => {
 			});
 
 			it('updates as an admin built from the caller', async () => {
+				tracker.on.delete('directus_role_members').response(0);
+				tracker.on.update('directus_role_members').response(0);
+
 				vi.mocked(verifyJWT).mockReturnValue({
 					email: 'ada@example.com',
 					scope: 'password-reset',
