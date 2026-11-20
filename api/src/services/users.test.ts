@@ -1229,6 +1229,8 @@ describe('Integration Tests', () => {
 							status: 'invited',
 						});
 
+					tracker.on.select('directus_role_members').response([]);
+
 					const createMany = vi.spyOn(ItemsService.prototype, 'createMany');
 
 					const promise = service.inviteUser(
@@ -1266,6 +1268,11 @@ describe('Integration Tests', () => {
 				]);
 
 				vi.mocked(processPayload).mockRejectedValueOnce(new ForbiddenError());
+
+				// clearAllMocks keeps an unused once-value: later tests write users.
+				onTestFinished(() => {
+					vi.mocked(processPayload).mockReset();
+				});
 
 				const promise = new UsersService({
 					knex: db,

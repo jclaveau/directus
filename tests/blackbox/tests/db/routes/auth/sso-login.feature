@@ -174,6 +174,10 @@ Feature: A first SSO login creates the user, a later one updates it
       | 3       | directus_access       | 3      | 0      | 0      | 0      |
       | 3       | directus_activity     | 0      | 1      | 0      | 0      |
       | 3       | directus_role_members | 2      | 1      | 0      | 1      |
+      | 3       | directus_roles        | 2      | 0      | 0      | 0      |
+      | 3       | directus_sessions     | 0      | 1      | 0      | 2      |
+      | 3       | directus_settings     | 1      | 0      | 0      | 0      |
+      | 3       | directus_users        | 4      | 0      | 3      | 0      |
 
   Scenario: a later login keeps the role an admin gave the user
     Then these requests get these responses:
@@ -292,6 +296,10 @@ Feature: A first SSO login creates the user, a later one updates it
       | 3       | directus_access       | 3      | 0      | 0      | 0      |
       | 3       | directus_activity     | 0      | 1      | 0      | 0      |
       | 3       | directus_role_members | 2      | 1      | 0      | 1      |
+      | 3       | directus_roles        | 2      | 0      | 0      | 0      |
+      | 3       | directus_sessions     | 0      | 1      | 0      | 2      |
+      | 3       | directus_settings     | 1      | 0      | 0      | 0      |
+      | 3       | directus_users        | 4      | 0      | 3      | 0      |
 
   Scenario: a login puts its mapped role after the roles an admin gave
     Then these requests get these responses:

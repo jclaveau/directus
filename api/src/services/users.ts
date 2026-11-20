@@ -519,12 +519,11 @@ export class UsersService extends ItemsService {
 			const user = await this.getUserByEmail(email);
 			const isNewUser = isEmpty(user);
 
-			// A user created here fails on its own with the error, through `opts`
-			if (!isNewUser && opts.preMutationError) {
-				throw opts.preMutationError;
-			}
-
 			if (!isNewUser && user.status !== 'invited') {
+				if (opts.preMutationError) {
+					throw opts.preMutationError;
+				}
+
 				continue;
 			}
 
@@ -538,7 +537,13 @@ export class UsersService extends ItemsService {
 					}).createOne({ email, status: 'invited' }, opts)
 					: user.id;
 
-				await this.grantInvitedRoles(trx, invitedUser, invitedRoles, isNewUser);
+				await this.grantInvitedRoles(
+					trx,
+					invitedUser,
+					invitedRoles,
+					isNewUser,
+					opts.preMutationError,
+				);
 			});
 
 			// Send invite for new and already invited users
@@ -567,22 +572,17 @@ export class UsersService extends ItemsService {
 	/**
 	 * Writes the invites of the inviter to `invitedRoles`, and the memberships
 	 * they hold: one per role while any invite of it is left.
+	 * `preMutationError` is thrown once the inviter may invite to every role,
+	 * so a refused inviter learns nothing from it.
 	 */
 	private async grantInvitedRoles(
 		trx: Knex,
 		invitedUser: PrimaryKey,
 		invitedRoles: string[],
 		isNewUser: boolean,
+		preMutationError: unknown,
 	): Promise<void> {
 		const inviter = this.accountability?.user ?? null;
-
-		const invites: { id: string; role: string; user_created: string | null }[]
-			= isNewUser
-				? []
-				: await trx
-					.select('id', 'role', 'user_created')
-					.from('directus_invites')
-					.where({ user: invitedUser });
 
 		const memberships: {
 			id: string;
@@ -595,6 +595,33 @@ export class UsersService extends ItemsService {
 				.select('id', 'role', 'managed_by', 'sort')
 				.from('directus_role_members')
 				.where({ user: invitedUser });
+
+		if (this.accountability) {
+			for (const role of invitedRoles) {
+				await processPayload(
+					{
+						accountability: this.accountability,
+						action: 'create',
+						collection: 'directus_role_members',
+						payload: { user: invitedUser, role },
+						nested: [],
+					},
+					{ knex: trx, schema: this.schema },
+				);
+			}
+		}
+
+		if (preMutationError) {
+			throw preMutationError;
+		}
+
+		const invites: { id: string; role: string; user_created: string | null }[]
+			= isNewUser
+				? []
+				: await trx
+					.select('id', 'role', 'user_created')
+					.from('directus_invites')
+					.where({ user: invitedUser });
 
 		const inviterInvites = invites.filter(({ user_created }) => {
 			return user_created === inviter;
@@ -628,21 +655,6 @@ export class UsersService extends ItemsService {
 		});
 
 		const lastSort = Math.max(0, ...memberships.map(({ sort }) => sort ?? 0));
-
-		if (this.accountability) {
-			for (const role of membershipRoles) {
-				await processPayload(
-					{
-						accountability: this.accountability,
-						action: 'create',
-						collection: 'directus_role_members',
-						payload: { user: invitedUser, role },
-						nested: [],
-					},
-					{ knex: trx, schema: this.schema },
-				);
-			}
-		}
 
 		const invitesService = new InvitesService({ knex: trx, schema: this.schema });
 
