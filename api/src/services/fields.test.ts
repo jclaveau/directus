@@ -75,6 +75,40 @@ describe('Services / Fields', () => {
 
 			expect(tracker.history.all).toEqual([]);
 		});
+
+		it('refuses a removed role special a hook adds, before the DDL', async () => {
+			tracker.on.select('directus_fields').response(undefined);
+
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
+				async (_event, payload) => {
+					return { ...(payload as Field), meta: { special: ['role-created'] } };
+				},
+			);
+
+			const service = new FieldsService({ knex: db, schema, accountability: admin });
+
+			await expect(
+				service.createField('test', {
+					field: 'made_by_role',
+					type: 'uuid',
+				} as Field),
+			).rejects.toHaveProperty(
+				'message',
+				'Invalid payload. Field "made_by_role" of collection "test" uses the'
+					+ ' removed special "role-created": a user can hold several roles,'
+					+ ' use "roles-created" on a json field.',
+			);
+
+			// Only the existence check runs before the hooks; no ALTER TABLE.
+			expect(tracker.history.all).toEqual([
+				expect.objectContaining({
+					method: 'select',
+					sql: 'select "id" from "directus_fields"'
+						+ ' where "collection" = ? and "field" = ? limit ?',
+					bindings: ['test', 'made_by_role', 1],
+				}),
+			]);
+		});
 	});
 
 	describe('updateField', () => {
@@ -99,6 +133,39 @@ describe('Services / Fields', () => {
 					type: 'uuid',
 					schema: { is_nullable: true },
 					meta: { special: ['role-updated'] },
+				} as RawField),
+			).rejects.toHaveProperty(
+				'message',
+				'Invalid payload. Field "id" of collection "test" uses the removed'
+					+ ' special "role-updated": a user can hold several roles, use'
+					+ ' "roles-updated" on a json field.',
+			);
+
+			expect(tracker.history.all).toEqual([]);
+		});
+
+		it('refuses a removed role special a hook adds, before the DDL', async () => {
+			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValueOnce({
+				name: 'id',
+				is_primary_key: false,
+			} as Awaited<ReturnType<FieldsService['columnInfo']>>);
+
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
+				async (_event, payload) => {
+					return {
+						...(payload as RawField),
+						meta: { special: ['role-updated'] },
+					};
+				},
+			);
+
+			const service = new FieldsService({ knex: db, schema, accountability: admin });
+
+			await expect(
+				service.updateField('test', {
+					field: 'id',
+					type: 'uuid',
+					schema: { is_nullable: true },
 				} as RawField),
 			).rejects.toHaveProperty(
 				'message',
