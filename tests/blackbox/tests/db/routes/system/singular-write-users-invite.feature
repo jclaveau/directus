@@ -265,3 +265,48 @@ Feature: A user is invited, re-invited and accepts the invitation
       | 1       | directus_invites      | 1      | 0      | 0      | 0      |
       | 1       | directus_role_members | 2      | 0      | 0      | 0      |
       | 1       | directus_users        | 2      | 0      | 0      | 0      |
+
+  Scenario: a user invited again by another inviter keeps both invitations
+    Given the rows of directus_roles:
+      | id          | name        |
+      | <same-role> | again-<run> |
+    And the rows of directus_users:
+      | id          | email                   | status  |
+      | <same-user> | again-<run>@example.com | invited |
+    And the rows of directus_role_members:
+      | id           | user        | role        | sort | managed_by |
+      | <membership> | <same-user> | <same-role> | 1    | invite     |
+    And the rows of directus_invites:
+      | id       | user        | role        | user_created | date_created         |
+      | <invite> | <same-user> | <same-role> | null         | 2026-01-01T00:00:00Z |
+    Then these requests get these responses:
+      | request                              | response                           |
+      | method: POST                         | code: 204                          |+
+      | path: /users/invite                  |                                    |
+      | payload:                             |                                    |
+      |   email: again-<run>@example.com     |                                    |
+      |   roles:                             |                                    |
+      |     - <same-role>                    |                                    |
+      | method: POST                         | code: 200                          |+
+      | path: /graphql/system                | body:                              |
+      | payload:                             |   data:                            |
+      |   query: >-                          |     invites:                       |
+      |     { invites(                       |       - id: <invite>               |
+      |     filter: {user: {id: {_eq:        |         role:                      |
+      |     "<same-user>"}}},                |           id: <same-role>          |
+      |     sort: ["date_created"])          |         user_created: null         |
+      |     { id role { id }                 |       - role:                      |
+      |     user_created { email } } }       |           id: <same-role>          |
+      |                                      |         user_created:              |
+      |                                      |           email: admin@default.com |
+      | method: GET                          | code: 200                          |+
+      | path: /users                         | body:                              |
+      | query:                               |   data:                            |
+      |   fields: status,roles.role          |     - status: invited              |
+      |   filter[email][_eq]: >-             |       roles:                       |
+      |     again-<run>@example.com          |         - role: <same-role>        |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
+      | 3       | directus_users        | 1      | 0      | 0      | 0      |
