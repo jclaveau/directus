@@ -199,3 +199,30 @@ Feature: A user is invited, re-invited and accepts the invitation
       | request | table          | select | insert | update | delete |
       | 1       | directus_users | 2      | 0      | 0      | 0      |
       | 2       | directus_users | 2      | 0      | 0      | 0      |
+
+  Scenario: graphql invites a user into the one role it names
+    Given these requests are sent:
+      | request               | response  |
+      | method: POST          | code: 200 |+
+      | path: /roles          |           |
+      | payload:              |           |
+      |   id: <graphql-role>  |           |
+      |   name: graphql-<run> |           |
+    Then these requests get these responses:
+      | request                                 | response                   |
+      | method: POST                            | code: 200                  |+
+      | path: /graphql/system                   | body:                      |
+      | payload:                                |   data:                    |
+      |   query: >-                             |     users_invite: true     |
+      |     mutation { users_invite(            |                            |
+      |     email: "graphql-<run>@example.com", |                            |
+      |     role: "<graphql-role>") }           |                            |
+      | method: GET                             | code: 200                  |+
+      | path: /users                            | body:                      |
+      | query:                                  |   data:                    |
+      |   fields: status,role                   |     - status: invited      |
+      |   filter[email][_eq]: >-                |       role: <graphql-role> |
+      |     graphql-<run>@example.com           |                            |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 0      | 0      | 0      | 0      |
