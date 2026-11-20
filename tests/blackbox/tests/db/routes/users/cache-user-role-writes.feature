@@ -8,7 +8,8 @@ Feature: A user's role, status and deletion purge the cache as today
     its `x-cache-status`.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
-    `<name>` for a uuid of its own. A response cell states the keys it checks.
+    `<name>` for a uuid of its own, or for the value a `remember` row stored.
+    A response cell states the keys it checks.
 
   Scenario: a user's name change keeps the cached read, a role change drops it
     Given these requests are sent:
@@ -60,39 +61,38 @@ Feature: A user's role, status and deletion purge the cache as today
       |   role: <first-role>                      |           |
       |   token: mover-<run>                      |           |
     Then these requests get these responses:
-      | request                              | response                         |
-      | as: mover-<run>                      | code: 200                        |+
-      | method: GET                          | headers:                         |
-      | path: /items/cache_user_rename_notes |   x-cache-status: MISS           |
-      | query:                               | body:                            |
-      |   fields: label                      |   data:                          |
-      |                                      |     - label: v1                  |
-      | as: mover-<run>                      | code: 200                        |+
-      | method: GET                          | headers:                         |
-      | path: /items/cache_user_rename_notes |   x-cache-status: HIT            |
-      | query:                               | body:                            |
-      |   fields: label                      |   data:                          |
-      |                                      |     - label: v1                  |
-      | method: PATCH                        | code: 200                        |+
-      | path: /users/<mover>                 | headers:                         |
-      | payload:                             |   x-scoped-cache-purged-tags: >- |
-      |   first_name: renamed                |     directus_users:id=<mover>    |
-      | as: mover-<run>                      | code: 200                        |+
-      | method: GET                          | headers:                         |
-      | path: /items/cache_user_rename_notes |   x-cache-status: HIT            |
-      | query:                               | body:                            |
-      |   fields: label                      |   data:                          |
-      |                                      |     - label: v1                  |
-      | method: PATCH                        | code: 200                        |+
-      | path: /users/<mover>                 | headers:                         |
-      | payload:                             |   x-scoped-cache-purged-tags: >- |
-      |   role: <second-role>                |     directus_users:id=<mover>    |
-      | as: mover-<run>                      | code: 200                        |+
-      | method: GET                          | headers:                         |
-      | path: /items/cache_user_rename_notes |   x-cache-status: MISS           |
-      | query:                               | body:                            |
-      |   fields: label                      |   data:                          |
-      |                                      |     - label: v1                  |
+    Then these requests get these responses:
+      | request                              | response               |
+      | as: mover-<run>                      | code: 200              |+
+      | method: GET                          | headers:               |
+      | path: /items/cache_user_rename_notes |   x-cache-status: MISS |
+      | query:                               | body:                  |
+      |   fields: label                      |   data:                |
+      |                                      |     - label: v1        |
+      | as: mover-<run>                      | code: 200              |+
+      | method: GET                          | headers:               |
+      | path: /items/cache_user_rename_notes |   x-cache-status: HIT  |
+      | query:                               | body:                  |
+      |   fields: label                      |   data:                |
+      |                                      |     - label: v1        |
+      | method: PATCH                        | code: 200              |+
+      | path: /users/<mover>                 |                        |
+      | payload:                             |                        |
+      |   first_name: renamed                |                        |
+      | as: mover-<run>                      | code: 200              |+
+      | method: GET                          | body:                  |
+      | path: /items/cache_user_rename_notes |   data:                |
+      | query:                               |     - label: v1        |
+      |   fields: label                      |                        |
+      | method: PATCH                        | code: 200              |+
+      | path: /users/<mover>                 |                        |
+      | payload:                             |                        |
+      |   role: <second-role>                |                        |
+      | as: mover-<run>                      | code: 200              |+
+      | method: GET                          | body:                  |
+      | path: /items/cache_user_rename_notes |   data:                |
+      | query:                               |     - label: v1        |
+      |   fields: label                      |                        |
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
       | 3       | directus_users | 0      | 0      | 0      | 0      |
@@ -120,41 +120,47 @@ Feature: A user's role, status and deletion purge the cache as today
       | payload:                                |           |
       |   id: <invitee-role>                    |           |
       |   name: invitee-<run>                   |           |
-      | method: POST                            | code: 200 |+
-      | path: /users                            |           |
+      | method: POST                            | code: 204 |+
+      | path: /users/invite                     |           |
       | payload:                                |           |
-      |   id: <invitee>                         |           |
       |   email: invitee-<run>@example.com      |           |
       |   role: <invitee-role>                  |           |
-      |   status: invited                       |           |
+      | method: GET                             | code: 200 |+
+      | path: /users                            |           |
+      | query:                                  |           |
+      |   fields: id                            |           |
+      |   filter[email][_eq]: >-                |           |
+      |     invitee-<run>@example.com           |           |
+      | remember:                               |           |
+      |   invitee: body.data.0.id               |           |
     Then these requests get these responses:
-      | request                                | response                         |
-      | method: GET                            | code: 200                        |+
-      | path: /items/cache_user_activate_notes | headers:                         |
-      | query:                                 |   x-cache-status: MISS           |
-      |   fields: label                        |                                  |
-      | method: GET                            | code: 200                        |+
-      | path: /items/cache_user_activate_notes | headers:                         |
-      | query:                                 |   x-cache-status: HIT            |
-      |   fields: label                        |                                  |
-      | method: PATCH                          | code: 200                        |+
-      | path: /users/<invitee>                 | headers:                         |
-      | payload:                               |   x-scoped-cache-purged-tags: >- |
-      |   status: active                       |     directus_users:id=<invitee>  |
-      | method: GET                            | code: 200                        |+
-      | path: /users/<invitee>                 | body:                            |
-      | query:                                 |   data:                          |
-      |   fields: status,role                  |     status: active               |
-      |                                        |     role: <invitee-role>         |
-      | method: GET                            | code: 200                        |+
-      | path: /items/cache_user_activate_notes | headers:                         |
-      | query:                                 |   x-cache-status: HIT            |
-      |   fields: label                        |                                  |
+      | request                                | response                 |
+      | method: GET                            | code: 200                |+
+      | path: /items/cache_user_activate_notes | headers:                 |
+      | query:                                 |   x-cache-status: MISS   |
+      |   fields: label                        |                          |
+      | method: GET                            | code: 200                |+
+      | path: /items/cache_user_activate_notes | headers:                 |
+      | query:                                 |   x-cache-status: HIT    |
+      |   fields: label                        |                          |
+      | method: PATCH                          | code: 200                |+
+      | path: /users/<invitee>                 |                          |
+      | payload:                               |                          |
+      |   status: active                       |                          |
+      | method: GET                            | code: 200                |+
+      | path: /users/<invitee>                 | body:                    |
+      | query:                                 |   data:                  |
+      |   fields: status,role                  |     status: active       |
+      |                                        |     role: <invitee-role> |
+      | method: GET                            | code: 200                |+
+      | path: /items/cache_user_activate_notes |                          |
+      | query:                                 |                          |
+      |   fields: label                        |                          |
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
       | 3       | directus_users | 0      | 0      | 0      | 0      |
 
-  Scenario: a deleted invited user keeps the cached read
+  Scenario: a deleted inviter keeps the cached read
     Given these requests are sent:
       | request                               | response  |
       | method: POST                          | code: 200 |+
@@ -172,35 +178,57 @@ Feature: A user's role, status and deletion purge the cache as today
       | payload:                              |           |
       |   label: v1                           |           |
       | method: POST                          | code: 200 |+
+      | path: /policies                       |           |
+      | payload:                              |           |
+      |   id: <inviter-policy>                |           |
+      |   name: inviter-<run>                 |           |
+      |   app_access: false                   |           |
+      |   admin_access: false                 |           |
+      |   permissions:                        |           |
+      |     - collection: directus_users      |           |
+      |       action: create                  |           |
+      |       fields: ['*']                   |           |
+      | method: POST                          | code: 200 |+
       | path: /roles                          |           |
       | payload:                              |           |
-      |   id: <deleted-role>                  |           |
-      |   name: deleted-<run>                 |           |
+      |   id: <inviter-role>                  |           |
+      |   name: inviter-<run>                 |           |
+      |   policies:                           |           |
+      |     - policy: <inviter-policy>        |           |
+      | method: POST                          | code: 200 |+
+      | path: /roles                          |           |
+      | payload:                              |           |
+      |   id: <invitee-role>                  |           |
+      |   name: invitee-<run>                 |           |
       | method: POST                          | code: 200 |+
       | path: /users                          |           |
       | payload:                              |           |
-      |   id: <deleted>                       |           |
-      |   email: deleted-<run>@example.com    |           |
-      |   role: <deleted-role>                |           |
-      |   status: invited                     |           |
+      |   id: <inviter>                       |           |
+      |   email: inviter-<run>@example.com    |           |
+      |   role: <inviter-role>                |           |
+      |   token: inviter-<run>                |           |
+      | as: inviter-<run>                     | code: 204 |+
+      | method: POST                          |           |
+      | path: /users/invite                   |           |
+      | payload:                              |           |
+      |   email: invitee-<run>@example.com    |           |
+      |   role: <invitee-role>                |           |
     Then these requests get these responses:
-      | request                              | response                         |
-      | method: GET                          | code: 200                        |+
-      | path: /items/cache_user_delete_notes | headers:                         |
-      | query:                               |   x-cache-status: MISS           |
-      |   fields: label                      |                                  |
-      | method: GET                          | code: 200                        |+
-      | path: /items/cache_user_delete_notes | headers:                         |
-      | query:                               |   x-cache-status: HIT            |
-      |   fields: label                      |                                  |
-      | method: DELETE                       | code: 204                        |+
-      | path: /users/<deleted>               | headers:                         |
-      |                                      |   x-scoped-cache-purged-tags: >- |
-      |                                      |     directus_users:id=<deleted>  |
-      | method: GET                          | code: 200                        |+
-      | path: /items/cache_user_delete_notes | headers:                         |
-      | query:                               |   x-cache-status: HIT            |
-      |   fields: label                      |                                  |
+      | request                              | response               |
+      | method: GET                          | code: 200              |+
+      | path: /items/cache_user_delete_notes | headers:               |
+      | query:                               |   x-cache-status: MISS |
+      |   fields: label                      |                        |
+      | method: GET                          | code: 200              |+
+      | path: /items/cache_user_delete_notes | headers:               |
+      | query:                               |   x-cache-status: HIT  |
+      |   fields: label                      |                        |
+      | method: DELETE                       | code: 204              |+
+      | path: /users/<inviter>               |                        |
+      | method: GET                          | code: 200              |+
+      | path: /items/cache_user_delete_notes |                        |
+      | query:                               |                        |
+      |   fields: label                      |                        |
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
       | 3       | directus_users | 0      | 0      | 0      | 0      |

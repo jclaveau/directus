@@ -19,7 +19,7 @@ import { type ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { load as loadYaml } from 'js-yaml';
-import { cloneDeep } from 'lodash-es';
+import { cloneDeep, get } from 'lodash-es';
 import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 
@@ -32,7 +32,7 @@ type RequestCell = {
 	upload_metadata?: Record<string, string>;
 	payload?: unknown;
 	body?: string;
-	remember?: string;
+	remember?: string | Record<string, string>;
 	remember_headers?: Record<string, string>;
 };
 
@@ -243,6 +243,15 @@ function lowercaseHeaders(expectedResponse: ResponseCell) {
 	};
 }
 
+// `remember: name` keeps `body.data.id`; a mapping keeps each named path.
+function rememberedPaths(remember: RequestCell['remember']) {
+	if (typeof remember === 'string') {
+		return { [remember]: 'body.data.id' };
+	}
+
+	return remember ?? {};
+}
+
 // One row at a time, so a row can name the key one before it remembered. A
 // remembered header keeps its last path segment: the upload a `Location`
 // names, or the `Directus-File-Id` whole.
@@ -273,14 +282,27 @@ async function sendRows(
 		const response = await sendRequest(instanceUrl, requestCell);
 		responses.push(response);
 
+		// TEMP PROBE (#755): removed once the header values are copied.
+		if (response.headers['x-cache-status'] !== undefined
+			|| response.headers['x-scoped-cache-purged-tags'] !== undefined) {
+			process.stdout.write(`PROBE-755 ${JSON.stringify({
+				method: requestCell.method,
+				path: requestCell.path,
+				cacheStatus: response.headers['x-cache-status'],
+				purgedTags: response.headers['x-scoped-cache-purged-tags'],
+			})}\n`);
+		}
+
 		expect(receivedPart(response, expectedResponse)).toMatchObject(
 			lowercaseHeaders(expectedResponse),
 		);
 
-		if (requestCell.remember !== undefined) {
-			scenarioKeys.keysByName[requestCell.remember] = rememberedText(
-				requestCell.remember,
-				response.body.data?.id,
+		for (const [name, dottedPath] of Object.entries(
+			rememberedPaths(requestCell.remember),
+		)) {
+			scenarioKeys.keysByName[name] = rememberedText(
+				name,
+				get(response, dottedPath),
 			);
 		}
 

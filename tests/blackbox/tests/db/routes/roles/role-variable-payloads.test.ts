@@ -4,7 +4,7 @@ import {
 } from '@common/functions';
 import { defineSingularWriteFeature } from '../system/singular-write-steps';
 
-const NOTES = 'role_variable_payload_notes';
+const NOTES = 'role_var_notes';
 
 defineSingularWriteFeature(
 	'./tests/db/routes/roles/role-variable-payloads.feature',

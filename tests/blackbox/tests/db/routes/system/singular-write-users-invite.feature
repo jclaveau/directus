@@ -224,8 +224,10 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   filter[email][_eq]: >-                |       role: <graphql-role> |
       |     graphql-<run>@example.com           |                            |
     And on postgres the requests ran these statements:
-      | request | table          | select | insert | update | delete |
-      | 1       | directus_users | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_users     | 3      | 1      | 0      | 0      |
 
   Scenario: a user invited again into the same role keeps their invitation
     Given these requests are sent:
@@ -255,4 +257,4 @@ Feature: A user is invited, re-invited and accepts the invitation
       |     same-<run>@example.com      |                         |
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
-      | 1       | directus_users | 0      | 0      | 0      | 0      |
+      | 1       | directus_users | 2      | 0      | 0      | 0      |
