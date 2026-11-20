@@ -12,6 +12,7 @@ import {
 	defineStatementCountsStep,
 	warmUpAuditedInstance,
 } from '@common/query-audit-steps';
+import { bindTableRowsSteps, insertTableRows } from '@common/table-rows';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
@@ -22,6 +23,7 @@ import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
 import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
+import { yamlSchemaFor } from './singular-write-steps';
 
 type RequestCell = {
 	as?: string;
@@ -40,7 +42,7 @@ type ResponseCell = {
 	code?: number;
 	body?: unknown;
 	text?: string;
-	headers?: Record<string, string>;
+	headers?: Record<string, string | string[] | null>;
 };
 
 const REQUEST_CELL_KEYS = [
@@ -72,7 +74,7 @@ type ScenarioKeys = {
 
 type SpawnedFeatureOptions = {
 	envOverrides: Record<string, string>;
-	beforeFeature?: (vendor: Vendor) => Promise<void>;
+	beforeFeature?: (vendor: Vendor, instanceUrl: string) => Promise<void>;
 	afterFeature?: (vendor: Vendor) => Promise<void>;
 };
 
@@ -81,8 +83,10 @@ const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 /**
  * Binds every scenario of a feature run against an instance of its own,
  * started with `envOverrides`: each holds an optional `Given these requests
- * are sent:` and a `Then these requests get these responses:`, both a
- * request|response table run row after row.
+ * are sent:` or the rows of its tables, an optional `this read is cached:`,
+ * and a `Then these requests get these responses:`, the request|response
+ * tables run row after row. `beforeFeature` gets the instance's url, so a
+ * collection it creates is in the schema the instance holds.
  */
 export function defineSpawnedWriteFeature(
 	featurePath: string,
@@ -111,7 +115,7 @@ export function defineSpawnedWriteFeature(
 			});
 
 			await awaitDirectusConnection(port);
-			await featureOptions.beforeFeature?.(vendor);
+			await featureOptions.beforeFeature?.(vendor, getUrl(vendor, env));
 			await warmUpAuditedInstance(feature, vendor, getUrl(vendor, env));
 		}, 60_000);
 
@@ -131,7 +135,36 @@ export function defineSpawnedWriteFeature(
 					const receivedResponses: Response[] = [];
 
 					given.optional('these requests are sent:', async (table: Row[]) => {
-						await sendRows(getUrl(vendor, env), scenarioKeys, table, true);
+						await sendRows(getUrl(vendor, env), scenarioKeys, table, true, vendor);
+					});
+
+					bindTableRowsSteps(given, feature, title, (tableName, tableRows) => {
+						return insertTableRows(vendor, tableName, tableRows.map((row) => {
+							return Object.fromEntries(Object.entries(row).map(([column, cell]) => {
+								return [column, withKeys(cell, scenarioKeys)];
+							}));
+						}));
+					});
+
+					// The first send fills the cache; the row's response is the second's.
+					and.optional('this read is cached:', async (table: Row[]) => {
+						await sendRows(
+							getUrl(vendor, env),
+							scenarioKeys,
+							table.map(({ request: requestText }) => {
+								return { request: requestText, response: '' };
+							}),
+							true,
+							vendor,
+						);
+
+						await sendRows(
+							getUrl(vendor, env),
+							scenarioKeys,
+							table,
+							false,
+							vendor,
+						);
 					});
 
 					then('these requests get these responses:', async (table: Row[]) => {
@@ -140,6 +173,7 @@ export function defineSpawnedWriteFeature(
 							scenarioKeys,
 							table,
 							false,
+							vendor,
 						));
 					});
 
@@ -216,7 +250,8 @@ function sendRequest(instanceUrl: string, requestCell: RequestCell) {
 }
 
 // Only what the response cell states is compared: a header by its lowercase
-// name, `text` against the raw body.
+// name, `text` against the raw body. A header the response does not send
+// reads as `null`, so a cell can state its absence.
 function receivedPart(response: Response, expectedResponse: ResponseCell) {
 	return {
 		code: response.statusCode,
@@ -224,7 +259,26 @@ function receivedPart(response: Response, expectedResponse: ResponseCell) {
 		...(expectedResponse.text === undefined
 			? {}
 			: { text: response.text }),
-		headers: response.headers,
+		headers: Object.fromEntries(
+			Object.entries({
+				...Object.fromEntries(
+					Object.keys(lowercaseHeaders(expectedResponse).headers ?? {})
+						.map((name) => {
+							return [name, null];
+						}),
+				),
+				...response.headers,
+			}).map(([name, value]) => {
+				return [
+					name,
+					Array.isArray(lowercaseHeaders(expectedResponse).headers?.[name])
+						? String(value)
+							.split(', ')
+							.sort()
+						: value,
+				];
+			}),
+		),
 	};
 }
 
@@ -237,7 +291,13 @@ function lowercaseHeaders(expectedResponse: ResponseCell) {
 		...expectedResponse,
 		headers: Object.fromEntries(
 			Object.entries(expectedResponse.headers).map(([name, value]) => {
-				return [name.toLowerCase(), value];
+				// A list states a comma-separated header in any order.
+				return [
+					name.toLowerCase(),
+					Array.isArray(value)
+						? [...value].sort()
+						: value,
+				];
 			}),
 		),
 	};
@@ -251,13 +311,16 @@ async function sendRows(
 	scenarioKeys: ScenarioKeys,
 	table: Row[],
 	allowsBlankResponse: boolean,
+	vendor: Vendor,
 ) {
 	const responses: Response[] = [];
 
 	for (const { request: requestText, response: responseText } of table) {
 		const requestCell = cellOfKnownKeys<RequestCell>(
 			'request',
-			loadYaml(withKeys(requestText, scenarioKeys)),
+			loadYaml(withKeys(requestText, scenarioKeys), {
+				schema: yamlSchemaFor(vendor),
+			}),
 			REQUEST_CELL_KEYS,
 			'spawned-write-steps.ts',
 		);

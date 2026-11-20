@@ -21,27 +21,27 @@ Feature: The presets of several member roles apply parents first, then leaves
       | <p-editors> | editors-<run> | false      | false        |
     And the rows of directus_permissions:
       | policy      | collection       | action | fields | presets                   |
-      | <p-staff>   | role_order_notes | create | ["*"]  | {"visibility":"internal"} |
-      | <p-press>   | role_order_notes | create | ["*"]  | {"visibility":"public"}   |
-      | <p-press>   | role_order_notes | read   | ["*"]  |                           |
-      | <p-editors> | role_order_notes | create | ["*"]  | {"lang":"fr"}             |
+      | <p-staff>   | role_order_notes | create | *      | {"visibility":"internal"} |
+      | <p-press>   | role_order_notes | create | *      | {"visibility":"public"}   |
+      | <p-press>   | role_order_notes | read   | *      |                           |
+      | <p-editors> | role_order_notes | create | *      | {"lang":"fr"}             |
     And the rows of directus_roles:
       | id        | name          | parent  |
       | <staff>   | staff-<run>   |         |
       | <press>   | press-<run>   |         |
       | <editors> | editors-<run> | <staff> |
     And the rows of directus_access:
-      | role      | policy      |
-      | <staff>   | <p-staff>   |
-      | <press>   | <p-press>   |
-      | <editors> | <p-editors> |
+      | id         | role      | policy      |
+      | <access-1> | <staff>   | <p-staff>   |
+      | <access-2> | <press>   | <p-press>   |
+      | <access-3> | <editors> | <p-editors> |
     And the rows of directus_users:
       | id      | email                   | token       |
       | <alice> | alice-<run>@example.com | alice-<run> |
     And the rows of directus_role_members:
-      | user    | role      | sort |
-      | <alice> | <press>   | 1    |
-      | <alice> | <editors> | 2    |
+      | id         | user    | role      | sort |
+      | <member-1> | <alice> | <press>   | 1    |
+      | <member-2> | <alice> | <editors> | 2    |
     Then these requests get these responses:
       | request                                    | response               |
       | as: alice-<run>                            | code: 200              |+
@@ -83,24 +83,24 @@ Feature: The presets of several member roles apply parents first, then leaves
       | <p-editors> | editors-<run> | false      | false        |
     And the rows of directus_permissions:
       | policy      | collection       | action | fields | presets                   |
-      | <p-staff>   | role_order_notes | create | ["*"]  | {"visibility":"internal"} |
-      | <p-staff>   | role_order_notes | read   | ["*"]  |                           |
-      | <p-editors> | role_order_notes | create | ["*"]  | {"visibility":"external"} |
+      | <p-staff>   | role_order_notes | create | *      | {"visibility":"internal"} |
+      | <p-staff>   | role_order_notes | read   | *      |                           |
+      | <p-editors> | role_order_notes | create | *      | {"visibility":"external"} |
     And the rows of directus_roles:
       | id        | name          | parent  |
       | <staff>   | staff-<run>   |         |
       | <editors> | editors-<run> | <staff> |
     And the rows of directus_access:
-      | role      | policy      |
-      | <staff>   | <p-staff>   |
-      | <editors> | <p-editors> |
+      | id         | role      | policy      |
+      | <access-1> | <staff>   | <p-staff>   |
+      | <access-2> | <editors> | <p-editors> |
     And the rows of directus_users:
       | id    | email                 | token     |
       | <bob> | bob-<run>@example.com | bob-<run> |
     And the rows of directus_role_members:
-      | user  | role      | sort |
-      | <bob> | <editors> | 1    |
-      | <bob> | <staff>   | 2    |
+      | id         | user  | role      | sort |
+      | <member-1> | <bob> | <editors> | 1    |
+      | <member-2> | <bob> | <staff>   | 2    |
     Then these requests get these responses:
       | request                                  | response                 |
       | as: bob-<run>                            | code: 200                |+
@@ -142,9 +142,9 @@ Feature: The presets of several member roles apply parents first, then leaves
       | <p-editors> | editors-<run> | false      | false        |
     And the rows of directus_permissions:
       | policy      | collection       | action | fields | presets                   |
-      | <p-press>   | role_order_notes | create | ["*"]  | {"visibility":"public"}   |
-      | <p-press>   | role_order_notes | read   | ["*"]  |                           |
-      | <p-editors> | role_order_notes | create | ["*"]  | {"visibility":"internal"} |
+      | <p-press>   | role_order_notes | create | *      | {"visibility":"public"}   |
+      | <p-press>   | role_order_notes | read   | *      |                           |
+      | <p-editors> | role_order_notes | create | *      | {"visibility":"internal"} |
     And the rows of directus_roles:
       | id        | name          | parent    |
       | <company> | company-<run> |           |
@@ -152,16 +152,16 @@ Feature: The presets of several member roles apply parents first, then leaves
       | <editors> | editors-<run> | <staff>   |
       | <press>   | press-<run>   |           |
     And the rows of directus_access:
-      | role      | policy      |
-      | <press>   | <p-press>   |
-      | <editors> | <p-editors> |
+      | id         | role      | policy      |
+      | <access-1> | <press>   | <p-press>   |
+      | <access-2> | <editors> | <p-editors> |
     And the rows of directus_users:
       | id      | email                   | token       |
       | <carol> | carol-<run>@example.com | carol-<run> |
     And the rows of directus_role_members:
-      | user    | role      | sort |
-      | <carol> | <editors> | 1    |
-      | <carol> | <press>   | 2    |
+      | id         | user    | role      | sort |
+      | <member-1> | <carol> | <editors> | 1    |
+      | <member-2> | <carol> | <press>   | 2    |
     Then these requests get these responses:
       | request                                    | response               |
       | as: carol-<run>                            | code: 200              |+
@@ -203,26 +203,26 @@ Feature: The presets of several member roles apply parents first, then leaves
       | <p-rev> | rev-<run> | false      | false        |
     And the rows of directus_permissions:
       | policy  | collection       | action | fields | presets             |
-      | <p-pub> | role_order_notes | create | ["*"]  | {"status":"draft"}  |
-      | <p-pub> | role_order_notes | read   | ["*"]  |                     |
-      | <p-rev> | role_order_notes | create | ["*"]  | {"status":"review"} |
+      | <p-pub> | role_order_notes | create | *      | {"status":"draft"}  |
+      | <p-pub> | role_order_notes | read   | *      |                     |
+      | <p-rev> | role_order_notes | create | *      | {"status":"review"} |
     And the rows of directus_roles:
       | id           | name             | parent  |
       | <staff>      | staff-<run>      |         |
       | <editors-fr> | editors-fr-<run> | <staff> |
       | <press>      | press-<run>      |         |
     And the rows of directus_access:
-      | role         | policy  |
-      | <staff>      | <p-pub> |
-      | <editors-fr> | <p-rev> |
-      | <press>      | <p-pub> |
+      | id         | role         | policy  |
+      | <access-1> | <staff>      | <p-pub> |
+      | <access-2> | <editors-fr> | <p-rev> |
+      | <access-3> | <press>      | <p-pub> |
     And the rows of directus_users:
       | id      | email                   | token       |
       | <alice> | alice-<run>@example.com | alice-<run> |
     And the rows of directus_role_members:
-      | user    | role         | sort |
-      | <alice> | <editors-fr> | 1    |
-      | <alice> | <press>      | 2    |
+      | id         | user    | role         | sort |
+      | <member-1> | <alice> | <editors-fr> | 1    |
+      | <member-2> | <alice> | <press>      | 2    |
     Then these requests get these responses:
       | request                                    | response          |
       | as: alice-<run>                            | code: 200         |+
@@ -264,23 +264,23 @@ Feature: The presets of several member roles apply parents first, then leaves
       | <p-press> | press-<run> | false      | false        |
     And the rows of directus_permissions:
       | policy    | collection       | action | fields | presets                   |
-      | <p-staff> | role_order_notes | create | ["*"]  | {"visibility":"internal"} |
-      | <p-staff> | role_order_notes | read   | ["*"]  |                           |
-      | <p-press> | role_order_notes | create | ["*"]  | {"visibility":"public"}   |
+      | <p-staff> | role_order_notes | create | *      | {"visibility":"internal"} |
+      | <p-staff> | role_order_notes | read   | *      |                           |
+      | <p-press> | role_order_notes | create | *      | {"visibility":"public"}   |
     And the rows of directus_roles:
       | id      | name        |
       | <staff> | staff-<run> |
       | <press> | press-<run> |
     And the rows of directus_access:
-      | role    | policy    |
-      | <staff> | <p-staff> |
-      | <press> | <p-press> |
+      | id         | role    | policy    |
+      | <access-1> | <staff> | <p-staff> |
+      | <access-2> | <press> | <p-press> |
     And the rows of directus_users:
       | id      | email                   | token       | status  |
       | <alice> | alice-<run>@example.com | alice-<run> | invited |
     And the rows of directus_role_members:
-      | user    | role    | sort |
-      | <alice> | <staff> | 1    |
+      | id         | user    | role    | sort |
+      | <member-1> | <alice> | <staff> | 1    |
     Then these requests get these responses:
       | request                                    | response               |
       | method: POST                               | code: 204              |+

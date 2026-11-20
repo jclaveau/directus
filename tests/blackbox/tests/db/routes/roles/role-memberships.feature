@@ -316,8 +316,8 @@ Feature: A user holds several roles, each one a membership
       | id      | email                   | status  |
       | <alice> | alice-<run>@example.com | invited |
     And the rows of directus_role_members:
-      | user    | role    | sort |
-      | <alice> | <staff> | 1    |
+      | id         | user    | role    | sort |
+      | <member-1> | <alice> | <staff> | 1    |
     Then these requests get these responses:
       | request                               | response                 |
       | method: POST                          | code: 204                |+
@@ -364,9 +364,9 @@ Feature: A user holds several roles, each one a membership
       | <carol> | carol-<run>@example.com | carol-<run> | active  |
       | <bob>   | bob-<run>@example.com   | bob-<run>   | invited |
     And the rows of directus_access:
-      | user    | policy    |
-      | <alice> | <inviter> |
-      | <carol> | <inviter> |
+      | id         | user    | policy    |
+      | <access-1> | <alice> | <inviter> |
+      | <access-2> | <carol> | <inviter> |
     Then these requests get these responses:
       | request                               | response                   |
       | as: alice-<run>                       | code: 204                  |+
@@ -464,8 +464,8 @@ Feature: A user holds several roles, each one a membership
       | id      | email                   |
       | <alice> | alice-<run>@example.com |
     And the rows of directus_role_members:
-      | user    | role    | sort |
-      | <alice> | <staff> | 1    |
+      | id         | user    | role    | sort |
+      | <member-1> | <alice> | <staff> | 1    |
     Then these requests get these responses:
       | request                           | response                        |
       | method: PATCH                     | code: 400                       |+
