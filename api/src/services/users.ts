@@ -22,6 +22,7 @@ import {
 	clearCachesAfterCommit,
 	clearPermissionsCacheAfterCommit,
 	flushResponseCacheAfterCommit,
+	purgeMutatedRowsAfterCommit,
 } from '../utils/clear-caches-after-commit.js';
 import getDatabase, { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
@@ -60,6 +61,15 @@ class SingleRoleFieldError extends InvalidPayloadError {
 
 // Bounds the bind parameters of one update and the rows one cache snapshot holds.
 const UNLINK_CHUNK_SIZE = 10_000;
+
+/**
+ * `handedMemberships` names the memberships handed over by key, or is `null`
+ * when the statement returned no key to name them by.
+ */
+type HandedOverMemberships = {
+	doubledCount: number;
+	handedMemberships: { id: PrimaryKey }[] | null;
+};
 
 export class UsersService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
@@ -828,22 +838,36 @@ export class UsersService extends ItemsService {
 	 * Only a deleted membership clears the permissions cache: the role it
 	 * doubled stays, at the hand membership's `sort`, which orders the presets.
 	 * A membership handed over keeps its role and its `sort`.
+	 *
+	 * A deleted membership flushes every response, as a dropped one does: a
+	 * response key holds no role, and the role order decides which preset wins.
+	 * A membership handed over only changes its own `managed_by`: the responses
+	 * that read it are the ones purged.
 	 */
 	private async handInvitedRolesToAdmins(
 		leavingUsers: PrimaryKey[],
 		opts: MutationOptions,
 	): Promise<void> {
-		const { doubledCount, handedCount } =
+		const { doubledCount, handedMemberships } =
 			getDatabaseClient(this.knex) === 'postgres'
 				? await this.handInvitedRolesInOneStatement(leavingUsers)
 				: await this.handInvitedRolesInTwoStatements(leavingUsers);
 
 		if (doubledCount > 0) {
 			await clearPermissionsCacheAfterCommit(this.knex);
-		}
-
-		if (doubledCount + handedCount > 0) {
 			await flushResponseCacheAfterCommit(this.knex, this.cache, opts);
+		}
+		else if (handedMemberships === null) {
+			await flushResponseCacheAfterCommit(this.knex, this.cache, opts);
+		}
+		else if (handedMemberships.length > 0) {
+			await purgeMutatedRowsAfterCommit(
+				this.knex,
+				this.schema,
+				'directus_role_members',
+				handedMemberships,
+				opts,
+			);
 		}
 	}
 
@@ -853,8 +877,11 @@ export class UsersService extends ItemsService {
 	 */
 	private async handInvitedRolesInOneStatement(
 		leavingUsers: PrimaryKey[],
-	): Promise<{ doubledCount: number; handedCount: number }> {
-		const writtenMemberships: { was_doubled: boolean }[] = await this.knex
+	): Promise<HandedOverMemberships> {
+		const writtenMemberships: {
+			id: PrimaryKey;
+			was_doubled: boolean;
+		}[] = await this.knex
 			.with(
 				'doubled',
 				this.doubledInviteMemberships(leavingUsers)
@@ -876,20 +903,24 @@ export class UsersService extends ItemsService {
 					.from('handed');
 			});
 
-		const doubledCount = writtenMemberships
-			.filter(({ was_doubled }) => was_doubled)
-			.length;
-
 		return {
-			doubledCount,
-			handedCount: writtenMemberships.length - doubledCount,
+			doubledCount: writtenMemberships
+				.filter(({ was_doubled }) => was_doubled)
+				.length,
+			handedMemberships: writtenMemberships
+				.filter(({ was_doubled }) => !was_doubled)
+				.map(({ id }) => ({ id })),
 		};
 	}
 
-	// TODO(#610): a data-modifying CTE is Postgres only.
+	/**
+	 * An update returns no rows to purge by: a membership handed over flushes
+	 * every response.
+	 * TODO(#610): a data-modifying CTE is Postgres only.
+	 */
 	private async handInvitedRolesInTwoStatements(
 		leavingUsers: PrimaryKey[],
-	): Promise<{ doubledCount: number; handedCount: number }> {
+	): Promise<HandedOverMemberships> {
 		const doubledCount = await this.doubledInviteMemberships(leavingUsers)
 			.delete();
 
@@ -898,7 +929,12 @@ export class UsersService extends ItemsService {
 			.where('managed_by', 'invite')
 			.update({ managed_by: null });
 
-		return { doubledCount, handedCount };
+		return {
+			doubledCount,
+			handedMemberships: handedCount > 0
+				? null
+				: [],
+		};
 	}
 
 	// The `invite` memberships of a role the user also holds by hand.

@@ -1,7 +1,10 @@
-import type { MutationOptions } from '@directus/types';
+import type { MutationOptions, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
 import type { Keyv } from 'keyv';
 import { clearSystemCache } from '../cache.js';
+import {
+	createScopedCacheExtensionHandle,
+} from '../extensions/lib/scoped-cache-handle.js';
 import { useLogger } from '../logger/index.js';
 import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
@@ -65,6 +68,30 @@ export async function flushResponseCacheAfterCommit(
 	}
 
 	await runOnceSettled(knex, () => flushResponseCache(responseCache));
+}
+
+/**
+ * Purge the responses that read `mutatedRows` once the transaction `knex`
+ * belongs to commits or rolls back, as `flushResponseCacheAfterCommit` flushes
+ * them all; a write that opted out hands the flush on to its own batch, if any.
+ */
+export async function purgeMutatedRowsAfterCommit(
+	knex: Knex,
+	schema: SchemaOverview,
+	collection: string,
+	mutatedRows: Record<string, unknown>[],
+	opts?: MutationOptions & ResponseCacheFlushDeferral,
+): Promise<void> {
+	if (opts?.autoPurgeCache === false) {
+		opts.onResponseCacheFlushDeferred?.();
+
+		return;
+	}
+
+	await runOnceSettled(knex, () => {
+		return createScopedCacheExtensionHandle(async () => schema)
+			.purgeForMutatedRows(collection, mutatedRows);
+	});
 }
 
 /**
