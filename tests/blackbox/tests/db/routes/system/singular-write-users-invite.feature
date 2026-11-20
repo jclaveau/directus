@@ -300,7 +300,7 @@ Feature: A user is invited, re-invited and accepts the invitation
       |     user_created { email } } }       |         role:                      |
       |                                      |           id: <same-role>          |
       |                                      |         user_created:              |
-      |                                      |           email: <new-invite>      |
+      |                                      |           email: admin@default.com |
       | method: GET                          | code: 200                          |+
       | path: /users                         | body:                              |
       | query:                               |   data:                            |

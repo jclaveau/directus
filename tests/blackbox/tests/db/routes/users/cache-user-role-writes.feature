@@ -356,10 +356,13 @@ Feature: A user's role, status and deletion purge the cache as today
       |     sort: ["date_created"])         |                                         |
       |     { id } }                        |                                         |
     And on postgres the requests ran these statements:
-      | request | table          | select | insert | update | delete |
-      | 1       | directus_users | 1      | 0      | 0      | 0      |
-      | 2       | directus_users | 1      | 0      | 0      | 0      |
-      | 3       | directus_users | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_invites      | 1      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 2      | 0      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
+      | 3       | directus_invites      | 1      | 0      | 0      | 0      |
+      | 3       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: a pending invitee invited into a second role drops the cached read
     Given the rows of directus_roles:
