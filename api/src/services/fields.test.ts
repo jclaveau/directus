@@ -145,11 +145,6 @@ describe('Services / Fields', () => {
 		});
 
 		it('refuses a removed role special a hook adds, before the DDL', async () => {
-			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValueOnce({
-				name: 'id',
-				is_primary_key: false,
-			} as Awaited<ReturnType<FieldsService['columnInfo']>>);
-
 			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload) => {
 					return {

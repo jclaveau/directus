@@ -23,7 +23,8 @@ Feature: A wrong response fails on its diff before any capture refusal
       """
     Then the step fails with the message:
       """
-      expected { status: 403, body: { …(1) } } to match object { status: 200, …(1) }
+      expected { status: 403, …(1) } to match object { status: 200, …(1) }
+      (1 matching property omitted from actual)
       """
 
   Scenario: a matching response holding no uuid at the spot fails on its capture
