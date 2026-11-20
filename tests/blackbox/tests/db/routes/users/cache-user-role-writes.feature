@@ -14,6 +14,8 @@ Feature: A user's role, status and deletion purge the cache as today
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own. A response cell states the keys it checks.
+  - A header stated as a list matches its comma-separated values in any
+    order: a user's deletion purges its cascades in no fixed order.
 
   Scenario: a user's name change keeps the cached read, a role change drops it
     Given the rows of directus_policies:
@@ -155,27 +157,27 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                               |   x-cache-status: HIT |
       |   fields: label                      |                       |
     Then these requests get these responses:
-      | request                              | response                         |
-      | method: DELETE                       | code: 204                        |+
-      | path: /users/<inviter>               | headers:                         |
-      |                                      |   x-scoped-cache-purged-tags: >- |
-      |                                      |     directus_users,              |
-      |                                      |     directus_users:id=<inviter>, |
-      |                                      |     directus_presets,            |
-      |                                      |     directus_sessions,           |
-      |                                      |     directus_dashboards,         |
-      |                                      |     directus_panels,             |
-      |                                      |     directus_notifications,      |
-      |                                      |     directus_shares,             |
-      |                                      |     directus_flows,              |
-      |                                      |     directus_operations,         |
-      |                                      |     directus_versions,           |
-      |                                      |     directus_comments,           |
-      |                                      |     directus_access              |
-      | method: GET                          | code: 200                        |+
-      | path: /items/cache_user_delete_notes | headers:                         |
-      | query:                               |   x-cache-status: HIT            |
-      |   fields: label                      |                                  |
+      | request                              | response                          |
+      | method: DELETE                       | code: 204                         |+
+      | path: /users/<inviter>               | headers:                          |
+      |                                      |   x-scoped-cache-purged-tags:     |
+      |                                      |     - directus_users              |
+      |                                      |     - directus_users:id=<inviter> |
+      |                                      |     - directus_presets            |
+      |                                      |     - directus_sessions           |
+      |                                      |     - directus_dashboards         |
+      |                                      |     - directus_panels             |
+      |                                      |     - directus_notifications      |
+      |                                      |     - directus_shares             |
+      |                                      |     - directus_flows              |
+      |                                      |     - directus_operations         |
+      |                                      |     - directus_versions           |
+      |                                      |     - directus_comments           |
+      |                                      |     - directus_access             |
+      | method: GET                          | code: 200                         |+
+      | path: /items/cache_user_delete_notes | headers:                          |
+      | query:                               |   x-cache-status: HIT             |
+      |   fields: label                      |                                   |
     And on postgres the requests ran these statements:
       | request | table                  | select | insert | update | delete |
       | 1       | directus_access        | 1      | 0      | 0      | 0      |

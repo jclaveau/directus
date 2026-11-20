@@ -41,7 +41,7 @@ type ResponseCell = {
 	code?: number;
 	body?: unknown;
 	text?: string;
-	headers?: Record<string, string>;
+	headers?: Record<string, string | string[]>;
 };
 
 const REQUEST_CELL_KEYS = [
@@ -249,7 +249,16 @@ function receivedPart(response: Response, expectedResponse: ResponseCell) {
 		...(expectedResponse.text === undefined
 			? {}
 			: { text: response.text }),
-		headers: response.headers,
+		headers: Object.fromEntries(
+			Object.entries(response.headers).map(([name, value]) => {
+				return [
+					name,
+					Array.isArray(lowercaseHeaders(expectedResponse).headers?.[name])
+						? String(value).split(', ').sort()
+						: value,
+				];
+			}),
+		),
 	};
 }
 
@@ -262,7 +271,11 @@ function lowercaseHeaders(expectedResponse: ResponseCell) {
 		...expectedResponse,
 		headers: Object.fromEntries(
 			Object.entries(expectedResponse.headers).map(([name, value]) => {
-				return [name.toLowerCase(), value];
+				// A list states a comma-separated header in any order.
+				return [
+					name.toLowerCase(),
+					Array.isArray(value) ? [...value].sort() : value,
+				];
 			}),
 		),
 	};
