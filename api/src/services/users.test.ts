@@ -993,13 +993,13 @@ describe('Integration Tests', () => {
 
 				expect(tracker.history.select).toMatchObject([
 					{
-						sql: 'select "id", "role", "user_created" from "directus_invites"'
-							+ ' where "user" = ?',
+						sql: 'select "id", "role", "managed_by", "sort"'
+							+ ' from "directus_role_members" where "user" = ?',
 						bindings: ['8e2b4c10-5d3a-4f6e-9a7b-000000000017'],
 					},
 					{
-						sql: 'select "id", "role", "managed_by", "sort"'
-							+ ' from "directus_role_members" where "user" = ?',
+						sql: 'select "id", "role", "user_created" from "directus_invites"'
+							+ ' where "user" = ?',
 						bindings: ['8e2b4c10-5d3a-4f6e-9a7b-000000000017'],
 					},
 				]);
