@@ -116,7 +116,7 @@ Feature: A socket hears what the roles its user holds now may read
       | id           | user     | role          | sort |
       | <membership> | <member> | <reader-role> | 1    |
     And the member's GraphQL socket subscribed to the notes
-    When the admin creates the note "ok", which the member's GraphQL socket hears
+    When the admin creates "early-1", "early-2"… until the member's GraphQL socket hears
     And the admin moves the membership of the member to the other role
     And the admin creates the notes "hidden" and "ok"
     Then the next note the member's GraphQL socket heard is "ok"

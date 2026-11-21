@@ -67,12 +67,23 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 
 				// Heard, the subscription is live before the role change. graphql-ws
-				// acknowledges no subscribe, so the note is created again until one
-				// lands: a note created before the server registered it is never sent.
+				// acknowledges no subscribe, and a note created before the server
+				// registered it is never sent: each try creates a note of its own
+				// label, every one other than the label a later step waits for.
 				when.optional(
-					/^the admin creates the note "(.+)", which the member's GraphQL socket hears$/,
-					async (label: string) => {
+					/^the admin creates "(.+)-1", "\1-2"… until the member's GraphQL socket hears$/,
+					async (labelPrefix: string) => {
+						const heardNotes: {
+							data: {
+								test_ws_membership_notes_mutated: { data: { label: string } };
+							};
+						}[] = [];
+
+						let label = '';
+
 						for (let attempt = 1; attempt <= 20; attempt++) {
+							label = `${labelPrefix}-${attempt}`;
+
 							const response = await request(getUrl(vendor))
 								.post(`/items/${collectionMembershipNotes}`)
 								.send({ label })
@@ -82,26 +93,35 @@ describe.each(vendors)('%s', (vendor) => {
 
 							const heardBy = Date.now() + 1000;
 
-							while (memberGqlSocket.getMessageCount() === 0
+							while (memberGqlSocket.getMessageCount() === heardNotes.length
 								&& Date.now() < heardBy) {
 								await new Promise((resolve) => setTimeout(resolve, 20));
 							}
 
-							if (memberGqlSocket.getMessageCount() > 0) {
+							const newCount = memberGqlSocket.getMessageCount() - heardNotes.length;
+
+							if (newCount > 0) {
+								const newNotes = await memberGqlSocket.getMessages(newCount);
+								heardNotes.push(...newNotes as typeof heardNotes);
+							}
+
+							// A late note of an earlier try is no proof this one is heard.
+							if (heardNotes.some((heardNote) => {
+								return heardNote.data.test_ws_membership_notes_mutated.data.label
+									=== label;
+							})) {
 								break;
 							}
 						}
 
-						expect(await memberGqlSocket.getMessages(1)).toEqual([
-							{
-								data: {
-									test_ws_membership_notes_mutated: {
-										event: 'create',
-										data: { label },
-									},
+						expect(heardNotes).toContainEqual({
+							data: {
+								test_ws_membership_notes_mutated: {
+									event: 'create',
+									data: { label },
 								},
 							},
-						]);
+						});
 					},
 				);
 
