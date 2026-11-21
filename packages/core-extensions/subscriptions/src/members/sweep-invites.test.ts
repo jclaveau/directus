@@ -74,8 +74,8 @@ describe('sweepInvites', () => {
 
 		expect(await sweepInvites(database)).toBe(1);
 
-		expect(await database('directus_users').pluck('id'))
-			.toEqual(['seated', 'fresh', 'joined', 'edge']);
+		expect(await database('directus_users').orderBy('id').pluck('id'))
+			.toEqual(['edge', 'fresh', 'joined', 'seated']);
 	});
 
 	test('deletes nothing when no invitee is due', async () => {
