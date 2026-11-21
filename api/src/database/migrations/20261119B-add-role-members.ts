@@ -153,7 +153,7 @@ export async function down(knex: Knex): Promise<void> {
 		table.uuid('role')
 			.references('directus_roles.id')
 			.nullable()
-			.onDelete('CASCADE');
+			.onDelete('SET NULL');
 	});
 
 	for (const [user, role] of roleByUser) {

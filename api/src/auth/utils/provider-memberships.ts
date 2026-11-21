@@ -1,6 +1,7 @@
 import type { Item, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
 import { RoleMembersService } from '../../services/role-members.js';
+import { lowerCaseRowKey } from '../../utils/managed-rows.js';
 import { transaction } from '../../utils/transaction.js';
 
 function removedRoleError(eventName: string): Error {
@@ -125,11 +126,16 @@ export async function syncProviderMemberships(
 
 	const lastSort = Math.max(0, ...userRows.map(({ sort }) => sort ?? 0));
 
+	// Postgres hands a uuid back in lower case, whatever case the mapping
+	// spells it in.
+	const mappedRoleKeys = new Set(providerRoles.map(lowerCaseRowKey));
 	const keptRoles = new Set<string>();
 
 	const staleRowIds = managedRows.flatMap(({ id, role }) => {
-		if (providerRoles.includes(role) && !keptRoles.has(role)) {
-			keptRoles.add(role);
+		const roleKey = lowerCaseRowKey(role);
+
+		if (mappedRoleKeys.has(roleKey) && !keptRoles.has(roleKey)) {
+			keptRoles.add(roleKey);
 
 			return [];
 		}
@@ -137,8 +143,14 @@ export async function syncProviderMemberships(
 		return [id];
 	});
 
-	const missingRoles = [...new Set(providerRoles)]
-		.filter((role) => !keptRoles.has(role));
+	const missingRoles = providerRoles.filter((role, position) => {
+		const roleKey = lowerCaseRowKey(role);
+
+		return !keptRoles.has(roleKey)
+			&& providerRoles.findIndex((other) => {
+				return lowerCaseRowKey(other) === roleKey;
+			}) === position;
+	});
 
 	if (staleRowIds.length === 0 && missingRoles.length === 0) {
 		return;

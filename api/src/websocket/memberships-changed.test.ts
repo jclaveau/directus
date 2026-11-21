@@ -190,7 +190,9 @@ describe('announceMembershipsChanged', () => {
 				roles: ['role-auditors'],
 			});
 
-		const earlierRefresh = memberships.announceMembershipsChanged(['user-member']);
+		const earlierRefresh = memberships
+			.announceMembershipsChanged(['user-member']);
+
 		await memberships.announceMembershipsChanged(['user-member']);
 
 		answerEarlierRead({

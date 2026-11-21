@@ -29,6 +29,10 @@ const openClientSets = new Set<Set<WebSocketClient>>();
 
 let busSubscribed = false;
 
+// The latest refresh each socket started: an earlier one ending after it read
+// the memberships before the later write, and is dropped.
+const latestRefreshes = new WeakMap<WebSocketClient, symbol>();
+
 /**
  * Hands the sockets a controller holds open to the refresh a membership write
  * runs, and has this node hear the writes the other nodes make.
@@ -101,13 +105,18 @@ async function refreshSocketAccountabilities(
 				continue;
 			}
 
+			const refreshMark = Symbol(socketUser);
+			latestRefreshes.set(client, refreshMark);
+
 			// Refreshed in place: a GraphQL subscription's service holds this
 			// object, reading every event with it.
 			try {
-				Object.assign(
-					client.accountability!,
-					await refreshedAccountability(client.accountability!),
-				);
+				const accountability = client.accountability!;
+				const refreshed = await refreshedAccountability(accountability);
+
+				if (latestRefreshes.get(client) === refreshMark) {
+					Object.assign(accountability, refreshed);
+				}
 			}
 			// The roles it holds are no longer the user's: closed, it reconnects
 			// and authenticates afresh.

@@ -194,7 +194,7 @@ describe('syncProviderMemberships', () => {
 		expect(RoleMembersService).not.toHaveBeenCalled();
 	});
 
-	test('writes nothing when the mapped role spells the stored uuid in capitals', async () => {
+	test('keeps a stored role its mapping spells in capitals', async () => {
 		userRows = [
 			{
 				id: 'row-1',

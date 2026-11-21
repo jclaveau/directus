@@ -4,6 +4,7 @@ import type {
 	ScopedCacheExtensionHandle,
 	ScopedCacheFingerprint,
 } from '@directus/types';
+import { tellPeersResponseCacheCleared } from '../../cache-peer-notice.js';
 import { getCache } from '../../cache.js';
 import getDatabase from '../../database/index.js';
 import { useLogger } from '../../logger/index.js';
@@ -51,6 +52,7 @@ export function createScopedCacheExtensionHandle(
 			// off.)
 			if (!scopedCachePurgeEnabled()) {
 				await cache.clear();
+				await tellPeersResponseCacheCleared();
 				recordScopedCachePurged(null);
 				return;
 			}
