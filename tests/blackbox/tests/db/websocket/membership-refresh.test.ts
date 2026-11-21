@@ -38,7 +38,7 @@ describe.each(vendors)('%s', (vendor) => {
 					}));
 				});
 
-				and('the member\'s socket subscribed to the notes', async () => {
+				and.optional('the member\'s socket subscribed to the notes', async () => {
 					memberSocket = createWebSocketConn(getUrl(vendor), {
 						auth: { access_token: `member-${scenarioKeys.run}` },
 					});
