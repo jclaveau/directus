@@ -147,10 +147,6 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// Adds a foreign key column to `directus_users` and drops it after, like
 			// `cache-nested-relation-tags`.
 			'/tests/db/routes/system/singular-write-users-nested-delete.test.ts',
-			// Its task collection holds an m2o to `directus_users`: a sibling's user
-			// delete then purges that collection's tag too, which
-			// `cache-user-role-writes` lists exactly.
-			'/tests/db/routes/items/nested-m2o-a2o.test.ts',
 			// Writes users under fixed keys and emails a sibling could collide with.
 			'/tests/db/routes/items/write-user-integrity.test.ts',
 			// Saves operations, which reloads every flow, like `singular-write-flows`.
