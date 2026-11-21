@@ -9,6 +9,7 @@ describe('bundle api', () => {
 			'20261105A-create-subscription-tables',
 			'20261107A-create-parked-syncs-preset',
 			'20261113A-show-subscription-collections',
+			'20261121A-add-checkout-columns',
 			'subscriptions-cli',
 			'subscriptions-sync',
 			'subscriptions',

@@ -76,12 +76,20 @@ const BUNDLE_TABLES = [
 	'subscription_plans',
 ];
 
+// The users the features write, as `<prefix>-<id>@example.com` with an `id`
+// from 100 to 199.
+const SCENARIO_EMAIL_PREFIXES = ['payer', 'friend', 'invited', 'other', 'user'];
+
 const accessFeature = loadFeature(
 	'./tests/db/routes/system/subscription-managed-access.feature',
 );
 
 const lifecycleFeature = loadFeature(
 	'./tests/db/routes/system/subscription-lifecycle.feature',
+);
+
+const mineFeature = loadFeature(
+	'./tests/db/routes/system/subscription-mine.feature',
 );
 
 const schemaApplyFeature = loadFeature(
@@ -202,6 +210,7 @@ describe.each(vendors)('%s', (vendor) => {
 			.whereIn('version', [
 				'@scalabus/subscriptions:20261105A',
 				'@scalabus/subscriptions:20261107A',
+				'@scalabus/subscriptions:20261121A',
 			])
 			.delete();
 
@@ -221,11 +230,21 @@ describe.each(vendors)('%s', (vendor) => {
 				'refused@example.com',
 			])
 			.orWhere('email', 'like', 'lifecycle-%@example.com')
+			.orWhere((scenarioEmails) => {
+				for (const emailPrefix of SCENARIO_EMAIL_PREFIXES) {
+					scenarioEmails.orWhere(
+						'email',
+						'like',
+						`${emailPrefix}-1__@example.com`,
+					);
+				}
+			})
 			.delete();
 
 		await database('directus_policies')
 			.whereIn('name', ['Pro plan', 'Other policy', 'Direct policy'])
 			.orWhere('name', 'like', 'Lifecycle %')
+			.orWhere('name', 'like', 'Mine %')
 			.delete();
 
 		await database.destroy();
@@ -235,13 +254,22 @@ describe.each(vendors)('%s', (vendor) => {
 		await rm(packageDirectory, { recursive: true, force: true });
 	}, 60_000);
 
+	// A `subscriptions` row stating no dates is seeded at the time it is written.
 	function seedRows(tableName: string, rowsTable: Record<string, string>[]) {
-		return database(tableName).insert(
-			parseGherkinTable(JSON.parse(withKeys(
-				JSON.stringify(rowsTable),
-				scenarioKeys,
-			))),
-		);
+		const seededRows = parseGherkinTable(JSON.parse(withKeys(
+			JSON.stringify(rowsTable),
+			scenarioKeys,
+		)));
+
+		if (tableName !== 'subscriptions') {
+			return database(tableName).insert(seededRows);
+		}
+
+		const seededAt = new Date();
+
+		return database(tableName).insert(seededRows.map((seededRow) => {
+			return { date_created: seededAt, date_updated: seededAt, ...seededRow };
+		}));
 	}
 
 	// A table too wide for a row per line.
@@ -1069,41 +1097,48 @@ describe.each(vendors)('%s', (vendor) => {
 
 	// Bound off each scenario's own steps: the library binds by position. An
 	// outline's steps still read `<column>`, which the library fills per example.
-	defineFeature(lifecycleFeature, (scenario) => {
+	function defineLifecycleFeature(
+		stepsFeature: ReturnType<typeof loadFeature>,
+	) {
 		const lifecycleScenarios = [
-			...lifecycleFeature.scenarios,
-			...lifecycleFeature.scenarioOutlines,
+			...stepsFeature.scenarios,
+			...stepsFeature.scenarioOutlines,
 		];
 
-		for (const { title, steps: scenarioSteps } of lifecycleScenarios) {
-			scenario(title, ({ defineStep }) => {
-				for (const [stepIndex, { stepText }] of scenarioSteps.entries()) {
-					const boundStep = lifecycleSteps.find(([stepMatcher]) => {
-						return stepMatcher.test(stepText);
-					});
+		defineFeature(stepsFeature, (scenario) => {
+			for (const { title, steps: scenarioSteps } of lifecycleScenarios) {
+				scenario(title, ({ defineStep }) => {
+					for (const [stepIndex, { stepText }] of scenarioSteps.entries()) {
+						const boundStep = lifecycleSteps.find(([stepMatcher]) => {
+							return stepMatcher.test(stepText);
+						});
 
-					if (boundStep === undefined) {
-						throw new Error(`No step reads ${JSON.stringify(stepText)}`);
+						if (boundStep === undefined) {
+							throw new Error(`No step reads ${JSON.stringify(stepText)}`);
+						}
+
+						const [stepMatcher, stepCallback] = boundStep;
+
+						if (stepIndex > 0) {
+							defineStep(stepMatcher, stepCallback);
+
+							continue;
+						}
+
+						// A scenario seeding no pending subscription has no provider.
+						defineStep(stepMatcher, (...stepArguments: unknown[]) => {
+							scenarioProviders = [];
+
+							return stepCallback(...stepArguments);
+						});
 					}
+				}, 180_000);
+			}
+		});
+	}
 
-					const [stepMatcher, stepCallback] = boundStep;
-
-					if (stepIndex > 0) {
-						defineStep(stepMatcher, stepCallback);
-
-						continue;
-					}
-
-					// A scenario seeding no pending subscription has no provider.
-					defineStep(stepMatcher, (...stepArguments: unknown[]) => {
-						scenarioProviders = [];
-
-						return stepCallback(...stepArguments);
-					});
-				}
-			}, 180_000);
-		}
-	});
+	defineLifecycleFeature(lifecycleFeature);
+	defineLifecycleFeature(mineFeature);
 
 	// Last: the apply drops the sync queue every scenario above relies on.
 	defineFeature(schemaApplyFeature, (scenario) => {
