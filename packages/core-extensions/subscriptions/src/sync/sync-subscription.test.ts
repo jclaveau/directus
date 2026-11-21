@@ -628,6 +628,9 @@ describe('syncSubscription', () => {
 			user_updated: null,
 			date_created: 1_793_836_800_000,
 			date_updated: 1_793_836_800_000,
+			payer: null,
+			custom_amount: null,
+			billing_mismatch: null,
 		}]);
 
 		expect(await database('subscription_managers').where('subscription', 3))
