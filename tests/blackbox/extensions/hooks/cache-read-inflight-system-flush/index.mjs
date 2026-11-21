@@ -56,7 +56,8 @@ const writeOf = {
 		return callApi('POST', '/access', { role, policy });
 	},
 	user: (rows) => {
-		return callApi('PATCH', `/users/${rows[0].target}`, { role: null });
+		// Drops every membership (#746): the user's single `role` is gone.
+		return callApi('PATCH', `/users/${rows[0].target}`, { roles: [] });
 	},
 	field: () => {
 		return callApi('PATCH', `/fields/${COLLECTION}/target`, {

@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { InvalidPayloadError } from '@directus/errors';
 import type { CollectionAccess, GraphQLParams } from '@directus/types';
 import { toBoolean } from '@directus/utils';
 import {
@@ -377,7 +378,12 @@ export function injectSystemResolvers(
 					serialize: (value) => value,
 				}),
 				resolve: async (_, _args, __, _info) => {
-					if (!gql.accountability?.user && !gql.accountability?.role) return null;
+					if (
+						!gql.accountability?.user
+						&& !gql.accountability?.memberRoles.length
+					) {
+						return null;
+					}
 
 					const result = await fetchAccountabilityCollectionAccess(gql.accountability, {
 						schema: gql.schema,
@@ -395,7 +401,12 @@ export function injectSystemResolvers(
 			roles_me: {
 				type: ReadCollectionTypes['directus_roles']!.List,
 				resolve: async (_, args, __, info) => {
-					if (!gql.accountability?.user && !gql.accountability?.role) return null;
+					if (
+						!gql.accountability?.user
+						&& !gql.accountability?.memberRoles.length
+					) {
+						return null;
+					}
 
 					const service = new RolesService({
 						accountability: gql.accountability,
@@ -435,7 +446,12 @@ export function injectSystemResolvers(
 					},
 				}),
 				resolve: async (_, _args, __, _info) => {
-					if (!gql.accountability?.user && !gql.accountability?.role) return null;
+					if (
+						!gql.accountability?.user
+						&& !gql.accountability?.memberRoles.length
+					) {
+						return null;
+					}
 
 					const result = await fetchAccountabilityPolicyGlobals(gql.accountability, {
 						schema: gql.schema,
@@ -535,16 +551,30 @@ export function injectSystemResolvers(
 				type: GraphQLBoolean,
 				args: {
 					email: new GraphQLNonNull(GraphQLString),
-					role: new GraphQLNonNull(GraphQLString),
+					roles: new GraphQLNonNull(
+						new GraphQLList(new GraphQLNonNull(GraphQLString)),
+					),
 					invite_url: GraphQLString,
 				},
 				resolve: async (_, args) => {
+					// The REST invite schema refuses it the same way.
+					if (args['roles'].length === 0) {
+						throw new InvalidPayloadError({
+							reason: '"roles" must contain at least 1 items',
+						});
+					}
+
 					const service = new UsersService({
 						accountability: gql.accountability,
 						schema: gql.schema,
 					});
 
-					await service.inviteUser(args['email'], args['role'], args['invite_url'] || null);
+					await service.inviteUser(
+						args['email'],
+						args['roles'],
+						args['invite_url'] || null,
+					);
+
 					return true;
 				},
 			},

@@ -12,11 +12,8 @@ beforeEach(() => {
 					currentUser: {
 						id: '1',
 						first_name: 'Kay',
-						role: {
-							id: '1',
-							name: 'admin',
-						},
-						roles: [{ id: '1' }, { id: '2' }],
+						roles: [{ id: 'm1', role: { id: '1', name: 'admin' } }],
+						effectiveRoles: [{ id: '1' }, { id: '2' }],
 						// Custom nested user field
 						org: { name: 'Directus' },
 					},
@@ -32,7 +29,7 @@ describe('parse-filter', () => {
 			// Static field
 			user: { _eq: 'Kay' },
 			// Dynamic fields
-			role: { _in: ['$CURRENT_ROLE', '2'] },
+			role: { _in: ['$CURRENT_MEMBER_ROLES', '2'] },
 			roles: { _in: ['$CURRENT_ROLES'] },
 			orgName: { _eq: '$CURRENT_USER.org.name' },
 		};

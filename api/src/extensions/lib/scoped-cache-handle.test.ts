@@ -15,6 +15,7 @@ const state = vi.hoisted(() => {
 const purgeScopedCache = vi.hoisted(() => vi.fn());
 const scopedCacheSnapshot = vi.hoisted(() => vi.fn());
 const loggerWarn = vi.hoisted(() => vi.fn());
+const tellPeersResponseCacheCleared = vi.hoisted(() => vi.fn());
 
 vi.mock('../../database/index.js', () => {
 	return { default: () => ({}) };
@@ -22,6 +23,10 @@ vi.mock('../../database/index.js', () => {
 
 vi.mock('../../logger/index.js', () => {
 	return { useLogger: () => ({ warn: loggerWarn }) };
+});
+
+vi.mock('../../cache-peer-notice.js', () => {
+	return { tellPeersResponseCacheCleared };
 });
 
 vi.mock('../../cache.js', () => {
@@ -349,6 +354,16 @@ describe('createScopedCacheExtensionHandle', () => {
 
 		expect(state.cache.clear).toHaveBeenCalledTimes(1);
 		expect(purgeScopedCache).not.toHaveBeenCalled();
+	});
+
+	it('scoped off: tells the other nodes their responses are cleared', async () => {
+		state.scopedEnabled = false;
+
+		const handle = createScopedCacheExtensionHandle(getSchema);
+
+		await handle.purgeForMutatedRows('articles', [{ owner: 7 }]);
+
+		expect(tellPeersResponseCacheCleared).toHaveBeenCalledTimes(1);
 	});
 
 	it('scoped off: the request reads its purges as a whole flush', async () => {

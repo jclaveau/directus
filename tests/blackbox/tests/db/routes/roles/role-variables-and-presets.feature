@@ -1,9 +1,11 @@
-Feature: A user's one role resolves the role variables and orders the presets
+Feature: A user's roles resolve the role variables and order the presets
 
-  - Pins today's single-role contract (#746). `$CURRENT_ROLE` is the user's
-    own role, the leaf of its chain; `$CURRENT_ROLES` is the whole chain. They
-    resolve the same in a permission rule, a validation, a preset and a query
-    filter. The `role-created` special writes `$CURRENT_ROLE`.
+  - `$CURRENT_MEMBER_ROLES` is the roles the user is a member of, as stored;
+    `$CURRENT_ROLES` adds the ancestors of each. They resolve the same in a
+    permission rule, a validation and a query filter. `$CURRENT_ROLE` is
+    removed (#746): a filter or a stored setting naming it is refused. The
+    `roles-created` special writes the list of member roles that allowed the
+    create.
   - Presets are applied policy after policy, parent role first, then the
     user's role, then the policies given to the user directly: on one field
     the last one wins.
@@ -96,7 +98,8 @@ Feature: A user's one role resolves the role variables and orders the presets
       | path: /users                        |           |
       | payload:                            |           |
       |   email: preset-<run>@example.com   |           |
-      |   role: <child-role>                |           |
+      |   roles:                            |           |
+      |     - role: <child-role>            |           |
       |   token: preset-<run>               |           |
       |   policies:                         |           |
       |     - policy: <user-policy>         |           |
@@ -114,27 +117,28 @@ Feature: A user's one role resolves the role variables and orders the presets
       |   fields: label,note,tag                     |     note: from the child |
       |                                              |     tag: from the parent |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete | with |
-      | 1       | directus_access      | 3      | 0      | 0      | 0      | 0    |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_collections | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_permissions | 3      | 0      | 0      | 0      | 0    |
-      | 1       | directus_policies    | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_roles       | 2      | 0      | 0      | 0      | 0    |
-      | 1       | directus_users       | 1      | 0      | 0      | 0      | 0    |
-      | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
-      | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_index             | 2      | 0      | 0      | 0      | 0    |
-      | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
-      | 1       | role_preset_notes    | 1      | 1      | 0      | 0      | 0    |
-      | 2       | directus_users       | 1      | 0      | 0      | 0      | 0    |
-      | 2       | role_preset_notes    | 1      | 0      | 0      | 0      | 0    |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions  | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_roles        | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index              | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+      | 1       | role_preset_notes     | 1      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | role_preset_notes     | 1      | 0      | 0      | 0      | 0    |
 
-  Scenario: the role variables resolve to the user's role and its chain
+  Scenario: the role variables resolve to the member roles and their chain
     Given these requests are sent:
       | request                               | response  |
       | method: POST                          | code: 200 |+
@@ -151,9 +155,11 @@ Feature: A user's one role resolves the role variables and orders the presets
       |       type: string                    |           |
       |       meta: {}                        |           |
       |     - field: created_role             |           |
-      |       type: uuid                      |           |
+      |       type: json                      |           |
       |       meta:                           |           |
-      |         special: [role-created]       |           |
+      |         special:                      |           |
+      |           - cast-json                 |           |
+      |           - roles-created             |           |
       | method: POST                          | code: 200 |+
       | path: /policies                       |           |
       | payload:                              |           |
@@ -173,9 +179,7 @@ Feature: A user's one role resolves the role variables and orders the presets
       |       fields: ['*']                   |           |
       |       validation:                     |           |
       |         role_tag:                     |           |
-      |           _eq: $CURRENT_ROLE          |           |
-      |       presets:                        |           |
-      |         role_tag: $CURRENT_ROLE       |           |
+      |           _in: $CURRENT_MEMBER_ROLES  |           |
       | method: POST                          | code: 200 |+
       | path: /roles                          |           |
       | payload:                              |           |
@@ -193,7 +197,8 @@ Feature: A user's one role resolves the role variables and orders the presets
       | path: /users                          |           |
       | payload:                              |           |
       |   email: variable-<run>@example.com   |           |
-      |   role: <child-role>                  |           |
+      |   roles:                              |           |
+      |     - role: <child-role>              |           |
       |   token: variable-<run>               |           |
       | method: POST                          | code: 200 |+
       | path: /items/role_variable_notes      |           |
@@ -205,54 +210,77 @@ Feature: A user's one role resolves the role variables and orders the presets
       |   - label: other row                  |           |
       |     role_tag: <other-role>            |           |
     Then these requests get these responses:
-      | request                                | response                            |
-      | as: variable-<run>                     | code: 200                           |+
-      | method: GET                            | body:                               |
-      | path: /items/role_variable_notes       |   data:                             |
-      | query:                                 |     - label: child row              |
-      |   fields: label                        |     - label: parent row             |
-      |   sort: label                          |                                     |
-      | as: variable-<run>                     | code: 200                           |+
-      | method: GET                            | body:                               |
-      | path: /items/role_variable_notes       |   data:                             |
-      | query:                                 |     - label: child row              |
-      |   fields: label                        |                                     |
-      |   filter[role_tag][_eq]: $CURRENT_ROLE |                                     |
-      | as: variable-<run>                     | code: 400                           |+
-      | method: POST                           | body:                               |
-      | path: /items/role_variable_notes       |   errors:                           |
-      | payload:                               |     - message: >-                   |
-      |   label: parent-tagged                 |         Validation failed for field |
-      |   role_tag: <parent-role>              |         "role_tag". Value has to be |
-      |                                        |         "<child-role>".             |
-      | as: variable-<run>                     | code: 200                           |+
-      | method: POST                           |                                     |
-      | path: /items/role_variable_notes       |                                     |
-      | payload:                               |                                     |
-      |   label: preset row                    |                                     |
-      | method: GET                            | code: 200                           |+
-      | path: /items/role_variable_notes       | body:                               |
-      | query:                                 |   data:                             |
-      |   fields: role_tag,created_role        |     - role_tag: <child-role>        |
-      |   filter[label][_eq]: preset row       |       created_role: <child-role>    |
+      | request                           | response                                |
+      | as: variable-<run>                | code: 200                               |+
+      | method: GET                       | body:                                   |
+      | path: /items/role_variable_notes  |   data:                                 |
+      | query:                            |     - label: child row                  |
+      |   fields: label                   |     - label: parent row                 |
+      |   sort: label                     |                                         |
+      | as: variable-<run>                | code: 200                               |+
+      | method: GET                       | body:                                   |
+      | path: /items/role_variable_notes  |   data:                                 |
+      | query:                            |     - label: child row                  |
+      |   fields: label                   |                                         |
+      |   filter[role_tag][_in]:          |                                         |
+      |     $CURRENT_MEMBER_ROLES         |                                         |
+      | as: variable-<run>                | code: 400                               |+
+      | method: GET                       | body:                                   |
+      | path: /items/role_variable_notes  |   errors:                               |
+      | query:                            |     - message: >-                       |
+      |   filter[role_tag][_eq]:          |         Invalid query. The filter uses  |
+      |     $CURRENT_ROLE                 |         "$CURRENT_ROLE":                |
+      |                                   |         "$CURRENT_ROLE" was removed, a  |
+      |                                   |         user can hold several roles:    |
+      |                                   |         use "$CURRENT_MEMBER_ROLES"     |
+      |                                   |         with "_in" or "_nin".           |
+      | as: variable-<run>                | code: 400                               |+
+      | method: POST                      | body:                                   |
+      | path: /items/role_variable_notes  |   errors:                               |
+      | payload:                          |     - message: >-                       |
+      |   label: parent-tagged            |         Validation failed for field     |
+      |   role_tag: <parent-role>         |         "role_tag". Value has to be     |
+      |                                   |         "<child-role>".                 |
+      | as: variable-<run>                | code: 200                               |+
+      | method: POST                      |                                         |
+      | path: /items/role_variable_notes  |                                         |
+      | payload:                          |                                         |
+      |   label: preset row               |                                         |
+      |   role_tag: <child-role>          |                                         |
+      | method: GET                       | code: 200                               |+
+      | path: /items/role_variable_notes  | body:                                   |
+      | query:                            |   data:                                 |
+      |   fields: role_tag,created_role   |     - role_tag: <child-role>            |
+      |   filter[label][_eq]: preset row  |       created_role:                     |
+      |                                   |         - <child-role>                  |
+      | method: POST                      | code: 400                               |+
+      | path: /permissions                | body:                                   |
+      | payload:                          |   errors:                               |
+      |   policy: <child-policy>          |     - message: >-                       |
+      |   collection: role_variable_notes |         Invalid payload. Field          |
+      |   action: update                  |         "presets" uses "$CURRENT_ROLE": |
+      |   fields: ['*']                   |         "$CURRENT_ROLE" was removed, a  |
+      |   presets:                        |         user can hold several roles:    |
+      |     role_tag: $CURRENT_ROLE       |         use "$CURRENT_MEMBER_ROLES"     |
+      |                                   |         with "_in" or "_nin".           |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 3      | 0      | 0      | 0      |
-      | 1       | directus_permissions | 2      | 0      | 0      | 0      |
-      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
-      | 1       | directus_roles       | 2      | 0      | 0      | 0      |
-      | 1       | directus_users       | 1      | 0      | 0      | 0      |
-      | 1       | role_variable_notes  | 1      | 0      | 0      | 0      |
-      | 2       | directus_users       | 1      | 0      | 0      | 0      |
-      | 2       | role_variable_notes  | 1      | 0      | 0      | 0      |
-      | 3       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 3       | directus_users       | 1      | 0      | 0      | 0      |
-      | 4       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 4       | directus_revisions   | 0      | 1      | 0      | 0      |
-      | 4       | directus_users       | 1      | 0      | 0      | 0      |
-      | 4       | role_variable_notes  | 1      | 1      | 0      | 0      |
-      | 5       | directus_users       | 1      | 0      | 0      | 0      |
-      | 5       | role_variable_notes  | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      |
+      | 1       | directus_permissions  | 2      | 0      | 0      | 0      |
+      | 1       | directus_policies     | 1      | 0      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles        | 2      | 0      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | role_variable_notes   | 1      | 0      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | role_variable_notes   | 1      | 0      | 0      | 0      |
+      | 3       | directus_users        | 1      | 0      | 0      | 0      |
+      | 4       | directus_permissions  | 1      | 0      | 0      | 0      |
+      | 4       | directus_users        | 1      | 0      | 0      | 0      |
+      | 5       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 5       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 5       | directus_users        | 1      | 0      | 0      | 0      |
+      | 5       | role_variable_notes   | 1      | 1      | 0      | 0      |
 
   Scenario: an app user reads the presets of their own role, not the parent's
     Given these requests are sent:
@@ -281,7 +309,8 @@ Feature: A user's one role resolves the role variables and orders the presets
       | path: /users                   |           |
       | payload:                       |           |
       |   email: app-<run>@example.com |           |
-      |   role: <child-role>           |           |
+      |   roles:                       |           |
+      |     - role: <child-role>       |           |
       |   token: app-<run>             |           |
       | method: POST                   | code: 200 |+
       | path: /presets                 |           |
@@ -304,10 +333,11 @@ Feature: A user's one role resolves the role variables and orders the presets
       |   sort: bookmark                       |                                |
       |   filter[bookmark][_ends_with]: -<run> |                                |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 3      | 0      | 0      | 0      |
-      | 1       | directus_permissions | 2      | 0      | 0      | 0      |
-      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
-      | 1       | directus_presets     | 1      | 0      | 0      | 0      |
-      | 1       | directus_roles       | 2      | 0      | 0      | 0      |
-      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      |
+      | 1       | directus_permissions  | 2      | 0      | 0      | 0      |
+      | 1       | directus_policies     | 1      | 0      | 0      | 0      |
+      | 1       | directus_presets      | 1      | 0      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles        | 2      | 0      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |

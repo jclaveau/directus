@@ -48,6 +48,8 @@ export function extractError(
 	return error;
 
 	function uniqueViolation() {
+		// TODO(#610): ER_DUP_ENTRY on directus_role_members_user_role_managed_by_unique
+		// → the 400 postgres.ts gives (role held twice from one manager)
 		const betweenQuotes = /'([^']+)'/g;
 		const matches = error.sqlMessage.match(betweenQuotes);
 

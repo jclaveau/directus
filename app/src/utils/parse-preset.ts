@@ -8,15 +8,18 @@ export function parsePreset(preset: Record<string, any> | null): Record<string, 
 	if (!currentUser) return preset ?? {};
 	if (!('id' in currentUser)) return preset ?? {};
 
+	const memberRoles = currentUser.roles.map((membership) => membership.role as Role);
+
 	// TODO make this work with new user
 	const accountability: Accountability = {
-		role: currentUser.role?.id ?? null,
+		memberRoles: memberRoles.map((role) => role.id),
+		roles: currentUser.effectiveRoles.map((role) => role.id),
 		user: currentUser.id,
 	};
 
 	return (
 		parsePresetShared(preset, accountability, {
-			$CURRENT_ROLE: currentUser.role as Role,
+			$CURRENT_MEMBER_ROLES: memberRoles,
 			$CURRENT_USER: currentUser as User,
 		}) ?? {}
 	);

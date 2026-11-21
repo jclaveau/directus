@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-Issue #746 "A user can hold only one role": `directus_role_members {user, role, sort, managed_by}` m2m replacing `directus_users.role`. Branch `multi-role`. Design phase, nothing coded. **The issue body IS the design** (rewritten 2026-11-19, open points D1-D10 there); this file holds only what a fresh session must not re-derive.
+Issue #746 "A user can hold only one role": `directus_role_members {user, role, sort, managed_by}` m2m replacing `directus_users.role`. Branch `multi-role`. PR 1 = #747, PR 2 = draft #749. **The issue body IS the design** (rewritten 2026-11-19, open points D1-D10 there); this file holds only what a fresh session must not re-derive.
 
 **Plan ruled by jean: 2 PRs.** PR 1 = bb Gherkin scenarios pinning TODAY's single-role behaviour on every impacted logic branch (no source change; table in the issue). PR 2 = everything else in one: API + migration + `$CURRENT_MEMBER_ROLES` + app, SSO multi-group (D6), admin UI roles m2m + policy-source list; each PR 1 scenario it edits is a contract change listed in its body.
 
@@ -23,6 +23,10 @@ Issue #746 "A user can hold only one role": `directus_role_members {user, role, 
 - Role delete suspends all users of the role (`roles.ts:93-116`).
 - SSO `ROLE_MAPPING`: first matching group wins (`oauth2.ts:178`, openid same), LDAP `.first()`.
 
-**Ruled by jean (2026-11-19, after slice 1 = draft #749):** D1 `PATCH /users {role}` → refused (no replace-all sugar). D10 `accountability.role` → removed. D8 → jean leans "same inviter re-invites = replace, two inviters = add", asked whether each invitation should need its own acceptance; today the invite JWT holds only `{email, scope}` and no inviter is stored, so per-inviter needs a `managed_by "invite:<user>"` membership. D9 → asked what the specials do (`role-created`/`role-updated` stamp `accountability.role` on create/update, `payload.ts:150`).
-
-**Open (recommendations given, no ruling):** D1 column fate (with no primary role: drop, maybe `PATCH {role}` as replace-all sugar); D2 sibling preset order = membership `sort`; D3 memberships read from DB per request (cached per user), drop the JWT claim; D5 junction service owns guards + cache clear; D6 SSO multi-group → `managed_by "auth:<provider>"` rows, default on or opt-in; D7 role delete suspends only users left with no role; D8 invite `roles[]`, re-invite replace vs add; `role-created`/`role-updated` specials removed or converted; `accountability.role` removed or null.
+**Ruled by jean (2026-11-19, after slice 1 = draft #749)** — full text in the issue's "Ruled by jean" table:
+- D1 `PATCH /users {role}` → refused, full message, no replace-all sugar.
+- D10 `accountability.role` → removed.
+- D8 (superseded 2026-11-20 by jean's rulings): invites live in `directus_invites` (user, role, user_created inviter or null; unique on coalesce); a role invited holds ONE membership `managed_by: invite` while any invite of it is left; re-invite adds/drops only that inviter's rows; accept sets the invite memberships to null (deletes one doubling a hand row), invite rows stay as history. managed_by pools: null, `invite`, `auth:<provider>`, `ext:<extension name>` (convention, unchecked). `invite:<uuid>`/`invite:system` are gone. Option B (per-invitation acceptance) = #750.
+- D9 option C: specials → `roles-created`/`roles-updated`, json array of the member roles whose policies allowed the write (inherited policy → the member role it came through; user-only policy → `[]`; admin → member roles with an `admin_access` policy; conditions checked on update). Migration `x` → `[x]`, drops the m2o, renames, names each field; old names refused on write. Hint: `fetch-policies.ts` reads each access row's `role` then drops it — keep the policy→role link.
+- D2, D3, D5, D6, D7: the issue's recommendation stands.
+- Coverage gap: app `stores/presets.ts` has no test; pin today's behaviour (red then green) before moving it to member roles (slice 3).

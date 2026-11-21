@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import emitter from '../../emitter.js';
 import { getAllowedLogLevels } from '../../utils/get-allowed-log-levels.js';
 import { WebSocketError } from '../errors.js';
+import { onSocketRolesRefreshed } from '../memberships-changed.js';
 import type { WebSocketClient } from '../types.js';
 import { LogsHandler } from './logs.js';
 
@@ -15,6 +16,10 @@ vi.mock('../controllers', () => ({
 
 vi.mock('../../database/index');
 vi.mock('../errors.js');
+
+vi.mock('../memberships-changed.js', () => {
+	return { onSocketRolesRefreshed: vi.fn() };
+});
 
 function mockClient(isAdmin: boolean) {
 	return {
@@ -223,5 +228,67 @@ describe('WebSocket logs handler', () => {
 			expect(handler.subscriptions[level]?.has(client)).toBe(false);
 			expect(handler.subscriptions[level]?.has(client2)).toBe(true);
 		}
+	});
+
+	test('refuses the logs to a socket no longer admin', async () => {
+		const client = mockClient(true);
+
+		emitter.emitAction('websocket.logs', {
+			client,
+			message: { type: 'subscribe', log_level: 'trace' },
+		});
+
+		await delay(10);
+
+		client.accountability!.admin = false;
+		vi.mocked(client.send).mockClear();
+
+		const [rolesRefreshedListener] = vi.mocked(onSocketRolesRefreshed)
+			.mock.lastCall!;
+
+		rolesRefreshedListener(client);
+
+		expect(handler.subscriptions['trace']?.has(client)).toBe(false);
+		expect(handler.subscriptions['fatal']?.has(client)).toBe(false);
+
+		expect(WebSocketError).toHaveBeenLastCalledWith(
+			'logs',
+			ErrorCode.Forbidden,
+			'You don\'t have permission to access this.',
+		);
+
+		expect(client.send).toHaveBeenCalledOnce();
+	});
+
+	test('keeps the logs of a socket still admin', async () => {
+		const client = mockClient(true);
+
+		emitter.emitAction('websocket.logs', {
+			client,
+			message: { type: 'subscribe', log_level: 'trace' },
+		});
+
+		await delay(10);
+
+		vi.mocked(client.send).mockClear();
+
+		const [rolesRefreshedListener] = vi.mocked(onSocketRolesRefreshed)
+			.mock.lastCall!;
+
+		rolesRefreshedListener(client);
+
+		expect(handler.subscriptions['trace']?.has(client)).toBe(true);
+		expect(client.send).not.toHaveBeenCalled();
+	});
+
+	test('tells nothing to a socket that never subscribed to the logs', () => {
+		const client = mockClient(false);
+
+		const [rolesRefreshedListener] = vi.mocked(onSocketRolesRefreshed)
+			.mock.lastCall!;
+
+		rolesRefreshedListener(client);
+
+		expect(client.send).not.toHaveBeenCalled();
 	});
 });

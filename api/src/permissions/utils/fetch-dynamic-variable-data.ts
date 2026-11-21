@@ -8,7 +8,10 @@ import { getMilliseconds } from '../../utils/get-milliseconds.js';
 import { type DynamicVariableContext } from './extract-required-dynamic-variable-context.js';
 
 export interface FetchDynamicVariableContext {
-	accountability: Pick<Accountability, 'user' | 'role' | 'roles'>;
+	accountability: Pick<
+		Accountability,
+		'user' | 'memberRoles' | 'roles'
+	>;
 	policies: string[];
 	dynamicVariableContext: DynamicVariableContext;
 }
@@ -35,17 +38,21 @@ export async function fetchDynamicVariableData(options: FetchDynamicVariableCont
 		);
 	}
 
-	if (options.accountability.role && (options.dynamicVariableContext.$CURRENT_ROLE?.size ?? 0) > 0) {
-		contextData['$CURRENT_ROLE'] = await fetchContextData(
-			'$CURRENT_ROLE',
+	if (
+		options.accountability.memberRoles.length > 0
+		&& options.dynamicVariableContext.$CURRENT_MEMBER_ROLES.size > 0
+	) {
+		contextData['$CURRENT_MEMBER_ROLES'] = await fetchContextData(
+			'$CURRENT_MEMBER_ROLES',
 			options.dynamicVariableContext,
-			{ role: options.accountability.role },
+			{ memberRoles: options.accountability.memberRoles },
 			async (fields) => {
 				const rolesService = new RolesService(context);
 
-				return await rolesService.readOne(options.accountability.role!, {
-					fields,
-				});
+				return await rolesService.readMany(
+					options.accountability.memberRoles,
+					{ fields },
+				);
 			},
 		);
 	}

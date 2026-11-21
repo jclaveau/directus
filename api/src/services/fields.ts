@@ -39,6 +39,9 @@ import { getSystemFieldRowsWithAuthProviders } from '../utils/get-field-system-r
 import getLocalType from '../utils/get-local-type.js';
 import { isEqual, isNil, merge } from '../utils/lodash-es-used.js';
 import { withMeta } from '../utils/read-meta.js';
+import {
+	refuseRemovedRoleStampSpecial,
+} from '../utils/refuse-removed-role-stamp-special.js';
 import { sanitizeColumn } from '../utils/sanitize-schema.js';
 import {
 	clearCachesThenFireActions,
@@ -390,6 +393,16 @@ export class FieldsService {
 			});
 		}
 
+		// Before the column change: refused after it, the field would still have
+		// altered the table and flushed the caches.
+		if (field.meta) {
+			refuseRemovedRoleStampSpecial('directus_fields', {
+				...field.meta,
+				collection,
+				field: field.field,
+			});
+		}
+
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
 		const nestedActionEvents: ActionEventParams[] = [];
 
@@ -438,6 +451,15 @@ export class FieldsService {
 								},
 							)
 						: field;
+
+				// Again on what the filter hooks return, still before the DDL.
+				if (hookAdjustedField.meta) {
+					refuseRemovedRoleStampSpecial('directus_fields', {
+						...hookAdjustedField.meta,
+						collection,
+						field: hookAdjustedField.field,
+					});
+				}
 
 				if (hookAdjustedField.type && ALIAS_TYPES.includes(hookAdjustedField.type) === false) {
 					if (table) {
@@ -514,6 +536,16 @@ export class FieldsService {
 			});
 		}
 
+		// Before the column change: refused after it, the field would still have
+		// altered the table and flushed the caches.
+		if (field.meta) {
+			refuseRemovedRoleStampSpecial('directus_fields', {
+				...field.meta,
+				collection,
+				field: field.field,
+			});
+		}
+
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
 		const nestedActionEvents: ActionEventParams[] = [];
 
@@ -544,6 +576,15 @@ export class FieldsService {
 							},
 						)
 					: field;
+
+			// Again on what the filter hooks return, still before the DDL.
+			if (hookAdjustedField.meta) {
+				refuseRemovedRoleStampSpecial('directus_fields', {
+					...hookAdjustedField.meta,
+					collection,
+					field: hookAdjustedField.field,
+				});
+			}
 
 			const record = field.meta
 				? await this.knex.select('id').from('directus_fields').where({ collection, field: field.field }).first()

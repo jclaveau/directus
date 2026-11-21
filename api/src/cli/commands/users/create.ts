@@ -24,7 +24,13 @@ export default async function usersCreate({
 		const schema = await getSchema();
 		const service = new UsersService({ schema, knex: database });
 
-		const id = await service.createOne({ email, password, role, status: 'active' });
+		const id = await service.createOne({
+			email,
+			password,
+			roles: [{ role }],
+			status: 'active',
+		});
+
 		process.stdout.write(`${String(id)}\n`);
 		database.destroy();
 		process.exit(0);

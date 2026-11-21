@@ -10,7 +10,10 @@ import type { Context } from '../../types.js';
  * The permissions will be filtered by IP access.
  */
 export async function fetchAccountabilityCollectionAccess(
-	accountability: Pick<Accountability, 'user' | 'roles' | 'role' | 'ip' | 'admin' | 'app'>,
+	accountability: Pick<
+		Accountability,
+		'user' | 'roles' | 'memberRoles' | 'ip' | 'admin' | 'app'
+	>,
 	context: Context,
 ): Promise<CollectionAccess> {
 	if (accountability.admin) {

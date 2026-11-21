@@ -3,7 +3,7 @@ import { deepMap } from '@directus/utils';
 
 export interface DynamicVariableContext {
 	$CURRENT_USER: Set<string>;
-	$CURRENT_ROLE: Set<string>;
+	$CURRENT_MEMBER_ROLES: Set<string>;
 	$CURRENT_ROLES: Set<string>;
 	$CURRENT_POLICIES: Set<string>;
 }
@@ -11,7 +11,7 @@ export interface DynamicVariableContext {
 export function extractRequiredDynamicVariableContextForPermissions(permissions: Permission[]) {
 	let permissionContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set<string>(),
-		$CURRENT_ROLE: new Set<string>(),
+		$CURRENT_MEMBER_ROLES: new Set<string>(),
 		$CURRENT_ROLES: new Set<string>(),
 		$CURRENT_POLICIES: new Set<string>(),
 	};
@@ -29,7 +29,7 @@ export function extractRequiredDynamicVariableContextForPermissions(permissions:
 export function extractRequiredDynamicVariableContext(val: any) {
 	const permissionContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set<string>(),
-		$CURRENT_ROLE: new Set<string>(),
+		$CURRENT_MEMBER_ROLES: new Set<string>(),
 		$CURRENT_ROLES: new Set<string>(),
 		$CURRENT_POLICIES: new Set<string>(),
 	};
@@ -41,7 +41,7 @@ export function extractRequiredDynamicVariableContext(val: any) {
 	function extractPermissionData(val: any) {
 		for (const placeholder of [
 			'$CURRENT_USER',
-			'$CURRENT_ROLE',
+			'$CURRENT_MEMBER_ROLES',
 			'$CURRENT_ROLES',
 			'$CURRENT_POLICIES',
 		] as (keyof typeof permissionContext)[]) {
@@ -55,7 +55,10 @@ export function extractRequiredDynamicVariableContext(val: any) {
 function mergeContexts(context1: DynamicVariableContext, context2: DynamicVariableContext) {
 	const permissionContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set([...context1.$CURRENT_USER, ...context2.$CURRENT_USER]),
-		$CURRENT_ROLE: new Set([...context1.$CURRENT_ROLE, ...context2.$CURRENT_ROLE]),
+		$CURRENT_MEMBER_ROLES: new Set([
+			...context1.$CURRENT_MEMBER_ROLES,
+			...context2.$CURRENT_MEMBER_ROLES,
+		]),
 		$CURRENT_ROLES: new Set([...context1.$CURRENT_ROLES, ...context2.$CURRENT_ROLES]),
 		$CURRENT_POLICIES: new Set([...context1.$CURRENT_POLICIES, ...context2.$CURRENT_POLICIES]),
 	};

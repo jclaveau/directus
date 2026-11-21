@@ -1,6 +1,6 @@
 import { ForbiddenError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
-import type { Accountability, RawField } from '@directus/types';
+import type { Accountability, Field, RawField } from '@directus/types';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -25,8 +25,8 @@ const schema = new SchemaBuilder()
 	})
 	.build();
 
-const nonAdmin = { role: 'test', user: 'user-1', admin: false } as Accountability;
-const admin = { role: 'admin', user: 'admin-1', admin: true } as Accountability;
+const nonAdmin = { user: 'user-1', admin: false } as Accountability;
+const admin = { user: 'admin-1', admin: true } as Accountability;
 
 class Client_PG extends MockClient {}
 
@@ -56,6 +56,59 @@ describe('Services / Fields', () => {
 				'does not have the permission to create the field',
 			);
 		});
+
+		it('refuses a removed role special before running a statement', async () => {
+			const service = new FieldsService({ knex: db, schema, accountability: admin });
+
+			await expect(
+				service.createField('test', {
+					field: 'made_by_role',
+					type: 'uuid',
+					meta: { special: ['role-created'] },
+				} as Field),
+			).rejects.toHaveProperty(
+				'message',
+				'Invalid payload. Field "made_by_role" of collection "test" uses the'
+					+ ' removed special "role-created": a user can hold several roles,'
+					+ ' use "roles-created" on a json field.',
+			);
+
+			expect(tracker.history.all).toEqual([]);
+		});
+
+		it('refuses a removed role special a hook adds, before the DDL', async () => {
+			tracker.on.select('directus_fields').response(undefined);
+
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
+				async (_event, payload) => {
+					return { ...(payload as Field), meta: { special: ['role-created'] } };
+				},
+			);
+
+			const service = new FieldsService({ knex: db, schema, accountability: admin });
+
+			await expect(
+				service.createField('test', {
+					field: 'made_by_role',
+					type: 'uuid',
+				} as Field),
+			).rejects.toHaveProperty(
+				'message',
+				'Invalid payload. Field "made_by_role" of collection "test" uses the'
+					+ ' removed special "role-created": a user can hold several roles,'
+					+ ' use "roles-created" on a json field.',
+			);
+
+			// Only the existence check runs before the hooks; no ALTER TABLE.
+			expect(tracker.history.all).toEqual([
+				expect.objectContaining({
+					method: 'select',
+					sql: 'select "id" from "directus_fields"'
+						+ ' where "collection" = ? and "field" = ? limit ?',
+					bindings: ['test', 'made_by_role', 1],
+				}),
+			]);
+		});
 	});
 
 	describe('updateField', () => {
@@ -69,6 +122,54 @@ describe('Services / Fields', () => {
 			await expect(service.updateField('test', field)).rejects.toThrowError(
 				'does not have the permission to update the field',
 			);
+		});
+
+		it('refuses a removed role special before running a statement', async () => {
+			const service = new FieldsService({ knex: db, schema, accountability: admin });
+
+			await expect(
+				service.updateField('test', {
+					field: 'id',
+					type: 'uuid',
+					schema: { is_nullable: true },
+					meta: { special: ['role-updated'] },
+				} as RawField),
+			).rejects.toHaveProperty(
+				'message',
+				'Invalid payload. Field "id" of collection "test" uses the removed'
+					+ ' special "role-updated": a user can hold several roles, use'
+					+ ' "roles-updated" on a json field.',
+			);
+
+			expect(tracker.history.all).toEqual([]);
+		});
+
+		it('refuses a removed role special a hook adds, before the DDL', async () => {
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
+				async (_event, payload) => {
+					return {
+						...(payload as RawField),
+						meta: { special: ['role-updated'] },
+					};
+				},
+			);
+
+			const service = new FieldsService({ knex: db, schema, accountability: admin });
+
+			await expect(
+				service.updateField('test', {
+					field: 'id',
+					type: 'uuid',
+					schema: { is_nullable: true },
+				} as RawField),
+			).rejects.toHaveProperty(
+				'message',
+				'Invalid payload. Field "id" of collection "test" uses the removed'
+					+ ' special "role-updated": a user can hold several roles, use'
+					+ ' "roles-updated" on a json field.',
+			);
+
+			expect(tracker.history.all).toEqual([]);
 		});
 
 		it('rejects with the error the column builder throws', async () => {

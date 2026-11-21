@@ -14,6 +14,8 @@ import {
 	vi,
 } from 'vitest';
 
+vi.mock('./utils/node-id.js', () => ({ nodeId: 'this-node' }));
+
 // cache.ts captures `const env = useEnv()` at module load, so mutate one shared object
 // (never reassign) to keep that reference and getConfigFromEnv's useEnv() in sync.
 const mockEnv = vi.hoisted(() => ({ current: {} as Record<string, any> }));
@@ -1699,6 +1701,7 @@ describe('flushCaches', () => {
 
 		expect(busPublish).toHaveBeenCalledWith('cacheCleared', {
 			targets: ['response', 'system'],
+			origin: 'this-node',
 		});
 	});
 
@@ -2273,6 +2276,7 @@ describe('clearCacheTargets', () => {
 
 		expect(busPublish).toHaveBeenCalledWith('cacheCleared', {
 			targets: ['response'],
+			origin: 'this-node',
 		});
 	});
 

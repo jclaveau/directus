@@ -1,6 +1,6 @@
-// Writes a user's role inside a transaction the extension opens itself with
-// `database.transaction()`, then reads as another user before it commits
-// (cache-untracked-transaction-flush.feature).
+// Replaces a user's memberships (#746) with one in `role` inside a transaction
+// the extension opens itself with `database.transaction()`, then reads as
+// another user before it commits (cache-untracked-transaction-flush.feature).
 //
 //   POST /untracked-trx-write/move-user
 //     { user, role, read: { path, query, token } }
@@ -24,7 +24,7 @@ export default function registerEndpoint(
 					knex: trx,
 					schema,
 					accountability: req.accountability,
-				}).updateOne(user, { role });
+				}).updateOne(user, { roles: [{ role }] });
 
 				const readQuery = new URLSearchParams(read.query);
 				const readUrl = `http://127.0.0.1:${env.PORT}${read.path}?${readQuery}`;

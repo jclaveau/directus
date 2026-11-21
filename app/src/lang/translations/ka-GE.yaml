@@ -1575,7 +1575,7 @@ no_value: მნიშვნელობა არ არის
 do_nothing: არაფრის გაკეთება
 generate_and_save_uuid: UUID-ის გენერირება და შენახვა
 save_current_user_id: მიმდინარე მომხმარებლის ID-ის შენახვა
-save_current_user_role: მიმდინარე მომხმარებლის როლის შენახვა
+save_current_user_roles: მიმდინარე მომხმარებლის როლების შენახვა
 save_current_datetime: მიმდინარე თარიღის/დროის შენახვა
 always_open: ყოველთვის ღია
 start_open: ღიად დაწყება

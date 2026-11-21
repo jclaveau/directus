@@ -139,7 +139,8 @@ const { onCreateOptions, onCreateValue } = useOnCreate();
 const { onUpdateOptions, onUpdateValue } = useOnUpdate();
 
 const hasCreateUpdateTriggers = computed(() => {
-	return ['uuid', 'date', 'time', 'dateTime', 'timestamp'].includes(type.value) && localType.value !== 'file';
+	const triggerTypes = ['uuid', 'date', 'time', 'dateTime', 'timestamp', 'json'];
+	return triggerTypes.includes(type.value) && localType.value !== 'file';
 });
 
 const isAlias = computed(() => {
@@ -155,9 +156,22 @@ const isGenerated = computed(() => {
 });
 
 function useOnCreate() {
-	const onCreateSpecials = ['uuid', 'user-created', 'role-created', 'date-created'];
+	const onCreateSpecials = ['uuid', 'user-created', 'roles-created', 'date-created'];
 
 	const onCreateOptions = computed(() => {
+		if (type.value === 'json') {
+			return [
+				{
+					text: t('do_nothing'),
+					value: null,
+				},
+				{
+					text: t('save_current_user_roles'),
+					value: 'roles-created',
+				},
+			];
+		}
+
 		if (type.value === 'uuid') {
 			const options = [
 				{
@@ -172,18 +186,15 @@ function useOnCreate() {
 					text: t('save_current_user_id'),
 					value: 'user-created',
 				},
-				{
-					text: t('save_current_user_role'),
-					value: 'role-created',
-				},
 			];
 
 			if (localType.value === 'm2o' && relations.value.m2o?.related_collection === 'directus_users') {
 				return options.filter(({ value }) => [null, 'user-created'].includes(value));
 			}
 
+			// No special stamps the roles of a user in one uuid any more.
 			if (localType.value === 'm2o' && relations.value.m2o?.related_collection === 'directus_roles') {
-				return options.filter(({ value }) => [null, 'role-created'].includes(value));
+				return options.filter(({ value }) => value === null);
 			}
 
 			return options;
@@ -238,9 +249,22 @@ function useOnCreate() {
 }
 
 function useOnUpdate() {
-	const onUpdateSpecials = ['user-updated', 'role-updated', 'date-updated'];
+	const onUpdateSpecials = ['user-updated', 'roles-updated', 'date-updated'];
 
 	const onUpdateOptions = computed(() => {
+		if (type.value === 'json') {
+			return [
+				{
+					text: t('do_nothing'),
+					value: null,
+				},
+				{
+					text: t('save_current_user_roles'),
+					value: 'roles-updated',
+				},
+			];
+		}
+
 		if (type.value === 'uuid') {
 			const options = [
 				{
@@ -251,18 +275,15 @@ function useOnUpdate() {
 					text: t('save_current_user_id'),
 					value: 'user-updated',
 				},
-				{
-					text: t('save_current_user_role'),
-					value: 'role-updated',
-				},
 			];
 
 			if (localType.value === 'm2o' && relations.value.m2o?.related_collection === 'directus_users') {
 				return options.filter(({ value }) => [null, 'user-updated'].includes(value));
 			}
 
+			// No special stamps the roles of a user in one uuid any more.
 			if (localType.value === 'm2o' && relations.value.m2o?.related_collection === 'directus_roles') {
-				return options.filter(({ value }) => [null, 'role-updated'].includes(value));
+				return options.filter(({ value }) => value === null);
 			}
 
 			return options;

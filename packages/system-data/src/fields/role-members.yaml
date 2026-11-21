@@ -1,0 +1,29 @@
+table: directus_role_members
+
+fields:
+  - field: id
+    special:
+      - uuid
+    hidden: true
+    width: half
+
+  - field: user
+    hidden: true
+    width: half
+    special:
+      - m2o
+
+  - field: role
+    hidden: true
+    width: half
+    special:
+      - m2o
+
+  - field: sort
+    hidden: true
+    width: half
+
+  - field: managed_by
+    hidden: true
+    readonly: true
+    width: half

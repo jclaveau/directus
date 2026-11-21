@@ -35,6 +35,12 @@ import { isLoginRedirectAllowed } from '../../utils/is-login-redirect-allowed.js
 import { verifyJWT } from '../../utils/jwt.js';
 import { Url } from '../../utils/url.js';
 import { LocalAuthDriver } from './local.js';
+import {
+	providerMemberships,
+	syncProviderMemberships,
+	takeProviderRoles,
+	withProviderRoles,
+} from '../utils/provider-memberships.js';
 
 export class OAuth2AuthDriver extends LocalAuthDriver {
 	client: Client;
@@ -191,6 +197,10 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			logger.debug(`[OAuth2] Configured group claim with name "${groupClaimName}" does not exist or is empty.`);
 		}
 
+		const grantedRoles: string[] = role
+			? [role]
+			: [];
+
 		// Flatten response to support dot indexes
 		userInfo = flatten(userInfo) as Record<string, unknown>;
 
@@ -211,7 +221,6 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			last_name: userInfo[this.config['lastNameKey']],
 			email: email,
 			external_identifier: identifier,
-			role: role,
 			auth_data: tokenSet.refresh_token && JSON.stringify({ refreshToken: tokenSet.refresh_token }),
 		};
 
@@ -225,9 +234,9 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			};
 
 			// Make sure a user's role gets updated if their oauth group or role mapping changes
-			if (this.config['roleMapping']) {
-				emitPayload['role'] = role;
-			}
+			const syncedRoles = this.config['roleMapping']
+				? grantedRoles
+				: undefined;
 
 			if (syncUserInfo) {
 				emitPayload = {
@@ -240,7 +249,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 
 			const updatedUserPayload = await emitter.emitFilter(
 				`auth.update`,
-				emitPayload,
+				withProviderRoles('auth.update', emitPayload, syncedRoles),
 				{
 					identifier,
 					provider: this.config['provider'],
@@ -249,9 +258,21 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 				{ database: getDatabase(), schema: this.schema, accountability: null },
 			);
 
+			const { userPayload: updatedUser, providerRoles } = takeProviderRoles(
+				'auth.update',
+				updatedUserPayload,
+			);
+
 			// Update user to update refresh_token and other properties that might have changed
-			if (Object.values(updatedUserPayload).some((value) => value !== undefined)) {
-				await this.usersService.updateOne(userId, updatedUserPayload);
+			if (Object.values(updatedUser).some((value) => value !== undefined)) {
+				await this.usersService.updateOne(userId, updatedUser);
+			}
+
+			if (providerRoles !== undefined) {
+				await syncProviderMemberships(userId, provider, providerRoles, {
+					knex: this.knex,
+					schema: this.schema,
+				});
 			}
 
 			return userId;
@@ -267,7 +288,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 		// user that is about to be created
 		const updatedUserPayload = await emitter.emitFilter(
 			`auth.create`,
-			userPayload,
+			withProviderRoles('auth.create', userPayload, grantedRoles),
 			{
 				identifier,
 				provider: this.config['provider'],
@@ -276,8 +297,20 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			{ database: getDatabase(), schema: this.schema, accountability: null },
 		);
 
+		const { userPayload: createdUser, providerRoles } = takeProviderRoles(
+			'auth.create',
+			updatedUserPayload,
+		);
+
 		try {
-			await this.usersService.createOne(updatedUserPayload);
+			await this.usersService.createOne({
+				...createdUser,
+				roles: providerMemberships(
+					provider,
+					providerRoles,
+					Boolean(this.config['roleMapping']),
+				),
+			});
 		} catch (e) {
 			if (isDirectusError(e, ErrorCode.RecordNotUnique)) {
 				logger.warn(e, '[OAuth2] Failed to register user. User not unique');

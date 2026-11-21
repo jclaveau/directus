@@ -4,7 +4,7 @@ import { MockClient } from 'knex-mock-client';
 import { ForbiddenError } from '@directus/errors';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCache } from '../cache.js';
-import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+import { fetchUserRoles } from '../permissions/lib/fetch-member-roles.js';
 import {
 	fetchGlobalAccess,
 } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
@@ -37,9 +37,11 @@ vi.mock('../logger/index.js', () => ({
 	useLogger: vi.fn(() => ({ warn: loggerWarn, info: vi.fn(), error: vi.fn() })),
 }));
 
-vi.mock('../permissions/lib/fetch-roles-tree.js', () => ({
-	fetchRolesTree: vi.fn().mockResolvedValue([]),
-}));
+vi.mock('../permissions/lib/fetch-member-roles.js', () => {
+	return {
+		fetchUserRoles: vi.fn().mockResolvedValue({ memberRoles: [], roles: [] }),
+	};
+});
 
 vi.mock('../permissions/modules/fetch-global-access/fetch-global-access.js', () => ({
 	fetchGlobalAccess: vi.fn().mockResolvedValue({ admin: true, app: true }),
@@ -72,9 +74,9 @@ const schema = { collections: {}, relations: {} } as any;
 
 const accountability: Accountability = {
 	user: senderUuid,
-	role: null,
 	admin: true,
 	app: true,
+	memberRoles: [],
 	roles: [],
 	ip: null,
 };
@@ -116,7 +118,6 @@ describe('Services / Comments', () => {
 				first_name: 'Jane',
 				last_name: 'Doe',
 				email: 'jane@x.com',
-				role: { id: null },
 			}, { scopedCacheFingerprints: [] }));
 
 		vi.mocked(UsersService.prototype.readByQuery).mockResolvedValue(withMeta([
@@ -186,10 +187,9 @@ describe('Services / Comments', () => {
 				first_name: 'Jane',
 				last_name: 'Doe',
 				email: 'jane@x.com',
-				role: { id: null },
 			}, { scopedCacheFingerprints: [] }));
 
-		vi.mocked(fetchRolesTree).mockResolvedValue([]);
+		vi.mocked(fetchUserRoles).mockResolvedValue({ memberRoles: [], roles: [] });
 		vi.mocked(validateAccess).mockResolvedValue(undefined);
 
 		vi.mocked(fetchGlobalAccess)
@@ -279,7 +279,6 @@ Sam Sender has mentioned you in a comment:
 				first_name: 'Jane',
 				last_name: 'Doe',
 				email: 'jane@x.com',
-				role: { id: null },
 			}, { scopedCacheFingerprints: [] }));
 
 		vi.mocked(fetchGlobalAccess)
@@ -308,7 +307,7 @@ Sam Sender has mentioned you in a comment:
 			[senderUuid, { fields: ['id', 'first_name', 'last_name', 'email'] }],
 			[
 				'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-				{ fields: ['id', 'first_name', 'last_name', 'email', 'role.id'] },
+				{ fields: ['id', 'first_name', 'last_name', 'email'] },
 			],
 		]);
 
@@ -361,7 +360,6 @@ Sam Sender has mentioned you in a comment:
 				first_name: 'Jane',
 				last_name: 'Doe',
 				email: 'jane@x.com',
-				role: { id: null },
 			}, { scopedCacheFingerprints: [] }));
 
 		vi.mocked(fetchGlobalAccess)
@@ -419,9 +417,9 @@ Sam Sender has mentioned you in a comment:
 	describe('as an author who is not an admin', () => {
 		const authorAccountability: Accountability = {
 			user: senderUuid,
-			role: null,
 			admin: false,
 			app: true,
+			memberRoles: [],
 			roles: [],
 			ip: null,
 		};
@@ -536,10 +534,9 @@ Sam Sender has mentioned you in a comment:
 					first_name: 'Jane',
 					last_name: 'Doe',
 					email: 'jane@x.com',
-					role: { id: null },
 				}, { scopedCacheFingerprints: [] }));
 
-			vi.mocked(fetchRolesTree).mockResolvedValue([]);
+			vi.mocked(fetchUserRoles).mockResolvedValue({ memberRoles: [], roles: [] });
 			vi.mocked(validateAccess).mockResolvedValue(undefined);
 
 			vi.mocked(fetchGlobalAccess)
@@ -597,9 +594,9 @@ Sam Sender has mentioned you in a comment:
 	describe('without a user', () => {
 		const publicAccountability: Accountability = {
 			user: null,
-			role: null,
 			admin: false,
 			app: false,
+			memberRoles: [],
 			roles: [],
 			ip: null,
 		};

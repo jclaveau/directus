@@ -7,7 +7,10 @@ import type { Context } from '../../types.js';
 export interface FetchAllowedFieldsOptions {
 	collection: string;
 	action: PermissionsAction;
-	accountability: Pick<Accountability, 'user' | 'role' | 'roles' | 'ip' | 'app'>;
+	accountability: Pick<
+		Accountability,
+		'user' | 'memberRoles' | 'roles' | 'ip' | 'app'
+	>;
 }
 
 /**

@@ -80,7 +80,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'user-1', role: null, roles: [], admin: false } as any,
+			accountability: { user: 'user-1', roles: [], admin: false } as any,
 			scope: 'system',
 		});
 
@@ -97,7 +97,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 
@@ -127,7 +127,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 
@@ -151,7 +151,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 
@@ -173,7 +173,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 
@@ -210,7 +210,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 
@@ -233,7 +233,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 
@@ -271,7 +271,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 
@@ -315,7 +315,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 
@@ -346,7 +346,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 
@@ -369,7 +369,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 
@@ -416,7 +416,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 
@@ -460,7 +460,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 
@@ -494,7 +494,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 
@@ -520,7 +520,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 
@@ -549,7 +549,7 @@ describe('resolveSystemAdmin', () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
 			schema: { collections: {} } as any,
-			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			accountability: { user: 'admin-1', roles: [], admin: true } as any,
 			scope: 'system',
 		});
 

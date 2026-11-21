@@ -57,8 +57,8 @@ describe('WebSocketService', () => {
 
 	test('broadcast with role filter', () => {
 		const clients = [
-			mockClient({ user: 'test', role: 'test' } as Accountability),
-			mockClient({ user: 'test2', role: 'test2' } as Accountability),
+			mockClient({ user: 'test', memberRoles: ['test'] } as Accountability),
+			mockClient({ user: 'test2', memberRoles: ['test2'] } as Accountability),
 		];
 
 		const message = 'test 123';
@@ -72,10 +72,28 @@ describe('WebSocketService', () => {
 		expect(clients[1]!.send).not.toBeCalled();
 	});
 
+	test('broadcast with role filter matches among several roles', () => {
+		const clients = [
+			mockClient(
+				{ user: 'test', memberRoles: ['other', 'test'] } as Accountability,
+			),
+			mockClient({ user: 'test2', memberRoles: [] as string[] } as Accountability),
+		];
+
+		vi.mocked(getWebSocketController).mockReturnValue({
+			clients: new Set(clients),
+		} as unknown as WebSocketController);
+
+		new WebSocketService().broadcast('test 123', { role: 'test' });
+
+		expect(clients[0]!.send).toBeCalledWith('test 123');
+		expect(clients[1]!.send).not.toBeCalled();
+	});
+
 	test('broadcast with user filter', () => {
 		const clients = [
-			mockClient({ user: 'test', role: 'test' } as Accountability),
-			mockClient({ user: 'test2', role: 'test2' } as Accountability),
+			mockClient({ user: 'test', memberRoles: ['test'] } as Accountability),
+			mockClient({ user: 'test2', memberRoles: ['test2'] } as Accountability),
 		];
 
 		const message = 'test 123';

@@ -394,7 +394,7 @@ describe('read pins at the merge', () => {
 				schema: salaries,
 				accountability: {
 					user: 'u1',
-					role: 'r1',
+					memberRoles: ['r1'],
 					roles: ['r1'],
 					admin: false,
 					app: true,
@@ -1041,7 +1041,7 @@ describe('read pins at the merge', () => {
 				schema: ownership,
 				accountability: {
 					user: 'u1',
-					role: 'r1',
+					memberRoles: ['r1'],
 					roles: ['r1'],
 					admin: false,
 					app: true,
@@ -1295,7 +1295,7 @@ describe('read pins at the merge', () => {
 				schema: cursus,
 				accountability: {
 					user: 'u1',
-					role: 'r1',
+					memberRoles: ['r1'],
 					roles: ['r1'],
 					admin: false,
 					app: true,

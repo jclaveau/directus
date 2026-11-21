@@ -8,6 +8,9 @@ import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
 import { contextHasDynamicVariables } from '../permissions/modules/process-ast/utils/context-has-dynamic-variables.js';
 import { extractRequiredDynamicVariableContext } from '../permissions/utils/extract-required-dynamic-variable-context.js';
 import { fetchDynamicVariableData } from '../permissions/utils/fetch-dynamic-variable-data.js';
+import {
+	refuseRemovedRoleVariableInFilter,
+} from './refuse-removed-role-variable.js';
 import { Meta } from '../types/index.js';
 import type { Context } from '../permissions/types.js';
 import { flatten, get, isPlainObject, merge, set } from './lodash-es-used.js';
@@ -174,6 +177,8 @@ async function sanitizeFilter(rawFilter: any, schema: SchemaOverview, accountabi
 			throw new InvalidQueryError({ reason: 'Invalid JSON for filter object' });
 		}
 	}
+
+	refuseRemovedRoleVariableInFilter(filters);
 
 	try {
 		let filterContext;

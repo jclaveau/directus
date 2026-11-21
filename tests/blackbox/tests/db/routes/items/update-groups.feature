@@ -337,6 +337,7 @@ Feature: An update reaches its hooks as one grouped event
       | 1       | directus_permissions   | 4      | 0      | 0      | 0      |
       | 1       | directus_policies      | 1      | 0      | 0      | 0      |
       | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_role_members  | 1      | 0      | 0      | 0      |
       | 1       | directus_roles         | 1      | 0      | 0      | 0      |
       | 1       | directus_users         | 1      | 0      | 0      | 0      |
       | 1       | test_update_groups     | 5      | 0      | 1      | 0      |

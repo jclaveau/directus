@@ -118,5 +118,11 @@ async function createDefaultAdmin(schema: SchemaOverview) {
 
 	const token = env['ADMIN_TOKEN'] ?? null;
 
-	await usersService.createOne({ ...defaultAdminUser, email: adminEmail, password: adminPassword, token, role });
+	await usersService.createOne({
+		...defaultAdminUser,
+		email: adminEmail,
+		password: adminPassword,
+		token,
+		roles: [{ role }],
+	});
 }

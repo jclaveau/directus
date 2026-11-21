@@ -1,0 +1,366 @@
+import { createInspector } from '@directus/schema';
+import knex, { type Knex } from 'knex';
+import { createTracker, MockClient, type Tracker } from 'knex-mock-client';
+import {
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	test,
+	vi,
+} from 'vitest';
+import { down, up } from './20261119C-rename-role-stamp-specials.js';
+
+const dialect = vi.hoisted(() => ({ client: 'postgres' }));
+const logger = vi.hoisted(() => ({ info: vi.fn() }));
+
+vi.mock('@directus/schema', () => {
+	return { createInspector: vi.fn() };
+});
+
+vi.mock('../index.js', () => {
+	return { getDatabaseClient: () => dialect.client };
+});
+
+vi.mock('../../logger/index.js', () => ({ useLogger: () => logger }));
+
+describe('the migration', () => {
+	let db: Knex;
+	let tracker: Tracker;
+
+	beforeAll(() => {
+		db = knex.default({ client: MockClient, dialect: 'pg' });
+		tracker = createTracker(db);
+	});
+
+	beforeEach(() => {
+		dialect.client = 'postgres';
+		logger.info.mockReset();
+		vi.mocked(createInspector).mockReset();
+		tracker.on.any(/^alter table/).response(undefined);
+		tracker.on.delete('directus_relations').response(1);
+		tracker.on.insert('directus_relations').response([]);
+		tracker.on.update('directus_fields').response(1);
+	});
+
+	afterEach(() => {
+		tracker.reset();
+		vi.restoreAllMocks();
+	});
+
+	test('up turns each role stamp into a json list of roles', async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			foreignKeys: vi.fn().mockResolvedValue([
+				{ column: 'author', constraint_name: 'articles_author_foreign' },
+				{ column: 'made_by_role', constraint_name: 'articles_made_by_role_foreign' },
+			]),
+		} as any);
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 3,
+				collection: 'articles',
+				field: 'made_by_role',
+				special: 'role-created',
+			},
+			{ id: 4, collection: 'articles', field: 'title', special: 'cast-csv' },
+			{
+				id: 5,
+				collection: 'articles',
+				field: 'changed_by_role',
+				special: 'cast-json,role-updated',
+			},
+		]);
+
+		await up(db);
+
+		expect(tracker.history.all.map(({ sql, bindings }) => ({ sql, bindings })))
+			.toEqual([
+				{
+					sql: 'select "id", "collection", "field", "special" from'
+						+ ' "directus_fields" where "special" is not null order by "id" asc',
+					bindings: [],
+				},
+				{
+					sql: 'alter table "articles" drop constraint'
+						+ ' "articles_made_by_role_foreign"',
+					bindings: [],
+				},
+				{
+					sql: 'alter table "articles" alter column "made_by_role" type json'
+						+ ' using case when "made_by_role" is null then null else'
+						+ ' json_build_array("made_by_role") end',
+					bindings: [],
+				},
+				{
+					sql: 'delete from "directus_relations" where "many_collection" = $1'
+						+ ' and "many_field" = $2',
+					bindings: ['articles', 'made_by_role'],
+				},
+				{
+					sql: 'update "directus_fields" set "special" = $1, "interface" = $2,'
+						+ ' "options" = $3, "display" = $4, "display_options" = $5'
+						+ ' where "id" = $6',
+					bindings: [
+						'roles-created,cast-json',
+						'tags',
+						null,
+						'labels',
+						null,
+						3,
+					],
+				},
+				{
+					sql: 'alter table "articles" alter column "changed_by_role" type json'
+						+ ' using case when "changed_by_role" is null then null else'
+						+ ' json_build_array("changed_by_role") end',
+					bindings: [],
+				},
+				{
+					sql: 'delete from "directus_relations" where "many_collection" = $1'
+						+ ' and "many_field" = $2',
+					bindings: ['articles', 'changed_by_role'],
+				},
+				{
+					sql: 'update "directus_fields" set "special" = $1, "interface" = $2,'
+						+ ' "options" = $3, "display" = $4, "display_options" = $5'
+						+ ' where "id" = $6',
+					bindings: [
+						'cast-json,roles-updated',
+						'tags',
+						null,
+						'labels',
+						null,
+						5,
+					],
+				},
+			]);
+
+		expect(logger.info).toHaveBeenCalledWith(
+			'Turned the role stamp fields "articles"."made_by_role",'
+			+ ' "articles"."changed_by_role" into json lists of member roles,'
+			+ ' dropping their relation to "directus_roles"',
+		);
+	});
+
+	test('up changes nothing without a role stamp field', async () => {
+		tracker.on.select('directus_fields').response([
+			{
+				id: 4,
+				collection: 'articles',
+				field: 'title',
+				special: 'roles-created',
+			},
+		]);
+
+		await up(db);
+
+		expect(tracker.history.all).toHaveLength(1);
+		expect(createInspector).not.toHaveBeenCalled();
+		expect(logger.info).not.toHaveBeenCalled();
+	});
+
+	test('up refuses a database other than postgres', async () => {
+		dialect.client = 'sqlite';
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 3,
+				collection: 'articles',
+				field: 'made_by_role',
+				special: 'role-created',
+			},
+			{
+				id: 5,
+				collection: 'notes',
+				field: 'changed_by_role',
+				special: 'role-updated',
+			},
+		]);
+
+		await expect(up(db)).rejects.toEqual(new Error(
+			'The role stamp fields "articles"."made_by_role",'
+			+ ' "notes"."changed_by_role" can only be converted on postgres,'
+			+ ' not on "sqlite"',
+		));
+
+		expect(tracker.history.all).toHaveLength(1);
+	});
+
+	test('down turns each list of one role back into its uuid', async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			primary: vi.fn().mockResolvedValue('id'),
+		} as any);
+
+		tracker.on.select('articles').response([]);
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 3,
+				collection: 'articles',
+				field: 'made_by_role',
+				special: 'roles-created,cast-json',
+			},
+		]);
+
+		await down(db);
+
+		expect(tracker.history.all.map(({ sql, bindings }) => ({ sql, bindings })))
+			.toEqual([
+				{
+					sql: 'select "id", "collection", "field", "special" from'
+						+ ' "directus_fields" where "special" is not null order by "id" asc',
+					bindings: [],
+				},
+				{
+					sql: 'select "id" from "articles" where'
+						+ ' json_array_length("made_by_role") > 1 order by "id" asc',
+					bindings: [],
+				},
+				{
+					sql: 'alter table "articles" alter column "made_by_role" type uuid'
+						+ ' using ("made_by_role" ->> 0)::uuid',
+					bindings: [],
+				},
+				{
+					sql: 'alter table "articles" add constraint'
+						+ ' "articles_made_by_role_foreign" foreign key ("made_by_role")'
+						+ ' references "directus_roles" ("id") on delete SET NULL',
+					bindings: [],
+				},
+				{
+					sql: 'insert into "directus_relations" ("many_collection",'
+						+ ' "many_field", "one_collection") values ($1, $2, $3)',
+					bindings: ['articles', 'made_by_role', 'directus_roles'],
+				},
+				{
+					sql: 'update "directus_fields" set "special" = $1, "interface" = $2,'
+						+ ' "options" = $3, "display" = $4, "display_options" = $5'
+						+ ' where "id" = $6',
+					bindings: [
+						'role-created',
+						'select-dropdown-m2o',
+						null,
+						'related-values',
+						null,
+						3,
+					],
+				},
+			]);
+
+		expect(logger.info).toHaveBeenCalledWith(
+			'Turned the role stamp fields "articles"."made_by_role" back into one'
+			+ ' role uuid related to "directus_roles"',
+		);
+	});
+
+	test('down refuses stamps listing several roles, changing nothing', async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			primary: vi.fn().mockImplementation(async (collection: string) => {
+				return collection === 'articles'
+					? 'id'
+					: 'code';
+			}),
+		} as any);
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 3,
+				collection: 'articles',
+				field: 'made_by_role',
+				special: 'roles-created,cast-json',
+			},
+			{
+				id: 4,
+				collection: 'articles',
+				field: 'changed_by_role',
+				special: 'roles-updated,cast-json',
+			},
+			{
+				id: 5,
+				collection: 'notes',
+				field: 'changed_by_role',
+				special: 'cast-json,roles-updated',
+			},
+		]);
+
+		tracker.on.select(/json_array_length\("made_by_role"\)/)
+			.response([{ id: 1 }, { id: 7 }]);
+
+		tracker.on.select(/from "articles" where json_array_length\("changed/)
+			.response([]);
+
+		tracker.on.select('notes').response([{ code: 'n-1' }]);
+
+		await expect(down(db)).rejects.toEqual(new Error(
+			'Cannot roll back the multi-role migration: role stamps list several'
+			+ ' roles in "articles"."made_by_role" rows 1, 7 and'
+			+ ' "notes"."changed_by_role" rows "n-1"; back up and keep one role per'
+			+ ' stamp first',
+		));
+
+		expect(tracker.history.all.map(({ method }) => method)).toEqual([
+			'select',
+			'select',
+			'select',
+			'select',
+		]);
+	});
+
+	test('down refuses a stamp whose table has no primary key', async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			primary: vi.fn().mockResolvedValue(null),
+		} as any);
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 3,
+				collection: 'articles',
+				field: 'made_by_role',
+				special: 'roles-created,cast-json',
+			},
+		]);
+
+		await expect(down(db)).rejects.toEqual(new Error(
+			'Cannot roll back the role stamp "articles"."made_by_role": its table'
+			+ ' has no primary key to name the rows listing several roles',
+		));
+
+		expect(tracker.history.all).toHaveLength(1);
+	});
+
+	test('down changes nothing without a role list field', async () => {
+		tracker.on.select('directus_fields').response([
+			{
+				id: 3,
+				collection: 'articles',
+				field: 'made_by_role',
+				special: 'role-created',
+			},
+		]);
+
+		await down(db);
+
+		expect(tracker.history.all).toHaveLength(1);
+		expect(logger.info).not.toHaveBeenCalled();
+	});
+
+	test('down refuses a database other than postgres', async () => {
+		dialect.client = 'cockroachdb';
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 3,
+				collection: 'articles',
+				field: 'made_by_role',
+				special: 'roles-updated',
+			},
+		]);
+
+		await expect(down(db)).rejects.toEqual(new Error(
+			'The role stamp fields "articles"."made_by_role" can only be converted'
+			+ ' on postgres, not on "cockroachdb"',
+		));
+	});
+});

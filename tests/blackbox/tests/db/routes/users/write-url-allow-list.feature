@@ -24,25 +24,28 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |   id: <invitee-role>  |           |
       |   name: invitee-<run> |           |
     Then these requests get these responses:
-      | request                                  | response                   |
-      | method: POST                             | code: 204                  |+
-      | path: /users/invite                      |                            |
-      | payload:                                 |                            |
-      |   email: allowed-<run>@example.com       |                            |
-      |   role: <invitee-role>                   |                            |
-      |   invite_url: >-                         |                            |
-      |     https://allowed.test/accept?via=mail |                            |
-      | method: GET                              | code: 200                  |+
-      | path: /users                             | body:                      |
-      | query:                                   |   data:                    |
-      |   fields: status,role                    |     - status: invited      |
-      |   filter[email][_eq]: >-                 |       role: <invitee-role> |
-      |     allowed-<run>@example.com            |                            |
+      | request                                  | response                       |
+      | method: POST                             | code: 204                      |+
+      | path: /users/invite                      |                                |
+      | payload:                                 |                                |
+      |   email: allowed-<run>@example.com       |                                |
+      |   roles:                                 |                                |
+      |     - <invitee-role>                     |                                |
+      |   invite_url: >-                         |                                |
+      |     https://allowed.test/accept?via=mail |                                |
+      | method: GET                              | code: 200                      |+
+      | path: /users                             | body:                          |
+      | query:                                   |   data:                        |
+      |   fields: status,roles.role              |     - status: invited          |
+      |   filter[email][_eq]: >-                 |       roles:                   |
+      |     allowed-<run>@example.com            |         - role: <invitee-role> |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_users     | 3      | 1      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_invites      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 0      | 1      | 0      | 0      |
+      | 1       | directus_users        | 3      | 1      | 0      | 0      |
 
   Scenario: an invited user invited again to the same role stays as they were
     Given these requests are sent:
@@ -56,31 +59,35 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       | path: /users/invite              |           |
       | payload:                         |           |
       |   email: again-<run>@example.com |           |
-      |   role: <same-role>              |           |
+      |   roles:                         |           |
+      |     - <same-role>                |           |
     Then these requests get these responses:
-      | request                          | response                |
-      | method: POST                     | code: 204               |+
-      | path: /users/invite              |                         |
-      | payload:                         |                         |
-      |   email: again-<run>@example.com |                         |
-      |   role: <same-role>              |                         |
-      | method: POST                     | code: 204               |+
-      | path: /users/invite              |                         |
-      | payload:                         |                         |
-      |   email: again-<run>@example.com |                         |
-      |   role: <same-role>              |                         |
-      |   invite_url: >-                 |                         |
-      |     https://allowed.test/accept  |                         |
-      | method: GET                      | code: 200               |+
-      | path: /users                     | body:                   |
-      | query:                           |   data:                 |
-      |   fields: status,role            |     - status: invited   |
-      |   filter[email][_eq]: >-         |       role: <same-role> |
-      |     again-<run>@example.com      |                         |
+      | request                          | response                    |
+      | method: POST                     | code: 204                   |+
+      | path: /users/invite              |                             |
+      | payload:                         |                             |
+      |   email: again-<run>@example.com |                             |
+      |   roles:                         |                             |
+      |     - <same-role>                |                             |
+      | method: POST                     | code: 204                   |+
+      | path: /users/invite              |                             |
+      | payload:                         |                             |
+      |   email: again-<run>@example.com |                             |
+      |   roles:                         |                             |
+      |     - <same-role>                |                             |
+      |   invite_url: >-                 |                             |
+      |     https://allowed.test/accept  |                             |
+      | method: GET                      | code: 200                   |+
+      | path: /users                     | body:                       |
+      | query:                           |   data:                     |
+      |   fields: status,roles.role      |     - status: invited       |
+      |   filter[email][_eq]: >-         |       roles:                |
+      |     again-<run>@example.com      |         - role: <same-role> |
     And on postgres the requests ran these statements:
-      | request | table          | select | insert | update | delete |
-      | 1       | directus_users | 2      | 0      | 0      | 0      |
-      | 2       | directus_users | 2      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_invites      | 1      | 0      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 2      | 0      | 0      | 0      |
 
   Scenario: an invitation of an active user leaves the user as they were
     Given these requests are sent:
@@ -99,20 +106,22 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       | path: /users                      |           |
       | payload:                          |           |
       |   email: active-<run>@example.com |           |
-      |   role: <kept-role>               |           |
+      |   roles:                          |           |
+      |     - role: <kept-role>           |           |
     Then these requests get these responses:
-      | request                           | response                |
-      | method: POST                      | code: 204               |+
-      | path: /users/invite               |                         |
-      | payload:                          |                         |
-      |   email: active-<run>@example.com |                         |
-      |   role: <offered-role>            |                         |
-      | method: GET                       | code: 200               |+
-      | path: /users                      | body:                   |
-      | query:                            |   data:                 |
-      |   fields: status,role             |     - status: active    |
-      |   filter[email][_eq]: >-          |       role: <kept-role> |
-      |     active-<run>@example.com      |                         |
+      | request                           | response                    |
+      | method: POST                      | code: 204                   |+
+      | path: /users/invite               |                             |
+      | payload:                          |                             |
+      |   email: active-<run>@example.com |                             |
+      |   roles:                          |                             |
+      |     - <offered-role>              |                             |
+      | method: GET                       | code: 200                   |+
+      | path: /users                      | body:                       |
+      | query:                            |   data:                     |
+      |   fields: status,roles.role       |     - status: active        |
+      |   filter[email][_eq]: >-          |       roles:                |
+      |     active-<run>@example.com      |         - role: <kept-role> |
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
       | 1       | directus_users | 2      | 0      | 0      | 0      |
@@ -128,37 +137,39 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |   public_registration_role: null          |           |
       |   public_registration_email_filter: null  |           |
     Then these requests get these responses:
-      | request                           | response             |
-      | method: POST                      | code: 204            |+
-      | path: /users/register             |                      |
-      | headers:                          |                      |
-      |   X-Forwarded-For: 198.51.100.41  |                      |
-      | payload:                          |                      |
-      |   email: direct-<run>@example.com |                      |
-      |   password: registered-password   |                      |
-      |   first_name: direct-<run>        |                      |
-      | method: GET                       | code: 200            |+
-      | path: /users                      | body:                |
-      | query:                            |   data:              |
-      |   fields: status,role,first_name  |     - status: active |
-      |   filter[email][_eq]: >-          |       role: null     |
-      |     direct-<run>@example.com      |       first_name: >- |
-      |                                   |         direct-<run> |
-      | method: POST                      | code: 200            |+
-      | path: /auth/login                 |                      |
-      | payload:                          |                      |
-      |   email: direct-<run>@example.com |                      |
-      |   password: registered-password   |                      |
+      | request                                | response             |
+      | method: POST                           | code: 204            |+
+      | path: /users/register                  |                      |
+      | headers:                               |                      |
+      |   X-Forwarded-For: 198.51.100.41       |                      |
+      | payload:                               |                      |
+      |   email: direct-<run>@example.com      |                      |
+      |   password: registered-password        |                      |
+      |   first_name: direct-<run>             |                      |
+      | method: GET                            | code: 200            |+
+      | path: /users                           | body:                |
+      | query:                                 |   data:              |
+      |   fields: status,roles.role,first_name |     - status: active |
+      |   filter[email][_eq]: >-               |       roles: []      |
+      |     direct-<run>@example.com           |       first_name: >- |
+      |                                        |         direct-<run> |
+      | method: POST                           | code: 200            |+
+      | path: /auth/login                      |                      |
+      | payload:                               |                      |
+      |   email: direct-<run>@example.com      |                      |
+      |   password: registered-password        |                      |
     And on postgres the requests ran these statements:
-      | request | table             | select | insert | update | delete |
-      | 1       | directus_access   | 2      | 0      | 0      | 0      |
-      | 1       | directus_settings | 2      | 0      | 0      | 0      |
-      | 1       | directus_users    | 3      | 1      | 0      | 0      |
-      | 3       | directus_access   | 2      | 0      | 0      | 0      |
-      | 3       | directus_activity | 0      | 1      | 0      | 0      |
-      | 3       | directus_sessions | 0      | 1      | 0      | 1      |
-      | 3       | directus_settings | 1      | 0      | 0      | 0      |
-      | 3       | directus_users    | 3      | 0      | 1      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 2      | 0      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_settings     | 2      | 0      | 0      | 0      |
+      | 1       | directus_users        | 3      | 1      | 0      | 0      |
+      | 3       | directus_access       | 2      | 0      | 0      | 0      |
+      | 3       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 3       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 3       | directus_sessions     | 0      | 1      | 0      | 1      |
+      | 3       | directus_settings     | 1      | 0      | 0      | 0      |
+      | 3       | directus_users        | 3      | 0      | 1      | 0      |
 
   Scenario: a registration to an allowed verification URL waits for it
     Given these requests are sent:
@@ -188,10 +199,11 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |   filter[email][_eq]: >-            |                          |
       |     verified-<run>@example.com      |                          |
     And on postgres the requests ran these statements:
-      | request | table             | select | insert | update | delete |
-      | 1       | directus_access   | 2      | 0      | 0      | 0      |
-      | 1       | directus_settings | 3      | 0      | 0      | 0      |
-      | 1       | directus_users    | 3      | 1      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 2      | 0      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_settings     | 3      | 0      | 0      | 0      |
+      | 1       | directus_users        | 3      | 1      | 0      | 0      |
 
   Scenario: a reset requested to an allowed URL is accepted
     Given these requests are sent:

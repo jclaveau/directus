@@ -4,9 +4,10 @@ Feature: A role an extension writes in its own transaction flushes once it commi
     on, in memory, and `CACHE_AUTO_PURGE` off: only a write that changes
     rights, such as a user's role, flushes it.
   - `POST /untracked-trx-write/move-user` opens a transaction with
-    the extension's own `database.transaction()`, writes the user's role
-    through `UsersService`, then sends the `read` as that user
-    before it commits, and answers with what that read got.
+    the extension's own `database.transaction()`, replaces the user's
+    memberships with one in `role` (#746) through `UsersService`, then sends
+    the `read` as that user before it commits, and answers with what that
+    read got.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own. A response cell states the keys it checks.
@@ -56,7 +57,8 @@ Feature: A role an extension writes in its own transaction flushes once it commi
       | payload:                                |           |
       |   id: <mover>                           |           |
       |   email: mover-<run>@example.com        |           |
-      |   role: <reader-role>                   |           |
+      |   roles:                                |           |
+      |     - role: <reader-role>               |           |
       |   token: mover-<run>                    |           |
     Then these requests get these responses:
       | request                                | response                        |
@@ -87,9 +89,10 @@ Feature: A role an extension writes in its own transaction flushes once it commi
       |                                        |         or it does not exist.   |
       |                                        |         Queried in root.        |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 2       | directus_access    | 2      | 0      | 0      | 0      |
-      | 2       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 2       | directus_roles     | 1      | 0      | 0      | 0      |
-      | 2       | directus_users     | 3      | 0      | 1      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 2       | directus_access       | 2      | 0      | 0      | 0      |
+      | 2       | directus_activity     | 0      | 3      | 0      | 0      |
+      | 2       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 2       | directus_role_members | 3      | 1      | 0      | 1      |
+      | 2       | directus_roles        | 1      | 0      | 0      | 0      |
+      | 2       | directus_users        | 4      | 0      | 0      | 0      |

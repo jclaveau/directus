@@ -5,7 +5,7 @@ import { verifyAccessJWT, verifyJWT } from './jwt.js';
 import { TokenExpiredError, InvalidTokenError } from '@directus/errors';
 import { ServiceUnavailableError } from '@directus/errors';
 
-const payload: DirectusTokenPayload = { role: null, app_access: false, admin_access: false };
+const payload: DirectusTokenPayload = { app_access: false, admin_access: false };
 const secret = 'test-secret';
 const options = { issuer: 'directus' };
 
@@ -15,7 +15,6 @@ test('Returns the payload of a correctly signed token', () => {
 
 	expect(result['admin_access']).toEqual(payload.admin_access);
 	expect(result['app_access']).toEqual(payload.app_access);
-	expect(result['role']).toEqual(payload.role);
 	expect(result['iss']).toBe('directus');
 	expect(result['iat']).toBeTypeOf('number');
 });
@@ -47,9 +46,8 @@ test(`Throws ServiceUnavailableError for unexpected error from jsonwebtoken`, ()
 	mock.mockRestore();
 });
 
-const RequiredEntries: Array<keyof DirectusTokenPayload> = ['role', 'app_access', 'admin_access'];
-
-RequiredEntries.forEach((entry) => {
+(['app_access', 'admin_access'] as Array<keyof DirectusTokenPayload>)
+	.forEach((entry) => {
 	test(`Throws InvalidTokenError if ${entry} not defined`, () => {
 		const { [entry]: _entryName, ...rest } = payload;
 		const token = jwt.sign(rest, secret, options);

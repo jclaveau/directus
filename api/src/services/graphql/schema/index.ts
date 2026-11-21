@@ -81,7 +81,8 @@ async function buildSchema(
 	type: 'schema' | 'sdl',
 ): Promise<GraphQLSchema | string> {
 	const { scope, accountability } = builder;
-	const key = `${scope}_${type}_${accountability?.role}_${accountability?.user}`;
+	const memberRoles = accountability?.memberRoles.join(',');
+	const key = `${scope}_${type}_${memberRoles}_${accountability?.user}`;
 
 	const cachedSchema = cache.get(key);
 

@@ -19,7 +19,12 @@ const { t } = useI18n();
 
 const emails = ref<string>('');
 const roles = ref<Record<string, any>[]>([]);
-const roleSelected = ref<string | undefined>(props.role);
+const rolesSelected = ref<string[]>([]);
+
+if (props.role) {
+	rolesSelected.value = [props.role];
+}
+
 const loading = ref(false);
 
 const uniqueValidationErrors = ref([]);
@@ -44,7 +49,7 @@ async function inviteUsers() {
 
 		await api.post('/users/invite', {
 			email: emailsParsed,
-			role: roleSelected.value,
+			roles: rolesSelected.value,
 		});
 
 		emails.value = '';
@@ -79,8 +84,8 @@ async function loadRoles() {
 		value: role.id,
 	}));
 
-	if (roles.value.length > 0 && !roleSelected.value) {
-		roleSelected.value = roles.value[0]?.value;
+	if (roles.value.length > 0 && rolesSelected.value.length === 0) {
+		rolesSelected.value = [roles.value[0]!.value];
 	}
 }
 </script>
@@ -102,8 +107,8 @@ async function loadRoles() {
 						<v-textarea v-model="emails" :nullable="false" placeholder="admin@example.com, user@example.com..." />
 					</div>
 					<div v-if="!role" class="field">
-						<div class="type-label">{{ t('role') }}</div>
-						<v-select v-model="roleSelected" :items="roles" />
+						<div class="type-label">{{ t('roles') }}</div>
+						<v-select v-model="rolesSelected" :items="roles" multiple />
 					</div>
 					<v-notice v-if="uniqueValidationErrors.length > 0" class="field" type="danger">
 						<div v-for="(err, i) in uniqueValidationErrors" :key="i">
@@ -120,7 +125,11 @@ async function loadRoles() {
 
 			<v-card-actions>
 				<v-button secondary @click="$emit('update:modelValue', false)">{{ t('cancel') }}</v-button>
-				<v-button :disabled="emails.length === 0" :loading="loading" @click="inviteUsers">
+				<v-button
+					:disabled="emails.length === 0 || rolesSelected.length === 0"
+					:loading="loading"
+					@click="inviteUsers"
+				>
 					{{ t('invite') }}
 				</v-button>
 			</v-card-actions>

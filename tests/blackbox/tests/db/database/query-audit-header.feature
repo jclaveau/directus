@@ -63,8 +63,7 @@ Feature: A request reports the SQL it ran, one entry per transaction
       |   x-query-audit: no-timings         |     maxPoolConnections: 1             |
       |                                     |     statements:                       |
       |                                     |     - stmt: >-                        |
-      |                                     |         select "directus_users"."id", |
-      |                                     |         "directus_users"."role"       |
+      |                                     |         select "directus_users"."id"  |
       |                                     |         from "directus_users"         |
       |                                     |         where                         |
       |                                     |         "directus_users"."token" = $1 |
@@ -112,8 +111,7 @@ Feature: A request reports the SQL it ran, one entry per transaction
       |   x-query-audit: bindings; no-timings |     maxPoolConnections: 1             |
       |                                       |     statements:                       |
       |                                       |     - stmt: >-                        |
-      |                                       |         select "directus_users"."id", |
-      |                                       |         "directus_users"."role"       |
+      |                                       |         select "directus_users"."id"  |
       |                                       |         from "directus_users"         |
       |                                       |         where                         |
       |                                       |         "directus_users"."token" = $1 |
@@ -142,8 +140,7 @@ Feature: A request reports the SQL it ran, one entry per transaction
       |   x-query-audit: full; no-timings   |     maxPoolConnections: 1             |
       |                                     |     statements:                       |
       |                                     |     - stmt: >-                        |
-      |                                     |         select "directus_users"."id", |
-      |                                     |         "directus_users"."role"       |
+      |                                     |         select "directus_users"."id"  |
       |                                     |         from "directus_users"         |
       |                                     |         where                         |
       |                                     |         "directus_users"."token" = $1 |
@@ -238,8 +235,7 @@ Feature: A request reports the SQL it ran, one entry per transaction
       |   x-query-audit: no-timings     |     maxPoolConnections: 1               |
       |                                 |     statements:                         |
       |                                 |     - stmt: >-                          |
-      |                                 |         select "directus_users"."id",   |
-      |                                 |         "directus_users"."role"         |
+      |                                 |         select "directus_users"."id"    |
       |                                 |         from "directus_users"           |
       |                                 |         where                           |
       |                                 |         "directus_users"."token" = $1   |
@@ -258,8 +254,7 @@ Feature: A request reports the SQL it ran, one entry per transaction
       |   x-query-audit: bindings; no-timings |     maxPoolConnections: 1             |
       |                                       |     statements:                       |
       |                                       |     - stmt: >-                        |
-      |                                       |         select "directus_users"."id", |
-      |                                       |         "directus_users"."role"       |
+      |                                       |         select "directus_users"."id"  |
       |                                       |         from "directus_users"         |
       |                                       |         where                         |
       |                                       |         "directus_users"."token" = $1 |

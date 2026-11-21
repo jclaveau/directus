@@ -26,6 +26,9 @@ import { parse as wktToGeoJSON } from 'wellknown';
 import type { Helpers } from '../database/helpers/index.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase from '../database/index.js';
+import {
+	fetchAllowingMemberRoles,
+} from '../permissions/lib/fetch-allowing-member-roles.js';
 import { format, isValid, parseISO } from '../utils/date-fns-used.js';
 import { generateHash } from '../utils/generate-hash.js';
 import { isMissingPrimaryKey, isPrimaryKey } from '../utils/is-primary-key.js';
@@ -66,8 +69,32 @@ type Transformers = {
 		accountability: Accountability | null;
 		specials: string[];
 		helpers: Helpers;
+		// the rows an update writes
+		primaryKeys?: PrimaryKey[];
+		// the fields the write sets
+		writtenFields?: string[];
 	}) => Promise<any>;
 };
+
+export type PayloadServiceOptions = AbstractServiceOptions & {
+	// the `roles-updated` stamp of rows already worked out, by
+	// `memberRoleStampKey`
+	memberRoleStamps?: Map<string, string[]>;
+};
+
+/**
+ * The key a `roles-updated` stamp is found by: the rows, as strings, and the
+ * fields the update sets, each sorted.
+ */
+export function memberRoleStampKey(
+	primaryKeys: PrimaryKey[],
+	writtenFields: string[],
+) {
+	return JSON.stringify([
+		primaryKeys.map((key) => String(key)).sort(),
+		[...writtenFields].sort(),
+	]);
+}
 
 /**
  * Process a given payload for a collection to ensure the special fields (hash, uuid, date etc) are
@@ -80,14 +107,16 @@ export class PayloadService {
 	collection: string;
 	schema: SchemaOverview;
 	nested: string[];
+	memberRoleStamps: Map<string, string[]>;
 
-	constructor(collection: string, options: AbstractServiceOptions) {
+	constructor(collection: string, options: PayloadServiceOptions) {
 		this.accountability = options.accountability || null;
 		this.knex = options.knex || getDatabase();
 		this.helpers = getHelpers(this.knex);
 		this.collection = collection;
 		this.schema = options.schema;
 		this.nested = options.nested ?? [];
+		this.memberRoleStamps = options.memberRoleStamps ?? new Map();
 
 		return this;
 	}
@@ -147,13 +176,42 @@ export class PayloadService {
 			if (action === 'update') return accountability?.user || null;
 			return value;
 		},
-		async 'role-created'({ action, value, accountability }) {
-			if (action === 'create') return accountability?.role || null;
-			return value;
+		'roles-created': async ({
+			action,
+			value,
+			accountability,
+			writtenFields = [],
+		}) => {
+			if (action !== 'create') {
+				return value;
+			}
+
+			return await this.allowingMemberRoles(
+				'create',
+				accountability,
+				[],
+				writtenFields,
+			);
 		},
-		async 'role-updated'({ action, value, accountability }) {
-			if (action === 'update') return accountability?.role || null;
-			return value;
+		'roles-updated': async ({
+			action,
+			value,
+			accountability,
+			primaryKeys = [],
+			writtenFields = [],
+		}) => {
+			if (action !== 'update') {
+				return value;
+			}
+
+			return this.memberRoleStamps.get(
+				memberRoleStampKey(primaryKeys, writtenFields),
+			) ?? await this.allowingMemberRoles(
+				'update',
+				accountability,
+				primaryKeys,
+				writtenFields,
+			);
 		},
 		async 'date-created'({ action, value, helpers }) {
 			if (action === 'create') return new Date(helpers.date.writeTimestamp(new Date().toISOString()));
@@ -189,6 +247,7 @@ export class PayloadService {
 		payloads: Partial<Item>[],
 		aliasMap: Record<string, string>,
 		aggregate: Aggregate,
+		primaryKeys?: PrimaryKey[],
 	): Promise<Partial<Item>[]>;
 
 	processValues(
@@ -196,6 +255,7 @@ export class PayloadService {
 		payload: Partial<Item>,
 		aliasMap: Record<string, string>,
 		aggregate: Aggregate,
+		primaryKeys?: PrimaryKey[],
 	): Promise<Partial<Item>>;
 
 	async processValues(
@@ -203,6 +263,7 @@ export class PayloadService {
 		payload: Partial<Item> | Partial<Item>[],
 		aliasMap: Record<string, string> = {},
 		aggregate: Aggregate = {},
+		primaryKeys: PrimaryKey[] = [],
 	): Promise<Partial<Item> | Partial<Item>[]> {
 		const processedPayload = toArray(payload);
 
@@ -234,7 +295,15 @@ export class PayloadService {
 
 		for (const record of processedPayload) {
 			for (const [name, field] of specialFields) {
-				const newValue = await this.processField(field, record, action, this.accountability);
+				const newValue = await this.processField(
+					field,
+					record,
+					action,
+					this.accountability,
+					primaryKeys,
+					fieldsInPayload,
+				);
+
 				if (newValue !== undefined) record[name] = newValue;
 			}
 		}
@@ -296,6 +365,8 @@ export class PayloadService {
 		payload: Partial<Item>,
 		action: PayloadAction,
 		accountability: Accountability | null,
+		primaryKeys: PrimaryKey[] = [],
+		writtenFields: string[] = [],
 	): Promise<any> {
 		if (!field.special) return payload[field.field];
 		const fieldSpecials = field.special ? toArray(field.special) : [];
@@ -311,11 +382,39 @@ export class PayloadService {
 					accountability,
 					specials: fieldSpecials,
 					helpers: this.helpers,
+					primaryKeys,
+					writtenFields,
 				});
 			}
 		}
 
 		return value;
+	}
+
+	/**
+	 * What `roles-created` and `roles-updated` stamp: null without a user, like
+	 * `user-created`, else the member roles whose policies allowed the write.
+	 */
+	async allowingMemberRoles(
+		action: 'create' | 'update',
+		accountability: Accountability | null,
+		primaryKeys: PrimaryKey[],
+		writtenFields: string[],
+	): Promise<string[] | null> {
+		if (!accountability?.user) {
+			return null;
+		}
+
+		return await fetchAllowingMemberRoles(
+			{
+				accountability,
+				action,
+				collection: this.collection,
+				primaryKeys,
+				fields: writtenFields,
+			},
+			{ knex: this.knex, schema: this.schema },
+		);
 	}
 
 	/**
@@ -1086,6 +1185,17 @@ export class PayloadService {
 				nested: [...this.nested, oneField],
 			});
 
+			// Only a new user's own memberships are new to every cache: a new
+			// role's memberships give it to users that exist already.
+			const isNewUserMemberships = opts?.createsNewUserMemberships === true
+				&& this.collection === 'directus_users'
+				&& relation.collection === 'directus_role_members';
+
+			const relationMutationOptions: MutationOptions = {
+				...nestedMutationOptions,
+				createsNewUserMemberships: isNewUserMemberships || undefined,
+			};
+
 			for (const parentRun of parentRuns) {
 				if (parentRun.listsChildren) {
 					await this.saveO2MLists(
@@ -1095,7 +1205,7 @@ export class PayloadService {
 						parentRun.parentIndexes.map((parentIndex) => {
 							return revisionsByParent[parentIndex]!;
 						}),
-						nestedMutationOptions,
+						relationMutationOptions,
 					);
 
 					continue;
@@ -1152,6 +1262,8 @@ export class PayloadService {
 						mutationTracker: opts?.mutationTracker,
 						mutationBatching: opts?.mutationBatching,
 						nestedUpdates: opts?.nestedUpdates,
+						createsNewUserMemberships:
+							relationMutationOptions.createsNewUserMemberships,
 					});
 				}
 

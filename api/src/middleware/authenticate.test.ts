@@ -5,7 +5,7 @@ import type { Knex } from 'knex';
 import { afterEach, expect, test, vi } from 'vitest';
 import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
-import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+import { fetchUserRoles } from '../permissions/lib/fetch-member-roles.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
 import '../types/express.d.ts';
@@ -41,7 +41,7 @@ vi.mock('@directus/env', () => ({
 	}),
 }));
 
-vi.mock('../permissions/lib/fetch-roles-tree.js');
+vi.mock('../permissions/lib/fetch-member-roles.js');
 vi.mock('../permissions/modules/fetch-global-access/fetch-global-access.js');
 
 afterEach(() => {
@@ -106,7 +106,6 @@ test('Sets accountability to payload contents if valid token is passed', async (
 	const token = jwt.sign(
 		{
 			id: userID,
-			role: roleID,
 			app_access: appAccess,
 			admin_access: adminAccess,
 			share,
@@ -126,7 +125,10 @@ test('Sets accountability to payload contents if valid token is passed', async (
 	const res = {} as Response;
 	const next = vi.fn();
 
-	vi.mocked(fetchRolesTree).mockResolvedValue([roleID]);
+	vi.mocked(fetchUserRoles).mockResolvedValue({
+		memberRoles: [roleID],
+		roles: [roleID],
+	});
 
 	vi.mocked(fetchGlobalAccess).mockResolvedValue({
 		app: appAccess,
@@ -138,7 +140,7 @@ test('Sets accountability to payload contents if valid token is passed', async (
 
 	expect(req.accountability).toEqual({
 		user: userID,
-		role: roleID,
+		memberRoles: [roleID],
 		roles: [roleID],
 		app: appAccess,
 		admin: adminAccess,
@@ -159,7 +161,6 @@ test('Sets accountability to payload contents if valid token is passed', async (
 	req.token = jwt.sign(
 		{
 			id: userID,
-			role: roleID,
 			app_access: 1,
 			admin_access: 0,
 			share,
@@ -172,7 +173,7 @@ test('Sets accountability to payload contents if valid token is passed', async (
 
 	expect(req.accountability).toEqual({
 		user: userID,
-		role: roleID,
+		memberRoles: [roleID],
 		roles: [roleID],
 		app: appAccess,
 		admin: adminAccess,
@@ -224,12 +225,12 @@ test('Sets accountability to user information when static token is used', async 
 	const res = {} as Response;
 	const next = vi.fn();
 
-	const testUser = { id: 'test-id', role: 'test-role', admin_access: true, app_access: false };
+	const testUser = { id: 'test-id', admin_access: true, app_access: false };
 
 	const expectedAccountability = {
 		user: testUser.id,
-		role: testUser.role,
-		roles: [testUser.role],
+		memberRoles: ['test-role'],
+		roles: ['test-role'],
 		app: testUser.app_access,
 		admin: testUser.admin_access,
 		grantedDbConnections: [],
@@ -246,7 +247,10 @@ test('Sets accountability to user information when static token is used', async 
 		first: vi.fn().mockResolvedValue(testUser),
 	} as unknown as Knex);
 
-	vi.mocked(fetchRolesTree).mockResolvedValue([testUser.role]);
+	vi.mocked(fetchUserRoles).mockResolvedValue({
+		memberRoles: ['test-role'],
+		roles: ['test-role'],
+	});
 
 	vi.mocked(fetchGlobalAccess).mockResolvedValue({
 		app: testUser.app_access,

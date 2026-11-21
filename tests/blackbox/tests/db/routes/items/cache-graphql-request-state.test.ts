@@ -128,7 +128,7 @@ describe.each(vendors)('%s', (vendor) => {
 			.send({
 				email: `reader-${token}@request-state.example.com`,
 				token,
-				role: adminRoleId,
+				roles: [{ role: adminRoleId }],
 			})
 			.set('Authorization', auth);
 

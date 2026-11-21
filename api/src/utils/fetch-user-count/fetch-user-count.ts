@@ -1,7 +1,25 @@
 import { toBoolean } from '@directus/utils';
+import type { Knex } from 'knex';
 import { fetchAccessLookup, type FetchAccessLookupOptions } from './fetch-access-lookup.js';
 import { fetchAccessRoles } from './fetch-access-roles.js';
 import { getUserCountQuery } from './get-user-count-query.js';
+
+async function fetchRoleAdminUsers(
+	knex: Knex,
+	{ users, adminRoles }: { users: string[]; adminRoles: string[] },
+): Promise<Set<string>> {
+	if (users.length === 0 || adminRoles.length === 0) {
+		return new Set();
+	}
+
+	const memberships: { user: string }[] = await knex
+		.distinct('user')
+		.from('directus_role_members')
+		.whereIn('user', users)
+		.whereIn('role', adminRoles);
+
+	return new Set(memberships.map(({ user }) => user));
+}
 
 export type FetchUserCountOptions = FetchAccessLookupOptions;
 
@@ -63,7 +81,7 @@ export async function fetchUserCount(options: FetchUserCountOptions): Promise<Us
 		};
 	}
 
-	const appUsers = new Set(
+	const directAppUsers = new Set(
 		accessRows
 			.filter(
 				(row) =>
@@ -71,10 +89,19 @@ export async function fetchUserCount(options: FetchUserCountOptions): Promise<Us
 					toBoolean(row.app_access) &&
 					row.user !== null &&
 					row.user_status === 'active' &&
-					adminUsers.has(row.user) === false &&
-					adminRoles.has(row.user_role as any) === false,
+					adminUsers.has(row.user) === false,
 			)
 			.map((row) => row.user!),
+	);
+
+	// A member of an admin role is counted by the admin query already.
+	const roleAdminUsers = await fetchRoleAdminUsers(options.knex, {
+		users: [...directAppUsers],
+		adminRoles: [...allAdminRoles],
+	});
+
+	const appUsers = new Set(
+		[...directAppUsers].filter((user) => !roleAdminUsers.has(user)),
 	);
 
 	// All users that are granted app rights through a role, but not directly, and that aren't admin users

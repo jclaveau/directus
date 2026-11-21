@@ -295,7 +295,7 @@ describe('Services / Translations', () => {
 			await expect(new TranslationsService({
 				knex: db,
 				schema,
-				accountability: { role: 'editor', admin: false } as Accountability,
+				accountability: { admin: false } as Accountability,
 			}).updateBatch([
 				{ id: 'translation-id-16', key: 'greeting' },
 			])).rejects.toStrictEqual(new ForbiddenError({
@@ -323,7 +323,7 @@ describe('Services / Translations', () => {
 			await expect(new TranslationsService({
 				knex: db,
 				schema,
-				accountability: { role: 'editor', admin: false } as Accountability,
+				accountability: { admin: false } as Accountability,
 			}).updateBatch([
 				{ id: 'translation-id-17', language: 'en-US' },
 			])).rejects.toStrictEqual(new ForbiddenError({
@@ -353,7 +353,7 @@ describe('Services / Translations', () => {
 			await expect(new TranslationsService({
 				knex: knex.default({ client: MockClient }),
 				schema,
-				accountability: { role: 'editor', admin: false } as Accountability,
+				accountability: { admin: false } as Accountability,
 			}).updateBatch([
 				{ id: 'translation-id-18', key: 'greeting', language: 'en-US' },
 			])).resolves.toStrictEqual(['translation-id-18']);
@@ -375,7 +375,7 @@ describe('Services / Translations', () => {
 			await expect(new TranslationsService({
 				knex: db,
 				schema,
-				accountability: { role: 'editor', admin: false } as Accountability,
+				accountability: { admin: false } as Accountability,
 			}).updateBatch([
 				{ id: 'translation-id-19', key: 'greeting' },
 			])).rejects.toStrictEqual(new ForbiddenError({

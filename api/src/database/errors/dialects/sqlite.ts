@@ -20,6 +20,8 @@ export function extractError(
 		return notNullConstraint(error);
 	}
 
+	// TODO(#610): a UNIQUE violation on directus_role_members (user, role,
+	// managed_by) → the 400 postgres.ts gives (role held twice from one manager)
 	if (error.message.includes('SQLITE_CONSTRAINT: UNIQUE')) {
 		const errorParts = error.message.split(' ');
 		const [table, field] = errorParts[errorParts.length - 1]!.split('.');

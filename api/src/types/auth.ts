@@ -13,7 +13,6 @@ export interface User {
 	email: string | null;
 	password: string | null;
 	status: 'active' | 'suspended' | 'invited';
-	role: string | null;
 	provider: string;
 	external_identifier: string | null;
 	auth_data: string | Record<string, unknown> | null;
@@ -31,7 +30,6 @@ export interface Session {
 
 export type DirectusTokenPayload = {
 	id?: string;
-	role: string | null;
 	session?: string;
 	app_access: boolean | number;
 	admin_access: boolean | number;

@@ -1550,7 +1550,6 @@ no_value: Утга байхгүй
 do_nothing: Юу ч хийхгүй
 generate_and_save_uuid: UUID үүсгэж, хадгалах
 save_current_user_id: Одоогийн хэрэглэгчийн ID хадгалах
-save_current_user_role: Одоогийн хэрэглэгчийн үүргийг хадгалах
 save_current_datetime: Одоогийн огноо/цагийг хадгалах
 always_open: Үргэлж нээлттэй
 start_open: Нээлттэй эхлэх

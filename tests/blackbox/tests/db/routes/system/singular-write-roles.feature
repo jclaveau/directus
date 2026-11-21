@@ -26,12 +26,13 @@ Feature: Roles and policies are updated by a query
       |   data:                        |                                  |
       |     description: queried-<run> |                                  |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 1      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_roles     | 4      | 0      | 1      | 0      |
-      | 1       | directus_users     | 2      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 1      | 0      | 0      | 0      |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles        | 4      | 0      | 1      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: a policy matched by a query takes the update
     Given these requests are sent:
@@ -57,11 +58,12 @@ Feature: Roles and policies are updated by a query
       |   data:                        |                                  |
       |     description: queried-<run> |                                  |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 4      | 0      | 0      | 0      |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 1       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 1       | directus_policies    | 3      | 0      | 1      | 0      |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
-      | 1       | directus_roles       | 1      | 0      | 0      | 0      |
-      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 4      | 0      | 0      | 0      |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_permissions  | 1      | 0      | 0      | 0      |
+      | 1       | directus_policies     | 3      | 0      | 1      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles        | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |

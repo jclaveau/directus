@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
 import { useLogger } from '../logger/index.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
+import { announceMembershipsChanged } from '../websocket/memberships-changed.js';
 import {
+	announceMembershipsChangedAfterCommit,
 	clearCachesAfterCommit,
 	flushResponseCacheAfterCommit,
 } from './clear-caches-after-commit.js';
@@ -24,6 +26,10 @@ vi.mock('../cache.js', () => {
 
 vi.mock('../scoped-cache/index.js', () => {
 	return { flushResponseCache: vi.fn() };
+});
+
+vi.mock('../websocket/memberships-changed.js', () => {
+	return { announceMembershipsChanged: vi.fn() };
 });
 
 vi.mock('../logger/index.js', () => {
@@ -173,5 +179,34 @@ describe('flushResponseCacheAfterCommit', () => {
 
 		expect(flushResponseCache).not.toHaveBeenCalled();
 		expect(onResponseCacheFlushDeferred).not.toHaveBeenCalled();
+	});
+});
+
+describe('announceMembershipsChangedAfterCommit', () => {
+	it('refreshes the sockets at once outside a transaction', async () => {
+		await announceMembershipsChangedAfterCommit(
+			knex.default({ client: MockClient }),
+			['user-id-1'],
+		);
+
+		expect(announceMembershipsChanged)
+			.toHaveBeenCalledExactlyOnceWith(['user-id-1']);
+	});
+
+	it('refreshes the sockets once a trx opened elsewhere commits', async () => {
+		const database = knex.default({ client: MockClient });
+
+		createTracker(database);
+
+		await database.transaction(async (trx) => {
+			await announceMembershipsChangedAfterCommit(trx, ['user-id-2']);
+
+			expect(announceMembershipsChanged).not.toHaveBeenCalled();
+		});
+
+		await vi.waitFor(() => {
+			expect(announceMembershipsChanged)
+				.toHaveBeenCalledExactlyOnceWith(['user-id-2']);
+		});
 	});
 });

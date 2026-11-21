@@ -35,7 +35,7 @@ describe('fetchShareInfo', () => {
 			collection: 'articles',
 			item: 'item-id',
 			role: null,
-			user_created: { id: 'user-1', role: 'role-1' },
+			user_created: { id: 'user-1' },
 		};
 
 		const readOne = vi
@@ -47,7 +47,7 @@ describe('fetchShareInfo', () => {
 		expect(info).toEqual(share);
 
 		expect(readOne).toHaveBeenCalledWith('share-1', {
-			fields: ['collection', 'item', 'role', 'user_created.id', 'user_created.role'],
+			fields: ['collection', 'item', 'role', 'user_created.id'],
 		});
 	});
 });

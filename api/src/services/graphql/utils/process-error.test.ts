@@ -20,14 +20,14 @@ describe('GraphQL processError util', () => {
 	});
 
 	test('returns redacted error when authenticated but not an admin', () => {
-		expect(processError({ role: 'd674e22b-f405-48ba-9958-9a7bd16a1aa9' } as Accountability, sampleError)).toEqual(
+		expect(processError({} as Accountability, sampleError)).toEqual(
 			redactedError,
 		);
 	});
 
 	test('returns original error when authenticated and is an admin', () => {
 		expect(
-			processError({ role: 'd674e22b-f405-48ba-9958-9a7bd16a1aa9', admin: true } as Accountability, sampleError),
+			processError({ admin: true } as Accountability, sampleError),
 		).toEqual({
 			message: 'An error message',
 			path: ['test_collection'],

@@ -9,6 +9,13 @@ import { InvalidPayloadError } from '@directus/errors';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import type { Knex } from 'knex';
 import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
+import {
+	changesGrantField,
+	changesManagedBy,
+	groupDataByKey,
+	lowerCaseRowKey,
+	setsManagedBy,
+} from '../utils/managed-rows.js';
 import { ItemsService } from './items.js';
 
 const MANAGED_ACCESS_GRANT_FIELDS = ['role', 'user', 'policy'] as const;
@@ -37,77 +44,6 @@ class ManagedBySetError extends InvalidPayloadError {
 				+ ' not by a request',
 		});
 	}
-}
-
-// A uuid key matches its row whatever its case.
-function lowerCaseAccessKey(accessKey: PrimaryKey): string {
-	return String(accessKey).toLowerCase();
-}
-
-function groupDataByKey(
-	groups: UpdateGroup<Item>[],
-): Map<string, Partial<Item>[]> {
-	const dataByKey = new Map<string, Partial<Item>[]>();
-
-	for (const { keys, data } of groups) {
-		for (const key of keys) {
-			const accessKey = lowerCaseAccessKey(key);
-			const keyData = dataByKey.get(accessKey);
-
-			if (keyData) {
-				keyData.push(data);
-			}
-			else {
-				dataByKey.set(accessKey, [data]);
-			}
-		}
-	}
-
-	return dataByKey;
-}
-
-function lowerCaseKey(relatedKey: unknown): unknown {
-	return typeof relatedKey === 'string'
-		? relatedKey.toLowerCase()
-		: relatedKey;
-}
-
-function setsManagedBy(item: Partial<Item>): boolean {
-	return 'managed_by' in item && item['managed_by'] !== null;
-}
-
-function changesManagedBy(
-	data: Partial<Item>,
-	managedAccess: ManagedAccessRow,
-): boolean {
-	return 'managed_by' in data && data['managed_by'] !== managedAccess.managed_by;
-}
-
-/** A relation may come as its key, or as an object holding it: `{ id, ... }`. */
-function changesGrantField(
-	data: Partial<Item>,
-	managedAccess: ManagedAccessRow,
-): boolean {
-	return MANAGED_ACCESS_GRANT_FIELDS.some((grantField) => {
-		if (!(grantField in data)) {
-			return false;
-		}
-
-		const fieldValue = data[grantField];
-
-		const isRelatedObject = typeof fieldValue === 'object' && fieldValue !== null;
-
-		// `{ id: null }` finds no row, so the payload creates the related item.
-		if (isRelatedObject && fieldValue.id === null) {
-			return true;
-		}
-
-		const relatedKey = isRelatedObject
-			? fieldValue.id
-			: fieldValue;
-
-		return lowerCaseKey(relatedKey) !== lowerCaseKey(managedAccess[grantField]);
-	});
 }
 
 export class AccessService extends ItemsService {
@@ -185,11 +121,15 @@ export class AccessService extends ItemsService {
 		const dataByKey = groupDataByKey(groups);
 
 		for (const managedAccess of managedRows) {
-			const keyData = dataByKey.get(lowerCaseAccessKey(managedAccess.id)) ?? [];
+			const keyData = dataByKey.get(lowerCaseRowKey(managedAccess.id)) ?? [];
 
 			const isRefused = keyData.some((data) => {
 				return changesManagedBy(data, managedAccess)
-					|| changesGrantField(data, managedAccess);
+					|| changesGrantField(
+						data,
+						managedAccess,
+						MANAGED_ACCESS_GRANT_FIELDS,
+					);
 			});
 
 			if (isRefused) {
@@ -198,12 +138,12 @@ export class AccessService extends ItemsService {
 		}
 
 		const managedKeys = new Set(
-			managedRows.map(({ id }) => lowerCaseAccessKey(id)),
+			managedRows.map(({ id }) => lowerCaseRowKey(id)),
 		);
 
 		for (const group of groups.filter(({ data }) => setsManagedBy(data))) {
 			const hasUnmanagedKey = group.keys.some((key) => {
-				return !managedKeys.has(lowerCaseAccessKey(key));
+				return !managedKeys.has(lowerCaseRowKey(key));
 			});
 
 			if (hasUnmanagedKey) {

@@ -16,6 +16,7 @@ import { transactionHoldingActions } from '../utils/transaction-holding-actions.
 import { emitActionEvents, ItemsService } from './items.js';
 import { AccessService } from './access.js';
 import { PresetsService } from './presets.js';
+import { RoleMembersService } from './role-members.js';
 import { UsersService } from './users.js';
 
 const DESCENDANT_PARENT_REASON =
@@ -90,7 +91,8 @@ export class RolesService extends ItemsService {
 			const presetsService = new PresetsService(options);
 			const usersService = new UsersService(options);
 
-			// Delete permissions/presets for this role, suspend all remaining users in role
+			// Delete permissions/presets for this role, suspend the users it leaves
+			// with no role
 
 			await accessService.deleteRoleAccess(
 				keys,
@@ -104,15 +106,40 @@ export class RolesService extends ItemsService {
 				{ ...holdingOpts, bypassLimits: true },
 			);
 
-			await usersService.updateByQuery(
+			const strandedUsers: { user: string }[] = await trx
+				.distinct('user')
+				.from('directus_role_members as deleted_membership')
+				.whereIn('role', keys)
+				.whereNotExists(function () {
+					this.select(trx.raw('1'))
+						.from('directus_role_members as kept_membership')
+						.whereRaw('?? = ??', [
+							'kept_membership.user',
+							'deleted_membership.user',
+						])
+						.whereNotIn('kept_membership.role', keys);
+				});
+
+			if (strandedUsers.length > 0) {
+				await usersService.updateMany(
+					strandedUsers.map(({ user }) => user),
+					{ status: 'suspended' },
+					{ ...holdingOpts, bypassLimits: true },
+				);
+			}
+
+			// Through the service, not the cascade, so the membership hooks run.
+			await new RoleMembersService(options).deleteByQuery(
 				{
 					filter: { role: { _in: keys } },
+					// Past QUERY_LIMIT_DEFAULT the cascade would drop the rest unseen.
+					limit: -1,
 				},
 				{
-					status: 'suspended',
-					role: null,
+					...holdingOpts,
+					bypassLimits: true,
+					deletesManagedMemberships: true,
 				},
-				{ ...holdingOpts, bypassLimits: true },
 			);
 
 			// If the about to be deleted roles are the parent of other roles set those parents to null

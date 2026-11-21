@@ -3,12 +3,19 @@ import type { MutationOptions } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
 import { transaction } from '../utils/transaction.js';
-import { AccessService, ItemsService, PresetsService, RolesService, UsersService } from './index.js';
+import {
+	AccessService,
+	ItemsService,
+	PresetsService,
+	RoleMembersService,
+	RolesService,
+	UsersService,
+} from './index.js';
 
 vi.mock('../../src/database/index', () => ({
 	default: vi.fn(),
@@ -193,9 +200,24 @@ describe('Integration Tests', () => {
 				.spyOn(PresetsService.prototype, 'deleteByQuery')
 				.mockResolvedValue(['preset-id-1']);
 
-			const usersUpdateByQuerySpy = vi.spyOn(UsersService.prototype, 'updateByQuery').mockResolvedValue(['user-id-1']);
+			const usersUpdateManySpy = vi.spyOn(UsersService.prototype, 'updateMany')
+				.mockResolvedValue(['user-id-1']);
+
+			const roleMembersDeleteByQuerySpy = vi
+				.spyOn(RoleMembersService.prototype, 'deleteByQuery')
+				.mockResolvedValue(['membership-id-1']);
+
 			const rolesUpdateByQuerySpy = vi.spyOn(RolesService.prototype, 'updateByQuery').mockResolvedValue(['role-id-6']);
 			const itemsDeleteManySpy = vi.spyOn(ItemsService.prototype, 'deleteMany').mockResolvedValue(['item-id-1']);
+
+			beforeEach(() => {
+				tracker.on.select('directus_role_members')
+					.response([{ user: 'user-id-1' }]);
+			});
+
+			afterEach(() => {
+				tracker.reset();
+			});
 
 			it('should call associated service methods, with user integrity check flag', async () => {
 				const keys = ['role-id-7'];
@@ -224,15 +246,18 @@ describe('Integration Tests', () => {
 					opts,
 				);
 
-				expect(usersUpdateByQuerySpy).toHaveBeenCalledWith(
+				expect(usersUpdateManySpy).toHaveBeenCalledWith(
+					['user-id-1'],
+					{ status: 'suspended' },
+					opts,
+				);
+
+				expect(roleMembersDeleteByQuerySpy).toHaveBeenCalledWith(
 					{
 						filter: { role: { _in: keys } },
+						limit: -1,
 					},
-					{
-						status: 'suspended',
-						role: null,
-					},
-					opts,
+					{ ...opts, deletesManagedMemberships: true },
 				);
 
 				expect(rolesUpdateByQuerySpy).toHaveBeenCalledWith(
@@ -247,6 +272,48 @@ describe('Integration Tests', () => {
 					userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
 					bypassEmitAction: expect.any(Function),
 				});
+			});
+
+			it('suspends only the users left with no role', async () => {
+				tracker.reset();
+
+				tracker.on.select('directus_role_members').response([
+					{ user: 'user-id-2' },
+					{ user: 'user-id-3' },
+				]);
+
+				await service.deleteMany(['role-id-13', 'role-id-14']);
+
+				expect(tracker.history.select[0]!.bindings).toEqual([
+					'role-id-13',
+					'role-id-14',
+					'role-id-13',
+					'role-id-14',
+				]);
+
+				expect(usersUpdateManySpy).toHaveBeenCalledWith(
+					['user-id-2', 'user-id-3'],
+					{ status: 'suspended' },
+					expect.objectContaining({ bypassLimits: true }),
+				);
+			});
+
+			it('suspends nobody when every member keeps another role', async () => {
+				tracker.reset();
+				tracker.on.select('directus_role_members').response([]);
+				usersUpdateManySpy.mockClear();
+
+				await service.deleteMany(['role-id-15']);
+
+				expect(usersUpdateManySpy).not.toHaveBeenCalled();
+
+				expect(roleMembersDeleteByQuerySpy).toHaveBeenCalledWith(
+					{
+						filter: { role: { _in: ['role-id-15'] } },
+						limit: -1,
+					},
+					expect.objectContaining({ bypassLimits: true }),
+				);
 			});
 
 			it('fires no action of a delete that rolled back', async () => {
@@ -307,6 +374,7 @@ describe('Integration Tests', () => {
 			it('fires the actions of its cascade once it committed', async () => {
 				const database = knex.default({ client: MockClient });
 				const databaseTracker = createTracker(database);
+				databaseTracker.on.select('directus_role_members').response([]);
 				const emittedActions: unknown[] = [];
 
 				vi.spyOn(emitter, 'emitAction').mockImplementation(async (event) => {
@@ -375,6 +443,7 @@ describe('Integration Tests', () => {
 			it('clears the caches once the parent transaction has committed', async () => {
 				const database = knex.default({ client: MockClient });
 				const databaseTracker = createTracker(database);
+				databaseTracker.on.select('directus_role_members').response([]);
 				const transactionStates: string[][] = [];
 
 				vi.mocked(clearSystemCache).mockImplementationOnce(async () => {

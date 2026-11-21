@@ -1,5 +1,6 @@
 import api from '@/api';
 import { useUserStore } from '@/stores/user';
+import type { AppUser } from '@/types/user';
 import { fetchAll } from '@/utils/fetch-all';
 import { Preset } from '@directus/types';
 import { cloneDeep, merge, orderBy } from 'lodash';
@@ -180,7 +181,8 @@ export const usePresetsStore = defineStore({
 			if (!userStore.currentUser || 'share' in userStore.currentUser) return;
 
 			// Hydrate is only called for logged in users, therefore, currentUser exists
-			const { id, role } = userStore.currentUser;
+			const { id } = userStore.currentUser;
+			const memberRoleIds = currentMemberRoleIds(userStore.currentUser);
 
 			const values = await Promise.all([
 				// All user saved bookmarks and presets
@@ -189,10 +191,10 @@ export const usePresetsStore = defineStore({
 						'filter[user][_eq]': id,
 					},
 				}),
-				role?.id // All role saved bookmarks and presets
+				memberRoleIds.length // All member roles' bookmarks and presets
 					? fetchAll<any>(`/presets`, {
 							params: {
-								'filter[role][_eq]': role.id,
+								'filter[role][_in]': memberRoleIds.join(','),
 								'filter[user][_null]': true,
 							},
 						})
@@ -270,7 +272,8 @@ export const usePresetsStore = defineStore({
 			if (userStore.currentUser === null) return null;
 			if (!('id' in userStore.currentUser)) return null;
 
-			const { id: userID, role: userRole } = userStore.currentUser;
+			const { id: userID } = userStore.currentUser;
+			const memberRoleIds = currentMemberRoleIds(userStore.currentUser);
 
 			const defaultPresetWithCollection = {
 				...defaultPreset,
@@ -280,7 +283,10 @@ export const usePresetsStore = defineStore({
 
 			const availablePresets = this.collectionPresets.filter((preset) => {
 				const userMatches = preset.user === userID || preset.user === null;
-				const roleMatches = preset.role === userRole?.id || preset.role === null;
+
+				const roleMatches = preset.role === null
+					|| memberRoleIds.includes(preset.role);
+
 				const collectionMatches = preset.collection === collection;
 
 				// Filter out all bookmarks
@@ -298,7 +304,15 @@ export const usePresetsStore = defineStore({
 			const userPreset = availablePresets.find((preset) => preset.user === userID);
 			if (userPreset) return userPreset;
 
-			const rolePreset = availablePresets.find((preset) => preset.role === userRole?.id);
+			// A later membership wins a preset an earlier one also sets
+			const rolePreset = orderBy(
+				availablePresets.filter((preset) => {
+					return preset.role !== null && memberRoleIds.includes(preset.role);
+				}),
+				(preset) => memberRoleIds.indexOf(preset.role!),
+				'desc',
+			)[0];
+
 			if (rolePreset) return rolePreset;
 
 			// If the other two already came up empty, we can assume there's only one preset. That
@@ -370,3 +384,13 @@ export const usePresetsStore = defineStore({
 		},
 	},
 });
+
+function currentMemberRoleIds(currentUser: AppUser) {
+	return currentUser.roles.map(({ role }) => {
+		if (typeof role === 'string') {
+			return role;
+		}
+
+		return role.id;
+	});
+}

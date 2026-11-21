@@ -13,12 +13,14 @@ import CommentsSidebarDetail from '@/views/private/components/comments-sidebar-d
 import RevisionsDrawerDetail from '@/views/private/components/revisions-drawer-detail.vue';
 import SaveOptions from '@/views/private/components/save-options.vue';
 import { useCollection } from '@directus/composables';
-import type { User } from '@directus/types';
+import type { Role, User } from '@directus/types';
 import { computed, ref, toRefs } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import UsersNavigation from '../components/navigation.vue';
 import UserInfoSidebarDetail from '../components/user-info-sidebar-detail.vue';
+import UserPoliciesSidebarDetail
+	from '../components/user-policies-sidebar-detail.vue';
 
 const props = defineProps<{
 	primaryKey: string;
@@ -64,7 +66,7 @@ const {
 	primaryKey,
 	props.primaryKey !== '+'
 		? {
-				fields: ['*', 'role.*'],
+				fields: ['*', 'roles.*', 'roles.role.*'],
 			}
 		: undefined,
 );
@@ -74,11 +76,24 @@ const {
 	itemPermissions: { updateAllowed, deleteAllowed, saveAllowed, archiveAllowed, fields },
 } = permissions;
 
-const user = computed(() => ({ ...item.value, role: item.value?.role?.id }));
+const user = computed(() => {
+	return {
+		...item.value,
+		roles: item.value?.roles?.map((membership) => membership.id),
+	};
+});
+
+const memberRoles = computed(() => {
+	return (item.value?.roles ?? []).map((membership) => membership.role as Role);
+});
+
+const memberRoleIds = computed(() => memberRoles.value.map((role) => role.id));
 
 if (props.role) {
+	// The m2m list reads only this shape: a plain array would be dropped
+	// as soon as another role is picked.
 	edits.value = {
-		role: props.role,
+		roles: { create: [{ role: props.role }], update: [], delete: [] },
 		...edits.value,
 	};
 }
@@ -376,7 +391,7 @@ function revert(values: Record<string, any>) {
 		</template>
 
 		<template #navigation>
-			<users-navigation :current-role="item?.role?.id ?? role" />
+			<users-navigation :current-role="memberRoles[0]?.id ?? role" />
 		</template>
 
 		<div class="user-item">
@@ -410,7 +425,14 @@ function revert(values: Record<string, any>) {
 							<v-icon name="place" small />
 							{{ item.location }}
 						</div>
-						<v-chip v-if="item.role?.name" :class="item.status" small>{{ item.role.name }}</v-chip>
+						<v-chip
+							v-for="memberRole in memberRoles"
+							:key="memberRole.id"
+							:class="item.status"
+							small
+						>
+							{{ memberRole.name }}
+						</v-chip>
 					</template>
 				</div>
 			</div>
@@ -442,6 +464,11 @@ function revert(values: Record<string, any>) {
 
 		<template #sidebar>
 			<user-info-sidebar-detail :is-new="isNew" :user="item" />
+			<user-policies-sidebar-detail
+				v-if="isNew === false"
+				:user-id="primaryKey"
+				:member-role-ids="memberRoleIds"
+			/>
 			<revisions-drawer-detail
 				v-if="isNew === false && revisionsAllowed"
 				ref="revisionsDrawerDetail"

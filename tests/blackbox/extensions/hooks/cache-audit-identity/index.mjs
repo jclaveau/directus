@@ -17,7 +17,7 @@ export default function registerHooks({ filter }, { env, database }) {
 		}
 
 		const user = await database
-			.select('id', 'role')
+			.select('id')
 			.from('directus_users')
 			.where({ token, status: 'active' })
 			.first();
@@ -26,11 +26,18 @@ export default function registerHooks({ filter }, { env, database }) {
 			return accountability;
 		}
 
+		// The memberships alone (#746): the ancestors change nothing for an admin.
+		const memberRoles = await database
+			.from('directus_role_members')
+			.where({ user: user.id })
+			.orderBy('sort')
+			.pluck('role');
+
 		return {
 			...accountability,
 			user: user.id,
-			role: user.role,
-			roles: [user.role],
+			memberRoles,
+			roles: memberRoles,
 			admin: true,
 			app: true,
 		};

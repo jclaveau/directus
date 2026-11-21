@@ -1386,7 +1386,7 @@ no_value: Inget värde
 do_nothing: Gör ingenting
 generate_and_save_uuid: Generera och spara UUID
 save_current_user_id: Spara nuvarande användar-ID
-save_current_user_role: Spara aktuell användarroll
+save_current_user_roles: Spara aktuella användarroller
 save_current_datetime: Spara aktuellt datum/tid
 always_open: Alltid öppen
 start_open: Start öppen

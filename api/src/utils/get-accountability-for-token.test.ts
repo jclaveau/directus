@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import getDatabase from '../database/index.js';
 import { getAccountabilityForToken } from './get-accountability-for-token.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
-import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+import { fetchUserRoles } from '../permissions/lib/fetch-member-roles.js';
 
 vi.mock('@directus/env', () => {
 	return {
@@ -12,7 +12,7 @@ vi.mock('@directus/env', () => {
 });
 
 vi.mock('../permissions/modules/fetch-global-access/fetch-global-access.js');
-vi.mock('../permissions/lib/fetch-roles-tree.js');
+vi.mock('../permissions/lib/fetch-member-roles.js');
 
 vi.mock('../database/index', () => {
 	const self: Record<string, any> = {
@@ -34,7 +34,7 @@ describe('getAccountabilityForToken', async () => {
 	test('minimal token payload', async () => {
 		const db = getDatabase();
 
-		vi.mocked(fetchRolesTree).mockResolvedValue([]);
+		vi.mocked(fetchUserRoles).mockResolvedValue({ memberRoles: [], roles: [] });
 
 		vi.mocked(fetchGlobalAccess).mockResolvedValue({
 			app: false,
@@ -42,23 +42,24 @@ describe('getAccountabilityForToken', async () => {
 			grantedDbConnections: [],
 		});
 
-		const token = jwt.sign({ role: '123-456-789', app_access: false, admin_access: false }, 'super-secure-secret', {
-			issuer: 'directus',
-		});
-
 		const expectedAccountability = {
 			admin: false,
 			app: false,
-			role: '123-456-789',
+			memberRoles: [],
 			roles: [],
 			ip: null,
 			user: null,
 			grantedDbConnections: [],
 		};
 
-		const result = await getAccountabilityForToken(token);
+		const result = await getAccountabilityForToken(jwt.sign(
+			{ app_access: false, admin_access: false },
+			'super-secure-secret',
+			{ issuer: 'directus' },
+		));
+
 		expect(result).toStrictEqual(expectedAccountability);
-		expect(fetchRolesTree).toHaveBeenCalledWith('123-456-789', db);
+		expect(fetchUserRoles).toHaveBeenCalledWith(null, db);
 		expect(fetchGlobalAccess).toHaveBeenCalledWith(expectedAccountability, db);
 	});
 
@@ -67,7 +68,6 @@ describe('getAccountabilityForToken', async () => {
 			{
 				share: 'share-id',
 				id: 'user-id',
-				role: 'role-id',
 				admin_access: 1,
 				app_access: 1,
 			},
@@ -75,7 +75,10 @@ describe('getAccountabilityForToken', async () => {
 			{ issuer: 'directus' },
 		);
 
-		vi.mocked(fetchRolesTree).mockResolvedValue([]);
+		vi.mocked(fetchUserRoles).mockResolvedValue({
+			memberRoles: ['role-id'],
+			roles: ['parent-id', 'role-id'],
+		});
 
 		vi.mocked(fetchGlobalAccess).mockResolvedValue({
 			app: true,
@@ -85,12 +88,14 @@ describe('getAccountabilityForToken', async () => {
 
 		const result = await getAccountabilityForToken(token);
 
+		expect(fetchUserRoles).toHaveBeenCalledWith('user-id', getDatabase());
+
 		expect(result).toStrictEqual({
 			admin: true,
 			app: true,
 			user: 'user-id',
-			role: 'role-id',
-			roles: [],
+			memberRoles: ['role-id'],
+			roles: ['parent-id', 'role-id'],
 			ip: null,
 			share: 'share-id',
 			grantedDbConnections: ['premium'],
@@ -98,12 +103,16 @@ describe('getAccountabilityForToken', async () => {
 	});
 
 	test('throws token expired error', async () => {
-		const token = jwt.sign({ role: '123-456-789' }, 'super-secure-secret', { issuer: 'directus', expiresIn: -1 });
+		const token = jwt.sign({ id: 'user-id' }, 'super-secure-secret', {
+			issuer: 'directus',
+			expiresIn: -1,
+		});
+
 		await expect(() => getAccountabilityForToken(token)).rejects.toThrow('Token expired.');
 	});
 
 	test('throws token invalid error', async () => {
-		const token = jwt.sign({ role: '123-456-789' }, 'bad-secret', { issuer: 'directus' });
+		const token = jwt.sign({ id: 'user-id' }, 'bad-secret', { issuer: 'directus' });
 		await expect(() => getAccountabilityForToken(token)).rejects.toThrow('Invalid token.');
 	});
 
@@ -112,10 +121,12 @@ describe('getAccountabilityForToken', async () => {
 
 		vi.spyOn(db, 'first').mockReturnValue({
 			id: 'user-id',
-			role: 'role-id',
 		} as any);
 
-		vi.mocked(fetchRolesTree).mockResolvedValue([]);
+		vi.mocked(fetchUserRoles).mockResolvedValue({
+			memberRoles: ['role-id'],
+			roles: ['role-id'],
+		});
 
 		vi.mocked(fetchGlobalAccess).mockResolvedValue({
 			app: true,
@@ -123,12 +134,12 @@ describe('getAccountabilityForToken', async () => {
 			grantedDbConnections: [],
 		});
 
-		const token = jwt.sign({ role: '123-456-789' }, 'bad-secret');
+		const token = jwt.sign({ id: 'user-id' }, 'bad-secret');
 
 		const expectedAccountability = {
 			user: 'user-id',
-			role: 'role-id',
-			roles: [],
+			memberRoles: ['role-id'],
+			roles: ['role-id'],
 			admin: false,
 			app: true,
 			ip: null,
@@ -139,14 +150,14 @@ describe('getAccountabilityForToken', async () => {
 
 		expect(result).toStrictEqual(expectedAccountability);
 
-		expect(fetchRolesTree).toHaveBeenCalledWith('role-id', db);
+		expect(fetchUserRoles).toHaveBeenCalledWith('user-id', db);
 		expect(fetchGlobalAccess).toHaveBeenCalledWith(expectedAccountability, db);
 	});
 
 	test('no user found', async () => {
 		const db = getDatabase();
 		vi.spyOn(db, 'first').mockReturnValue(false as any);
-		const token = jwt.sign({ role: '123-456-789' }, 'bad-secret');
+		const token = jwt.sign({ id: 'user-id' }, 'bad-secret');
 		await expect(() => getAccountabilityForToken(token)).rejects.toThrow('Invalid user credentials.');
 	});
 });

@@ -14,6 +14,7 @@ import {
 	queueCachePurge,
 	type CachePurgeScan,
 } from '../cache-events.js';
+import { tellPeersResponseCacheCleared } from '../cache-peer-notice.js';
 import { cacheStoreDropsEntries } from '../cache-store-probe.js';
 import { flushCacheRedisDatabase } from '../redis/index.js';
 import {
@@ -811,6 +812,7 @@ export async function flushResponseCache(cache: Keyv | null): Promise<void> {
 	const flushedDatabase = await clearResponseCache(cache);
 
 	recordScopedCachePurged(null);
+	await tellPeersResponseCacheCleared();
 
 	// Gated here, not in the drop: the flush command drops the index whatever the
 	// mode, so a store switched out of scoped purging leaves no sets behind — while
@@ -1212,6 +1214,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 		try {
 			if (target.mode === 'namespace') {
 				await cache.clear();
+				await tellPeersResponseCacheCleared();
 
 				queueCachePurge({
 					purgeId,
@@ -1628,6 +1631,9 @@ async function purgeScopedCacheUnrecorded(
 		if (!cleared) {
 			return null;
 		}
+
+		// A memory store holds a copy per node; a Redis one is cleared already.
+		await tellPeersResponseCacheCleared();
 
 		// Not folded into the `flush` config-event marker, though both mean "the
 		// whole cache went": that marker is a direct, unbuffered INSERT, which is

@@ -50,7 +50,16 @@ async function fetchUser() {
 	try {
 		const response = await api.get(`/users/${props.user}`, {
 			params: {
-				fields: ['id', 'first_name', 'last_name', 'avatar.id', 'role.name', 'status', 'email'],
+				fields: [
+					'id',
+					'first_name',
+					'last_name',
+					'avatar.id',
+					'roles.id',
+					'roles.role.name',
+					'status',
+					'email',
+				],
 			},
 		});
 
@@ -94,7 +103,9 @@ function navigateToUser() {
 				<v-chip class="status" :class="data.status" small>
 					{{ t(`fields.directus_users.status_${data.status}`) }}
 				</v-chip>
-				<v-chip v-if="data.role?.name" small>{{ data.role.name }}</v-chip>
+				<v-chip v-for="membership in data.roles ?? []" :key="membership.id" small>
+					{{ membership.role.name }}
+				</v-chip>
 				<div class="email">{{ data.email }}</div>
 			</div>
 		</div>

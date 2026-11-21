@@ -5,12 +5,13 @@ import { describe, expect, test, vi } from 'vitest';
 import emitter from '../emitter.js';
 import { getAccountabilityForToken } from '../utils/get-accountability-for-token.js';
 import { authenticateConnection, authenticationSuccess } from './authenticate.js';
+import { customAccountabilities } from './memberships-changed.js';
 import type { WebSocketAuthMessage } from './messages.js';
 import { getExpiresAtForToken } from './utils/get-expires-at-for-token.js';
 
 vi.mock('../utils/get-accountability-for-token', () => ({
 	getAccountabilityForToken: vi.fn().mockReturnValue({
-		role: null, // minimum viable accountability
+		user: null,
 	} as Accountability),
 }));
 
@@ -56,7 +57,7 @@ describe('authenticateConnection', () => {
 		} as WebSocketAuthMessage);
 
 		expect(result).toStrictEqual({
-			accountability: { role: null },
+			accountability: { user: null },
 			expires_at: TIMESTAMP,
 			refresh_token: 'refresh',
 		});
@@ -72,7 +73,7 @@ describe('authenticateConnection', () => {
 		} as WebSocketAuthMessage);
 
 		expect(result).toStrictEqual({
-			accountability: { role: null },
+			accountability: { user: null },
 			expires_at: TIMESTAMP,
 			refresh_token: 'refresh',
 		});
@@ -88,7 +89,7 @@ describe('authenticateConnection', () => {
 		} as WebSocketAuthMessage);
 
 		expect(result).toStrictEqual({
-			accountability: { role: null },
+			accountability: { user: null },
 			expires_at: TIMESTAMP,
 			refresh_token: undefined,
 		});
@@ -108,6 +109,12 @@ describe('authenticateConnection', () => {
 		} as WebSocketAuthMessage);
 
 		expect(accountability).toEqual(customAccountability);
+
+		// A membership write closes its socket rather than refresh the filter's
+		// roles.
+		expect(
+			customAccountabilities.has(customAccountability as Accountability),
+		).toBe(true);
 	});
 
 	test('Failure token expired', async () => {

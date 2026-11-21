@@ -30,9 +30,12 @@ type LoginCell = {
 	login: string;
 	profile: IdentityProfile;
 	remember_session?: string;
+	remember_token?: string;
 };
 
 type RequestCell = {
+	on?: 'peer';
+	as?: string;
 	method: 'GET' | 'POST';
 	path: string;
 	query?: Record<string, string>;
@@ -43,21 +46,25 @@ const LOGIN_CELL_KEYS = [
 	'login',
 	'profile',
 	'remember_session',
+	'remember_token',
 ] as const satisfies readonly (keyof LoginCell)[];
 
 const REQUEST_CELL_KEYS = [
+	'on',
+	'as',
 	'method',
 	'path',
 	'query',
 	'payload',
 ] as const satisfies readonly (keyof RequestCell)[];
 
-const RESPONSE_CELL_KEYS = ['code', 'body'] as const;
+const RESPONSE_CELL_KEYS = ['code', 'body', 'headers'] as const;
 
 type Row = { request: string; response: string };
 
 type SsoInstance = {
 	vendorEnv: Env;
+	peerEnv: Env | null;
 	providersByName: Record<string, MockIdentityProvider>;
 	keysByName: Record<string, string>;
 };
@@ -72,7 +79,9 @@ export const SSO_CLIENT_ID = 'sso-blackbox-client';
  * and `mockopenid` (OpenID) providers this file starts. A row is a request to
  * that instance, or a `login: <provider>` walking the code flow with `profile`
  * as the provider's answer. A scenario may end with the statements its
- * requests ran on postgres.
+ * requests ran on postgres. With `spawnsPeer`, a second instance on the same
+ * env takes the requests sent `on: peer`; a request sent `as` a token
+ * authenticates with it instead of as the admin.
  */
 export function defineSsoFeature(
 	featurePath: string,
@@ -83,6 +92,7 @@ export function defineSsoFeature(
 	hooks: {
 		beforeFeature?: (vendor: Vendor) => Promise<void>;
 		afterFeature?: (vendor: Vendor) => Promise<void>;
+		spawnsPeer?: boolean;
 	} = {},
 ) {
 	const feature = loadFeature(featurePath);
@@ -90,6 +100,7 @@ export function defineSsoFeature(
 	describe.each(vendors)('%s', (vendor) => {
 		const ssoInstance: SsoInstance = {
 			vendorEnv: cloneDeep(config.envs),
+			peerEnv: null,
 			providersByName: {
 				mockoauth: new MockIdentityProvider(SSO_CLIENT_ID, false),
 				mockopenid: new MockIdentityProvider(SSO_CLIENT_ID, true),
@@ -98,6 +109,7 @@ export function defineSsoFeature(
 		};
 
 		let instance: ChildProcess;
+		let peerInstance: ChildProcess | null = null;
 
 		beforeAll(async () => {
 			await hooks.beforeFeature?.(vendor);
@@ -130,10 +142,29 @@ export function defineSsoFeature(
 				vendor,
 				getUrl(vendor, ssoInstance.vendorEnv),
 			);
+
+			if (hooks.spawnsPeer) {
+				const peerEnv = cloneDeep(ssoInstance.vendorEnv);
+
+				peerEnv[vendor].PORT = String(await freePortOfWorker());
+				peerEnv[vendor]['PUBLIC_URL'] = `http://127.0.0.1:${peerEnv[vendor].PORT}`;
+				ssoInstance.peerEnv = peerEnv;
+
+				peerInstance = spawn('node', [paths.cli, 'start'], {
+					cwd: paths.cwd,
+					env: peerEnv[vendor],
+				});
+
+				await awaitDirectusConnection(Number(peerEnv[vendor].PORT));
+			}
 		}, 60_000);
 
 		afterAll(async () => {
 			await stopSpawnedInstance(instance);
+
+			if (peerInstance !== null) {
+				await stopSpawnedInstance(peerInstance);
+			}
 
 			for (const provider of Object.values(ssoInstance.providersByName)) {
 				await provider.stop();
@@ -215,14 +246,30 @@ function sendRequest(
 	ssoInstance: SsoInstance,
 	requestCell: RequestCell,
 ) {
-	const { method, path, query = {}, payload } = requestCell;
-	const instanceUrl = getUrl(vendor, ssoInstance.vendorEnv);
+	const { on, as, method, path, query = {}, payload } = requestCell;
+
+	if (on === 'peer' && ssoInstance.peerEnv === null) {
+		throw new Error(
+			'A request sent on the peer of a feature spawning none:'
+			+ ` ${JSON.stringify(requestCell)}`,
+		);
+	}
+
+	const instanceUrl = on === 'peer'
+		? getUrl(vendor, ssoInstance.peerEnv!)
+		: getUrl(vendor, ssoInstance.vendorEnv);
 
 	const pendingRequest = method === 'GET'
 		? request(instanceUrl).get(path)
 		: request(instanceUrl).post(path);
 
-	pendingRequest.query(query).set('Authorization', AUTH);
+	const authorizationHeader = as === undefined
+		? AUTH
+		: `Bearer ${as}`;
+
+	pendingRequest
+		.query(query)
+		.set('Authorization', authorizationHeader);
 
 	return payload === undefined
 		? pendingRequest
@@ -253,7 +300,11 @@ async function sendRows(
 			? await logIn(vendor, ssoInstance, requestCell)
 			: await sendRequest(vendor, ssoInstance, requestCell);
 
-		expect({ code: response.statusCode, body: response.body })
+		expect({
+			code: response.statusCode,
+			body: response.body,
+			headers: response.headers,
+		})
 			.toMatchObject(responseCellOf<object>(
 				loadYaml(responseText),
 				RESPONSE_CELL_KEYS,
@@ -264,6 +315,13 @@ async function sendRows(
 			ssoInstance.keysByName[requestCell.remember_session] = rememberedText(
 				requestCell.remember_session,
 				response.body.data.refresh_token,
+			);
+		}
+
+		if ('login' in requestCell && requestCell.remember_token) {
+			ssoInstance.keysByName[requestCell.remember_token] = rememberedText(
+				requestCell.remember_token,
+				response.body.data.access_token,
 			);
 		}
 

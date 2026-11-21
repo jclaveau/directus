@@ -6,6 +6,7 @@ import { useLogger } from '../../logger/index.js';
 import { getAllowedLogLevels } from '../../utils/get-allowed-log-levels.js';
 import { getLogsController, LogsController } from '../controllers/index.js';
 import { handleWebSocketError, WebSocketError } from '../errors.js';
+import { onSocketRolesRefreshed } from '../memberships-changed.js';
 import { WebSocketLogsMessage } from '../messages.js';
 import type { LogsSubscription, WebSocketClient } from '../types.js';
 import { fmtMessage, getMessageType } from '../utils/message.js';
@@ -76,6 +77,26 @@ export class LogsHandler {
 		// unsubscribe when a connection drops
 		emitter.onAction('websocket.error', ({ client }) => this.unsubscribe(client));
 		emitter.onAction('websocket.close', ({ client }) => this.unsubscribe(client));
+
+		// A membership write that took admin away: the socket stays open, as on
+		// any other refused subscription.
+		onSocketRolesRefreshed((client) => {
+			const subscribedToLogs = this.availableLogLevels.some((logLevel) => {
+				return this.subscriptions[logLevel]?.has(client);
+			});
+
+			if (client.accountability?.admin || !subscribedToLogs) {
+				return;
+			}
+
+			this.unsubscribe(client);
+
+			client.send(new WebSocketError(
+				'logs',
+				ErrorCode.Forbidden,
+				`You don't have permission to access this.`,
+			).toMessage());
+		});
 	}
 
 	/**

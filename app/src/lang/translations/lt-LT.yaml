@@ -1554,7 +1554,7 @@ no_value: Nėra reikšmės
 do_nothing: Nieko nedaryti
 generate_and_save_uuid: Generuoti ir išsaugoti UUID
 save_current_user_id: Išsaugoti dabartinio vartotojo ID
-save_current_user_role: Išsaugoti dabartinio vartotojo grupę
+save_current_user_roles: Išsaugoti dabartinio vartotojo grupes
 save_current_datetime: Išsaugoti dabartinį datą/laiką
 always_open: Visą laiką atidarytas
 start_open: Iš pradžių atidarytas

@@ -80,7 +80,10 @@ describe('Services / Schema', () => {
 		it('should throw ForbiddenError for non-admin user', async () => {
 			vi.mocked(getSnapshot).mockResolvedValueOnce(testSnapshot);
 
-			const service = new SchemaService({ knex: db, accountability: { role: 'test', admin: false } as Accountability });
+			const service = new SchemaService({
+				knex: db,
+				accountability: { admin: false } as Accountability,
+			});
 
 			await expect(service.snapshot()).rejects.toThrowError(ForbiddenError);
 			await expect(service.snapshot()).rejects.toThrowError('Only administrators can read a schema snapshot.');
@@ -89,9 +92,10 @@ describe('Services / Schema', () => {
 		it('should return snapshot for admin user', async () => {
 			vi.mocked(getSnapshot).mockResolvedValueOnce(testSnapshot);
 
-			const service = new SchemaService({ knex: db, accountability: { role: 'admin', admin: true } as Accountability });
-
-			await expect(service.snapshot()).resolves.toEqual(testSnapshot);
+			await expect(new SchemaService({
+				knex: db,
+				accountability: { admin: true } as Accountability,
+			}).snapshot()).resolves.toEqual(testSnapshot);
 		});
 	});
 
@@ -108,7 +112,10 @@ describe('Services / Schema', () => {
 		it('should throw ForbiddenError for non-admin user', async () => {
 			vi.mocked(getSnapshot).mockResolvedValueOnce(testSnapshot);
 
-			const service = new SchemaService({ knex: db, accountability: { role: 'test', admin: false } as Accountability });
+			const service = new SchemaService({
+				knex: db,
+				accountability: { admin: false } as Accountability,
+			});
 
 			await expect(service.apply(snapshotDiffWithHash)).rejects.toThrowError(ForbiddenError);
 
@@ -122,9 +129,10 @@ describe('Services / Schema', () => {
 		it('should apply for admin user', async () => {
 			vi.mocked(getSnapshot).mockResolvedValueOnce(testSnapshot);
 
-			const service = new SchemaService({ knex: db, accountability: { role: 'admin', admin: true } as Accountability });
-
-			await service.apply(snapshotDiffWithHash);
+			await new SchemaService({
+				knex: db,
+				accountability: { admin: true } as Accountability,
+			}).apply(snapshotDiffWithHash);
 
 			expect(vi.mocked(applyDiff)).toHaveBeenCalledOnce();
 		});
@@ -162,7 +170,10 @@ describe('Services / Schema', () => {
 		} satisfies Snapshot;
 
 		it('should throw ForbiddenError for non-admin user', async () => {
-			const service = new SchemaService({ knex: db, accountability: { role: 'test', admin: false } as Accountability });
+			const service = new SchemaService({
+				knex: db,
+				accountability: { admin: false } as Accountability,
+			});
 
 			await expect(service.diff(snapshotToApply, { currentSnapshot: testSnapshot, force: true })).rejects.toThrowError(
 				ForbiddenError,
@@ -174,9 +185,12 @@ describe('Services / Schema', () => {
 		});
 
 		it('should return diff for admin user', async () => {
-			const service = new SchemaService({ knex: db, accountability: { role: 'admin', admin: true } as Accountability });
+			const diffOptions = { currentSnapshot: testSnapshot, force: true };
 
-			await expect(service.diff(snapshotToApply, { currentSnapshot: testSnapshot, force: true })).resolves.toEqual({
+			await expect(new SchemaService({
+				knex: db,
+				accountability: { admin: true } as Accountability,
+			}).diff(snapshotToApply, diffOptions)).resolves.toEqual({
 				collections: [testCollectionDiff],
 				fields: [],
 				relations: [],
@@ -184,17 +198,21 @@ describe('Services / Schema', () => {
 		});
 
 		it('should return null for empty diff', async () => {
-			const service = new SchemaService({ knex: db, accountability: { role: 'admin', admin: true } as Accountability });
+			const diffOptions = { currentSnapshot: testSnapshot, force: true };
 
-			await expect(service.diff(testSnapshot, { currentSnapshot: testSnapshot, force: true })).resolves.toBeNull();
+			await expect(new SchemaService({
+				knex: db,
+				accountability: { admin: true } as Accountability,
+			}).diff(testSnapshot, diffOptions)).resolves.toBeNull();
 		});
 	});
 
 	describe('getHashedSnapshot', () => {
 		it('should return snapshot for admin user', async () => {
-			const service = new SchemaService({ knex: db, accountability: { role: 'admin', admin: true } as Accountability });
-
-			expect(service.getHashedSnapshot(testSnapshot)).toEqual(
+						expect(new SchemaService({
+				knex: db,
+				accountability: { admin: true } as Accountability,
+			}).getHashedSnapshot(testSnapshot)).toEqual(
 				expect.objectContaining({
 					...testSnapshot,
 					hash: expect.any(String),

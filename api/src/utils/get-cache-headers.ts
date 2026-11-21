@@ -32,7 +32,10 @@ export function getCacheControlHeader(
 	// When caching depends on the authentication status of the users
 	if (personalized) {
 		// Allow response to be stored in shared cache (public) or local cache only (private)
-		const access = !!req.accountability?.role === false ? 'public' : 'private';
+		const access = req.accountability?.memberRoles.length
+			? 'private'
+			: 'public';
+
 		headerValues.push(access);
 	}
 

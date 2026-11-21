@@ -26,13 +26,15 @@ Feature: A deleted role suspends its users and drops its presets
       | payload:                                |           |
       |   id: <member>                          |           |
       |   email: member-<run>@example.com       |           |
-      |   role: <deleted-role>                  |           |
+      |   roles:                                |           |
+      |     - role: <deleted-role>              |           |
       | method: POST                            | code: 200 |+
       | path: /users                            |           |
       | payload:                                |           |
       |   id: <child-member>                    |           |
       |   email: child-member-<run>@example.com |           |
-      |   role: <child-role>                    |           |
+      |   roles:                                |           |
+      |     - role: <child-role>                |           |
       | method: POST                            | code: 200 |+
       | path: /presets                          |           |
       | payload:                                |           |
@@ -40,50 +42,54 @@ Feature: A deleted role suspends its users and drops its presets
       |   collection: directus_users            |           |
       |   role: <deleted-role>                  |           |
     Then these requests get these responses:
-      | request                                | response               |
-      | method: DELETE                         | code: 204              |+
-      | path: /roles/<deleted-role>            |                        |
-      | method: GET                            | code: 200              |+
-      | path: /users/<member>                  | body:                  |
-      | query:                                 |   data:                |
-      |   fields: status,role                  |     status: suspended  |
-      |                                        |     role: null         |
-      | method: GET                            | code: 200              |+
-      | path: /users/<child-member>            | body:                  |
-      | query:                                 |   data:                |
-      |   fields: status,role                  |     status: active     |
-      |                                        |     role: <child-role> |
-      | method: GET                            | code: 200              |+
-      | path: /roles/<child-role>              | body:                  |
-      | query:                                 |   data:                |
-      |   fields: parent                       |     parent: null       |
-      | method: GET                            | code: 200              |+
-      | path: /presets                         | body:                  |
-      | query:                                 |   data: []             |
-      |   fields: id                           |                        |
-      |   filter[bookmark][_eq]: deleted-<run> |                        |
+      | request                                | response                   |
+      | method: DELETE                         | code: 204                  |+
+      | path: /roles/<deleted-role>            |                            |
+      | method: GET                            | code: 200                  |+
+      | path: /users/<member>                  | body:                      |
+      | query:                                 |   data:                    |
+      |   fields: status,roles.role            |     status: suspended      |
+      |                                        |     roles: []              |
+      | method: GET                            | code: 200                  |+
+      | path: /users/<child-member>            | body:                      |
+      | query:                                 |   data:                    |
+      |   fields: status,roles.role            |     status: active         |
+      |                                        |     roles:                 |
+      |                                        |       - role: <child-role> |
+      | method: GET                            | code: 200                  |+
+      | path: /roles/<child-role>              | body:                      |
+      | query:                                 |   data:                    |
+      |   fields: parent                       |     parent: null           |
+      | method: GET                            | code: 200                  |+
+      | path: /presets                         | body:                      |
+      | query:                                 |   data: []                 |
+      |   fields: id                           |                            |
+      |   filter[bookmark][_eq]: deleted-<run> |                            |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete | with |
-      | 1       | directus_access      | 7      | 0      | 0      | 0      | 0    |
-      | 1       | directus_activity    | 0      | 3      | 0      | 0      | 0    |
-      | 1       | directus_presets     | 1      | 0      | 0      | 1      | 0    |
-      | 1       | directus_revisions   | 0      | 2      | 0      | 0      | 0    |
-      | 1       | directus_roles       | 7      | 0      | 1      | 1      | 0    |
-      | 1       | directus_sessions    | 0      | 0      | 0      | 1      | 0    |
-      | 1       | directus_users       | 8      | 0      | 1      | 0      | 0    |
-      | 2       | directus_access      | 2      | 0      | 0      | 0      | 0    |
-      | 2       | directus_collections | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_users       | 2      | 0      | 0      | 0      | 0    |
-      | 2       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
-      | 2       | information_schema   | 1      | 0      | 0      | 0      | 0    |
-      | 2       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 2       | pg_index             | 2      | 0      | 0      | 0      | 0    |
-      | 2       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_users       | 2      | 0      | 0      | 0      | 0    |
-      | 4       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_users       | 1      | 0      | 0      | 0      | 0    |
-      | 5       | directus_presets     | 1      | 0      | 0      | 0      | 0    |
-      | 5       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_access       | 8      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity     | 0      | 4      | 0      | 0      | 0    |
+      | 1       | directus_presets      | 1      | 0      | 0      | 1      | 0    |
+      | 1       | directus_revisions    | 0      | 2      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 4      | 0      | 0      | 1      | 1    |
+      | 1       | directus_roles        | 8      | 0      | 1      | 1      | 0    |
+      | 1       | directus_sessions     | 0      | 0      | 0      | 1      | 0    |
+      | 1       | directus_users        | 7      | 0      | 1      | 0      | 0    |
+      | 2       | directus_access       | 2      | 0      | 0      | 0      | 0    |
+      | 2       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_role_members | 2      | 0      | 0      | 0      | 0    |
+      | 2       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users        | 2      | 0      | 0      | 0      | 0    |
+      | 2       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
+      | 2       | information_schema    | 1      | 0      | 0      | 0      | 0    |
+      | 2       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
+      | 2       | pg_index              | 2      | 0      | 0      | 0      | 0    |
+      | 2       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_users        | 2      | 0      | 0      | 0      | 0    |
+      | 4       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 5       | directus_presets      | 1      | 0      | 0      | 0      | 0    |
+      | 5       | directus_users        | 1      | 0      | 0      | 0      | 0    |

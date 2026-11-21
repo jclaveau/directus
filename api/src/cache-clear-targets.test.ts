@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache } from './cache.js';
 import { clearCache as clearPermissionCache } from './permissions/cache.js';
 import { dropScopedCacheIndex } from './scoped-cache/index.js';
+import { nodeId } from './utils/node-id.js';
 
 // hoisted: cache.ts reads `const env = useEnv()` at module load, before a plain
 // `const env` below would be initialised (temporal dead zone).
@@ -152,6 +153,7 @@ describe('clearCacheTargets', () => {
 
 		expect(mockBus.publish).toHaveBeenCalledWith('cacheCleared', {
 			targets: ['system', 'response'],
+			origin: nodeId,
 		});
 	});
 
@@ -162,6 +164,7 @@ describe('clearCacheTargets', () => {
 
 		expect(mockBus.publish).toHaveBeenCalledWith('cacheCleared', {
 			targets: ['response', 'locks'],
+			origin: nodeId,
 		});
 	});
 });
