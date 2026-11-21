@@ -7,6 +7,7 @@ import { readChosenSubscription } from './cancel/read-chosen-subscription.js';
 import { resumeOwnSubscription } from './cancel/resume-own-subscription.js';
 import { readSubscriptionsConfig } from './config/read-subscriptions-config.js';
 import { addOwnBeneficiary } from './members/add-own-beneficiary.js';
+import { listOwnSubscriptions } from './members/list-own-subscriptions.js';
 import { archivePlan } from './plans/archive-plan.js';
 import { createProviders } from './providers/create-providers.js';
 import type { SubscriptionProviders } from './providers/types.js';
@@ -51,6 +52,19 @@ export const subscriptionsEndpoint = defineEndpoint(
 				.then(() => {
 					response.status(200)
 						.end();
+				}, next);
+		});
+
+		router.get('/mine', (request: AccountableRequest, response, next) => {
+			Promise.resolve()
+				.then(() => {
+					return listOwnSubscriptions(
+						database,
+						request.accountability?.user ?? null,
+					);
+				})
+				.then((ownSubscriptions) => {
+					response.json({ data: ownSubscriptions });
 				}, next);
 		});
 

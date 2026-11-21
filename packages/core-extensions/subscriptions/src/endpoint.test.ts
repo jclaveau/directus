@@ -6,12 +6,14 @@ import { cancelOwnSubscription } from './cancel/cancel-own-subscription.js';
 import { resumeOwnSubscription } from './cancel/resume-own-subscription.js';
 import { subscriptionsEndpoint } from './endpoint.js';
 import { addOwnBeneficiary } from './members/add-own-beneficiary.js';
+import { listOwnSubscriptions } from './members/list-own-subscriptions.js';
 import { archivePlan } from './plans/archive-plan.js';
 import { receiveWebhook } from './webhook/receive-webhook.js';
 
 vi.mock('./cancel/cancel-own-subscription.js');
 vi.mock('./cancel/resume-own-subscription.js');
 vi.mock('./members/add-own-beneficiary.js');
+vi.mock('./members/list-own-subscriptions.js');
 vi.mock('./plans/archive-plan.js');
 vi.mock('./webhook/receive-webhook.js');
 
@@ -417,6 +419,93 @@ describe('subscriptionsEndpoint', () => {
 			expect(resumeOwnSubscription).not.toHaveBeenCalled();
 		},
 	);
+
+	test('lists the requesting user\'s subscriptions', async () => {
+		vi.mocked(listOwnSubscriptions).mockResolvedValue([{
+			id: 2,
+			plan: { code: 'pro', name: 'Pro' },
+			provider: 'stripe',
+			status: 'active',
+			current_period_end: null,
+			cancel_at_period_end: false,
+			roles: ['beneficiary'],
+		}]);
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+
+		expressApp.use((request, _response, next) => {
+			Object.assign(request, { accountability: { user: 'user-1' } });
+			next();
+		});
+
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const mineResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/mine`,
+		);
+
+		httpServer.close();
+
+		expect(mineResponse.status).toBe(200);
+
+		expect(await mineResponse.json()).toEqual({
+			data: [{
+				id: 2,
+				plan: { code: 'pro', name: 'Pro' },
+				provider: 'stripe',
+				status: 'active',
+				current_period_end: null,
+				cancel_at_period_end: false,
+				roles: ['beneficiary'],
+			}],
+		});
+
+		expect(listOwnSubscriptions).toHaveBeenCalledWith('database', 'user-1');
+	});
+
+	test('lists as nobody without accountability', async () => {
+		vi.mocked(listOwnSubscriptions).mockRejectedValue(new ForbiddenError());
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		expressApp.use((
+			routeError: Error & { status: number },
+			_request: express.Request,
+			response: express.Response,
+			_next: express.NextFunction,
+		) => {
+			response.status(routeError.status)
+				.end();
+		});
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const mineResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/mine`,
+		);
+
+		httpServer.close();
+
+		expect(mineResponse.status).toBe(403);
+		expect(listOwnSubscriptions).toHaveBeenCalledWith('database', null);
+	});
 
 	test('seats a beneficiary and answers its id', async () => {
 		vi.mocked(addOwnBeneficiary).mockResolvedValue(4);
