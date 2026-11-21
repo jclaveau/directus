@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import Stripe from 'stripe';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
+	AbandonedCheckoutError,
 	MissingProviderSubscriptionError,
 	WebhookIgnoredError,
 	WebhookRefusedError,
@@ -504,6 +505,174 @@ describe('composeResourceId', () => {
 		expect(createStripeProvider(new Stripe('sk_test_1'), 'whsec_1')
 			.composeResourceId({ subscriptionId: 'sub_1', customerId: 'cus_1' }))
 			.toBe('sub_1');
+	});
+});
+
+describe('checkout', () => {
+	test('resolves an expired checkout session event to the session', async () => {
+		const stripeClient = new Stripe('sk_test_1');
+		const stripeProvider = createStripeProvider(stripeClient, 'whsec_1');
+
+		const payload = JSON.stringify({
+			type: 'checkout.session.expired',
+			data: { object: { id: 'cs_5' } },
+		});
+
+		const signatureHeader = stripeClient.webhooks.generateTestHeaderString({
+			payload,
+			secret: 'whsec_1',
+		});
+
+		await expect(stripeProvider.verifyWebhook(
+			Buffer.from(payload),
+			{ 'stripe-signature': signatureHeader },
+		)).resolves.toBe('cs_5');
+	});
+
+	test.each([
+		[{ months: 1, days: 0 }, { interval: 'month', interval_count: 1 }],
+		[{ months: 24, days: 0 }, { interval: 'year', interval_count: 2 }],
+		[{ months: 0, days: 14 }, { interval: 'week', interval_count: 2 }],
+		[{ months: 0, days: 10 }, { interval: 'day', interval_count: 10 }],
+	])('opens a session billing %j as %j', async (billingInterval, recurring) => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		vi.spyOn(stripeClient.checkout.sessions, 'create').mockResolvedValue({
+			id: 'cs_5',
+			url: 'https://checkout.stripe.com/c/pay/cs_5',
+		} as never);
+
+		await expect(createStripeProvider(stripeClient, 'whsec_1')
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '14.90' },
+				interval: billingInterval,
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.resolves.toBe('https://checkout.stripe.com/c/pay/cs_5');
+
+		expect(stripeClient.checkout.sessions.create).toHaveBeenCalledWith({
+			mode: 'subscription',
+			customer_email: 'payer@example.com',
+			line_items: [{
+				quantity: 1,
+				price_data: {
+					currency: 'eur',
+					unit_amount: 1490,
+					recurring,
+					product_data: { name: 'Pro' },
+				},
+			}],
+			subscription_data: { metadata: { directus_subscription: '5' } },
+			metadata: { directus_subscription: '5' },
+			success_url: 'https://shop.example.com/ok',
+			cancel_url: 'https://shop.example.com/ok',
+		});
+	});
+
+	test('refuses a session without a URL', async () => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		vi.spyOn(stripeClient.checkout.sessions, 'create')
+			.mockResolvedValue({ id: 'cs_5', url: null } as never);
+
+		await expect(createStripeProvider(stripeClient, 'whsec_1')
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '14.90' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.rejects.toThrow('Stripe checkout session "cs_5" has no URL');
+	});
+
+	test.each([
+		[{ months: 1, days: 3 }],
+		[{ months: 0, days: 0 }],
+	])('refuses a %j interval Stripe cannot bill', async (billingInterval) => {
+		await expect(createStripeProvider(new Stripe('sk_test_1'), 'whsec_1')
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '14.90' },
+				interval: billingInterval,
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.rejects.toThrow(
+				`Billing interval ${JSON.stringify(billingInterval)} is no`
+				+ ' Stripe interval',
+			);
+	});
+
+	test('starts no subscription from a payment, Stripe does it', async () => {
+		await expect(createStripeProvider(new Stripe('sk_test_1'), 'whsec_1')
+			.startPaidCheckout({
+				paymentId: 'pi_5',
+				customerId: 'cus_5',
+				mandateId: 'none',
+				paidAt: '2026-11-05T10:00:00Z',
+				amount: { currency: 'EUR', value: '14.90' },
+				directusSubscription: 5,
+				interval: { months: 1, days: 0 },
+			}))
+			.rejects.toThrow(
+				'Stripe starts a checkout\'s subscription itself, not from payment'
+				+ ' "pi_5"',
+			);
+	});
+
+	test('reports an expired session as an abandoned checkout', async () => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		vi.spyOn(stripeClient.checkout.sessions, 'retrieve').mockResolvedValue({
+			id: 'cs_5',
+			status: 'expired',
+			metadata: { directus_subscription: '5' },
+		} as never);
+
+		const fetchFailure = await createStripeProvider(stripeClient, 'whsec_1')
+			.fetchSubscription('cs_5')
+			.catch((fetchError: unknown) => fetchError);
+
+		expect(fetchFailure).toBeInstanceOf(AbandonedCheckoutError);
+
+		expect(fetchFailure).toMatchObject({
+			message: 'Checkout "cs_5" of subscription 5 ended "expired", unpaid',
+			extensions: {
+				checkoutId: 'cs_5',
+				checkoutStatus: 'expired',
+				directusSubscription: 5,
+			},
+		});
+
+		expect(stripeClient.checkout.sessions.retrieve)
+			.toHaveBeenCalledWith('cs_5');
+	});
+
+	test.each([
+		[{ status: 'complete', metadata: { directus_subscription: '5' } }],
+		[{ status: 'expired', metadata: {} }],
+	])('reports a session %j as no subscription', async (sessionFields) => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		vi.spyOn(stripeClient.checkout.sessions, 'retrieve')
+			.mockResolvedValue({ id: 'cs_5', ...sessionFields } as never);
+
+		const fetchFailure = await createStripeProvider(stripeClient, 'whsec_1')
+			.fetchSubscription('cs_5')
+			.catch((fetchError: unknown) => fetchError);
+
+		expect(fetchFailure).toBeInstanceOf(MissingProviderSubscriptionError);
+
+		expect(fetchFailure).toMatchObject({
+			message: 'The provider has no subscription for "cs_5"',
+			extensions: { resourceId: 'cs_5', subscriptionId: null },
+		});
 	});
 });
 

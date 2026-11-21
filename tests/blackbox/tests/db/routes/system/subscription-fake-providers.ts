@@ -15,6 +15,10 @@ export type MollieHolding = {
 	/** Set on a subscription the bundle created to resume `resumes`. */
 	resumes?: string;
 	start_date?: string;
+	/** Set on a checkout's first payment, which carries no subscription. */
+	sequence_type?: 'first';
+	/** The mandate a paid first payment set up. */
+	mandate?: string;
 };
 
 export type MollieMandate = {
@@ -31,6 +35,12 @@ export type StripeHolding = {
 	cancel_at_period_end?: boolean;
 	/** The price's cents; the recorded 1000 without it. */
 	unit_amount?: number;
+};
+
+type StripeSession = {
+	session: string;
+	directus_subscription: string;
+	status: string;
 };
 
 export type ReceivedWrite = {
@@ -116,6 +126,7 @@ export async function startFakeProviders() {
 	const mollieHoldings = new Map<string, MollieHolding>();
 	const stripeHoldings = new Map<string, StripeHolding>();
 	const mollieMandates = new Map<string, MollieMandate>();
+	const stripeSessions = new Map<string, StripeSession>();
 	const forgottenSubscriptions = new Set<string>();
 	const unansweredPaths: string[] = [];
 	const receivedWrites: ReceivedWrite[] = [];
@@ -127,6 +138,10 @@ export async function startFakeProviders() {
 			return undefined;
 		}
 
+		if (molliePayment.sequence_type === 'first') {
+			return { code: 200, body: composeFirstPayment(molliePayment) };
+		}
+
 		return {
 			code: 200,
 			body: {
@@ -136,6 +151,73 @@ export async function startFakeProviders() {
 				subscriptionId: molliePayment.subscription ?? undefined,
 			},
 		};
+	}
+
+	function composeFirstPayment(firstPayment: MollieHolding) {
+		return {
+			resource: 'payment',
+			id: firstPayment.payment,
+			customerId: firstPayment.customer,
+			status: firstPayment.status,
+			sequenceType: 'first',
+			mandateId: firstPayment.mandate,
+			paidAt: firstPayment.paid_at,
+			amount: { currency: 'EUR', value: firstPayment.amount ?? '10.00' },
+			metadata: {
+				directus_subscription: String(firstPayment.directus_subscription),
+			},
+			_links: {
+				checkout: {
+					href: `https://www.mollie.com/checkout/${firstPayment.payment}`,
+					type: 'text/html',
+				},
+			},
+		};
+	}
+
+	// A checkout's customer and first payment, named after the row the metadata
+	// names, so a scenario knows their ids up front.
+	function createMollieCheckout(
+		checkoutResource: string,
+		requestBody: string | object | null,
+	): FakeAnswer {
+		const {
+			metadata: checkoutMetadata,
+			customerId,
+			amount: paidAmount,
+		} = requestBody as {
+			metadata: { directus_subscription: string };
+			customerId?: string;
+			amount?: { value: string };
+		};
+
+		const directusSubscription = checkoutMetadata.directus_subscription;
+
+		if (checkoutResource === 'customers') {
+			return {
+				code: 201,
+				body: {
+					resource: 'customer',
+					id: `cst_checkout_${directusSubscription}`,
+					metadata: checkoutMetadata,
+					_links: {},
+				},
+			};
+		}
+
+		const firstPayment: MollieHolding = {
+			payment: `tr_checkout_${directusSubscription}`,
+			customer: customerId!,
+			subscription: null,
+			directus_subscription: Number(directusSubscription),
+			status: 'open',
+			amount: paidAmount!.value,
+			sequence_type: 'first',
+		};
+
+		mollieHoldings.set(firstPayment.payment, firstPayment);
+
+		return { code: 201, body: composeFirstPayment(firstPayment) };
 	}
 
 	function answerMollieSubscription(
@@ -228,14 +310,14 @@ export async function startFakeProviders() {
 
 	// What the bundle sends to resume a cancel: a subscription named after the
 	// one it resumes and its attempt, `sub_x_2` then `sub_x_3`, so a scenario
-	// knows its id up front.
+	// knows its id up front. A paid checkout's is `sub_checkout_<row id>`.
 	function createMollieSubscription(
 		customerId: string,
 		requestBody: string | object | null,
 	): FakeAnswer {
 		const { metadata, amount: createdAmount } = requestBody as {
 			amount: { value: string };
-			metadata: { directus_subscription?: string; resumes: string };
+			metadata: { directus_subscription?: string; resumes?: string };
 			startDate: string;
 		};
 
@@ -245,7 +327,9 @@ export async function startFakeProviders() {
 			})
 			.length;
 
-		const createdSubscription = `${metadata.resumes}_${resumeCount + 2}`;
+		const createdSubscription = metadata.resumes === undefined
+			? `sub_checkout_${metadata.directus_subscription}`
+			: `${metadata.resumes}_${resumeCount + 2}`;
 
 		const createdHolding: MollieHolding = {
 			payment: `tr_${createdSubscription}`,
@@ -352,11 +436,60 @@ export async function startFakeProviders() {
 		};
 	}
 
+	function createStripeSession(requestBody: string | null): FakeAnswer {
+		const directusSubscription = new URLSearchParams(requestBody ?? '')
+			.get('metadata[directus_subscription]')!;
+
+		const stripeSession: StripeSession = {
+			session: `cs_checkout_${directusSubscription}`,
+			directus_subscription: directusSubscription,
+			status: 'open',
+		};
+
+		stripeSessions.set(stripeSession.session, stripeSession);
+
+		return { code: 200, body: composeStripeSession(stripeSession) };
+	}
+
+	function composeStripeSession(stripeSession: StripeSession) {
+		return {
+			id: stripeSession.session,
+			object: 'checkout.session',
+			url: `https://checkout.stripe.com/c/pay/${stripeSession.session}`,
+			status: stripeSession.status,
+			metadata: { directus_subscription: stripeSession.directus_subscription },
+		};
+	}
+
+	function answerStripeSession(sessionId: string): FakeAnswer | undefined {
+		const stripeSession = stripeSessions.get(sessionId);
+
+		return stripeSession === undefined
+			? undefined
+			: { code: 200, body: composeStripeSession(stripeSession) };
+	}
+
 	function answerProvider(
 		requestMethod: string,
 		requestPath: string,
 		requestBody: string | object | null,
 	): FakeAnswer | undefined {
+		const checkoutMatch = /^\/v2\/(customers|payments)$/.exec(requestPath);
+
+		if (checkoutMatch !== null && requestMethod === 'POST') {
+			return createMollieCheckout(checkoutMatch[1]!, requestBody);
+		}
+
+		if (requestPath === '/v1/checkout/sessions' && requestMethod === 'POST') {
+			return createStripeSession(requestBody as string | null);
+		}
+
+		const sessionMatch = /^\/v1\/checkout\/sessions\/(\w+)$/.exec(requestPath);
+
+		if (sessionMatch !== null) {
+			return answerStripeSession(sessionMatch[1]!);
+		}
+
 		const paymentMatch = /^\/v2\/payments\/(\w+)$/.exec(requestPath);
 
 		if (paymentMatch !== null) {
@@ -447,6 +580,37 @@ export async function startFakeProviders() {
 		},
 		holdAtStripe(stripeHolding: StripeHolding) {
 			stripeHoldings.set(stripeHolding.subscription, stripeHolding);
+		},
+		// Merged into the first payment the checkout created, keeping its amount.
+		holdFirstPaymentAtMollie(firstPayment: MollieHolding) {
+			mollieHoldings.set(firstPayment.payment, {
+				...mollieHoldings.get(firstPayment.payment),
+				...firstPayment,
+				sequence_type: 'first',
+			});
+		},
+		expirePaymentAtMollie(paymentId: string) {
+			const expiredPayment = mollieHoldings.get(paymentId);
+
+			if (expiredPayment === undefined) {
+				throw new Error(
+					`The fake Mollie holds no payment ${JSON.stringify(paymentId)}`,
+				);
+			}
+
+			expiredPayment.status = 'expired';
+		},
+		expireSessionAtStripe(sessionId: string) {
+			const expiredSession = stripeSessions.get(sessionId);
+
+			if (expiredSession === undefined) {
+				throw new Error(
+					`The fake Stripe holds no checkout session`
+					+ ` ${JSON.stringify(sessionId)}`,
+				);
+			}
+
+			expiredSession.status = 'expired';
 		},
 		forgetSubscription(subscriptionId: string) {
 			forgottenSubscriptions.add(subscriptionId);
