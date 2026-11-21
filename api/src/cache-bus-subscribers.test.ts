@@ -46,6 +46,7 @@ vi.mock('./logger/index.js', () => ({ useLogger: () => ({ warn: vi.fn() }) }));
 vi.mock('./utils/validate-env.js', () => ({ validateEnv: vi.fn() }));
 
 import { getCache } from './cache.js';
+import { nodeId } from './utils/node-id.js';
 
 async function seedTiers() {
 	const { cache, systemCache, lockCache } = getCache();
@@ -86,6 +87,25 @@ describe('cacheCleared subscriber (peer-side flush)', () => {
 		expect(await cache.get('r')).toBeUndefined();
 		expect(await systemCache.get('s')).toBe('s');
 		expect(await lockCache.get('l')).toBe('l');
+	});
+
+	it('memory peer drops the responses another node flushed', async () => {
+		const { cache } = await seedTiers();
+
+		await handlers['cacheCleared']!({
+			targets: ['response'],
+			origin: 'other-node',
+		});
+
+		expect(await cache.get('r')).toBeUndefined();
+	});
+
+	it('memory node keeps what it sent, having cleared it before', async () => {
+		const { cache } = await seedTiers();
+
+		await handlers['cacheCleared']!({ targets: ['response'], origin: nodeId });
+
+		expect(await cache.get('r')).toBe('r');
 	});
 
 	it('redis peer is a no-op on the shared tiers', async () => {

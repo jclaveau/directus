@@ -10,6 +10,7 @@ import { clearSystemCache } from '../cache.js';
 import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
 import { transaction } from '../utils/transaction.js';
+import { announceMembershipsChanged } from '../websocket/memberships-changed.js';
 import { ItemsService } from './items.js';
 import { RoleMembersService } from './role-members.js';
 
@@ -49,6 +50,10 @@ vi.mock('../cache.js', async (importOriginal) => {
 	};
 });
 
+vi.mock('../websocket/memberships-changed.js', () => {
+	return { announceMembershipsChanged: vi.fn() };
+});
+
 const schema = new SchemaBuilder()
 	.collection('directus_role_members', (c) => {
 		c.field('id').uuid()
@@ -61,6 +66,7 @@ afterEach(() => {
 	vi.mocked(clearSystemCache).mockClear();
 	vi.mocked(clearPermissionsCache).mockClear();
 	vi.mocked(flushResponseCache).mockClear();
+	vi.mocked(announceMembershipsChanged).mockClear();
 });
 
 describe('Services / RoleMembers', () => {
@@ -71,8 +77,14 @@ describe('Services / RoleMembers', () => {
 
 			const onRequireUserIntegrityCheck = vi.fn();
 
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database)
+				.on.select('directus_role_members')
+				.response([{ user: 'user-id-1' }]);
+
 			await expect(new RoleMembersService({
-				knex: knex.default({ client: MockClient }),
+				knex: database,
 				schema,
 			}).createMany(
 				[
@@ -109,8 +121,14 @@ describe('Services / RoleMembers', () => {
 			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
 				.mockResolvedValue(['member-id-3']);
 
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database)
+				.on.select('directus_role_members')
+				.response([{ user: 'user-id-3' }]);
+
 			await new RoleMembersService({
-				knex: knex.default({ client: MockClient }),
+				knex: database,
 				schema,
 			}).createOne({ role: 'role-id-3', user: 'user-id-3' });
 
@@ -129,6 +147,10 @@ describe('Services / RoleMembers', () => {
 			const database = knex.default({ client: MockClient });
 			const tracker = createTracker(database);
 			const transactionStates: string[][] = [];
+
+			tracker.on
+				.select('directus_role_members')
+				.response([{ user: 'user-id-4' }]);
 
 			vi.mocked(clearPermissionsCache).mockImplementationOnce(async () => {
 				transactionStates.push(
@@ -180,8 +202,14 @@ describe('Services / RoleMembers', () => {
 			vi.spyOn(ItemsService.prototype, 'createMany')
 				.mockResolvedValue(['member-id-10']);
 
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database)
+				.on.select('directus_role_members')
+				.response([{ user: 'user-id-10' }]);
+
 			const service = new RoleMembersService({
-				knex: knex.default({ client: MockClient }),
+				knex: database,
 				schema,
 			});
 
@@ -205,8 +233,14 @@ describe('Services / RoleMembers', () => {
 
 			const onRequireUserIntegrityCheck = vi.fn();
 
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database)
+				.on.select('directus_role_members')
+				.response([{ user: 'user-id-5' }]);
+
 			await new RoleMembersService({
-				knex: knex.default({ client: MockClient }),
+				knex: database,
 				schema,
 			}).updateBatch(
 				[{ id: 'member-id-5', role: 'role-id-5' }],
@@ -231,8 +265,14 @@ describe('Services / RoleMembers', () => {
 			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
 				.mockResolvedValue(['member-id-6']);
 
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database)
+				.on.select('directus_role_members')
+				.response([{ user: 'user-id-6' }]);
+
 			await new RoleMembersService({
-				knex: knex.default({ client: MockClient }),
+				knex: database,
 				schema,
 			}).updateBatch([{ id: 'member-id-6', sort: 2 }]);
 
@@ -246,8 +286,14 @@ describe('Services / RoleMembers', () => {
 			vi.spyOn(ItemsService.prototype, 'updateGroups')
 				.mockResolvedValue(['member-id-11']);
 
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database)
+				.on.select('directus_role_members')
+				.response([{ user: 'user-id-11' }]);
+
 			const service = new RoleMembersService({
-				knex: knex.default({ client: MockClient }),
+				knex: database,
 				schema,
 			});
 
@@ -271,8 +317,14 @@ describe('Services / RoleMembers', () => {
 
 			const onRequireUserIntegrityCheck = vi.fn();
 
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database)
+				.on.select('directus_role_members')
+				.response([{ user: 'user-id-7' }]);
+
 			await expect(new RoleMembersService({
-				knex: knex.default({ client: MockClient }),
+				knex: database,
 				schema,
 			}).deleteMany(['member-id-7'], { onRequireUserIntegrityCheck }))
 				.resolves.toStrictEqual(['member-id-7']);
@@ -292,8 +344,14 @@ describe('Services / RoleMembers', () => {
 			vi.spyOn(ItemsService.prototype, 'deleteMany')
 				.mockResolvedValue(['member-id-8']);
 
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database)
+				.on.select('directus_role_members')
+				.response([{ user: 'user-id-8' }]);
+
 			await new RoleMembersService({
-				knex: knex.default({ client: MockClient }),
+				knex: database,
 				schema,
 			}).deleteMany(['member-id-8']);
 
@@ -304,8 +362,14 @@ describe('Services / RoleMembers', () => {
 			vi.spyOn(ItemsService.prototype, 'deleteMany')
 				.mockResolvedValue(['member-id-12']);
 
+			const database = knex.default({ client: MockClient });
+
+			createTracker(database)
+				.on.select('directus_role_members')
+				.response([{ user: 'user-id-12' }]);
+
 			const service = new RoleMembersService({
-				knex: knex.default({ client: MockClient }),
+				knex: database,
 				schema,
 			});
 
@@ -319,6 +383,96 @@ describe('Services / RoleMembers', () => {
 				.toHaveBeenCalledWith({ namespace: 'response' });
 
 			expect(clearSystemCache).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('the users whose sockets it refreshes', () => {
+		it('reads the users of the memberships it created', async () => {
+			vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['member-id-16', 'member-id-17']);
+
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			tracker.on
+				.select('directus_role_members')
+				.response([{ user: 'user-id-16' }, { user: 'user-id-17' }]);
+
+			await new RoleMembersService({ knex: database, schema }).createMany([
+				{ role: 'role-id-16', user: 'user-id-16' },
+				{ role: 'role-id-16', user: 'user-id-17' },
+			]);
+
+			expect(tracker.history.select).toMatchObject([
+				{
+					sql: 'select "user" from "directus_role_members"'
+						+ ' where "id" in (?, ?)',
+					bindings: ['member-id-16', 'member-id-17'],
+				},
+			]);
+
+			expect(announceMembershipsChanged)
+				.toHaveBeenCalledExactlyOnceWith(['user-id-16', 'user-id-17']);
+		});
+
+		it(oneLine`
+			reads the users of the memberships it updated, before and after, a
+			membership handed to another user changing the roles of both
+		`, async () => {
+			vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue(['member-id-18']);
+
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			tracker.on
+				.select('directus_role_members')
+				.responseOnce([{ user: 'user-id-18' }]);
+
+			tracker.on
+				.select('directus_role_members')
+				.responseOnce([{ user: 'user-id-19' }]);
+
+			await new RoleMembersService({ knex: database, schema })
+				.updateBatch([{ id: 'member-id-18', user: 'user-id-19' }]);
+
+			expect(tracker.history.select).toMatchObject([
+				{
+					sql: 'select "user" from "directus_role_members" where "id" in (?)',
+					bindings: ['member-id-18'],
+				},
+				{
+					sql: 'select "user" from "directus_role_members" where "id" in (?)',
+					bindings: ['member-id-18'],
+				},
+			]);
+
+			expect(announceMembershipsChanged)
+				.toHaveBeenCalledExactlyOnceWith(['user-id-18', 'user-id-19']);
+		});
+
+		it('reads the users of the memberships before it deletes them', async () => {
+			const deleteMany = vi.spyOn(ItemsService.prototype, 'deleteMany')
+				.mockResolvedValue(['member-id-20']);
+
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+			const deletedBeforeRead: boolean[] = [];
+
+			tracker.on
+				.select('directus_role_members')
+				.response(() => {
+					deletedBeforeRead.push(deleteMany.mock.calls.length > 0);
+					return [{ user: 'user-id-20' }];
+				});
+
+			await new RoleMembersService({ knex: database, schema })
+				.deleteMany(['member-id-20']);
+
+			expect(deletedBeforeRead).toEqual([false]);
+
+			expect(announceMembershipsChanged)
+				.toHaveBeenCalledExactlyOnceWith(['user-id-20']);
 		});
 	});
 

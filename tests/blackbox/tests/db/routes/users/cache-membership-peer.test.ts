@@ -32,7 +32,15 @@ defineSpawnedWriteFeature(
 					collection: 'cache_membership_peer_notes',
 					schema: {},
 					meta: {},
-					fields: [{ field: 'label', type: 'string', meta: {} }],
+					fields: [
+						{
+							field: 'id',
+							type: 'uuid',
+							meta: { special: ['uuid'] },
+							schema: { is_primary_key: true, has_auto_increment: false },
+						},
+						{ field: 'label', type: 'string', meta: {} },
+					],
 				})
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
