@@ -112,7 +112,9 @@ describe('authenticateConnection', () => {
 
 		// A membership write closes its socket rather than refresh the filter's
 		// roles.
-		expect(customAccountabilities.has(customAccountability)).toBe(true);
+		expect(
+			customAccountabilities.has(customAccountability as Accountability),
+		).toBe(true);
 	});
 
 	test('Failure token expired', async () => {

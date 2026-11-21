@@ -34,6 +34,9 @@ vi.mock('@directus/env', () => {
 				AUTH_COMPANY_GROUP_DN: 'ou=groups,dc=example,dc=com',
 				AUTH_DIRECTORY_DRIVER: 'ldap',
 				AUTH_OKTA_DRIVER: 'saml',
+				// Never listed in AUTH_PROVIDERS: the password login.
+				AUTH_DEFAULT_DRIVER: 'oauth2',
+				AUTH_DEFAULT_ROLE_MAPPING: { admins: 'role-a' },
 			};
 		},
 	};
@@ -110,7 +113,9 @@ describe('the migration', () => {
 			.mockReturnValueOnce('00000000-0000-4000-8000-000000000002')
 			.mockReturnValueOnce('00000000-0000-4000-8000-000000000003')
 			.mockReturnValueOnce('00000000-0000-4000-8000-000000000004')
-			.mockReturnValueOnce('00000000-0000-4000-8000-000000000005');
+			.mockReturnValueOnce('00000000-0000-4000-8000-000000000005')
+			.mockReturnValueOnce('00000000-0000-4000-8000-000000000006')
+			.mockReturnValueOnce('00000000-0000-4000-8000-000000000007');
 
 		vi.mocked(createInspector).mockReturnValue({
 			foreignKeys: vi.fn().mockResolvedValue([]),
@@ -122,6 +127,8 @@ describe('the migration', () => {
 			{ id: 'user-3', role: 'role-c', provider: 'company' },
 			{ id: 'user-4', role: 'role-d', provider: 'directory' },
 			{ id: 'user-5', role: 'role-e', provider: 'okta' },
+			{ id: 'user-6', role: 'role-f', provider: 'default' },
+			{ id: 'user-7', role: 'role-g', provider: null },
 		]);
 
 		tracker.on.insert('directus_role_members').response([]);
@@ -155,6 +162,16 @@ describe('the migration', () => {
 				'role-e',
 				1,
 				'user-5',
+				'00000000-0000-4000-8000-000000000006',
+				null,
+				'role-f',
+				1,
+				'user-6',
+				'00000000-0000-4000-8000-000000000007',
+				null,
+				'role-g',
+				1,
+				'user-7',
 			],
 		]);
 	});

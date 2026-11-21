@@ -1,3 +1,4 @@
+import type { Accountability } from '@directus/types';
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useBus } from '../bus/index.js';
@@ -222,7 +223,9 @@ describe('announceMembershipsChanged', () => {
 			close: vi.fn(),
 		};
 
-		memberships.customAccountabilities.add(memberSocket.accountability);
+		memberships.customAccountabilities.add(
+			memberSocket.accountability as Accountability,
+		);
 
 		memberships.refreshOnMembershipChange(
 			new Set([memberSocket as unknown as WebSocketClient]),
@@ -282,6 +285,44 @@ describe('announceMembershipsChanged', () => {
 
 		expect(rolesRefreshedListener)
 			.toHaveBeenCalledExactlyOnceWith(memberSocket);
+	});
+
+	it('keeps the socket of a listener that throws open', async () => {
+		const memberSocket = {
+			accountability: { user: 'user-member', roles: ['role-editors'] },
+			send: vi.fn(),
+			close: vi.fn(),
+		};
+
+		const listenerFailure = new Error('listener failed');
+		const laterListener = vi.fn();
+
+		memberships.onSocketRolesRefreshed(() => {
+			throw listenerFailure;
+		});
+
+		memberships.onSocketRolesRefreshed(laterListener);
+
+		memberships.refreshOnMembershipChange(
+			new Set([memberSocket as unknown as WebSocketClient]),
+		);
+
+		vi.mocked(fetchUserRoles).mockResolvedValueOnce({
+			memberRoles: ['role-auditors'],
+			roles: ['role-auditors'],
+		} as any);
+
+		await memberships.announceMembershipsChanged(['user-member']);
+
+		expect(memberSocket.send).not.toHaveBeenCalled();
+		expect(memberSocket.close).not.toHaveBeenCalled();
+		expect(laterListener).toHaveBeenCalledExactlyOnceWith(memberSocket);
+
+		expect(useLogger().error).toHaveBeenCalledExactlyOnceWith(
+			listenerFailure,
+			'[websocket] a listener of the refreshed roles of the socket of'
+				+ ' user "user-member" failed: Error: listener failed',
+		);
 	});
 
 	it('logs a publish the bus refused, and answers', async () => {
