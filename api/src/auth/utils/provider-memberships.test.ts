@@ -194,6 +194,26 @@ describe('syncProviderMemberships', () => {
 		expect(RoleMembersService).not.toHaveBeenCalled();
 	});
 
+	test('writes nothing when the mapped role spells the stored uuid in capitals', async () => {
+		userRows = [
+			{
+				id: 'row-1',
+				role: '3d9a4c17-6e2b-4f0a-9c1d-2b7e8f6a5c41',
+				managed_by: 'auth:github',
+				sort: 1,
+			},
+		];
+
+		await syncProviderMemberships(
+			'user-1',
+			'github',
+			['3D9A4C17-6E2B-4F0A-9C1D-2B7E8F6A5C41'],
+			{ knex: knexMock, schema: {} as SchemaOverview },
+		);
+
+		expect(RoleMembersService).not.toHaveBeenCalled();
+	});
+
 	test('writes nothing when no role is mapped and none is granted', async () => {
 		await syncProviderMemberships('user-1', 'github', [], {
 			knex: knexMock,
