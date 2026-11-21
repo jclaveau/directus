@@ -39,6 +39,7 @@ beforeEach(async () => {
 			currency: 'eur',
 			interval: '{"months":1}',
 			beneficiaries_max: 3,
+			status: 'active',
 		},
 		{
 			code: 'old',

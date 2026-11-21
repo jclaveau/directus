@@ -394,6 +394,9 @@ describe('runSyncBatch', () => {
 			date_updated: new Date('2026-10-01T00:00:00Z'),
 		});
 
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
 		await database('subscription_sync_queue').insert({
 			provider: 'mollie',
 			resource_id: 'tr_1',
