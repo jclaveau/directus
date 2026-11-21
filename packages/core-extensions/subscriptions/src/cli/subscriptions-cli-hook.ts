@@ -1,6 +1,7 @@
 import { defineHook } from '@directus/extensions-sdk/scalabus';
 import type { Command } from 'commander';
 import { readMollieAccessToken } from '../config/read-subscriptions-config.js';
+import { INVITE_DAYS_KEPT, sweepInvites } from '../members/sweep-invites.js';
 
 const MOLLIE_WEBHOOKS_URL = 'https://api.mollie.com/v2/webhooks';
 
@@ -21,11 +22,31 @@ const MOLLIE_EVENT_TYPES = [
  */
 export const subscriptionsCliHook = defineHook(
 	'subscriptions-cli',
-	({ init }, { env }) => {
+	({ init }, { env, database }) => {
 		init('cli.before', ({ program }: { program: Command }) => {
-			program
+			const subscriptionsCommand = program
 				.command('subscriptions')
-				.description('Set up the subscriptions bundle')
+				.description('Set up the subscriptions bundle');
+
+			subscriptionsCommand
+				.command('sweep-invites')
+				.description(
+					`Delete the invited users holding no seat ${INVITE_DAYS_KEPT} days`
+					+ ' after their invite',
+				)
+				.action(async () => {
+					const sweptCount = await sweepInvites(database);
+
+					process.stdout.write(sweptCount === 1
+						? 'Deleted 1 invited user holding no seat since its invite of'
+						+ ` ${INVITE_DAYS_KEPT} days\n`
+						: `Deleted ${sweptCount} invited users holding no seat since`
+						+ ` their invite of ${INVITE_DAYS_KEPT} days\n`);
+
+					process.exit(0);
+				});
+
+			subscriptionsCommand
 				.command('mollie-setup-webhook')
 				.description('Create the Mollie webhook and print its secret')
 				.requiredOption('--url <url>', 'Public URL of the Mollie webhook route')

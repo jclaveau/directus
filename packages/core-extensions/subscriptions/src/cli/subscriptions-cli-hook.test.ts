@@ -1,6 +1,14 @@
 import { Command } from 'commander';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import { sweepInvites } from '../members/sweep-invites.js';
 import { subscriptionsCliHook } from './subscriptions-cli-hook.js';
+
+vi.mock('../members/sweep-invites.js', async (importOriginal) => {
+	return {
+		...await importOriginal<object>(),
+		sweepInvites: vi.fn(),
+	};
+});
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -8,6 +16,41 @@ afterEach(() => {
 });
 
 describe('subscriptionsCliHook', () => {
+	test.each([
+		[1, 'Deleted 1 invited user holding no seat since its invite of 30 days\n'],
+		[
+			2,
+			'Deleted 2 invited users holding no seat since their invite of 30'
+			+ ' days\n',
+		],
+	])('sweeps %j invited users and says so', async (sweptCount, sweepLine) => {
+		const init = vi.fn();
+		const program = new Command();
+		vi.mocked(sweepInvites).mockResolvedValue(sweptCount);
+		vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+
+		const exitProcess = vi.spyOn(process, 'exit')
+			.mockReturnValue(undefined as never);
+
+		(subscriptionsCliHook.config as (...args: unknown[]) => void)(
+			{ init },
+			{ env: {}, database: 'database' },
+		);
+
+		init.mock.calls[0]?.[1]({ program });
+
+		await program.parseAsync([
+			'node',
+			'directus',
+			'subscriptions',
+			'sweep-invites',
+		]);
+
+		expect(sweepInvites).toHaveBeenCalledWith('database');
+		expect(vi.mocked(process.stdout.write).mock.calls).toEqual([[sweepLine]]);
+		expect(exitProcess).toHaveBeenCalledWith(0);
+	});
+
 	test('creates the Mollie webhook and prints its secret once', async () => {
 		const init = vi.fn();
 		const program = new Command();

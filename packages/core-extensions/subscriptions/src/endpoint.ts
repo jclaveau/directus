@@ -21,7 +21,7 @@ type AccountableRequest = Request & { accountability?: Accountability | null };
 
 export const subscriptionsEndpoint = defineEndpoint(
 	'subscriptions',
-	(router, { env, database, logger }) => {
+	(router, { env, database, logger, services, getSchema }) => {
 		let enabledProviders: SubscriptionProviders | undefined;
 
 		// Read at first use: the CLI loads this endpoint too, before
@@ -132,6 +132,15 @@ export const subscriptionsEndpoint = defineEndpoint(
 							enabledProviders: readEnabledProviders(),
 							userId: request.accountability?.user ?? null,
 							requestBody: request.body,
+							inviteUser: async (invitedEmail: string) => {
+								const usersService = new services.UsersService({
+									schema: await getSchema(),
+									accountability: null,
+								});
+
+								// The user exists, invited with no role: this sends its mail.
+								await usersService.inviteUser(invitedEmail, null, null);
+							},
 						});
 					})
 					.then((beneficiaryId) => {
