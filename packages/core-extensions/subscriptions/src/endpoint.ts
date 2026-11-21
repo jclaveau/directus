@@ -5,8 +5,13 @@ import type { Request } from 'express';
 import { cancelOwnSubscription } from './cancel/cancel-own-subscription.js';
 import { readChosenSubscription } from './cancel/read-chosen-subscription.js';
 import { resumeOwnSubscription } from './cancel/resume-own-subscription.js';
-import { readSubscriptionsConfig } from './config/read-subscriptions-config.js';
+import {
+	readCheckoutUrlAllowList,
+	readSubscriptionsConfig,
+} from './config/read-subscriptions-config.js';
 import { addOwnBeneficiary } from './members/add-own-beneficiary.js';
+import { createCheckout } from './members/create-checkout.js';
+import { listOwnSubscriptions } from './members/list-own-subscriptions.js';
 import { archivePlan } from './plans/archive-plan.js';
 import { createProviders } from './providers/create-providers.js';
 import type { SubscriptionProviders } from './providers/types.js';
@@ -16,7 +21,7 @@ type AccountableRequest = Request & { accountability?: Accountability | null };
 
 export const subscriptionsEndpoint = defineEndpoint(
 	'subscriptions',
-	(router, { env, database, logger }) => {
+	(router, { env, database, logger, services, getSchema }) => {
 		let enabledProviders: SubscriptionProviders | undefined;
 
 		// Read at first use: the CLI loads this endpoint too, before
@@ -27,6 +32,8 @@ export const subscriptionsEndpoint = defineEndpoint(
 
 			return enabledProviders;
 		};
+
+		const checkoutUrlAllowList = readCheckoutUrlAllowList(env);
 
 		router.post('/webhooks/:provider', (request, response, next) => {
 			if (!Buffer.isBuffer(request.body)) {
@@ -51,6 +58,35 @@ export const subscriptionsEndpoint = defineEndpoint(
 				.then(() => {
 					response.status(200)
 						.end();
+				}, next);
+		});
+
+		router.get('/mine', (request: AccountableRequest, response, next) => {
+			Promise.resolve()
+				.then(() => {
+					return listOwnSubscriptions(
+						database,
+						request.accountability?.user ?? null,
+					);
+				})
+				.then((ownSubscriptions) => {
+					response.json({ data: ownSubscriptions });
+				}, next);
+		});
+
+		router.post('/checkout', (request: AccountableRequest, response, next) => {
+			Promise.resolve()
+				.then(() => {
+					return createCheckout({
+						database,
+						enabledProviders: readEnabledProviders(),
+						checkoutUrlAllowList,
+						userId: request.accountability?.user ?? null,
+						requestBody: request.body,
+					});
+				})
+				.then((createdCheckout) => {
+					response.json({ data: createdCheckout });
 				}, next);
 		});
 
@@ -96,6 +132,15 @@ export const subscriptionsEndpoint = defineEndpoint(
 							enabledProviders: readEnabledProviders(),
 							userId: request.accountability?.user ?? null,
 							requestBody: request.body,
+							inviteUser: async (invitedEmail: string) => {
+								const usersService = new services.UsersService({
+									schema: await getSchema(),
+									accountability: null,
+								});
+
+								// The user exists, invited with no role: this sends its mail.
+								await usersService.inviteUser(invitedEmail, null, null);
+							},
 						});
 					})
 					.then((beneficiaryId) => {

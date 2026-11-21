@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
+import { startFakeMailbox, type ReceivedMail } from './fake-smtp-mailbox';
 import {
 	startFakeProviders,
 	type MollieHolding,
@@ -68,6 +69,7 @@ const MOLLIE_OLD_WEBHOOK_SECRET = 'mollie_secret_old';
 const SYNC_POLL = { timeout: 45_000, interval: 500 };
 
 const BUNDLE_TABLES = [
+	'subscription_invites',
 	'subscription_sync_queue',
 	'subscription_events',
 	'subscription_beneficiaries',
@@ -76,12 +78,54 @@ const BUNDLE_TABLES = [
 	'subscription_plans',
 ];
 
+// The users the features write, as `<prefix>-<id>@example.com` with an `id`
+// from 100 to 199.
+const SCENARIO_EMAIL_PREFIXES = [
+	'payer',
+	'friend',
+	'invited',
+	'other',
+	'user',
+	'co',
+	'known',
+	'new',
+	'gone',
+	'first',
+	'second',
+	'stale',
+	'seated',
+	'fresh',
+	'joined',
+	'again',
+];
+
+// The checkout pages the fake providers answer, the row id appended.
+const CHECKOUT_PAGES = {
+	mollie_page: 'https://www.mollie.com/checkout/tr_checkout_',
+	stripe_page: 'https://checkout.stripe.com/c/pay/cs_checkout_',
+};
+
+// The names a scenario learns from a response: each scenario learns its own.
+const RESPONSE_KEY_NAMES = ['checkout'];
+
 const accessFeature = loadFeature(
 	'./tests/db/routes/system/subscription-managed-access.feature',
 );
 
 const lifecycleFeature = loadFeature(
 	'./tests/db/routes/system/subscription-lifecycle.feature',
+);
+
+const mineFeature = loadFeature(
+	'./tests/db/routes/system/subscription-mine.feature',
+);
+
+const checkoutFeature = loadFeature(
+	'./tests/db/routes/system/subscription-checkout.feature',
+);
+
+const invitesFeature = loadFeature(
+	'./tests/db/routes/system/subscription-beneficiary-invites.feature',
 );
 
 const schemaApplyFeature = loadFeature(
@@ -93,11 +137,12 @@ describe.each(vendors)('%s', (vendor) => {
 
 	const scenarioKeys: ScenarioKeys = {
 		run: randomUUID(),
-		keysByName: {},
+		keysByName: { ...CHECKOUT_PAGES },
 	};
 
 	let database: Knex;
 	let fakeProviders: Awaited<ReturnType<typeof startFakeProviders>>;
+	let fakeMailbox: Awaited<ReturnType<typeof startFakeMailbox>>;
 	let instanceProcess: ChildProcess;
 	let packageDirectory: string;
 
@@ -122,6 +167,7 @@ describe.each(vendors)('%s', (vendor) => {
 		database = knex(config.knexConfig[vendor]!);
 
 		fakeProviders = await startFakeProviders();
+		fakeMailbox = await startFakeMailbox();
 
 		packageDirectory = await mkdtemp(join(tmpdir(), 'directus-blackbox-bundle-'));
 
@@ -155,6 +201,12 @@ describe.each(vendors)('%s', (vendor) => {
 			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_test_blackbox',
 			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: STRIPE_WEBHOOK_SECRET,
 			BLACKBOX_PROVIDERS_PORT: String(fakeProviders.listeningPort),
+			SUBSCRIPTIONS_CHECKOUT_URL_ALLOW_LIST: 'https://shop.example.com/ok',
+			EMAIL_TRANSPORT: 'smtp',
+			EMAIL_SMTP_HOST: '127.0.0.1',
+			EMAIL_SMTP_PORT: String(fakeMailbox.listeningPort),
+			EMAIL_SMTP_SECURE: 'false',
+			EMAIL_SMTP_IGNORE_TLS: 'true',
 			NODE_OPTIONS: [vendorEnv['NODE_OPTIONS'], `--import=${reroutePreload}`]
 				.filter(Boolean)
 				.join(' '),
@@ -202,6 +254,8 @@ describe.each(vendors)('%s', (vendor) => {
 			.whereIn('version', [
 				'@scalabus/subscriptions:20261105A',
 				'@scalabus/subscriptions:20261107A',
+				'@scalabus/subscriptions:20261121A',
+				'@scalabus/subscriptions:20261122A',
 			])
 			.delete();
 
@@ -221,27 +275,48 @@ describe.each(vendors)('%s', (vendor) => {
 				'refused@example.com',
 			])
 			.orWhere('email', 'like', 'lifecycle-%@example.com')
+			.orWhere((scenarioEmails) => {
+				for (const emailPrefix of SCENARIO_EMAIL_PREFIXES) {
+					scenarioEmails.orWhere(
+						'email',
+						'like',
+						`${emailPrefix}-1__@example.com`,
+					);
+				}
+			})
 			.delete();
 
 		await database('directus_policies')
 			.whereIn('name', ['Pro plan', 'Other policy', 'Direct policy'])
 			.orWhere('name', 'like', 'Lifecycle %')
+			.orWhere('name', 'like', 'Mine %')
+			.orWhere('name', 'like', 'Checkout %')
 			.delete();
 
 		await database.destroy();
 
 		await fakeProviders.stopListening();
+		await fakeMailbox.stopListening();
 
 		await rm(packageDirectory, { recursive: true, force: true });
 	}, 60_000);
 
+	// A `subscriptions` row stating no dates is seeded at the time it is written.
 	function seedRows(tableName: string, rowsTable: Record<string, string>[]) {
-		return database(tableName).insert(
-			parseGherkinTable(JSON.parse(withKeys(
-				JSON.stringify(rowsTable),
-				scenarioKeys,
-			))),
-		);
+		const seededRows = parseGherkinTable(JSON.parse(withKeys(
+			JSON.stringify(rowsTable),
+			scenarioKeys,
+		)));
+
+		if (tableName !== 'subscriptions') {
+			return database(tableName).insert(seededRows);
+		}
+
+		const seededAt = new Date();
+
+		return database(tableName).insert(seededRows.map((seededRow) => {
+			return { date_created: seededAt, date_updated: seededAt, ...seededRow };
+		}));
 	}
 
 	// A table too wide for a row per line.
@@ -249,7 +324,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	function readColumnRow(columnsTable: ColumnValueRow[]) {
 		return Object.fromEntries(columnsTable.map(({ column, value }) => {
-			return [column, value];
+			return [column, withKeys(value, scenarioKeys)];
 		}));
 	}
 
@@ -264,6 +339,12 @@ describe.each(vendors)('%s', (vendor) => {
 	// scenario finds its answer.
 	function holdSubscription(columnsTable: ColumnValueRow[]) {
 		fakeProviders.holdAtMollie(
+			parseGherkinTable<MollieHolding>([readColumnRow(columnsTable)])[0]!,
+		);
+	}
+
+	function holdFirstPayment(columnsTable: ColumnValueRow[]) {
+		fakeProviders.holdFirstPaymentAtMollie(
 			parseGherkinTable<MollieHolding>([readColumnRow(columnsTable)])[0]!,
 		);
 	}
@@ -366,11 +447,22 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 	}
 
+	// An expiry event tells of a checkout the fake provider then holds expired.
 	function sendProviderEvents(
 		rowsTable: { provider: string; type: string; entity: string }[],
 	) {
 		const providerRows = keepProviderRows(rowsTable);
 		const scenarioProvider = readScenarioProvider();
+
+		for (const { type: eventType, entity } of providerRows) {
+			if (eventType === 'payment.expired') {
+				fakeProviders.expirePaymentAtMollie(withKeys(entity, scenarioKeys));
+			}
+
+			if (eventType === 'checkout.session.expired') {
+				fakeProviders.expireSessionAtStripe(withKeys(entity, scenarioKeys));
+			}
+		}
 
 		if (scenarioProvider === 'mollie') {
 			return sendMollieEvents(providerRows);
@@ -457,7 +549,14 @@ describe.each(vendors)('%s', (vendor) => {
 				id: 'evt_blackbox',
 				object: 'event',
 				type: eventType,
-				data: { object: { id: subscription, object: 'subscription' } },
+				data: {
+					object: {
+						id: withKeys(subscription, scenarioKeys),
+						object: eventType.startsWith('checkout.session.')
+							? 'checkout.session'
+							: 'subscription',
+					},
+				},
 			});
 
 			const signedAt = Math.floor(Date.now() / 1000);
@@ -494,7 +593,7 @@ describe.each(vendors)('%s', (vendor) => {
 				type: eventType,
 				...entity === ''
 					? {}
-					: { entityId: entity },
+					: { entityId: withKeys(entity, scenarioKeys) },
 			});
 
 			const eventSignature = createHmac('sha256', MOLLIE_WEBHOOK_SECRET)
@@ -780,7 +879,7 @@ describe.each(vendors)('%s', (vendor) => {
 			);
 		}
 
-		return expectNoQueueRow(providerRows[0]!.resource_id);
+		return expectNoQueueRow(withKeys(providerRows[0]!.resource_id, scenarioKeys));
 	}
 
 	// A `write` cell is the YAML of one write, a write without `body` having none.
@@ -790,40 +889,89 @@ describe.each(vendors)('%s', (vendor) => {
 		const providerRows = keepProviderRows(rowsTable);
 
 		if (!('write' in providerRows[0]!)) {
-			return parseGherkinTable<ReceivedWrite>(providerRows);
+			return parseGherkinTable<ReceivedWrite>(
+				JSON.parse(withKeys(JSON.stringify(providerRows), scenarioKeys)),
+			);
 		}
 
 		return providerRows.map(({ write: writeYaml }) => {
-			return { body: null, ...loadYaml(writeYaml!) as object } as ReceivedWrite;
+			return {
+				body: null,
+				...loadYaml(withKeys(writeYaml!, scenarioKeys)) as object,
+			} as ReceivedWrite;
 		});
 	}
 
-	async function expectReceivedWrites(rowsTable: Record<string, string>[]) {
+	// One parameter: jest-cucumber hands a step function declaring more than its
+	// arguments a callback, and waits on it until the scenario times out.
+	function expectReceivedWrites(rowsTable: Record<string, string>[]) {
+		return expectReceivedWritesAt(rowsTable, undefined);
+	}
+
+	async function expectReceivedWritesAt(
+		rowsTable: Record<string, string>[],
+		keptPath: string | undefined,
+	) {
 		await expect.poll(() => {
-			return fakeProviders.receivedWrites;
+			return fakeProviders.receivedWrites
+				.filter((receivedWrite) => {
+					return keptPath === undefined || receivedWrite.path === keptPath;
+				})
+				.map(comparableWrite);
 		}, SYNC_POLL)
-			.toEqual(readExpectedWrites(rowsTable));
+			.toEqual(readExpectedWrites(rowsTable).map(comparableWrite));
 
 		fakeProviders.receivedWrites.length = 0;
 	}
 
+	function expectNoWrite() {
+		expect(fakeProviders.receivedWrites).toEqual([]);
+	}
+
 	// A subscription too wide for a row: one line per field of the JSON body.
+	// The writes that came before it, such as its checkout's, are not read.
 	async function expectCreatedSubscription(
 		customerId: string,
 		fieldsTable: { field: string; value: string }[],
 	) {
-		await expectReceivedWrites([{
-			method: 'POST',
-			path: `/v2/customers/${customerId}/subscriptions`,
-			body: JSON.stringify(Object.fromEntries(
-				parseGherkinTable(fieldsTable).map(({ field, value }) => {
-					return [field, value];
-				}),
-			)),
-		}]);
+		const subscriptionsPath = `/v2/customers/${
+			withKeys(customerId, scenarioKeys)}/subscriptions`;
+
+		await expectReceivedWritesAt(
+			[{
+				method: 'POST',
+				path: subscriptionsPath,
+				body: JSON.stringify(Object.fromEntries(
+					parseGherkinTable(JSON.parse(withKeys(
+						JSON.stringify(fieldsTable),
+						scenarioKeys,
+					))).map(({ field, value }) => {
+						return [field, value];
+					}),
+				)),
+			}],
+			subscriptionsPath,
+		);
 	}
 
+	// A checkout names the provider a table per provider is read for.
 	function sendRequestRows(rowsTable: Row[]) {
+		for (const { request: requestText } of rowsTable) {
+			if (!requestText.includes('/subscriptions/checkout')) {
+				continue;
+			}
+
+			const { payload: checkoutPayload } = loadYaml(requestText) as {
+				payload?: { provider?: unknown };
+			};
+
+			if (typeof checkoutPayload?.provider === 'string') {
+				scenarioProviders = [
+					...new Set([...scenarioProviders, checkoutPayload.provider]),
+				];
+			}
+		}
+
 		return sendRows(
 			{
 				vendor,
@@ -936,6 +1084,7 @@ describe.each(vendors)('%s', (vendor) => {
 		[/^the rows of (\w+):$/, seedRows],
 		[/^Mollie holds this subscription:$/, holdSubscription],
 		[/^Mollie holds this mandate:$/, holdMandate],
+		[/^Mollie holds this first payment:$/, holdFirstPayment],
 		[/^Stripe holds this subscription:$/, holdStripeSubscription],
 		[/^the provider holds this subscription:$/, holdProviderSubscription],
 		[
@@ -971,12 +1120,20 @@ describe.each(vendors)('%s', (vendor) => {
 		],
 		[/^the sync queue eventually holds no row for (\S+)$/, expectNoQueueRow],
 		[/^the providers eventually received these writes:$/, expectReceivedWrites],
+		[/^the providers received no write$/, expectNoWrite],
 		[
-			/^Mollie eventually received this subscription for (\w+):$/,
+			/^Mollie eventually received this subscription for (\S+):$/,
 			expectCreatedSubscription,
 		],
 		[/^the CLI runs (.+) with these variables:$/, runCli],
 		[/^the CLI exited with (\d+), having logged:$/, expectCliExit],
+		[
+			/^the mailbox eventually holds these mails:$/,
+			(mailsTable: ReceivedMail[]) => {
+				return expect.poll(() => fakeMailbox.receivedMails, SYNC_POLL)
+					.toEqual(mailsTable);
+			},
+		],
 	];
 
 	type DiffEntry = { collection: string; diff: { kind: string }[] };
@@ -1069,41 +1226,57 @@ describe.each(vendors)('%s', (vendor) => {
 
 	// Bound off each scenario's own steps: the library binds by position. An
 	// outline's steps still read `<column>`, which the library fills per example.
-	defineFeature(lifecycleFeature, (scenario) => {
+	function defineLifecycleFeature(
+		stepsFeature: ReturnType<typeof loadFeature>,
+	) {
 		const lifecycleScenarios = [
-			...lifecycleFeature.scenarios,
-			...lifecycleFeature.scenarioOutlines,
+			...stepsFeature.scenarios,
+			...stepsFeature.scenarioOutlines,
 		];
 
-		for (const { title, steps: scenarioSteps } of lifecycleScenarios) {
-			scenario(title, ({ defineStep }) => {
-				for (const [stepIndex, { stepText }] of scenarioSteps.entries()) {
-					const boundStep = lifecycleSteps.find(([stepMatcher]) => {
-						return stepMatcher.test(stepText);
-					});
+		defineFeature(stepsFeature, (scenario) => {
+			for (const { title, steps: scenarioSteps } of lifecycleScenarios) {
+				scenario(title, ({ defineStep }) => {
+					for (const [stepIndex, { stepText }] of scenarioSteps.entries()) {
+						const boundStep = lifecycleSteps.find(([stepMatcher]) => {
+							return stepMatcher.test(stepText);
+						});
 
-					if (boundStep === undefined) {
-						throw new Error(`No step reads ${JSON.stringify(stepText)}`);
+						if (boundStep === undefined) {
+							throw new Error(`No step reads ${JSON.stringify(stepText)}`);
+						}
+
+						const [stepMatcher, stepCallback] = boundStep;
+
+						if (stepIndex > 0) {
+							defineStep(stepMatcher, stepCallback);
+
+							continue;
+						}
+
+						// A scenario seeding no pending subscription has no provider,
+						// and reads only the writes it makes.
+						defineStep(stepMatcher, (...stepArguments: unknown[]) => {
+							scenarioProviders = [];
+							fakeProviders.receivedWrites.length = 0;
+							fakeMailbox.receivedMails.length = 0;
+
+							for (const responseKeyName of RESPONSE_KEY_NAMES) {
+								delete scenarioKeys.keysByName[responseKeyName];
+							}
+
+							return stepCallback(...stepArguments);
+						});
 					}
+				}, 180_000);
+			}
+		});
+	}
 
-					const [stepMatcher, stepCallback] = boundStep;
-
-					if (stepIndex > 0) {
-						defineStep(stepMatcher, stepCallback);
-
-						continue;
-					}
-
-					// A scenario seeding no pending subscription has no provider.
-					defineStep(stepMatcher, (...stepArguments: unknown[]) => {
-						scenarioProviders = [];
-
-						return stepCallback(...stepArguments);
-					});
-				}
-			}, 180_000);
-		}
-	});
+	defineLifecycleFeature(lifecycleFeature);
+	defineLifecycleFeature(mineFeature);
+	defineLifecycleFeature(checkoutFeature);
+	defineLifecycleFeature(invitesFeature);
 
 	// Last: the apply drops the sync queue every scenario above relies on.
 	defineFeature(schemaApplyFeature, (scenario) => {
@@ -1126,4 +1299,73 @@ function readLogMessage(logLine: string): string {
 	catch {
 		return logLine;
 	}
+}
+
+// A body as the fields it carries: Mollie's JSON parsed, Stripe's form decoded
+// to the object its brackets nest, each leaf a string as the form sends it.
+function comparableWrite(receivedWrite: ReceivedWrite): ReceivedWrite {
+	const { path: writePath, body: writeBody } = receivedWrite;
+
+	if (writeBody === null) {
+		return receivedWrite;
+	}
+
+	if (writePath.startsWith('/v1/')) {
+		return {
+			...receivedWrite,
+			body: typeof writeBody === 'string'
+				? decodeStripeForm(writeBody)
+				: stringifyLeaves(writeBody) as object,
+		};
+	}
+
+	return {
+		...receivedWrite,
+		body: typeof writeBody === 'string'
+			? JSON.parse(writeBody)
+			: writeBody,
+	};
+}
+
+function decodeStripeForm(formText: string): object {
+	const decodedForm: Record<string, unknown> = {};
+
+	for (const [fieldPath, fieldValue] of new URLSearchParams(formText)) {
+		const pathSegments = fieldPath.replaceAll(']', '').split('[');
+		let parentNode = decodedForm;
+
+		for (const [segmentIndex, pathSegment] of pathSegments.entries()) {
+			const nextSegment = pathSegments[segmentIndex + 1];
+
+			if (nextSegment === undefined) {
+				parentNode[pathSegment] = fieldValue;
+
+				continue;
+			}
+
+			parentNode[pathSegment] ??= /^\d+$/.test(nextSegment)
+				? []
+				: {};
+
+			parentNode = parentNode[pathSegment] as Record<string, unknown>;
+		}
+	}
+
+	return decodedForm;
+}
+
+function stringifyLeaves(bodyNode: unknown): unknown {
+	if (Array.isArray(bodyNode)) {
+		return bodyNode.map(stringifyLeaves);
+	}
+
+	if (bodyNode !== null && typeof bodyNode === 'object') {
+		return Object.fromEntries(
+			Object.entries(bodyNode).map(([fieldName, fieldNode]) => {
+				return [fieldName, stringifyLeaves(fieldNode)];
+			}),
+		);
+	}
+
+	return String(bodyNode);
 }

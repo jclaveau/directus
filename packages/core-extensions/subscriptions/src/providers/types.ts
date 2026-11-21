@@ -41,6 +41,33 @@ export type ResumedSubscription = {
 	isNewSubscription: boolean;
 };
 
+export type CheckoutAmount = {
+	/** ISO 4217, upper case. */
+	currency: string;
+	/** Two decimals, "9.90" for 9.90 euros. */
+	value: string;
+};
+
+export type CheckoutStart = {
+	directusSubscription: number;
+	payerEmail: string;
+	amount: CheckoutAmount;
+	interval: BillingInterval;
+	planName: string;
+	redirectUrl: string;
+};
+
+/** A Mollie first payment, paid: the mandate a checkout's subscription bills. */
+export type PaidCheckout = {
+	paymentId: string;
+	customerId: string;
+	mandateId: string;
+	paidAt: string;
+	amount: CheckoutAmount;
+	directusSubscription: number;
+	interval: BillingInterval;
+};
+
 export interface SubscriptionProvider {
 	/** Resolves to the resource id the sync queue keys the event on. */
 	verifyWebhook(
@@ -52,6 +79,10 @@ export interface SubscriptionProvider {
 	/** Resolves to the resource id to sync: a new subscription's on Mollie. */
 	resumeCancel(cancelResume: CancelResume): Promise<ResumedSubscription>;
 	composeResourceId(subscriptionIds: ProviderSubscriptionIds): string;
+	/** Resolves to the provider's payment page. */
+	createCheckout(checkoutStart: CheckoutStart): Promise<string>;
+	/** Resolves to the resource id of the subscription the payment started. */
+	startPaidCheckout(paidCheckout: PaidCheckout): Promise<string>;
 }
 
 export type SubscriptionProviders = Map<string, SubscriptionProvider>;

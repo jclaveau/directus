@@ -1,11 +1,17 @@
 import type { AbstractService } from '@directus/types';
 import type { Knex } from 'knex';
 import {
+	AbandonedCheckoutError,
 	MissingProviderSubscriptionError,
+	PaidCheckoutError,
 	UnboundProviderSubscriptionError,
 } from '../errors.js';
 import { findProvider } from '../providers/create-providers.js';
-import type { SubscriptionProviders } from '../providers/types.js';
+import type {
+	ProviderSubscription,
+	SubscriptionProvider,
+	SubscriptionProviders,
+} from '../providers/types.js';
 import {
 	MAX_SYNC_ATTEMPTS,
 	selectDueSync,
@@ -13,6 +19,7 @@ import {
 } from '../queue/sync-queue.js';
 import {
 	closeMissingSubscription,
+	readPlanInterval,
 	syncSubscription,
 	type SyncedAccess,
 	type SyncedSubscription,
@@ -82,15 +89,11 @@ async function syncNextRow({
 		);
 
 		// No transaction open: a slow or throttled provider holds no connection.
-		const fetchedSubscription = await subscriptionProvider
-			.fetchSubscription(leasedRow.resource_id)
-			.catch((fetchError: unknown) => {
-				if (fetchError instanceof MissingProviderSubscriptionError) {
-					return fetchError;
-				}
-
-				throw fetchError;
-			});
+		const fetchedSubscription = await fetchLeasedSubscription(
+			database,
+			subscriptionProvider,
+			leasedRow.resource_id,
+		);
 
 		committedSync = await database.transaction(async (trx) => {
 			const isLeaseHeld = await lockLeasedSync(trx, leasedRow);
@@ -103,6 +106,13 @@ async function syncNextRow({
 
 			const leasedQueueRow = trx('subscription_sync_queue')
 				.where('id', leasedRow.id);
+
+			if (fetchedSubscription instanceof AbandonedCheckoutError) {
+				await expireAbandonedCheckout(trx, fetchedSubscription);
+				await leasedQueueRow.delete();
+
+				return undefined;
+			}
 
 			if (fetchedSubscription instanceof MissingProviderSubscriptionError) {
 				const closedSubscription = await closeMissingSubscription({
@@ -206,6 +216,78 @@ async function syncNextRow({
 	}
 
 	return false;
+}
+
+/**
+ * A paid Mollie checkout's payment starts its subscription here, outside the
+ * sync's transaction, then syncs it like any other.
+ */
+async function fetchLeasedSubscription(
+	database: Knex,
+	subscriptionProvider: SubscriptionProvider,
+	resourceId: string,
+): Promise<
+	ProviderSubscription
+	| MissingProviderSubscriptionError
+	| AbandonedCheckoutError
+> {
+	try {
+		return await subscriptionProvider.fetchSubscription(resourceId);
+	}
+	catch (fetchError) {
+		if (fetchError instanceof MissingProviderSubscriptionError
+			|| fetchError instanceof AbandonedCheckoutError) {
+			return fetchError;
+		}
+
+		if (!(fetchError instanceof PaidCheckoutError)) {
+			throw fetchError;
+		}
+
+		const paidCheckout = fetchError.extensions;
+
+		const startedResourceId = await subscriptionProvider.startPaidCheckout({
+			...paidCheckout,
+			interval: await readCheckoutInterval(
+				database,
+				paidCheckout.directusSubscription,
+			),
+		});
+
+		return await subscriptionProvider.fetchSubscription(startedResourceId);
+	}
+}
+
+async function readCheckoutInterval(
+	database: Knex,
+	directusSubscription: number,
+) {
+	const soldPlan = await database('subscriptions')
+		.join('subscription_plans', 'subscription_plans.id', 'subscriptions.plan')
+		.select('subscription_plans.code', 'subscription_plans.interval')
+		.where('subscriptions.id', directusSubscription)
+		.first();
+
+	if (soldPlan === undefined) {
+		throw new Error(
+			`The checkout's subscription ${JSON.stringify(directusSubscription)}`
+			+ ' does not exist',
+		);
+	}
+
+	return readPlanInterval(soldPlan);
+}
+
+/** Only a row no payment bound yet: a paid one keeps the provider's status. */
+async function expireAbandonedCheckout(
+	trx: Knex.Transaction,
+	abandonedCheckout: AbandonedCheckoutError,
+): Promise<void> {
+	await trx('subscriptions')
+		.where('id', abandonedCheckout.extensions.directusSubscription)
+		.andWhere('status', 'pending')
+		.whereNull('provider_subscription_id')
+		.update({ status: 'expired', date_updated: new Date() });
 }
 
 /**

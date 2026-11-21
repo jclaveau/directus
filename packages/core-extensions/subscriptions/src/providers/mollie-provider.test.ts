@@ -2,8 +2,10 @@ import { oneLine } from '@directus/utils';
 import { MollieApiError, type MollieClient } from '@mollie/api-client';
 import { describe, expect, test, vi } from 'vitest';
 import {
+	AbandonedCheckoutError,
 	MissingProviderSubscriptionError,
 	NoValidMandateError,
+	PaidCheckoutError,
 	WebhookIgnoredError,
 	WebhookSignatureError,
 	WebhookUnreadableError,
@@ -1002,5 +1004,285 @@ describe('composeResourceId', () => {
 		expect(createMollieProvider({} as MollieClient, ['mollie_secret_1'])
 			.composeResourceId({ subscriptionId: 'sub_1', customerId: 'cst_1' }))
 			.toBe('cst_1/sub_1');
+	});
+});
+
+describe('createCheckout', () => {
+	test('opens the first payment of a customer made for the checkout', async () => {
+		const mollieClient = {
+			customers: {
+				create: vi.fn().mockResolvedValue({ id: 'cst_5' }),
+			},
+			payments: {
+				create: vi.fn().mockResolvedValue({
+					id: 'tr_5',
+					getCheckoutUrl: () => 'https://www.mollie.com/checkout/tr_5',
+				}),
+			},
+		};
+
+		await expect(createMollieProvider(
+			mollieClient as unknown as MollieClient,
+			['mollie_secret_1'],
+		)
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '14.90' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.resolves.toBe('https://www.mollie.com/checkout/tr_5');
+
+		expect(mollieClient.customers.create).toHaveBeenCalledWith({
+			email: 'payer@example.com',
+			metadata: { directus_subscription: '5' },
+		});
+
+		expect(mollieClient.payments.create).toHaveBeenCalledWith({
+			amount: { currency: 'EUR', value: '14.90' },
+			customerId: 'cst_5',
+			sequenceType: 'first',
+			description: 'Subscription 5',
+			redirectUrl: 'https://shop.example.com/ok',
+			metadata: { directus_subscription: '5' },
+		});
+	});
+
+	test('refuses a payment without a checkout URL', async () => {
+		await expect(createMollieProvider({
+			customers: { create: vi.fn().mockResolvedValue({ id: 'cst_5' }) },
+			payments: {
+				create: vi.fn().mockResolvedValue({
+					id: 'tr_5',
+					getCheckoutUrl: () => null,
+				}),
+			},
+		} as unknown as MollieClient)
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '14.90' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.rejects.toThrow('Mollie payment "tr_5" has no checkout URL');
+	});
+});
+
+describe('startPaidCheckout', () => {
+	test.each([
+		[{ months: 1, days: 0 }, '1 month', '2026-12-05'],
+		[{ months: 12, days: 0 }, '12 months', '2027-11-05'],
+		[{ months: 0, days: 7 }, '1 week', '2026-11-12'],
+		[{ months: 0, days: 14 }, '2 weeks', '2026-11-19'],
+		[{ months: 0, days: 10 }, '10 days', '2026-11-15'],
+	])(oneLine`
+		bills a %j interval as "%s" on the paid mandate, from %s
+	`, async (billingInterval, mollieInterval, startDate) => {
+		const mollieClient = {
+			customerSubscriptions: {
+				iterate: vi.fn().mockReturnValue((async function* () {
+					yield {
+						id: 'sub_old',
+						status: 'canceled',
+						metadata: { directus_subscription: '5' },
+					};
+
+					yield {
+						id: 'sub_other',
+						status: 'active',
+						metadata: { directus_subscription: '4' },
+					};
+				})()),
+				create: vi.fn().mockResolvedValue({ id: 'sub_5' }),
+			},
+		};
+
+		await expect(createMollieProvider(
+			mollieClient as unknown as MollieClient,
+			['mollie_secret_1'],
+		)
+			.startPaidCheckout({
+				paymentId: 'tr_5',
+				customerId: 'cst_5',
+				mandateId: 'mdt_5',
+				paidAt: '2026-11-05T10:00:00+00:00',
+				amount: { currency: 'EUR', value: '14.90' },
+				directusSubscription: 5,
+				interval: billingInterval,
+			}))
+			.resolves.toBe('cst_5/sub_5');
+
+		expect(mollieClient.customerSubscriptions.iterate)
+			.toHaveBeenCalledWith({ customerId: 'cst_5' });
+
+		expect(mollieClient.customerSubscriptions.create).toHaveBeenCalledWith({
+			customerId: 'cst_5',
+			amount: { currency: 'EUR', value: '14.90' },
+			interval: mollieInterval,
+			description: 'Subscription 5',
+			mandateId: 'mdt_5',
+			startDate,
+			metadata: { directus_subscription: '5' },
+			idempotencyKey: 'checkout-tr_5',
+		});
+	});
+
+	test('returns the subscription a lost commit already created', async () => {
+		const mollieClient = {
+			customerSubscriptions: {
+				iterate: vi.fn().mockReturnValue((async function* () {
+					yield {
+						id: 'sub_5',
+						status: 'active',
+						metadata: { directus_subscription: '5' },
+					};
+				})()),
+				create: vi.fn(),
+			},
+		};
+
+		await expect(createMollieProvider(
+			mollieClient as unknown as MollieClient,
+			['mollie_secret_1'],
+		)
+			.startPaidCheckout({
+				paymentId: 'tr_5',
+				customerId: 'cst_5',
+				mandateId: 'mdt_5',
+				paidAt: '2026-11-05T10:00:00+00:00',
+				amount: { currency: 'EUR', value: '14.90' },
+				directusSubscription: 5,
+				interval: { months: 1, days: 0 },
+			}))
+			.resolves.toBe('cst_5/sub_5');
+
+		expect(mollieClient.customerSubscriptions.create).not.toHaveBeenCalled();
+	});
+
+	test.each([
+		[{ months: 1, days: 3 }],
+		[{ months: 0, days: 0 }],
+	])('refuses a %j interval Mollie cannot bill', async (billingInterval) => {
+		await expect(createMollieProvider({
+			customerSubscriptions: {
+				iterate: vi.fn().mockReturnValue((async function* () {})()),
+			},
+		} as unknown as MollieClient)
+			.startPaidCheckout({
+				paymentId: 'tr_5',
+				customerId: 'cst_5',
+				mandateId: 'mdt_5',
+				paidAt: '2026-11-05T10:00:00+00:00',
+				amount: { currency: 'EUR', value: '14.90' },
+				directusSubscription: 5,
+				interval: billingInterval,
+			}))
+			.rejects.toThrow(
+				`Billing interval ${JSON.stringify(billingInterval)} is no`
+				+ ' Mollie interval',
+			);
+	});
+});
+
+describe('fetchSubscription of a checkout payment', () => {
+	test('hands a paid first payment over to start its subscription', async () => {
+		const fetchFailure = await createMollieProvider({
+			payments: {
+				get: vi.fn().mockResolvedValue({
+					id: 'tr_5',
+					status: 'paid',
+					sequenceType: 'first',
+					customerId: 'cst_5',
+					mandateId: 'mdt_5',
+					paidAt: '2026-11-05T10:00:00+00:00',
+					amount: { currency: 'EUR', value: '14.90' },
+					metadata: { directus_subscription: '5' },
+				}),
+			},
+		} as unknown as MollieClient)
+			.fetchSubscription('tr_5')
+			.catch((fetchError: unknown) => fetchError);
+
+		expect(fetchFailure).toBeInstanceOf(PaidCheckoutError);
+
+		expect(fetchFailure).toMatchObject({
+			message: oneLine`
+				Payment "tr_5" paid the checkout of subscription 5, which has no
+				provider subscription yet
+			`,
+			extensions: {
+				paymentId: 'tr_5',
+				customerId: 'cst_5',
+				mandateId: 'mdt_5',
+				paidAt: '2026-11-05T10:00:00+00:00',
+				amount: { currency: 'EUR', value: '14.90' },
+				directusSubscription: 5,
+			},
+		});
+	});
+
+	test.each(['expired', 'failed', 'canceled'])(
+		'reports a first payment %s as an abandoned checkout',
+		async (paymentStatus) => {
+			const fetchFailure = await createMollieProvider({
+				payments: {
+					get: vi.fn().mockResolvedValue({
+						id: 'tr_5',
+						status: paymentStatus,
+						sequenceType: 'first',
+						customerId: 'cst_5',
+						amount: { currency: 'EUR', value: '14.90' },
+						metadata: { directus_subscription: '5' },
+					}),
+				},
+			} as unknown as MollieClient)
+				.fetchSubscription('tr_5')
+				.catch((fetchError: unknown) => fetchError);
+
+			expect(fetchFailure).toBeInstanceOf(AbandonedCheckoutError);
+
+			expect(fetchFailure).toMatchObject({
+				message: `Checkout "tr_5" of subscription 5 ended`
+					+ ` ${JSON.stringify(paymentStatus)}, unpaid`,
+				extensions: {
+					checkoutId: 'tr_5',
+					checkoutStatus: paymentStatus,
+					directusSubscription: 5,
+				},
+			});
+		},
+	);
+
+	test.each([
+		[{ status: 'open' }],
+		[{ status: 'paid' }],
+		[{ status: 'paid', sequenceType: 'recurring' }],
+		[{ status: 'paid', metadata: null }],
+	])('reports a first payment %j as no subscription yet', async (paymentFields) => {
+		const fetchFailure = await createMollieProvider({
+			payments: {
+				get: vi.fn().mockResolvedValue({
+					id: 'tr_5',
+					sequenceType: 'first',
+					customerId: 'cst_5',
+					amount: { currency: 'EUR', value: '14.90' },
+					metadata: { directus_subscription: '5' },
+					...paymentFields,
+				}),
+			},
+		} as unknown as MollieClient)
+			.fetchSubscription('tr_5')
+			.catch((fetchError: unknown) => fetchError);
+
+		expect(fetchFailure).toBeInstanceOf(MissingProviderSubscriptionError);
+
+		expect(fetchFailure).toMatchObject({
+			message: 'The provider has no subscription for "tr_5"',
+			extensions: { resourceId: 'tr_5', subscriptionId: null },
+		});
 	});
 });

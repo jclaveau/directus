@@ -74,6 +74,47 @@ export function readReconcileCron(env: Record<string, unknown>): string {
 }
 
 /**
+ * The pages a checkout may send the payer back to, compared on origin and path.
+ * Unset, every checkout is refused: the provider would redirect anywhere.
+ */
+export function readCheckoutUrlAllowList(
+	env: Record<string, unknown>,
+): URL[] {
+	const variableName = 'SUBSCRIPTIONS_CHECKOUT_URL_ALLOW_LIST';
+	const listedUrls = env[variableName];
+
+	if (listedUrls === undefined) {
+		return [];
+	}
+
+	const urlEntries = typeof listedUrls === 'string'
+		? listedUrls.split(',')
+		: listedUrls;
+
+	if (!Array.isArray(urlEntries)) {
+		throw new Error(
+			`${JSON.stringify(variableName)} must be a list of URLs,`
+			+ ` got ${JSON.stringify(listedUrls)}`,
+		);
+	}
+
+	return urlEntries.map((urlEntry: unknown) => {
+		const trimmedEntry = typeof urlEntry === 'string'
+			? urlEntry.trim()
+			: urlEntry;
+
+		if (typeof trimmedEntry !== 'string' || !URL.canParse(trimmedEntry)) {
+			throw new Error(
+				`${JSON.stringify(variableName)} lists ${JSON.stringify(urlEntry)},`
+				+ ' which is not a URL',
+			);
+		}
+
+		return new URL(trimmedEntry);
+	});
+}
+
+/**
  * A comma-separated list, so a rotated secret still verifies until it is
  * dropped. The error names the variable and the position, never a secret.
  */
