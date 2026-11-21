@@ -172,6 +172,44 @@ describe('announceMembershipsChanged', () => {
 		expect(useBus().publish).toHaveBeenCalledOnce();
 	});
 
+	it('keeps the roles of the later refresh when the earlier ends last', async () => {
+		const memberSocket = {
+			accountability: { user: 'user-member', roles: ['role-editors'] },
+		} as unknown as WebSocketClient;
+
+		memberships.refreshOnMembershipChange(new Set([memberSocket]));
+
+		let answerEarlierRead: (roles: unknown) => void = () => {};
+
+		vi.mocked(fetchUserRoles)
+			.mockReturnValueOnce(new Promise((resolve) => {
+				answerEarlierRead = resolve as (roles: unknown) => void;
+			}))
+			.mockResolvedValueOnce({
+				memberRoles: ['role-auditors'],
+				roles: ['role-auditors'],
+			});
+
+		const earlierRefresh = memberships.announceMembershipsChanged(['user-member']);
+		await memberships.announceMembershipsChanged(['user-member']);
+
+		answerEarlierRead({
+			memberRoles: ['role-editors'],
+			roles: ['role-editors'],
+		});
+
+		await earlierRefresh;
+
+		expect(memberSocket.accountability).toStrictEqual({
+			user: 'user-member',
+			roles: ['role-auditors'],
+			memberRoles: ['role-auditors'],
+			admin: false,
+			app: true,
+			grantedDbConnections: [],
+		});
+	});
+
 	it('logs a publish the bus refused, and answers', async () => {
 		const refusal = new Error('ECONNREFUSED');
 		vi.mocked(useBus().publish).mockRejectedValueOnce(refusal);
