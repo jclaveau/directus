@@ -19,6 +19,7 @@ import { getIPFromReq } from '../../utils/get-ip-from-req.js';
 import { authenticateConnection, authenticationSuccess } from '../authenticate.js';
 import { WebSocketError, handleWebSocketError } from '../errors.js';
 import { AuthMode, WebSocketAuthMessage } from '../messages.js';
+import { refreshOnMembershipChange } from '../memberships-changed.js';
 import type { AuthenticationState, UpgradeContext, WebSocketAuthentication, WebSocketClient } from '../types.js';
 import { getMessageType } from '../utils/message.js';
 import { waitForAnyMessage, waitForMessageType } from '../utils/wait-for-message.js';
@@ -45,6 +46,7 @@ export default abstract class SocketController {
 		});
 
 		this.clients = new Set();
+		refreshOnMembershipChange(this.clients);
 		this.authInterval = null;
 
 		const { endpoint, authentication, maxConnections } = this.getEnvironmentConfig(configPrefix);

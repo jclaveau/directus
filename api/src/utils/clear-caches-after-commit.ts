@@ -8,6 +8,7 @@ import {
 import { useLogger } from '../logger/index.js';
 import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
+import { announceMembershipsChanged } from '../websocket/memberships-changed.js';
 import { queueAfterCommitOrRollback } from './transaction.js';
 
 /**
@@ -100,6 +101,17 @@ export async function purgeMutatedRowsAfterCommit(
  */
 export async function clearPermissionsCacheAfterCommit(knex: Knex): Promise<void> {
 	await runOnceSettled(knex, () => clearPermissionsCache());
+}
+
+/**
+ * Recompute the roles of the sockets `users` hold open, on every node, once the
+ * transaction `knex` belongs to commits or rolls back.
+ */
+export async function announceMembershipsChangedAfterCommit(
+	knex: Knex,
+	users: readonly string[],
+): Promise<void> {
+	await runOnceSettled(knex, () => announceMembershipsChanged(users));
 }
 
 /**

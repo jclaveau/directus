@@ -9,6 +9,7 @@ import {
 } from '@directus/types';
 import type { Knex } from 'knex';
 import {
+	announceMembershipsChangedAfterCommit,
 	clearPermissionsCacheAfterCommit,
 	flushResponseCacheAfterCommit,
 } from '../utils/clear-caches-after-commit.js';
@@ -87,10 +88,24 @@ export class RoleMembersService extends ItemsService {
 	}
 
 	// A membership changes no schema: the permissions cache, whose own clear
-	// reaches the other nodes, and the response cache are all it leaves stale.
-	private async clearCaches(opts?: MutationOptions) {
+	// reaches the other nodes, the response cache, and the roles of the sockets
+	// its users hold open are all it leaves stale.
+	private async clearCaches(
+		memberUsers: readonly string[],
+		opts?: MutationOptions,
+	) {
 		await clearPermissionsCacheAfterCommit(this.knex);
 		await flushResponseCacheAfterCommit(this.knex, this.cache, opts);
+		await announceMembershipsChangedAfterCommit(this.knex, memberUsers);
+	}
+
+	private async readMemberUsers(keys: PrimaryKey[]): Promise<string[]> {
+		const memberships: { user: string }[] = await this.knex
+			.select('user')
+			.from('directus_role_members')
+			.whereIn('id', keys);
+
+		return memberships.map(({ user }) => user);
 	}
 
 	protected override async validateRowsToCreate(
@@ -196,7 +211,7 @@ export class RoleMembersService extends ItemsService {
 
 		// A new user's memberships land with the user: no cache holds them yet.
 		if (!opts.createsNewUserMemberships) {
-			await this.clearCaches(opts);
+			await this.clearCaches(await this.readMemberUsers(result), opts);
 		}
 
 		return result;
@@ -209,9 +224,16 @@ export class RoleMembersService extends ItemsService {
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
+		// A membership moved to another user changes the roles of both.
+		const groupKeys = groups.flatMap(({ keys }) => keys);
+		const usersBefore = await this.readMemberUsers(groupKeys);
+
 		const result = await super.updateGroups(groups, opts);
 
-		await this.clearCaches(opts);
+		await this.clearCaches(
+			[...usersBefore, ...await this.readMemberUsers(groupKeys)],
+			opts,
+		);
 
 		return result;
 	}
@@ -223,9 +245,10 @@ export class RoleMembersService extends ItemsService {
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
+		const memberUsers = await this.readMemberUsers(keys);
 		const result = await super.deleteMany(keys, opts);
 
-		await this.clearCaches(opts);
+		await this.clearCaches(memberUsers, opts);
 
 		return result;
 	}

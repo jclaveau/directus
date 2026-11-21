@@ -39,9 +39,15 @@ export async function _fetchMemberRoles(
  *
  * press (sort 1), editors under staff (sort 2) → staff, press, editors
  * editors under staff (sort 1), staff (sort 2) → staff, editors
+ *
+ * `readMemberRoles` reads the member roles, cached unless one says otherwise.
  */
-export async function fetchUserRoles(user: string | null, knex: Knex) {
-	const memberRoles = await fetchMemberRoles(user, knex);
+export async function fetchUserRoles(
+	user: string | null,
+	knex: Knex,
+	readMemberRoles = fetchMemberRoles,
+) {
+	const memberRoles = await readMemberRoles(user, knex);
 	const memberChains: string[][] = [];
 
 	for (const memberRole of memberRoles) {
