@@ -658,7 +658,12 @@ describe('subscriptionsEndpoint', () => {
 
 	test('sends the invite mail of a user the add created', async () => {
 		const inviteUser = vi.fn().mockResolvedValue(undefined);
-		const UsersService = vi.fn().mockReturnValue({ inviteUser });
+
+		// Called with `new`: vitest 4 constructs only a `function` implementation.
+		const UsersService = vi.fn(function () {
+			return { inviteUser };
+		});
+
 		const subscriptionsRouter = express.Router();
 
 		vi.mocked(addOwnBeneficiary).mockImplementation(async (beneficiaryAdd) => {

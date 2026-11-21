@@ -48,6 +48,7 @@ beforeEach(async () => {
 			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
+			beneficiaries_max: 1,
 			status: 'archived',
 		},
 		{
@@ -57,6 +58,7 @@ beforeEach(async () => {
 			amount: 10,
 			currency: 'EUR',
 			interval: '{"months":1}',
+			beneficiaries_max: 1,
 			status: 'subscriptions-locked',
 		},
 	]);
