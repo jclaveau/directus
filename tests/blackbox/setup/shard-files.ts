@@ -73,6 +73,9 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// Two spawned instances, and one case holds a pool saturated for six seconds.
 	'/tests/db/app/pgbouncer.test.ts': 4_000,
 	'/tests/db/app/system-mcp.test.ts': 10_000,
+	// One spawned instance; most scenarios wait out a 10 s sync tick. 567 s
+	// for 43 tests on 2026-11-21, before the checkout and invite features.
+	'/tests/db/routes/system/subscriptions-bundle.test.ts': 850_000,
 	// A pm2 daemon per arm, and each assertion is a pool settling or a window
 	// spent proving it did not move. Measured over the postgres runs of
 	// 2026-09-08.
