@@ -200,6 +200,20 @@ describe('the migration', () => {
 		);
 	});
 
+	test('down sets the role of the users of a deleted role to null', async () => {
+		tracker.on.select('directus_role_members').response([]);
+
+		await down(db);
+
+		expect(tracker.history.any.map(({ sql }) => sql)).toEqual(
+			expect.arrayContaining([
+				'alter table "directus_users" add constraint'
+				+ ' "directus_users_role_foreign" foreign key ("role")'
+				+ ' references "directus_roles" ("id") on delete SET NULL',
+			]),
+		);
+	});
+
 	test('down rolls back a user holding one role twice', async () => {
 		tracker.on.select('directus_role_members').response([
 			{ user: 'user-1', role: 'role-b' },
