@@ -652,7 +652,56 @@ describe('subscriptionsEndpoint', () => {
 			enabledProviders: new Map(),
 			userId: 'user-1',
 			requestBody: { subscription: 2, user: 'user-2' },
+			inviteUser: expect.any(Function),
 		});
+	});
+
+	test('sends the invite mail of a user the add created', async () => {
+		const inviteUser = vi.fn().mockResolvedValue(undefined);
+		const UsersService = vi.fn().mockReturnValue({ inviteUser });
+		const subscriptionsRouter = express.Router();
+
+		vi.mocked(addOwnBeneficiary).mockImplementation(async (beneficiaryAdd) => {
+			await beneficiaryAdd.inviteUser('new-1@example.com');
+
+			return 4;
+		});
+
+		const expressApp = express();
+		expressApp.use(express.json());
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{
+				env: {},
+				database: 'database',
+				services: { UsersService },
+				getSchema: vi.fn().mockResolvedValue('schema'),
+			},
+		);
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const seatResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/beneficiaries`,
+			{
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: '{"subscription":2,"email":"new-1@example.com"}',
+			},
+		);
+
+		httpServer.close();
+
+		expect(seatResponse.status).toBe(200);
+
+		expect(UsersService)
+			.toHaveBeenCalledWith({ schema: 'schema', accountability: null });
+
+		expect(inviteUser)
+			.toHaveBeenCalledWith('new-1@example.com', null, null);
 	});
 
 	test('seats as nobody without accountability', async () => {
@@ -694,6 +743,7 @@ describe('subscriptionsEndpoint', () => {
 			enabledProviders: new Map(),
 			userId: null,
 			requestBody: undefined,
+			inviteUser: expect.any(Function),
 		});
 	});
 

@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
+import { startFakeMailbox, type ReceivedMail } from './fake-smtp-mailbox';
 import {
 	startFakeProviders,
 	type MollieHolding,
@@ -68,6 +69,7 @@ const MOLLIE_OLD_WEBHOOK_SECRET = 'mollie_secret_old';
 const SYNC_POLL = { timeout: 45_000, interval: 500 };
 
 const BUNDLE_TABLES = [
+	'subscription_invites',
 	'subscription_sync_queue',
 	'subscription_events',
 	'subscription_beneficiaries',
@@ -85,6 +87,16 @@ const SCENARIO_EMAIL_PREFIXES = [
 	'other',
 	'user',
 	'co',
+	'known',
+	'new',
+	'gone',
+	'first',
+	'second',
+	'stale',
+	'seated',
+	'fresh',
+	'joined',
+	'again',
 ];
 
 // The checkout pages the fake providers answer, the row id appended.
@@ -112,6 +124,10 @@ const checkoutFeature = loadFeature(
 	'./tests/db/routes/system/subscription-checkout.feature',
 );
 
+const invitesFeature = loadFeature(
+	'./tests/db/routes/system/subscription-beneficiary-invites.feature',
+);
+
 const schemaApplyFeature = loadFeature(
 	'./tests/db/routes/system/subscription-schema-apply.feature',
 );
@@ -126,6 +142,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	let database: Knex;
 	let fakeProviders: Awaited<ReturnType<typeof startFakeProviders>>;
+	let fakeMailbox: Awaited<ReturnType<typeof startFakeMailbox>>;
 	let instanceProcess: ChildProcess;
 	let packageDirectory: string;
 
@@ -150,6 +167,7 @@ describe.each(vendors)('%s', (vendor) => {
 		database = knex(config.knexConfig[vendor]!);
 
 		fakeProviders = await startFakeProviders();
+		fakeMailbox = await startFakeMailbox();
 
 		packageDirectory = await mkdtemp(join(tmpdir(), 'directus-blackbox-bundle-'));
 
@@ -183,6 +201,11 @@ describe.each(vendors)('%s', (vendor) => {
 			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_test_blackbox',
 			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: STRIPE_WEBHOOK_SECRET,
 			BLACKBOX_PROVIDERS_PORT: String(fakeProviders.listeningPort),
+			EMAIL_TRANSPORT: 'smtp',
+			EMAIL_SMTP_HOST: '127.0.0.1',
+			EMAIL_SMTP_PORT: String(fakeMailbox.listeningPort),
+			EMAIL_SMTP_SECURE: 'false',
+			EMAIL_SMTP_IGNORE_TLS: 'true',
 			NODE_OPTIONS: [vendorEnv['NODE_OPTIONS'], `--import=${reroutePreload}`]
 				.filter(Boolean)
 				.join(' '),
@@ -231,6 +254,7 @@ describe.each(vendors)('%s', (vendor) => {
 				'@scalabus/subscriptions:20261105A',
 				'@scalabus/subscriptions:20261107A',
 				'@scalabus/subscriptions:20261121A',
+				'@scalabus/subscriptions:20261122A',
 			])
 			.delete();
 
@@ -271,6 +295,7 @@ describe.each(vendors)('%s', (vendor) => {
 		await database.destroy();
 
 		await fakeProviders.stopListening();
+		await fakeMailbox.stopListening();
 
 		await rm(packageDirectory, { recursive: true, force: true });
 	}, 60_000);
@@ -1095,6 +1120,13 @@ describe.each(vendors)('%s', (vendor) => {
 		],
 		[/^the CLI runs (.+) with these variables:$/, runCli],
 		[/^the CLI exited with (\d+), having logged:$/, expectCliExit],
+		[
+			/^the mailbox eventually holds these mails:$/,
+			(mailsTable: ReceivedMail[]) => {
+				return expect.poll(() => fakeMailbox.receivedMails, SYNC_POLL)
+					.toEqual(mailsTable);
+			},
+		],
 	];
 
 	type DiffEntry = { collection: string; diff: { kind: string }[] };
@@ -1220,6 +1252,7 @@ describe.each(vendors)('%s', (vendor) => {
 						defineStep(stepMatcher, (...stepArguments: unknown[]) => {
 							scenarioProviders = [];
 							fakeProviders.receivedWrites.length = 0;
+							fakeMailbox.receivedMails.length = 0;
 
 							for (const responseKeyName of RESPONSE_KEY_NAMES) {
 								delete scenarioKeys.keysByName[responseKeyName];
@@ -1236,6 +1269,7 @@ describe.each(vendors)('%s', (vendor) => {
 	defineLifecycleFeature(lifecycleFeature);
 	defineLifecycleFeature(mineFeature);
 	defineLifecycleFeature(checkoutFeature);
+	defineLifecycleFeature(invitesFeature);
 
 	// Last: the apply drops the sync queue every scenario above relies on.
 	defineFeature(schemaApplyFeature, (scenario) => {
