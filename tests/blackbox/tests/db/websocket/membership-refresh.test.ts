@@ -59,7 +59,8 @@ describe.each(vendors)('%s', (vendor) => {
 					async () => {
 						memberLogsSocket = createWebSocketConn(getUrl(vendor), {
 							path: 'websocket/logs',
-							auth: { access_token: `member-${scenarioKeys.run}` },
+							// The logs socket authenticates on the upgrade alone.
+							queryString: `access_token=member-${scenarioKeys.run}`,
 						});
 
 						await memberLogsSocket.sendMessage({
