@@ -1214,6 +1214,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 		try {
 			if (target.mode === 'namespace') {
 				await cache.clear();
+				await tellPeersResponseCacheCleared();
 
 				queueCachePurge({
 					purgeId,

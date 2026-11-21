@@ -24,12 +24,14 @@ import { ItemsService } from './items.js';
 
 const MEMBERSHIP_GRANT_FIELDS = ['user', 'role'] as const;
 
-type ManagedMembershipRow = {
+type MembershipRow = {
 	id: string;
-	managed_by: string;
+	managed_by: string | null;
 	user: string;
 	role: string;
 };
+
+type ManagedMembershipRow = MembershipRow & { managed_by: string };
 
 // Each manager says what changes its membership.
 function managedMembershipReason({
@@ -54,9 +56,41 @@ function managedMembershipReason({
 		+ ` ${JSON.stringify(managed_by)}, which alone changes it`;
 }
 
+/**
+ * The user a created membership names, by its key or as `{ id, ... }`. One
+ * without a key is a user the same request creates: it holds no socket yet.
+ */
+function existingMemberUser(memberUser: unknown): string[] {
+	if (typeof memberUser === 'string') {
+		return [lowerCaseRowKey(memberUser)];
+	}
+
+	const relatedKey = typeof memberUser === 'object' && memberUser !== null
+		? (memberUser as { id?: unknown }).id
+		: undefined;
+
+	if (typeof relatedKey === 'string') {
+		return [lowerCaseRowKey(relatedKey)];
+	}
+
+	return [];
+}
+
 class ManagedMembershipChangeError extends InvalidPayloadError {
 	constructor(managedMembership: ManagedMembershipRow) {
 		super({ reason: managedMembershipReason(managedMembership) });
+	}
+}
+
+class MembershipUserChangeError extends InvalidPayloadError {
+	constructor(membership: MembershipRow, sentUser: unknown) {
+		super({
+			reason: `Membership ${JSON.stringify(membership.id)} gives role`
+				+ ` ${JSON.stringify(membership.role)} to user`
+				+ ` ${JSON.stringify(membership.user)}, which can't change to`
+				+ ` ${JSON.stringify(sentUser)}: delete it and create one for that`
+				+ ' user',
+		});
 	}
 }
 
@@ -81,35 +115,35 @@ class MembershipManagedBySetError extends InvalidPayloadError {
  * ROLE_MAPPING sets, and `ext:<extension name>` by convention for one an
  * extension writes (no check enforces that prefix). A request neither sets
  * `managed_by` nor changes or deletes a managed membership; `sort` stays its.
+ *
+ * No write, a request's or the code's, hands a membership to another user: its
+ * `user` is the one whose roles it changes.
  */
 export class RoleMembersService extends ItemsService {
+	protected override readonly writtenRowColumns = ['user'];
+
 	constructor(options: AbstractServiceOptions) {
 		super('directus_role_members', options);
 	}
 
 	// A membership changes no schema: the permissions cache, whose own clear
-	// reaches the other nodes, the response cache, and the roles of the sockets
-	// its users hold open are all it leaves stale.
-	private async clearCaches(
-		memberUsers: readonly string[],
-		opts?: MutationOptions,
-	) {
+	// reaches the other nodes, and the response cache are what it leaves stale,
+	// with the roles of the sockets its users hold open.
+	private async clearCaches(opts?: MutationOptions) {
 		await clearPermissionsCacheAfterCommit(this.knex);
 		await flushResponseCacheAfterCommit(this.knex, this.cache, opts);
-		await announceMembershipsChangedAfterCommit(this.knex, memberUsers);
 	}
 
-	private async readMemberUsers(keys: PrimaryKey[]): Promise<string[]> {
-		if (keys.length === 0) {
-			return [];
-		}
-
-		const memberships: { user: string }[] = await this.knex
-			.select('user')
-			.from('directus_role_members')
-			.whereIn('id', keys);
-
-		return memberships.map(({ user }) => user);
+	// The users of the memberships an update or a delete wrote, off the write
+	// statement's own RETURNING.
+	protected override async onKeyRowsWritten(
+		writtenRows: Item[],
+		trx: Knex,
+	): Promise<void> {
+		await announceMembershipsChangedAfterCommit(
+			trx,
+			writtenRows.map(({ user }) => user),
+		);
 	}
 
 	protected override async validateRowsToCreate(
@@ -126,11 +160,14 @@ export class RoleMembersService extends ItemsService {
 		keys: PrimaryKey[],
 		trx: Knex,
 	): Promise<ManagedMembershipRow[]> {
-		return await trx
+		return await this.membershipRowsQuery(keys, trx).whereNotNull('managed_by');
+	}
+
+	private membershipRowsQuery(keys: PrimaryKey[], trx: Knex) {
+		return trx
 			.select('id', 'managed_by', ...MEMBERSHIP_GRANT_FIELDS)
 			.from('directus_role_members')
-			.whereIn('id', keys)
-			.whereNotNull('managed_by');
+			.whereIn('id', keys);
 	}
 
 	protected override async validateKeysToDelete(
@@ -151,22 +188,51 @@ export class RoleMembersService extends ItemsService {
 
 	/**
 	 * Who holds which role is the manager's; `sort` is not. A value sent back
-	 * as it is stored changes nothing, so it is no refusal.
+	 * as it is stored changes nothing, so it is no refusal. A group sending
+	 * `user` reads every row it names, managed or not, to refuse a move.
 	 */
 	protected override async validateGroupsToUpdate(
 		groups: UpdateGroup<Item>[],
 		trx: Knex,
 	): Promise<void> {
-		if (!this.accountability) {
+		const sendsMemberUser = groups.some(({ data }) => 'user' in data);
+
+		if (!this.accountability && !sendsMemberUser) {
 			return;
 		}
 
-		const managedRows = await this.readManagedMemberships(
-			groups.flatMap((group) => group.keys),
-			trx,
-		);
+		const groupKeys = groups.flatMap((group) => group.keys);
+
+		const membershipRows: MembershipRow[] = sendsMemberUser
+			? await this.membershipRowsQuery(groupKeys, trx)
+			: await this.readManagedMemberships(groupKeys, trx);
 
 		const dataByKey = groupDataByKey(groups);
+
+		if (this.accountability) {
+			this.refuseManagedMembershipChanges(membershipRows, dataByKey, groups);
+		}
+
+		for (const membership of membershipRows) {
+			const movingData = dataByKey.get(lowerCaseRowKey(membership.id))
+				?.find((data) => changesGrantField(data, membership, ['user']));
+
+			if (movingData) {
+				throw new MembershipUserChangeError(membership, movingData['user']);
+			}
+		}
+	}
+
+	private refuseManagedMembershipChanges(
+		membershipRows: MembershipRow[],
+		dataByKey: Map<string, Partial<Item>[]>,
+		groups: UpdateGroup<Item>[],
+	): void {
+		const managedRows = membershipRows.filter(
+			(membership): membership is ManagedMembershipRow => {
+				return membership.managed_by !== null;
+			},
+		);
 
 		for (const managedMembership of managedRows) {
 			const keyData = dataByKey.get(lowerCaseRowKey(managedMembership.id))
@@ -215,7 +281,12 @@ export class RoleMembersService extends ItemsService {
 
 		// A new user's memberships land with the user: no cache holds them yet.
 		if (!opts.createsNewUserMemberships) {
-			await this.clearCaches(await this.readMemberUsers(result), opts);
+			await this.clearCaches(opts);
+
+			await announceMembershipsChangedAfterCommit(
+				this.knex,
+				data.flatMap((row) => existingMemberUser(row['user'])),
+			);
 		}
 
 		return result;
@@ -228,16 +299,9 @@ export class RoleMembersService extends ItemsService {
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
-		// A membership moved to another user changes the roles of both.
-		const groupKeys = groups.flatMap(({ keys }) => keys);
-		const usersBefore = await this.readMemberUsers(groupKeys);
-
 		const result = await super.updateGroups(groups, opts);
 
-		await this.clearCaches(
-			[...usersBefore, ...await this.readMemberUsers(groupKeys)],
-			opts,
-		);
+		await this.clearCaches(opts);
 
 		return result;
 	}
@@ -249,10 +313,9 @@ export class RoleMembersService extends ItemsService {
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
-		const memberUsers = await this.readMemberUsers(keys);
 		const result = await super.deleteMany(keys, opts);
 
-		await this.clearCaches(memberUsers, opts);
+		await this.clearCaches(opts);
 
 		return result;
 	}

@@ -2239,6 +2239,31 @@ implements AbstractService<Item> {
 	): Promise<void> {}
 
 	/**
+	 * The columns a subclass reads off the rows an update or a delete writes,
+	 * returned by the write statement itself and handed to `onKeyRowsWritten`.
+	 * A service naming some writes its update groups one by one: a batch
+	 * statement returns no rows.
+	 */
+	protected readonly writtenRowColumns: readonly string[] = [];
+
+	/**
+	 * Handed the `writtenRowColumns` of the rows an update or a delete wrote,
+	 * inside its transaction; a delete rolled back to its savepoint hands none.
+	 * TODO(#610): only postgres and cockroach return them; elsewhere it is not
+	 * called.
+	 */
+	protected async onKeyRowsWritten(
+		_writtenRows: Item[],
+		_trx: Knex,
+	): Promise<void> {}
+
+	// The rows' `writtenRowColumns` where the statement can return them.
+	private returnsWrittenRows(): boolean {
+		return this.writtenRowColumns.length > 0
+			&& ['postgres', 'cockroachdb'].includes(getDatabaseClient(this.knex));
+	}
+
+	/**
 	 * What writing these groups sets off once they are written — a cache clear,
 	 * a logout. Handed the groups the hooks left.
 	 */
@@ -3482,16 +3507,31 @@ implements AbstractService<Item> {
 			let updatedRowCount = 0;
 
 			if (Object.keys(payloadWithTypeCasting).length > 0) {
+				let writtenRows: Item[] | null = null;
+
 				try {
-					updatedRowCount = await trx(this.collection)
-						.update(payloadWithTypeCasting)
-						.whereIn(primaryKeyField, keys);
+					if (this.returnsWrittenRows()) {
+						writtenRows = await trx(this.collection)
+							.update(payloadWithTypeCasting, [...this.writtenRowColumns])
+							.whereIn(primaryKeyField, keys);
+
+						updatedRowCount = writtenRows.length;
+					}
+					else {
+						updatedRowCount = await trx(this.collection)
+							.update(payloadWithTypeCasting)
+							.whereIn(primaryKeyField, keys);
+					}
 				}
 				catch (err: any) {
 					throw await translateDatabaseError(err, payloadWithPresets, this.knex, {
 						collection: this.collection,
 						operation: 'update',
 					});
+				}
+
+				if (writtenRows !== null) {
+					await this.onKeyRowsWritten(writtenRows, trx);
 				}
 			}
 
@@ -3717,7 +3757,11 @@ implements AbstractService<Item> {
 
 		const { capabilities } = getHelpers(this.knex);
 
-		if (!capabilities.supportsJsonBatchUpdate() || isRefused) {
+		if (
+			!capabilities.supportsJsonBatchUpdate()
+			|| isRefused
+			|| this.writtenRowColumns.length > 0
+		) {
 			return null;
 		}
 
@@ -4877,6 +4921,20 @@ implements AbstractService<Item> {
 		}
 	}
 
+	// `writtenRows` is null where the statement returns none.
+	private async deleteRowsOf(
+		rowsQuery: Knex.QueryBuilder,
+	): Promise<{ writtenCount: number; writtenRows: Item[] | null }> {
+		if (!this.returnsWrittenRows()) {
+			return { writtenCount: await rowsQuery.delete(), writtenRows: null };
+		}
+
+		const writtenRows: Item[] = await rowsQuery
+			.delete([...this.writtenRowColumns]);
+
+		return { writtenCount: writtenRows.length, writtenRows };
+	}
+
 	/**
 	 * Delete the rows `keys` name. An admin reaches every row, so a key no row
 	 * holds is a 404 for them, as it is for deleteOne. It is told off the
@@ -4895,8 +4953,13 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 
 		if (this.accountability?.admin !== true) {
-			await trx(this.collection).whereIn(primaryKeyField, keys)
-				.delete();
+			const { writtenRows } = await this.deleteRowsOf(
+				trx(this.collection).whereIn(primaryKeyField, keys),
+			);
+
+			if (writtenRows !== null) {
+				await this.onKeyRowsWritten(writtenRows, trx);
+			}
 
 			return;
 		}
@@ -4904,11 +4967,13 @@ implements AbstractService<Item> {
 		const keyNames = new Set(keys.map((key) => this.primaryKeyNameOf(key)));
 		const savepoint = await trx.transaction();
 		let deletedCount: number;
+		let deletedRows: Item[] | null;
 
 		try {
-			deletedCount = await savepoint(this.collection)
-				.whereIn(primaryKeyField, keys)
-				.delete();
+			({ writtenCount: deletedCount, writtenRows: deletedRows }
+				= await this.deleteRowsOf(
+					savepoint(this.collection).whereIn(primaryKeyField, keys),
+				));
 		}
 		catch (error) {
 			await savepoint.rollback();
@@ -4917,6 +4982,11 @@ implements AbstractService<Item> {
 
 		if (deletedCount >= keyNames.size) {
 			await savepoint.commit();
+
+			if (deletedRows !== null) {
+				await this.onKeyRowsWritten(deletedRows, trx);
+			}
+
 			return;
 		}
 
@@ -4928,6 +4998,11 @@ implements AbstractService<Item> {
 		// No row is left, so the shortfall is only keys no row held.
 		if (keysFromQuery && keptRows.length === 0) {
 			await savepoint.commit();
+
+			if (deletedRows !== null) {
+				await this.onKeyRowsWritten(deletedRows, trx);
+			}
+
 			return;
 		}
 

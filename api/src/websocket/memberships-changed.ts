@@ -10,6 +10,7 @@ import {
 	fetchGlobalAccess,
 } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { nodeId } from '../utils/node-id.js';
+import { WebSocketError } from './errors.js';
 import type { WebSocketClient } from './types.js';
 
 const MEMBERSHIPS_CHANGED_CHANNEL = 'membershipsChanged';
@@ -58,7 +59,8 @@ export function refreshOnMembershipChange(
  * roles it had then may read. A membership write recomputes the roles of the
  * sockets its users hold open, on this node before it answers and on every
  * other node once the bus reaches it, without closing them: the next event or
- * message a socket gets is read with the roles the user holds now.
+ * message a socket gets is read with the roles the user holds now. A socket
+ * whose refresh fails is closed.
  *
  * Never throws: it runs after the write committed.
  */
@@ -104,12 +106,24 @@ async function refreshSocketAccountabilities(
 					client.accountability!,
 				);
 			}
+			// The roles it holds are no longer the user's: closed, it reconnects
+			// and authenticates afresh.
 			catch (error) {
 				useLogger().error(
 					error,
 					'[websocket] could not refresh the roles of the socket of user '
 						+ `${JSON.stringify(socketUser)}: ${error}`,
 				);
+
+				client.send(new WebSocketError(
+					'auth',
+					'ROLES_REFRESH_FAILED',
+					`The memberships of user ${JSON.stringify(socketUser)} changed`
+						+ ' and the roles of this socket could not be refreshed:'
+						+ ' reconnect to authenticate again.',
+				).toMessage());
+
+				client.close();
 			}
 		}
 	}
