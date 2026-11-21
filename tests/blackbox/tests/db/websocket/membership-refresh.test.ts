@@ -66,16 +66,31 @@ describe.each(vendors)('%s', (vendor) => {
 					},
 				);
 
-				// Heard, the subscription is live before the role change.
+				// Heard, the subscription is live before the role change. graphql-ws
+				// acknowledges no subscribe, so the note is created again until one
+				// lands: a note created before the server registered it is never sent.
 				when.optional(
 					/^the admin creates the note "(.+)", which the member's GraphQL socket hears$/,
 					async (label: string) => {
-						const response = await request(getUrl(vendor))
-							.post(`/items/${collectionMembershipNotes}`)
-							.send({ label })
-							.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+						for (let attempt = 1; attempt <= 20; attempt++) {
+							const response = await request(getUrl(vendor))
+								.post(`/items/${collectionMembershipNotes}`)
+								.send({ label })
+								.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
-						expect(response.statusCode).toEqual(200);
+							expect(response.statusCode).toEqual(200);
+
+							const heardBy = Date.now() + 1000;
+
+							while (memberGqlSocket.getMessageCount() === 0
+								&& Date.now() < heardBy) {
+								await new Promise((resolve) => setTimeout(resolve, 20));
+							}
+
+							if (memberGqlSocket.getMessageCount() > 0) {
+								break;
+							}
+						}
 
 						expect(await memberGqlSocket.getMessages(1)).toEqual([
 							{
