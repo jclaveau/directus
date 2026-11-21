@@ -214,6 +214,10 @@ describe('addOwnBeneficiary', () => {
 		],
 		[{ subscription: 1, email: 15 }, '"email" must be an email, got 15'],
 		[
+			{ subscription: 1, email: 'ada@example..com' },
+			'"email" must be an email, got "ada@example..com"',
+		],
+		[
 			{ subscription: 1, user: 'user-2' },
 			'"user" must be a user id, got "user-2"',
 		],

@@ -20,7 +20,9 @@ type BeneficiaryPayload = { subscription: number }
 
 const UUID_PATTERN = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Domain labels exclude the dot, so no two quantifiers compete for a
+// character: linear on any input (CodeQL js/polynomial-redos).
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
 
 /**
  * `POST /subscriptions/beneficiaries`: a manager seats a user on the plan,
