@@ -54,7 +54,7 @@ Feature: A user is invited, re-invited and accepts the invitation
       | 1       | directus_users        | 3      | 1      | 0      | 0      |
       | 3       | directus_access       | 1      | 0      | 0      | 0      |
       | 3       | directus_invites      | 1      | 1      | 0      | 1      |
-      | 3       | directus_role_members | 1      | 1      | 0      | 1      |
+      | 3       | directus_role_members | 3      | 1      | 0      | 1      |
       | 3       | directus_roles        | 1      | 0      | 0      | 0      |
       | 3       | directus_users        | 3      | 0      | 0      | 0      |
 

@@ -2276,6 +2276,7 @@ describe('clearCacheTargets', () => {
 
 		expect(busPublish).toHaveBeenCalledWith('cacheCleared', {
 			targets: ['response'],
+			origin: 'this-node',
 		});
 	});
 

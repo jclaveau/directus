@@ -100,6 +100,10 @@ export class RoleMembersService extends ItemsService {
 	}
 
 	private async readMemberUsers(keys: PrimaryKey[]): Promise<string[]> {
+		if (keys.length === 0) {
+			return [];
+		}
+
 		const memberships: { user: string }[] = await this.knex
 			.select('user')
 			.from('directus_role_members')

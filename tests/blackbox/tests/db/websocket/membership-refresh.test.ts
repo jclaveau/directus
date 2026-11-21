@@ -69,7 +69,9 @@ describe.each(vendors)('%s', (vendor) => {
 						status: 'error',
 						error: {
 							code: 'FORBIDDEN',
-							message: 'You don\'t have permission to access this.',
+							message: 'You don\'t have permission to access collection'
+								+ ' "test_ws_membership_notes" or it does not exist.'
+								+ ' Queried in root.',
 						},
 					},
 				]);

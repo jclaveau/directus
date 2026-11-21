@@ -72,7 +72,7 @@ Feature: A role's users list adds memberships and drops the others
       | 1       | directus_access       | 2      | 0      | 0      | 0      |
       | 1       | directus_activity     | 0      | 2      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
-      | 1       | directus_role_members | 3      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 4      | 1      | 0      | 0      |
       | 1       | directus_roles        | 5      | 0      | 0      | 0      |
       | 1       | directus_users        | 1      | 0      | 0      | 0      |
       | 2       | directus_access       | 2      | 0      | 0      | 0      |
@@ -82,7 +82,7 @@ Feature: A role's users list adds memberships and drops the others
       | 3       | directus_access       | 3      | 0      | 0      | 0      |
       | 3       | directus_activity     | 0      | 4      | 0      | 0      |
       | 3       | directus_revisions    | 0      | 2      | 1      | 0      |
-      | 3       | directus_role_members | 4      | 1      | 0      | 1      |
+      | 3       | directus_role_members | 6      | 1      | 0      | 1      |
       | 3       | directus_roles        | 6      | 0      | 0      | 0      |
       | 3       | directus_users        | 3      | 1      | 0      | 0      |
       | 4       | directus_access       | 2      | 0      | 0      | 0      |

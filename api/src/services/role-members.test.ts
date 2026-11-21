@@ -567,6 +567,10 @@ describe('Services / RoleMembers', () => {
 
 			expect(tracker.history.select).toMatchObject([
 				{
+					sql: 'select "user" from "directus_role_members" where "id" in (?)',
+					bindings: ['6f1c2a4e-0000-4000-8000-000000000011'],
+				},
+				{
 					sql: 'select "id", "managed_by", "user", "role"'
 						+ ' from "directus_role_members"'
 						+ ' where "id" in (?) and "managed_by" is not null',
@@ -699,6 +703,14 @@ describe('Services / RoleMembers', () => {
 			}));
 
 			expect(tracker.history.select).toMatchObject([
+				{
+					sql: 'select "user" from "directus_role_members"'
+						+ ' where "id" in (?, ?)',
+					bindings: [
+						'6f1c2a4e-0000-4000-8000-000000000001',
+						'6f1c2a4e-0000-4000-8000-000000000013',
+					],
+				},
 				{
 					sql: 'select "id", "managed_by", "user", "role"'
 						+ ' from "directus_role_members"'

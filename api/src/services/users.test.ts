@@ -1057,6 +1057,11 @@ describe('Integration Tests', () => {
 							+ ' where "user" = ?',
 						bindings: ['8e2b4c10-5d3a-4f6e-9a7b-000000000017'],
 					},
+					{
+						sql: 'select "user" from "directus_role_members"'
+							+ ' where "id" in (?)',
+						bindings: ['member-id-2'],
+					},
 				]);
 
 				expect(writes).toEqual([

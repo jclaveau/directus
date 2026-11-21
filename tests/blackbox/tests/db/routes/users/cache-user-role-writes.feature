@@ -94,7 +94,7 @@ Feature: A user's role, status and deletion purge the cache as today
       | 3       | directus_access         | 3      | 0      | 0      | 0      | 0    |
       | 3       | directus_activity       | 0      | 3      | 0      | 0      | 0    |
       | 3       | directus_revisions      | 0      | 1      | 0      | 0      | 0    |
-      | 3       | directus_role_members   | 4      | 1      | 0      | 1      | 0    |
+      | 3       | directus_role_members   | 6      | 1      | 0      | 1      | 0    |
       | 3       | directus_roles          | 1      | 0      | 0      | 0      | 0    |
       | 3       | directus_users          | 5      | 0      | 0      | 0      | 0    |
       | 4       | cache_user_rename_notes | 1      | 0      | 0      | 0      | 0    |
@@ -409,7 +409,7 @@ Feature: A user's role, status and deletion purge the cache as today
     And on postgres the requests ran these statements:
       | request | table                   | select | insert | update | delete |
       | 1       | directus_invites        | 1      | 1      | 0      | 0      |
-      | 1       | directus_role_members   | 1      | 1      | 0      | 0      |
+      | 1       | directus_role_members   | 2      | 1      | 0      | 0      |
       | 1       | directus_users          | 2      | 0      | 0      | 0      |
       | 2       | directus_access         | 4      | 0      | 0      | 0      |
       | 2       | directus_permissions    | 1      | 0      | 0      | 0      |
