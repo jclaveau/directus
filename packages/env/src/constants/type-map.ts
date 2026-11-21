@@ -341,6 +341,8 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	SUBSCRIPTIONS_MOLLIE_ACCESS_TOKEN: 'string',
 	SUBSCRIPTIONS_RECONCILE_CRON: 'string',
 	SUBSCRIPTIONS_CHECKOUT_URL_ALLOW_LIST: 'array',
+	SUBSCRIPTIONS_EXAMPLES_FAKE_PROVIDERS: 'boolean',
+	SUBSCRIPTIONS_EXAMPLES_PROVIDERS_PORT: 'number',
 } as const;
 
 export const TYPE_MAP_REGEX: [RegExp, EnvType][] = Object.entries(TYPE_MAP).map(([name, value]) => [
