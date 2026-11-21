@@ -84,6 +84,7 @@ type RedisCommandRow = {
 	command: string;
 	key: string;
 	calls: string;
+	senders: string;
 };
 
 type InstanceUrls = {
@@ -293,7 +294,9 @@ export function defineSpawnedWriteFeature(
 /**
  * The rows of `table`, each `calls` counting the commands that match it: the
  * command, whatever its case; the key, its first argument past the namespace,
- * any when empty; the database, any when empty.
+ * any when empty; the database, any when empty. `senders` counts the client
+ * connections that sent them, which tells one instance's commands apart from
+ * two instances'.
  */
 function countedRedisCommands(
 	ranCommands: MonitoredCommand[],
@@ -317,7 +320,15 @@ function countedRedisCommands(
 				&& databaseMatches;
 		});
 
-		return { ...commandRow, calls: String(matchingCommands.length) };
+		const senderSources = new Set(matchingCommands.map((matchingCommand) => {
+			return matchingCommand.source;
+		}));
+
+		return {
+			...commandRow,
+			calls: String(matchingCommands.length),
+			senders: String(senderSources.size),
+		};
 	});
 }
 

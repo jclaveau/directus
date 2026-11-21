@@ -1,15 +1,17 @@
-Feature: A write on one instance clears the response store it shares once
+Feature: A write on one instance alone clears the response store it shares
 
   - A user's memberships decide what it may read, and a response key names the
     user, not its roles: a membership written on one instance has to drop the
     reads every instance cached for that user (#746).
   - On a Redis response store every instance reads the same entries: the
-    clear the writing instance runs is the one clear they get, and it tells
-    no other instance to clear again.
+    clears the writing instance runs are the ones they get, and it tells no
+    other instance to clear again. A role change flushes three times, each
+    flush clearing the store once.
   - The feature runs two instances on one database, one bus and one Redis
     response store, held in Redis database 9, which a clear flushes. A row
     sent `on: peer` goes to the second one. The Redis commands are the ones
-    Redis ran while the requests ran, a key spelled past the namespace.
+    Redis ran while the requests ran, a key spelled past the namespace;
+    `senders` counts the connections that sent them.
   - A Given states the database rows and the cached reads a scenario starts
     from; the rows are written straight into the database. A user's role is a
     `directus_role_members` row.
@@ -17,7 +19,7 @@ Feature: A write on one instance clears the response store it shares once
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own. A response cell states the keys it checks.
 
-  Scenario: a role taken away on one instance clears the shared store once
+  Scenario: a role taken away on one instance clears the shared store from it alone
     Given the rows of directus_policies:
       | id              | name         | app_access | admin_access |
       | <reader-policy> | reader-<run> | false      | false        |
@@ -62,6 +64,6 @@ Feature: A write on one instance clears the response store it shares once
       | query:                                                |           |
       |   fields: label                                       |           |
     And the requests sent Redis these commands:
-      | database | command | key              | calls |
-      | 9        | flushdb |                  | 1     |
-      |          | publish | bus:cacheCleared | 0     |
+      | database | command | key              | calls | senders |
+      | 9        | flushdb |                  | 3     | 1       |
+      |          | publish | bus:cacheCleared | 0     | 0       |

@@ -123,7 +123,11 @@ describe.each(vendors)('%s', (vendor) => {
 				then.optional(
 					'the member\'s socket is told its roles could not be refreshed',
 					async () => {
-						expect(await memberSocket.getMessages(1)).toEqual([
+						// The server closes the socket right after telling it, so the
+						// message is read off a closed socket.
+						expect(await memberSocket.getMessages(1, {
+							targetState: WebSocket.CLOSED,
+						})).toEqual([
 							{
 								type: 'auth',
 								status: 'error',

@@ -12062,12 +12062,18 @@ describe('Services / Items / mutationBatching', () => {
 });
 
 describe('ItemsService — the rows an update or a delete returns', () => {
+	// A write runs on a fork of the service, which hands its rows here.
+	const handedRows: unknown[][] = [];
+
 	class WrittenRowsService extends ItemsService {
 		protected override readonly writtenRowColumns = ['name'];
-		readonly handedRows: unknown[][] = [];
+
+		constructor(options: AbstractServiceOptions) {
+			super('test', options);
+		}
 
 		protected override async onKeyRowsWritten(writtenRows: unknown[]) {
-			this.handedRows.push(writtenRows);
+			handedRows.push(writtenRows);
 		}
 	}
 
@@ -12081,13 +12087,14 @@ describe('ItemsService — the rows an update or a delete returns', () => {
 
 	afterEach(() => {
 		tracker.reset();
+		handedRows.length = 0;
 		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 	});
 
 	it('hands the rows an update statement returns', async () => {
 		tracker.on.update('test').response([{ name: 'a' }, { name: 'a' }]);
 
-		const service = new WrittenRowsService('test', { knex: db, schema });
+		const service = new WrittenRowsService({ knex: db, schema });
 
 		await service.updateMany([1, 2], { name: 'a' });
 
@@ -12095,14 +12102,14 @@ describe('ItemsService — the rows an update or a delete returns', () => {
 			'update "test" set "name" = $1 where "id" in ($2, $3) returning "name"',
 		]);
 
-		expect(service.handedRows).toEqual([[{ name: 'a' }, { name: 'a' }]]);
+		expect(handedRows).toEqual([[{ name: 'a' }, { name: 'a' }]]);
 	});
 
 	it('writes its update groups one by one, each returning its rows', async () => {
 		tracker.on.update('test').responseOnce([{ name: 'a' }]);
 		tracker.on.update('test').responseOnce([{ name: 'b' }]);
 
-		const service = new WrittenRowsService('test', { knex: db, schema });
+		const service = new WrittenRowsService({ knex: db, schema });
 
 		await service.updateBatch([{ id: 1, name: 'a' }, { id: 2, name: 'b' }]);
 
@@ -12111,13 +12118,13 @@ describe('ItemsService — the rows an update or a delete returns', () => {
 			'update "test" set "name" = $1 where "id" in ($2) returning "name"',
 		]);
 
-		expect(service.handedRows).toEqual([[{ name: 'a' }], [{ name: 'b' }]]);
+		expect(handedRows).toEqual([[{ name: 'a' }], [{ name: 'b' }]]);
 	});
 
 	it('hands the rows a delete statement returns', async () => {
 		tracker.on.delete('test').response([{ name: 'a' }]);
 
-		const service = new WrittenRowsService('test', { knex: db, schema });
+		const service = new WrittenRowsService({ knex: db, schema });
 
 		await service.deleteMany([1]);
 
@@ -12125,7 +12132,7 @@ describe('ItemsService — the rows an update or a delete returns', () => {
 			'delete from "test" where "id" in ($1) returning "name"',
 		]);
 
-		expect(service.handedRows).toEqual([[{ name: 'a' }]]);
+		expect(handedRows).toEqual([[{ name: 'a' }]]);
 	});
 
 	it(oneLine`
@@ -12135,7 +12142,7 @@ describe('ItemsService — the rows an update or a delete returns', () => {
 		tracker.on.delete('test').response([{ name: 'a' }]);
 		tracker.on.select('test').response([{ id: 1 }]);
 
-		const service = new WrittenRowsService('test', {
+		const service = new WrittenRowsService({
 			knex: db,
 			schema,
 			accountability: { admin: true } as any,
@@ -12145,7 +12152,7 @@ describe('ItemsService — the rows an update or a delete returns', () => {
 			new ItemNotFoundError({ collection: 'test', primaryKey: 2 }),
 		);
 
-		expect(service.handedRows).toEqual([]);
+		expect(handedRows).toEqual([]);
 	});
 
 	it(oneLine`
@@ -12153,7 +12160,7 @@ describe('ItemsService — the rows an update or a delete returns', () => {
 	`, async () => {
 		tracker.on.delete('test').response([{ name: 'a' }, { name: 'b' }]);
 
-		const service = new WrittenRowsService('test', {
+		const service = new WrittenRowsService({
 			knex: db,
 			schema,
 			accountability: { admin: true } as any,
@@ -12161,14 +12168,14 @@ describe('ItemsService — the rows an update or a delete returns', () => {
 
 		await service.deleteMany([1, 2]);
 
-		expect(service.handedRows).toEqual([[{ name: 'a' }, { name: 'b' }]]);
+		expect(handedRows).toEqual([[{ name: 'a' }, { name: 'b' }]]);
 	});
 
 	it('returns no row off postgres and cockroach, handing none', async () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
 		tracker.on.delete('test').response(1);
 
-		const service = new WrittenRowsService('test', { knex: db, schema });
+		const service = new WrittenRowsService({ knex: db, schema });
 
 		await service.deleteMany([1]);
 
@@ -12176,6 +12183,6 @@ describe('ItemsService — the rows an update or a delete returns', () => {
 			'delete from "test" where "id" in ($1)',
 		]);
 
-		expect(service.handedRows).toEqual([]);
+		expect(handedRows).toEqual([]);
 	});
 });

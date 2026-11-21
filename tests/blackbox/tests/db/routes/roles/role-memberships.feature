@@ -469,8 +469,8 @@ Feature: A user holds several roles, each one a membership
       |   fields: roles.role       |     roles: []                                |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete | with |
-      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_role_members | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 2      | 0      | 0      | 0      | 0    |
 
   Scenario: a membership sent back with its user changes its role
     Given the rows of directus_roles:

@@ -4929,8 +4929,8 @@ implements AbstractService<Item> {
 			return { writtenCount: await rowsQuery.delete(), writtenRows: null };
 		}
 
-		const writtenRows: Item[] = await rowsQuery
-			.delete([...this.writtenRowColumns]);
+		const writtenRows = await rowsQuery
+			.delete([...this.writtenRowColumns]) as Item[];
 
 		return { writtenCount: writtenRows.length, writtenRows };
 	}
