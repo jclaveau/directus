@@ -4,6 +4,11 @@ import type { Knex } from 'knex';
 export type PendingSubscriptionCreate = {
 	plan: number;
 	provider: string;
+	/** Set by a checkout, with the columns of migration 20261121A. */
+	checkoutColumns?: {
+		payer: string;
+		custom_amount: string | null;
+	};
 };
 
 /**
@@ -13,7 +18,7 @@ export type PendingSubscriptionCreate = {
  */
 export async function createPendingSubscription(
 	trx: Knex,
-	{ plan, provider }: PendingSubscriptionCreate,
+	{ plan, provider, checkoutColumns }: PendingSubscriptionCreate,
 ): Promise<number> {
 	const soldPlan = await trx('subscription_plans')
 		.select('code', 'status')
@@ -43,6 +48,7 @@ export async function createPendingSubscription(
 			cancel_at_period_end: false,
 			date_created: createdAt,
 			date_updated: createdAt,
+			...checkoutColumns,
 		},
 		['id'],
 	);

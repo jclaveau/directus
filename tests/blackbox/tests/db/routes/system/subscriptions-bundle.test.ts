@@ -78,7 +78,23 @@ const BUNDLE_TABLES = [
 
 // The users the features write, as `<prefix>-<id>@example.com` with an `id`
 // from 100 to 199.
-const SCENARIO_EMAIL_PREFIXES = ['payer', 'friend', 'invited', 'other', 'user'];
+const SCENARIO_EMAIL_PREFIXES = [
+	'payer',
+	'friend',
+	'invited',
+	'other',
+	'user',
+	'co',
+];
+
+// The checkout pages the fake providers answer, the row id appended.
+const CHECKOUT_PAGES = {
+	mollie_page: 'https://www.mollie.com/checkout/tr_checkout_',
+	stripe_page: 'https://checkout.stripe.com/c/pay/cs_checkout_',
+};
+
+// The names a scenario learns from a response: each scenario learns its own.
+const RESPONSE_KEY_NAMES = ['checkout'];
 
 const accessFeature = loadFeature(
 	'./tests/db/routes/system/subscription-managed-access.feature',
@@ -92,6 +108,10 @@ const mineFeature = loadFeature(
 	'./tests/db/routes/system/subscription-mine.feature',
 );
 
+const checkoutFeature = loadFeature(
+	'./tests/db/routes/system/subscription-checkout.feature',
+);
+
 const schemaApplyFeature = loadFeature(
 	'./tests/db/routes/system/subscription-schema-apply.feature',
 );
@@ -101,7 +121,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	const scenarioKeys: ScenarioKeys = {
 		run: randomUUID(),
-		keysByName: {},
+		keysByName: { ...CHECKOUT_PAGES },
 	};
 
 	let database: Knex;
@@ -245,6 +265,7 @@ describe.each(vendors)('%s', (vendor) => {
 			.whereIn('name', ['Pro plan', 'Other policy', 'Direct policy'])
 			.orWhere('name', 'like', 'Lifecycle %')
 			.orWhere('name', 'like', 'Mine %')
+			.orWhere('name', 'like', 'Checkout %')
 			.delete();
 
 		await database.destroy();
@@ -277,7 +298,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	function readColumnRow(columnsTable: ColumnValueRow[]) {
 		return Object.fromEntries(columnsTable.map(({ column, value }) => {
-			return [column, value];
+			return [column, withKeys(value, scenarioKeys)];
 		}));
 	}
 
@@ -292,6 +313,12 @@ describe.each(vendors)('%s', (vendor) => {
 	// scenario finds its answer.
 	function holdSubscription(columnsTable: ColumnValueRow[]) {
 		fakeProviders.holdAtMollie(
+			parseGherkinTable<MollieHolding>([readColumnRow(columnsTable)])[0]!,
+		);
+	}
+
+	function holdFirstPayment(columnsTable: ColumnValueRow[]) {
+		fakeProviders.holdFirstPaymentAtMollie(
 			parseGherkinTable<MollieHolding>([readColumnRow(columnsTable)])[0]!,
 		);
 	}
@@ -394,11 +421,22 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 	}
 
+	// An expiry event tells of a checkout the fake provider then holds expired.
 	function sendProviderEvents(
 		rowsTable: { provider: string; type: string; entity: string }[],
 	) {
 		const providerRows = keepProviderRows(rowsTable);
 		const scenarioProvider = readScenarioProvider();
+
+		for (const { type: eventType, entity } of providerRows) {
+			if (eventType === 'payment.expired') {
+				fakeProviders.expirePaymentAtMollie(withKeys(entity, scenarioKeys));
+			}
+
+			if (eventType === 'checkout.session.expired') {
+				fakeProviders.expireSessionAtStripe(withKeys(entity, scenarioKeys));
+			}
+		}
 
 		if (scenarioProvider === 'mollie') {
 			return sendMollieEvents(providerRows);
@@ -485,7 +523,14 @@ describe.each(vendors)('%s', (vendor) => {
 				id: 'evt_blackbox',
 				object: 'event',
 				type: eventType,
-				data: { object: { id: subscription, object: 'subscription' } },
+				data: {
+					object: {
+						id: withKeys(subscription, scenarioKeys),
+						object: eventType.startsWith('checkout.session.')
+							? 'checkout.session'
+							: 'subscription',
+					},
+				},
 			});
 
 			const signedAt = Math.floor(Date.now() / 1000);
@@ -522,7 +567,7 @@ describe.each(vendors)('%s', (vendor) => {
 				type: eventType,
 				...entity === ''
 					? {}
-					: { entityId: entity },
+					: { entityId: withKeys(entity, scenarioKeys) },
 			});
 
 			const eventSignature = createHmac('sha256', MOLLIE_WEBHOOK_SECRET)
@@ -808,7 +853,7 @@ describe.each(vendors)('%s', (vendor) => {
 			);
 		}
 
-		return expectNoQueueRow(providerRows[0]!.resource_id);
+		return expectNoQueueRow(withKeys(providerRows[0]!.resource_id, scenarioKeys));
 	}
 
 	// A `write` cell is the YAML of one write, a write without `body` having none.
@@ -818,40 +863,83 @@ describe.each(vendors)('%s', (vendor) => {
 		const providerRows = keepProviderRows(rowsTable);
 
 		if (!('write' in providerRows[0]!)) {
-			return parseGherkinTable<ReceivedWrite>(providerRows);
+			return parseGherkinTable<ReceivedWrite>(
+				JSON.parse(withKeys(JSON.stringify(providerRows), scenarioKeys)),
+			);
 		}
 
 		return providerRows.map(({ write: writeYaml }) => {
-			return { body: null, ...loadYaml(writeYaml!) as object } as ReceivedWrite;
+			return {
+				body: null,
+				...loadYaml(withKeys(writeYaml!, scenarioKeys)) as object,
+			} as ReceivedWrite;
 		});
 	}
 
-	async function expectReceivedWrites(rowsTable: Record<string, string>[]) {
+	async function expectReceivedWrites(
+		rowsTable: Record<string, string>[],
+		keptPath?: string,
+	) {
 		await expect.poll(() => {
-			return fakeProviders.receivedWrites;
+			return fakeProviders.receivedWrites
+				.filter((receivedWrite) => {
+					return keptPath === undefined || receivedWrite.path === keptPath;
+				})
+				.map(comparableWrite);
 		}, SYNC_POLL)
-			.toEqual(readExpectedWrites(rowsTable));
+			.toEqual(readExpectedWrites(rowsTable).map(comparableWrite));
 
 		fakeProviders.receivedWrites.length = 0;
 	}
 
+	function expectNoWrite() {
+		expect(fakeProviders.receivedWrites).toEqual([]);
+	}
+
 	// A subscription too wide for a row: one line per field of the JSON body.
+	// The writes that came before it, such as its checkout's, are not read.
 	async function expectCreatedSubscription(
 		customerId: string,
 		fieldsTable: { field: string; value: string }[],
 	) {
-		await expectReceivedWrites([{
-			method: 'POST',
-			path: `/v2/customers/${customerId}/subscriptions`,
-			body: JSON.stringify(Object.fromEntries(
-				parseGherkinTable(fieldsTable).map(({ field, value }) => {
-					return [field, value];
-				}),
-			)),
-		}]);
+		const subscriptionsPath = `/v2/customers/${
+			withKeys(customerId, scenarioKeys)}/subscriptions`;
+
+		await expectReceivedWrites(
+			[{
+				method: 'POST',
+				path: subscriptionsPath,
+				body: JSON.stringify(Object.fromEntries(
+					parseGherkinTable(JSON.parse(withKeys(
+						JSON.stringify(fieldsTable),
+						scenarioKeys,
+					))).map(({ field, value }) => {
+						return [field, value];
+					}),
+				)),
+			}],
+			subscriptionsPath,
+		);
 	}
 
+	// A checkout names the provider a table per provider is read for.
 	function sendRequestRows(rowsTable: Row[]) {
+		for (const { request: requestText } of rowsTable) {
+			if (!requestText.includes('/subscriptions/checkout')) {
+				continue;
+			}
+
+			const { payload: checkoutPayload } = loadYaml(requestText) as {
+				payload?: { provider?: unknown };
+			};
+
+			if (typeof checkoutPayload?.provider === 'string') {
+				scenarioProviders = [
+					...new Set([...scenarioProviders, checkoutPayload.provider]),
+				];
+			}
+		}
+
 		return sendRows(
 			{
 				vendor,
@@ -964,6 +1052,7 @@ describe.each(vendors)('%s', (vendor) => {
 		[/^the rows of (\w+):$/, seedRows],
 		[/^Mollie holds this subscription:$/, holdSubscription],
 		[/^Mollie holds this mandate:$/, holdMandate],
+		[/^Mollie holds this first payment:$/, holdFirstPayment],
 		[/^Stripe holds this subscription:$/, holdStripeSubscription],
 		[/^the provider holds this subscription:$/, holdProviderSubscription],
 		[
@@ -999,8 +1088,9 @@ describe.each(vendors)('%s', (vendor) => {
 		],
 		[/^the sync queue eventually holds no row for (\S+)$/, expectNoQueueRow],
 		[/^the providers eventually received these writes:$/, expectReceivedWrites],
+		[/^the providers received no write$/, expectNoWrite],
 		[
-			/^Mollie eventually received this subscription for (\w+):$/,
+			/^Mollie eventually received this subscription for (\S+):$/,
 			expectCreatedSubscription,
 		],
 		[/^the CLI runs (.+) with these variables:$/, runCli],
@@ -1125,9 +1215,15 @@ describe.each(vendors)('%s', (vendor) => {
 							continue;
 						}
 
-						// A scenario seeding no pending subscription has no provider.
+						// A scenario seeding no pending subscription has no provider,
+						// and reads only the writes it makes.
 						defineStep(stepMatcher, (...stepArguments: unknown[]) => {
 							scenarioProviders = [];
+							fakeProviders.receivedWrites.length = 0;
+
+							for (const responseKeyName of RESPONSE_KEY_NAMES) {
+								delete scenarioKeys.keysByName[responseKeyName];
+							}
 
 							return stepCallback(...stepArguments);
 						});
@@ -1139,6 +1235,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	defineLifecycleFeature(lifecycleFeature);
 	defineLifecycleFeature(mineFeature);
+	defineLifecycleFeature(checkoutFeature);
 
 	// Last: the apply drops the sync queue every scenario above relies on.
 	defineFeature(schemaApplyFeature, (scenario) => {
@@ -1161,4 +1258,73 @@ function readLogMessage(logLine: string): string {
 	catch {
 		return logLine;
 	}
+}
+
+// A body as the fields it carries: Mollie's JSON parsed, Stripe's form decoded
+// to the object its brackets nest, each leaf a string as the form sends it.
+function comparableWrite(receivedWrite: ReceivedWrite): ReceivedWrite {
+	const { path: writePath, body: writeBody } = receivedWrite;
+
+	if (writeBody === null) {
+		return receivedWrite;
+	}
+
+	if (writePath.startsWith('/v1/')) {
+		return {
+			...receivedWrite,
+			body: typeof writeBody === 'string'
+				? decodeStripeForm(writeBody)
+				: stringifyLeaves(writeBody) as object,
+		};
+	}
+
+	return {
+		...receivedWrite,
+		body: typeof writeBody === 'string'
+			? JSON.parse(writeBody)
+			: writeBody,
+	};
+}
+
+function decodeStripeForm(formText: string): object {
+	const decodedForm: Record<string, unknown> = {};
+
+	for (const [fieldPath, fieldValue] of new URLSearchParams(formText)) {
+		const pathSegments = fieldPath.replaceAll(']', '').split('[');
+		let parentNode = decodedForm;
+
+		for (const [segmentIndex, pathSegment] of pathSegments.entries()) {
+			const nextSegment = pathSegments[segmentIndex + 1];
+
+			if (nextSegment === undefined) {
+				parentNode[pathSegment] = fieldValue;
+
+				continue;
+			}
+
+			parentNode[pathSegment] ??= /^\d+$/.test(nextSegment)
+				? []
+				: {};
+
+			parentNode = parentNode[pathSegment] as Record<string, unknown>;
+		}
+	}
+
+	return decodedForm;
+}
+
+function stringifyLeaves(bodyNode: unknown): unknown {
+	if (Array.isArray(bodyNode)) {
+		return bodyNode.map(stringifyLeaves);
+	}
+
+	if (bodyNode !== null && typeof bodyNode === 'object') {
+		return Object.fromEntries(
+			Object.entries(bodyNode).map(([fieldName, fieldNode]) => {
+				return [fieldName, stringifyLeaves(fieldNode)];
+			}),
+		);
+	}
+
+	return String(bodyNode);
 }

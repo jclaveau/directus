@@ -1,11 +1,18 @@
 import Stripe from 'stripe';
 import {
+	AbandonedCheckoutError,
 	MissingProviderSubscriptionError,
 	WebhookIgnoredError,
 	WebhookRefusedError,
 } from '../errors.js';
 import { readDirectusSubscription } from './read-directus-subscription.js';
-import type { ProviderBilling, SubscriptionProvider } from './types.js';
+import type {
+	BillingInterval,
+	ProviderBilling,
+	SubscriptionProvider,
+} from './types.js';
+
+const STRIPE_CHECKOUT_SESSION_ID = /^cs_\w+$/;
 
 const STRIPE_INTERVALS: Record<string, { months: number; days: number }> = {
 	year: { months: 12, days: 0 },
@@ -57,6 +64,10 @@ export function createStripeProvider(
 		},
 
 		async fetchSubscription(resourceId) {
+			if (STRIPE_CHECKOUT_SESSION_ID.test(resourceId)) {
+				return await refuseCheckoutSession(stripeClient, resourceId);
+			}
+
 			const stripeSubscription = await retrieveStripeSubscription(
 				stripeClient,
 				resourceId,
@@ -114,7 +125,107 @@ export function createStripeProvider(
 		composeResourceId({ subscriptionId }) {
 			return subscriptionId;
 		},
+
+		/** Both metadata name the row: the session's for its expiry. */
+		async createCheckout({
+			directusSubscription,
+			payerEmail,
+			amount,
+			interval,
+			planName,
+			redirectUrl,
+		}) {
+			const checkoutMetadata = {
+				directus_subscription: String(directusSubscription),
+			};
+
+			const checkoutSession = await stripeClient.checkout.sessions.create({
+				mode: 'subscription',
+				customer_email: payerEmail,
+				line_items: [{
+					quantity: 1,
+					price_data: {
+						currency: amount.currency.toLowerCase(),
+						unit_amount: Math.round(Number(amount.value) * 100),
+						recurring: formatStripeRecurring(interval),
+						product_data: { name: planName },
+					},
+				}],
+				subscription_data: { metadata: checkoutMetadata },
+				metadata: checkoutMetadata,
+				success_url: redirectUrl,
+				cancel_url: redirectUrl,
+			});
+
+			if (checkoutSession.url === null) {
+				throw new Error(
+					`Stripe checkout session ${JSON.stringify(checkoutSession.id)}`
+					+ ' has no URL',
+				);
+			}
+
+			return checkoutSession.url;
+		},
+
+		async startPaidCheckout({ paymentId }) {
+			throw new Error(
+				`Stripe starts a checkout's subscription itself, not from payment`
+				+ ` ${JSON.stringify(paymentId)}`,
+			);
+		},
 	};
+}
+
+function formatStripeRecurring({
+	months,
+	days,
+}: BillingInterval): Stripe.Checkout.SessionCreateParams.LineItem
+		.PriceData.Recurring {
+	if (months > 0 && days === 0) {
+		return months % 12 === 0
+			? { interval: 'year', interval_count: months / 12 }
+			: { interval: 'month', interval_count: months };
+	}
+
+	if (months === 0 && days > 0) {
+		return days % 7 === 0
+			? { interval: 'week', interval_count: days / 7 }
+			: { interval: 'day', interval_count: days };
+	}
+
+	throw new Error(
+		`Billing interval ${JSON.stringify({ months, days })} is no`
+		+ ' Stripe interval',
+	);
+}
+
+/**
+ * A `checkout.session.expired` queues the session: an expired one expires the
+ * pending row it names, any other syncs nothing.
+ */
+async function refuseCheckoutSession(
+	stripeClient: Stripe,
+	sessionId: string,
+): Promise<never> {
+	const checkoutSession = await stripeClient.checkout.sessions
+		.retrieve(sessionId);
+
+	const directusSubscription = readDirectusSubscription(
+		checkoutSession.metadata,
+	);
+
+	if (checkoutSession.status === 'expired' && directusSubscription !== null) {
+		throw new AbandonedCheckoutError({
+			checkoutId: sessionId,
+			checkoutStatus: 'expired',
+			directusSubscription,
+		});
+	}
+
+	throw new MissingProviderSubscriptionError({
+		resourceId: sessionId,
+		subscriptionId: null,
+	});
 }
 
 /** A metered or one-off price bills no fixed amount per interval. */
@@ -181,6 +292,10 @@ function readEventSubscriptionId(stripeEvent: Stripe.Event): string {
 		return typeof subscriptionReference === 'string'
 			? subscriptionReference
 			: subscriptionReference.id;
+	}
+
+	if (stripeEvent.type === 'checkout.session.expired') {
+		return stripeEvent.data.object.id;
 	}
 
 	throw new WebhookIgnoredError({

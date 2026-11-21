@@ -1,8 +1,14 @@
 import type { AbstractService } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { MollieApiError } from '@mollie/api-client';
-import { MissingProviderSubscriptionError } from '../errors.js';
+import {
+	AbandonedCheckoutError,
+	MissingProviderSubscriptionError,
+	PaidCheckoutError,
+} from '../errors.js';
+import { addCheckoutColumns } from '../migrations/add-checkout-columns.js';
 import {
 	createSubscriptionTables,
 } from '../migrations/create-subscription-tables.js';
@@ -29,6 +35,7 @@ beforeEach(async () => {
 	});
 
 	await createSubscriptionTables.config.up(database);
+	await addCheckoutColumns.config.up(database);
 	vi.useFakeTimers({ now: new Date('2026-11-05T00:00:00Z'), toFake: ['Date'] });
 });
 
@@ -366,6 +373,205 @@ describe('runSyncBatch', () => {
 				provider_customer_id: 'cst_1',
 				provider_subscription_id: 'sub_1',
 			}]);
+	});
+
+	test('starts the subscription a paid checkout sold, then syncs it', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'mollie',
+			status: 'pending',
+			custom_amount: '14.90',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_sync_queue').insert({
+			provider: 'mollie',
+			resource_id: 'tr_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const fetchSubscription = vi.fn()
+			.mockRejectedValueOnce(new PaidCheckoutError({
+				paymentId: 'tr_1',
+				customerId: 'cst_1',
+				mandateId: 'mdt_1',
+				paidAt: '2026-11-04T10:00:00+00:00',
+				amount: { currency: 'EUR', value: '14.90' },
+				directusSubscription: 1,
+			}))
+			.mockResolvedValueOnce({
+				subscriptionId: 'sub_1',
+				customerId: 'cst_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2026-12-04T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1490,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			});
+
+		const startPaidCheckout = vi.fn().mockResolvedValue('cst_1/sub_1');
+		const logger = { warn: vi.fn(), error: vi.fn() };
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'mollie',
+				{
+					fetchSubscription,
+					startPaidCheckout,
+					composeResourceId: vi.fn().mockReturnValue('cst_1/sub_1'),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger,
+		});
+
+		expect(startPaidCheckout).toHaveBeenCalledWith({
+			paymentId: 'tr_1',
+			customerId: 'cst_1',
+			mandateId: 'mdt_1',
+			paidAt: '2026-11-04T10:00:00+00:00',
+			amount: { currency: 'EUR', value: '14.90' },
+			directusSubscription: 1,
+			interval: { months: 1, days: 0 },
+		});
+
+		expect(fetchSubscription.mock.calls).toEqual([['tr_1'], ['cst_1/sub_1']]);
+		expect(logger.error).not.toHaveBeenCalled();
+		expect(await database('subscription_sync_queue')).toEqual([]);
+
+		expect(await database('subscriptions')
+			.select('status', 'provider_customer_id', 'provider_subscription_id'))
+			.toEqual([{
+				status: 'active',
+				provider_customer_id: 'cst_1',
+				provider_subscription_id: 'sub_1',
+			}]);
+	});
+
+	test('retries a paid checkout whose subscription row is gone', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'mollie',
+			resource_id: 'tr_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const startPaidCheckout = vi.fn();
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'mollie',
+				{
+					fetchSubscription: vi.fn().mockRejectedValue(
+						new PaidCheckoutError({
+							paymentId: 'tr_1',
+							customerId: 'cst_1',
+							mandateId: 'mdt_1',
+							paidAt: '2026-11-04T10:00:00+00:00',
+							amount: { currency: 'EUR', value: '14.90' },
+							directusSubscription: 9,
+						}),
+					),
+					startPaidCheckout,
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(startPaidCheckout).not.toHaveBeenCalled();
+
+		expect(await database('subscription_sync_queue')
+			.select('attempts', 'last_error'))
+			.toEqual([{
+				attempts: 1,
+				last_error: 'The checkout\'s subscription 9 does not exist',
+			}]);
+	});
+
+	test.each([
+		['pending', null, 'expired'],
+		['pending', 'sub_1', 'pending'],
+		['active', null, 'active'],
+	])(oneLine`
+		expires an abandoned checkout of a %s row bound to %j: %s
+	`, async (storedStatus, providerSubscriptionId, expectedStatus) => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			status: storedStatus,
+			provider_subscription_id: providerSubscriptionId,
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'cs_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const emitSyncedAction = vi.fn();
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{
+					fetchSubscription: vi.fn().mockRejectedValue(
+						new AbandonedCheckoutError({
+							checkoutId: 'cs_1',
+							checkoutStatus: 'expired',
+							directusSubscription: 1,
+						}),
+					),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction,
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(emitSyncedAction).not.toHaveBeenCalled();
+		expect(await database('subscription_sync_queue')).toEqual([]);
+
+		expect(await database('subscriptions').select('status'))
+			.toEqual([{ status: expectedStatus }]);
 	});
 
 	test('drops a subscription no pending row awaits, logged', async () => {

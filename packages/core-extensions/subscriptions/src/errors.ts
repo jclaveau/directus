@@ -155,3 +155,39 @@ export const BeneficiariesMaxReachedError = createError<{
 	},
 	400,
 );
+
+/**
+ * Not a failure: a Mollie checkout's first payment, paid, set up a mandate and
+ * no subscription yet. `runSyncBatch` creates it at the amount sold.
+ */
+export const PaidCheckoutError = createError<{
+	paymentId: string;
+	customerId: string;
+	mandateId: string;
+	paidAt: string;
+	amount: { currency: string; value: string };
+	directusSubscription: number;
+}>(
+	'PAID_CHECKOUT',
+	({ paymentId, directusSubscription }) => {
+		return `Payment ${JSON.stringify(paymentId)} paid the checkout of`
+			+ ` subscription ${JSON.stringify(directusSubscription)},`
+			+ ' which has no provider subscription yet';
+	},
+	409,
+);
+
+/** Not retried: `runSyncBatch` expires the pending row the checkout named. */
+export const AbandonedCheckoutError = createError<{
+	checkoutId: string;
+	checkoutStatus: string;
+	directusSubscription: number;
+}>(
+	'ABANDONED_CHECKOUT',
+	({ checkoutId, checkoutStatus, directusSubscription }) => {
+		return `Checkout ${JSON.stringify(checkoutId)} of subscription`
+			+ ` ${JSON.stringify(directusSubscription)} ended`
+			+ ` ${JSON.stringify(checkoutStatus)}, unpaid`;
+	},
+	410,
+);

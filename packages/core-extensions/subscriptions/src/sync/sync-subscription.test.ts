@@ -2,6 +2,7 @@ import { oneLine } from '@directus/utils';
 import type { AbstractService } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { addCheckoutColumns } from '../migrations/add-checkout-columns.js';
 import {
 	createSubscriptionTables,
 } from '../migrations/create-subscription-tables.js';
@@ -29,6 +30,7 @@ beforeEach(async () => {
 	});
 
 	await createSubscriptionTables.config.up(database);
+	await addCheckoutColumns.config.up(database);
 });
 
 afterEach(async () => {
@@ -149,6 +151,9 @@ describe('syncSubscription', () => {
 			user_updated: null,
 			date_created: 1_790_812_800_000,
 			date_updated: 1_793_836_800_000,
+			payer: null,
+			custom_amount: null,
+			billing_mismatch: null,
 		}]);
 	});
 
@@ -231,6 +236,9 @@ describe('syncSubscription', () => {
 			user_updated: null,
 			date_created: 1_790_812_800_000,
 			date_updated: 1_793_836_800_000,
+			payer: null,
+			custom_amount: null,
+			billing_mismatch: null,
 		}]);
 	});
 
@@ -1247,9 +1255,75 @@ describe('syncSubscription', () => {
 
 			expect(logger.error).toHaveBeenCalledWith(
 				`Subscription 1 is billed ${loggedBilling} by "stripe", its plan`
-				+ ' "monthly" sells {"amountCents":1000,"currency":"EUR",'
+				+ ' "monthly" sold it at {"amountCents":1000,"currency":"EUR",'
 				+ '"interval":{"months":1,"days":0}}',
 			);
+		},
+	);
+
+	test.each([
+		[
+			1000,
+			[[
+				'Subscription 1 is billed {"amountCents":1000,"currency":"EUR",'
+				+ '"interval":{"months":1,"days":0}} by "stripe", its plan'
+				+ ' "monthly" sold it at {"amountCents":1490,"currency":"EUR",'
+				+ '"interval":{"months":1,"days":0}}',
+			]],
+		],
+		[1490, []],
+	])(
+		'compares a billing of %j cents with the custom_amount sold',
+		async (billedCents, loggedErrors) => {
+			await database('subscription_plans').insert({
+				code: 'monthly',
+				name: 'Monthly',
+				policy: 'policy-1',
+				amount: 10,
+				currency: 'EUR',
+				interval: '{"months":1}',
+			});
+
+			await database('subscriptions').insert({
+				plan: 1,
+				provider: 'stripe',
+				provider_customer_id: 'cus_1',
+				provider_subscription_id: 'sub_1',
+				status: 'active',
+				current_period_end: new Date('2026-12-01T00:00:00Z'),
+				custom_amount: '14.90',
+				date_created: new Date('2026-10-01T00:00:00Z'),
+				date_updated: new Date('2026-10-01T00:00:00Z'),
+			});
+
+			await database('subscription_managers')
+				.insert({ subscription: 1, user: 'user-1' });
+
+			const logger = { warn: vi.fn(), error: vi.fn() };
+
+			await syncSubscription({
+				trx: database,
+				subscriptionProvider: {} as SubscriptionProvider,
+				logger,
+				accessService: {} as AbstractService,
+				providerName: 'stripe',
+				providerSubscription: {
+					subscriptionId: 'sub_1',
+					customerId: 'cus_1',
+					status: 'active',
+					currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+					cancelAtPeriodEnd: false,
+					directusSubscription: 1,
+					billing: {
+						amountCents: billedCents,
+						currency: 'EUR',
+						interval: { months: 1, days: 0 },
+					},
+				},
+				syncedAt: new Date('2026-11-05T00:00:00Z'),
+			});
+
+			expect(logger.error.mock.calls).toEqual(loggedErrors);
 		},
 	);
 
@@ -1822,8 +1896,8 @@ describe('selectStoredSubscription', () => {
 			.toEqual({
 				sql: 'select "id", "plan", "provider_customer_id",'
 					+ ' "provider_subscription_id", "status",'
-					+ ' "current_period_end", "cancel_at_period_end"'
-					+ ' from "subscriptions"'
+					+ ' "current_period_end", "cancel_at_period_end",'
+					+ ' "custom_amount" from "subscriptions"'
 					+ ' where "provider" = $1 and "provider_subscription_id" = $2'
 					+ ' limit $3 for update',
 				bindings: ['mollie', 'sub_1', 1],
