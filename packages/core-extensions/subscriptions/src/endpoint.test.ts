@@ -6,6 +6,7 @@ import { cancelOwnSubscription } from './cancel/cancel-own-subscription.js';
 import { resumeOwnSubscription } from './cancel/resume-own-subscription.js';
 import { subscriptionsEndpoint } from './endpoint.js';
 import { addOwnBeneficiary } from './members/add-own-beneficiary.js';
+import { createCheckout } from './members/create-checkout.js';
 import { listOwnSubscriptions } from './members/list-own-subscriptions.js';
 import { archivePlan } from './plans/archive-plan.js';
 import { receiveWebhook } from './webhook/receive-webhook.js';
@@ -13,6 +14,7 @@ import { receiveWebhook } from './webhook/receive-webhook.js';
 vi.mock('./cancel/cancel-own-subscription.js');
 vi.mock('./cancel/resume-own-subscription.js');
 vi.mock('./members/add-own-beneficiary.js');
+vi.mock('./members/create-checkout.js');
 vi.mock('./members/list-own-subscriptions.js');
 vi.mock('./plans/archive-plan.js');
 vi.mock('./webhook/receive-webhook.js');
@@ -505,6 +507,108 @@ describe('subscriptionsEndpoint', () => {
 
 		expect(mineResponse.status).toBe(403);
 		expect(listOwnSubscriptions).toHaveBeenCalledWith('database', null);
+	});
+
+	test('checks out with the allow list read at registration', async () => {
+		vi.mocked(createCheckout).mockResolvedValue({
+			subscription: 5,
+			url: 'https://checkout.stripe.com/c/pay/cs_5',
+		});
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+
+		expressApp.use((request, _response, next) => {
+			Object.assign(request, { accountability: { user: 'user-1' } });
+			next();
+		});
+
+		expressApp.use(express.json());
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{
+				env: {
+					SUBSCRIPTIONS_CHECKOUT_URL_ALLOW_LIST: ['https://shop.example.com/ok'],
+				},
+				database: 'database',
+			},
+		);
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const checkoutResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/checkout`,
+			{
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: '{"plan":"pro","provider":"stripe"}',
+			},
+		);
+
+		httpServer.close();
+
+		expect(checkoutResponse.status).toBe(200);
+
+		expect(await checkoutResponse.json()).toEqual({
+			data: {
+				subscription: 5,
+				url: 'https://checkout.stripe.com/c/pay/cs_5',
+			},
+		});
+
+		expect(createCheckout).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			checkoutUrlAllowList: [new URL('https://shop.example.com/ok')],
+			userId: 'user-1',
+			requestBody: { plan: 'pro', provider: 'stripe' },
+		});
+	});
+
+	test('checks out as nobody without accountability', async () => {
+		vi.mocked(createCheckout).mockRejectedValue(new ForbiddenError());
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		expressApp.use((
+			routeError: Error & { status: number },
+			_request: express.Request,
+			response: express.Response,
+			_next: express.NextFunction,
+		) => {
+			response.status(routeError.status)
+				.end();
+		});
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const checkoutResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/checkout`,
+			{ method: 'POST' },
+		);
+
+		httpServer.close();
+
+		expect(checkoutResponse.status).toBe(403);
+
+		expect(createCheckout).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			checkoutUrlAllowList: [],
+			userId: null,
+			requestBody: undefined,
+		});
 	});
 
 	test('seats a beneficiary and answers its id', async () => {

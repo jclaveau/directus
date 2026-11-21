@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+	readCheckoutUrlAllowList,
 	readMollieAccessToken,
 	readReconcileCron,
 	readSubscriptionsConfig,
@@ -159,6 +160,52 @@ describe('readMollieAccessToken', () => {
 			.toThrow(new Error(
 				'"SUBSCRIPTIONS_MOLLIE_ACCESS_TOKEN" is required to create a Mollie'
 				+ ' webhook: Mollie refuses an API key there',
+			));
+	});
+});
+
+describe('readCheckoutUrlAllowList', () => {
+	test('allows no URL when unset', () => {
+		expect(readCheckoutUrlAllowList({})).toEqual([]);
+	});
+
+	test.each([
+		'https://shop.example.com/ok, https://shop.example.com/ko',
+		['https://shop.example.com/ok', 'https://shop.example.com/ko'],
+	])('reads the URLs listed in %j', (listedUrls) => {
+		expect(readCheckoutUrlAllowList({
+			SUBSCRIPTIONS_CHECKOUT_URL_ALLOW_LIST: listedUrls,
+		}))
+			.toEqual([
+				new URL('https://shop.example.com/ok'),
+				new URL('https://shop.example.com/ko'),
+			]);
+	});
+
+	test('refuses a list that is neither a string nor an array', () => {
+		expect(() => {
+			return readCheckoutUrlAllowList({
+				SUBSCRIPTIONS_CHECKOUT_URL_ALLOW_LIST: 15,
+			});
+		})
+			.toThrow(new Error(
+				'"SUBSCRIPTIONS_CHECKOUT_URL_ALLOW_LIST" must be a list of URLs,'
+				+ ' got 15',
+			));
+	});
+
+	test.each([
+		['https://shop.example.com/ok,shop', '"shop"'],
+		[['https://shop.example.com/ok', 15], '15'],
+	])('refuses %j, which lists a non-URL', (listedUrls, refusedEntry) => {
+		expect(() => {
+			return readCheckoutUrlAllowList({
+				SUBSCRIPTIONS_CHECKOUT_URL_ALLOW_LIST: listedUrls,
+			});
+		})
+			.toThrow(new Error(
+				`"SUBSCRIPTIONS_CHECKOUT_URL_ALLOW_LIST" lists ${refusedEntry},`
+				+ ' which is not a URL',
 			));
 	});
 });

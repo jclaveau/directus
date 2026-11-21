@@ -17,9 +17,9 @@ export const addCheckoutColumns = defineMigration(
 					.nullable()
 					.comment('VAT included, at least the plan\'s amount');
 
+				// Null until a sync compares the provider's billing with the sale.
 				table.boolean('billing_mismatch')
-					.notNullable()
-					.defaultTo(false);
+					.nullable();
 
 				table.index(['payer']);
 			});

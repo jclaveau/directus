@@ -1,15 +1,22 @@
-import { MollieApiError, type MollieClient } from '@mollie/api-client';
+import {
+	MollieApiError,
+	type MollieClient,
+	SequenceType,
+} from '@mollie/api-client';
 import type { IncomingHttpHeaders } from 'node:http';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
+	AbandonedCheckoutError,
 	MissingProviderSubscriptionError,
 	NoValidMandateError,
+	PaidCheckoutError,
 	WebhookIgnoredError,
 	WebhookSignatureError,
 	WebhookUnreadableError,
 } from '../errors.js';
 import { readDirectusSubscription } from './read-directus-subscription.js';
 import type {
+	BillingInterval,
 	ProviderBilling,
 	ProviderSubscriptionIds,
 	SubscriptionProvider,
@@ -33,6 +40,9 @@ const MOLLIE_INTERVAL = /^(\d+) (month|week|day)s?$/;
 const USABLE_MANDATE_STATUSES = ['valid', 'pending'];
 
 const ENDED_MOLLIE_STATUSES = ['canceled', 'completed'];
+
+/** A first payment in one of these never sets up a mandate. */
+const UNPAID_PAYMENT_STATUSES = ['expired', 'failed', 'canceled'];
 
 /** Mollie's `completed` is a fixed-term subscription past its last payment. */
 const NORMALIZED_STATUSES: Record<string, string> = {
@@ -191,7 +201,121 @@ export function createMollieProvider(
 		},
 
 		composeResourceId: composeMollieResourceId,
+
+		/**
+		 * A customer per checkout, then its first payment: once paid, it holds
+		 * the mandate `startPaidCheckout` bills the subscription on.
+		 */
+		async createCheckout({
+			directusSubscription,
+			payerEmail,
+			amount,
+			redirectUrl,
+		}) {
+			const checkoutMetadata = {
+				directus_subscription: String(directusSubscription),
+			};
+
+			const mollieCustomer = await mollieClient.customers.create({
+				email: payerEmail,
+				metadata: checkoutMetadata,
+			});
+
+			const firstPayment = await mollieClient.payments.create({
+				amount,
+				customerId: mollieCustomer.id,
+				sequenceType: SequenceType.first,
+				description: `Subscription ${directusSubscription}`,
+				redirectUrl,
+				metadata: checkoutMetadata,
+			});
+
+			const checkoutUrl = firstPayment.getCheckoutUrl();
+
+			if (checkoutUrl === null) {
+				throw new Error(
+					`Mollie payment ${JSON.stringify(firstPayment.id)} has no`
+					+ ' checkout URL',
+				);
+			}
+
+			return checkoutUrl;
+		},
+
+		/**
+		 * The first charge falls one interval after the payment, which paid the
+		 * first period. A retry finds the subscription a lost commit created.
+		 */
+		async startPaidCheckout({
+			paymentId,
+			customerId,
+			mandateId,
+			paidAt,
+			amount,
+			directusSubscription,
+			interval,
+		}) {
+			for await (const customerSubscription of mollieClient
+				.customerSubscriptions.iterate({ customerId })) {
+				if (readDirectusSubscription(customerSubscription.metadata)
+					=== directusSubscription
+					&& !ENDED_MOLLIE_STATUSES.includes(customerSubscription.status)) {
+					return composeMollieResourceId({
+						customerId,
+						subscriptionId: customerSubscription.id,
+					});
+				}
+			}
+
+			const mollieInterval = formatMollieInterval(interval);
+
+			const createdSubscription = await mollieClient.customerSubscriptions
+				.create({
+					customerId,
+					amount,
+					interval: mollieInterval,
+					description: `Subscription ${directusSubscription}`,
+					mandateId,
+					startDate: addMollieInterval(new Date(paidAt), mollieInterval)
+						.toISOString()
+						.slice(0, 10),
+					metadata: { directus_subscription: String(directusSubscription) },
+					idempotencyKey: `checkout-${paymentId}`,
+				});
+
+			return composeMollieResourceId({
+				customerId,
+				subscriptionId: createdSubscription.id,
+			});
+		},
 	};
+}
+
+function readIntervalParts({ months, days }: BillingInterval) {
+	if (months > 0 && days === 0) {
+		return [months, 'month'] as const;
+	}
+
+	if (months === 0 && days > 0 && days % 7 === 0) {
+		return [days / 7, 'week'] as const;
+	}
+
+	return [days, 'day'] as const;
+}
+
+function formatMollieInterval({ months, days }: BillingInterval): string {
+	const [intervalCount, intervalUnit] = readIntervalParts({ months, days });
+
+	if (intervalCount <= 0 || (months > 0 && days > 0)) {
+		throw new Error(
+			`Billing interval ${JSON.stringify({ months, days })} is no`
+			+ ' Mollie interval',
+		);
+	}
+
+	return intervalCount === 1
+		? `1 ${intervalUnit}`
+		: `${intervalCount} ${intervalUnit}s`;
 }
 
 /** The canceled subscription's mandate first, else any the customer holds. */
@@ -340,8 +464,8 @@ function parseMollieResourceId(resourceId: string): ProviderSubscriptionIds {
 }
 
 /**
- * The first payment, which sets up the mandate, carries no subscriptionId: its
- * webhook grants nothing, access starts with the subscription's first charge.
+ * The first payment, which sets up the mandate, carries no subscriptionId. A
+ * checkout's, paid, starts the subscription; unpaid, it expires the checkout.
  */
 async function readPaymentSubscription(
 	mollieClient: MollieClient,
@@ -351,6 +475,15 @@ async function readPaymentSubscription(
 		.catch((error: unknown) => {
 			throw mapMollieNotFound(error, paymentId, null);
 		});
+
+	const checkoutSubscription = molliePayment.sequenceType === SequenceType.first
+		? readDirectusSubscription(molliePayment.metadata)
+		: null;
+
+	if (molliePayment.subscriptionId === undefined
+		&& checkoutSubscription !== null) {
+		refuseCheckoutPayment(molliePayment, checkoutSubscription);
+	}
 
 	if (molliePayment.subscriptionId === undefined
 		|| molliePayment.customerId === undefined) {
@@ -364,6 +497,45 @@ async function readPaymentSubscription(
 		customerId: molliePayment.customerId,
 		subscriptionId: molliePayment.subscriptionId,
 	};
+}
+
+function refuseCheckoutPayment(
+	molliePayment: {
+		id: string;
+		status: string;
+		customerId?: string;
+		mandateId?: string;
+		paidAt?: string;
+		amount: { currency: string; value: string };
+	},
+	directusSubscription: number,
+): void {
+	const { id: paymentId, status: paymentStatus } = molliePayment;
+
+	if (paymentStatus === 'paid'
+		&& molliePayment.customerId !== undefined
+		&& molliePayment.mandateId !== undefined
+		&& molliePayment.paidAt !== undefined) {
+		throw new PaidCheckoutError({
+			paymentId,
+			customerId: molliePayment.customerId,
+			mandateId: molliePayment.mandateId,
+			paidAt: molliePayment.paidAt,
+			amount: {
+				currency: molliePayment.amount.currency,
+				value: molliePayment.amount.value,
+			},
+			directusSubscription,
+		});
+	}
+
+	if (UNPAID_PAYMENT_STATUSES.includes(paymentStatus)) {
+		throw new AbandonedCheckoutError({
+			checkoutId: paymentId,
+			checkoutStatus: paymentStatus,
+			directusSubscription,
+		});
+	}
 }
 
 async function getMollieSubscription(

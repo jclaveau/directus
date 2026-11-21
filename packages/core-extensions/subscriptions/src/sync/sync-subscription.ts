@@ -53,6 +53,7 @@ type StoredSubscription = {
 	status: string;
 	current_period_end: Date | number | string | null;
 	cancel_at_period_end: boolean | number;
+	custom_amount: number | string | null;
 };
 
 type SubscriptionState = {
@@ -81,6 +82,7 @@ const STORED_SUBSCRIPTION_FIELDS = [
 	'status',
 	'current_period_end',
 	'cancel_at_period_end',
+	'custom_amount',
 ];
 
 /**
@@ -122,13 +124,18 @@ export async function syncSubscription({
 
 	// A plan changed in the provider's portal: the plan sold stays, an admin
 	// settles the difference.
-	if (!holdsPlanBilling(subscribedPlan, providerSubscription.billing)) {
+	const soldBilling = readPlanBilling(
+		subscribedPlan,
+		storedSubscription.custom_amount,
+	);
+
+	if (!holdsSoldBilling(soldBilling, providerSubscription.billing)) {
 		logger.error(
 			`Subscription ${JSON.stringify(storedSubscription.id)} is billed`
 			+ ` ${JSON.stringify(providerSubscription.billing)} by`
 			+ ` ${JSON.stringify(providerName)}, its plan`
-			+ ` ${JSON.stringify(subscribedPlan.code)} sells`
-			+ ` ${JSON.stringify(readPlanBilling(subscribedPlan))}`,
+			+ ` ${JSON.stringify(subscribedPlan.code)} sold it at`
+			+ ` ${JSON.stringify(soldBilling)}`,
 		);
 	}
 
@@ -396,12 +403,10 @@ async function countManagers(
 	return Number(managerTally!.managerCount);
 }
 
-function holdsPlanBilling(
-	subscribedPlan: SubscribedPlan,
+function holdsSoldBilling(
+	planBilling: ProviderBilling,
 	providerBilling: ProviderBilling | null,
 ): boolean {
-	const planBilling = readPlanBilling(subscribedPlan);
-
 	return providerBilling !== null
 		&& providerBilling.amountCents === planBilling.amountCents
 		&& providerBilling.currency === planBilling.currency
@@ -409,16 +414,22 @@ function holdsPlanBilling(
 		&& providerBilling.interval.days === planBilling.interval.days;
 }
 
-function readPlanBilling(subscribedPlan: SubscribedPlan): ProviderBilling {
+/** A checkout paid above the plan's price bills its `custom_amount`. */
+function readPlanBilling(
+	subscribedPlan: SubscribedPlan,
+	customAmount: number | string | null,
+): ProviderBilling {
 	return {
 		// A decimal column: Postgres hands back "10.00", SQLite 10.
-		amountCents: Math.round(Number(subscribedPlan.amount) * 100),
+		amountCents: Math.round(Number(customAmount ?? subscribedPlan.amount) * 100),
 		currency: subscribedPlan.currency.toUpperCase(),
 		interval: readPlanInterval(subscribedPlan),
 	};
 }
 
-function readPlanInterval(subscribedPlan: SubscribedPlan): BillingInterval {
+export function readPlanInterval(
+	subscribedPlan: Pick<SubscribedPlan, 'code' | 'interval'>,
+): BillingInterval {
 	const planDuration: Record<string, unknown> = JSON.parse(
 		subscribedPlan.interval,
 	);
