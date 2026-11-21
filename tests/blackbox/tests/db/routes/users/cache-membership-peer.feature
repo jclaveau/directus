@@ -42,26 +42,26 @@ Feature: A write on one instance drops the reads a peer instance cached
       | id     | label |
       | <note> | v1    |
     And this read is cached:
-      | request                                  | response              |
-      | on: peer                                 | code: 200             |+
-      | as: member-<run>                         | headers:              |
-      | method: GET                              |   x-cache-status: HIT |
-      | path: /items/cache_membership_peer_notes | body:                 |
-      | query:                                   |   data:               |
-      |   fields: label                          |     - label: v1       |
+      | request                                         | response              |
+      | on: peer                                        | code: 200             |+
+      | as: member-<run>                                | headers:              |
+      | method: GET                                     |   x-cache-status: HIT |
+      | path: /items/cache_membership_peer_notes/<note> | body:                 |
+      | query:                                          |   data:               |
+      |   fields: label                                 |     label: v1         |
     Then these requests get these responses:
-      | request                                  | response  |
-      | method: PATCH                            | code: 200 |+
-      | path: /users/<member>                    |           |
-      | payload:                                 |           |
-      |   roles:                                 |           |
-      |     - role: <other-role>                 |           |
-      | on: peer                                 | code: 403 |+
-      | as: member-<run>                         |           |
-      | method: GET                              |           |
-      | path: /items/cache_membership_peer_notes |           |
-      | query:                                   |           |
-      |   fields: label                          |           |
+      | request                                         | response  |
+      | method: PATCH                                   | code: 200 |+
+      | path: /users/<member>                           |           |
+      | payload:                                        |           |
+      |   roles:                                        |           |
+      |     - role: <other-role>                        |           |
+      | on: peer                                        | code: 403 |+
+      | as: member-<run>                                |           |
+      | method: GET                                     |           |
+      | path: /items/cache_membership_peer_notes/<note> |           |
+      | query:                                          |           |
+      |   fields: label                                 |           |
 
   Scenario: a membership an extension deletes on one instance ends the peer read
     Given the rows of directus_policies:
@@ -87,25 +87,25 @@ Feature: A write on one instance drops the reads a peer instance cached
       | id     | label |
       | <note> | v1    |
     And this read is cached:
-      | request                                  | response              |
-      | on: peer                                 | code: 200             |+
-      | as: member-<run>                         | headers:              |
-      | method: GET                              |   x-cache-status: HIT |
-      | path: /items/cache_membership_peer_notes | body:                 |
-      | query:                                   |   data:               |
-      |   fields: label                          |     - label: v1       |
+      | request                                         | response              |
+      | on: peer                                        | code: 200             |+
+      | as: member-<run>                                | headers:              |
+      | method: GET                                     |   x-cache-status: HIT |
+      | path: /items/cache_membership_peer_notes/<note> | body:                 |
+      | query:                                          |   data:               |
+      |   fields: label                                 |     label: v1         |
     Then these requests get these responses:
-      | request                                  | response                 |
-      | method: POST                             | code: 200                |+
-      | path: /role-members-delete/delete-one    | body:                    |
-      | payload:                                 |   deleted: <membership>  |
-      |   membership: <membership>               |                          |
-      | on: peer                                 | code: 403                |+
-      | as: member-<run>                         |                          |
-      | method: GET                              |                          |
-      | path: /items/cache_membership_peer_notes |                          |
-      | query:                                   |                          |
-      |   fields: label                          |                          |
+      | request                                         | response                |
+      | method: POST                                    | code: 200               |+
+      | path: /role-members-delete/delete-one           | body:                   |
+      | payload:                                        |   deleted: <membership> |
+      |   membership: <membership>                      |                         |
+      | on: peer                                        | code: 403               |+
+      | as: member-<run>                                |                         |
+      | method: GET                                     |                         |
+      | path: /items/cache_membership_peer_notes/<note> |                         |
+      | query:                                          |                         |
+      |   fields: label                                 |                         |
 
   Scenario: an item written on one instance ends the read the peer cached
     Given the rows of cache_membership_peer_notes:
