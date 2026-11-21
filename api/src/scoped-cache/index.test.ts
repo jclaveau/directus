@@ -2485,6 +2485,32 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
+		tells the other nodes once a retried namespace-mode record cleared this
+		one, like any flush
+	`, async () => {
+		const calls: string[] = [];
+
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'namespace',
+			collection: null,
+			scopedCacheFingerprints: [],
+			ids: [7],
+		}]);
+
+		cache.clear.mockImplementationOnce(async () => {
+			calls.push('clear');
+		});
+
+		vi.mocked(tellPeersResponseCacheCleared).mockImplementationOnce(async () => {
+			calls.push('tell peers');
+		});
+
+		expect(await retryPendingScopedCachePurges()).toBe(1);
+
+		expect(calls).toEqual(['clear', 'tell peers']);
+	});
+
+	it(oneLine`
 		keeps a record whose retry failed again and counts the attempt, then carries on
 		to the targets behind it
 	`, async () => {

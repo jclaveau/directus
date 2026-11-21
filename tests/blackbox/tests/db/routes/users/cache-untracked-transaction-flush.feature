@@ -93,6 +93,6 @@ Feature: A role an extension writes in its own transaction flushes once it commi
       | 2       | directus_access       | 2      | 0      | 0      | 0      |
       | 2       | directus_activity     | 0      | 3      | 0      | 0      |
       | 2       | directus_revisions    | 0      | 1      | 0      | 0      |
-      | 2       | directus_role_members | 5      | 1      | 0      | 1      |
+      | 2       | directus_role_members | 3      | 1      | 0      | 1      |
       | 2       | directus_roles        | 1      | 0      | 0      | 0      |
       | 2       | directus_users        | 4      | 0      | 0      | 0      |

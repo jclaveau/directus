@@ -24,7 +24,7 @@ export interface CacheClearMessage {
  * Never throws: it runs after the write committed, as the flush does.
  */
 export async function tellPeersResponseCacheCleared(): Promise<void> {
-	if (useEnv()['CACHE_STORE'] !== 'memory' || !redisConfigAvailable()) {
+	if (useEnv()['CACHE_STORE'] === 'memory' || !redisConfigAvailable()) {
 		return;
 	}
 

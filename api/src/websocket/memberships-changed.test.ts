@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useBus } from '../bus/index.js';
 import { useLogger } from '../logger/index.js';
@@ -127,22 +128,36 @@ describe('announceMembershipsChanged', () => {
 		expect(useBus().publish).not.toHaveBeenCalled();
 	});
 
-	it('keeps the roles of a socket whose refresh failed, and logs it', async () => {
+	it(oneLine`
+		closes a socket whose refresh failed, telling it why, and logs it
+	`, async () => {
 		const refusal = new Error('Connection terminated');
 		vi.mocked(fetchUserRoles).mockRejectedValueOnce(refusal);
 
 		const memberSocket = {
 			accountability: { user: 'user-member', roles: ['role-editors'] },
-		} as unknown as WebSocketClient;
+			send: vi.fn(),
+			close: vi.fn(),
+		};
 
-		memberships.refreshOnMembershipChange(new Set([memberSocket]));
+		memberships.refreshOnMembershipChange(
+			new Set([memberSocket as unknown as WebSocketClient]),
+		);
 
 		await memberships.announceMembershipsChanged(['user-member']);
 
-		expect(memberSocket.accountability).toStrictEqual({
-			user: 'user-member',
-			roles: ['role-editors'],
-		});
+		expect(memberSocket.send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({
+			type: 'auth',
+			status: 'error',
+			error: {
+				code: 'ROLES_REFRESH_FAILED',
+				message: 'The memberships of user "user-member" changed and the'
+					+ ' roles of this socket could not be refreshed: reconnect to'
+					+ ' authenticate again.',
+			},
+		}));
+
+		expect(memberSocket.close).toHaveBeenCalledExactlyOnceWith();
 
 		expect(useLogger().error).toHaveBeenCalledExactlyOnceWith(
 			refusal,

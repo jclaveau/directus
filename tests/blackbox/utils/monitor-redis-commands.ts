@@ -3,11 +3,13 @@ import { randomUUID } from 'node:crypto';
 
 /**
  * One command as MONITOR streams it. `source` is the address of the client that
- * sent it, or `lua` for a command a script ran.
+ * sent it, or `lua` for a command a script ran; `database` the database it ran
+ * on.
  */
 export type MonitoredCommand = {
 	commandArgs: string[];
 	source: string;
+	database: string;
 };
 
 /**
@@ -72,7 +74,12 @@ export async function monitorRedisCommands(
 	// parsed in the same chunk lands before any promise callback runs.
 	monitor.on(
 		'monitor',
-		(_time: string, commandArgs: string[], source: string) => {
+		(
+			_time: string,
+			commandArgs: string[],
+			source: string,
+			database: string,
+		) => {
 			if (commandArgs[1] === startSentinel) {
 				sentinelSource = source;
 				windowOpen = true;
@@ -83,7 +90,7 @@ export async function monitorRedisCommands(
 				endSeen();
 			}
 			else if (windowOpen && source !== sentinelSource) {
-				monitoredCommands.push({ commandArgs, source });
+				monitoredCommands.push({ commandArgs, source, database });
 			}
 		},
 	);

@@ -18,6 +18,8 @@ Feature: A user holds several roles, each one a membership
   - A user holds a role once per `managed_by`: a second membership of the
     same role from the same manager is refused, whether a write creates it
     or moves another membership onto that role.
+  - A membership's `user` never changes: a write handing it to another user
+    is refused, and the user sent back as stored changes nothing.
   - A Given states the database rows a scenario starts from, written straight
     into the database; the feature's collection is created before it runs.
   - A request authenticates as the admin, unless it names the token it sends
@@ -431,3 +433,69 @@ Feature: A user holds several roles, each one a membership
       |     {"roles":{"_sort":["sort"]}}  |         sort: 1                 |
       |                                   |       - role: <press>           |
       |                                   |         sort: 2                 |
+
+  Scenario: a membership handed to another user is refused, writing nothing
+    Given the rows of directus_roles:
+      | id      | name        |
+      | <staff> | staff-<run> |
+    And the rows of directus_users:
+      | id      | email                   |
+      | <alice> | alice-<run>@example.com |
+      | <bob>   | bob-<run>@example.com   |
+    And the rows of directus_role_members:
+      | id          | user    | role    | sort |
+      | <staff-row> | <alice> | <staff> | 1    |
+    Then these requests get these responses:
+      | request                    | response                                     |
+      | method: PATCH              | code: 400                                    |+
+      | path: /users/<alice>       | body:                                        |
+      | payload:                   |   errors:                                    |
+      |   roles:                   |     - message: >-                            |
+      |     update:                |         Invalid payload. Membership          |
+      |       - id: <staff-row>    |         "<staff-row>" gives role "<staff>"   |
+      |         user: <bob>        |         to user "<alice>", which can't       |
+      |                            |         change to "<bob>": delete it and     |
+      |                            |         create one for that user.            |
+      |                            |       extensions:                            |
+      |                            |         code: INVALID_PAYLOAD                |
+      | method: GET                | code: 200                                    |+
+      | path: /users/<alice>       | body:                                        |
+      | query:                     |   data:                                      |
+      |   fields: roles.role       |     roles:                                   |
+      |                            |       - role: <staff>                        |
+      | method: GET                | code: 200                                    |+
+      | path: /users/<bob>         | body:                                        |
+      | query:                     |   data:                                      |
+      |   fields: roles.role       |     roles: []                                |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+
+  Scenario: a membership sent back with its user changes its role
+    Given the rows of directus_roles:
+      | id      | name        |
+      | <staff> | staff-<run> |
+      | <press> | press-<run> |
+    And the rows of directus_users:
+      | id      | email                   |
+      | <alice> | alice-<run>@example.com |
+    And the rows of directus_role_members:
+      | id          | user    | role    | sort |
+      | <staff-row> | <alice> | <staff> | 1    |
+    Then these requests get these responses:
+      | request                        | response                     |
+      | method: PATCH                  | code: 200                    |+
+      | path: /users/<alice>           |                              |
+      | payload:                       |                              |
+      |   roles:                       |                              |
+      |     update:                    |                              |
+      |       - id: <staff-row>        |                              |
+      |         user: <alice>          |                              |
+      |         role: <press>          |                              |
+      | method: GET                    | code: 200                    |+
+      | path: /users/<alice>           | body:                        |
+      | query:                         |   data:                      |
+      |   fields: roles.id,roles.role  |     roles:                   |
+      |                                |       - id: <staff-row>      |
+      |                                |         role: <press>        |

@@ -235,9 +235,6 @@ describe('Services / RoleMembers', () => {
 
 			const database = knex.default({ client: MockClient });
 
-			createTracker(database)
-				.on.select('directus_role_members')
-				.response([{ user: 'user-id-5' }]);
 
 			await new RoleMembersService({
 				knex: database,
@@ -267,9 +264,6 @@ describe('Services / RoleMembers', () => {
 
 			const database = knex.default({ client: MockClient });
 
-			createTracker(database)
-				.on.select('directus_role_members')
-				.response([{ user: 'user-id-6' }]);
 
 			await new RoleMembersService({
 				knex: database,
@@ -288,9 +282,6 @@ describe('Services / RoleMembers', () => {
 
 			const database = knex.default({ client: MockClient });
 
-			createTracker(database)
-				.on.select('directus_role_members')
-				.response([{ user: 'user-id-11' }]);
 
 			const service = new RoleMembersService({
 				knex: database,
@@ -319,9 +310,6 @@ describe('Services / RoleMembers', () => {
 
 			const database = knex.default({ client: MockClient });
 
-			createTracker(database)
-				.on.select('directus_role_members')
-				.response([{ user: 'user-id-7' }]);
 
 			await expect(new RoleMembersService({
 				knex: database,
@@ -346,9 +334,6 @@ describe('Services / RoleMembers', () => {
 
 			const database = knex.default({ client: MockClient });
 
-			createTracker(database)
-				.on.select('directus_role_members')
-				.response([{ user: 'user-id-8' }]);
 
 			await new RoleMembersService({
 				knex: database,
@@ -364,9 +349,6 @@ describe('Services / RoleMembers', () => {
 
 			const database = knex.default({ client: MockClient });
 
-			createTracker(database)
-				.on.select('directus_role_members')
-				.response([{ user: 'user-id-12' }]);
 
 			const service = new RoleMembersService({
 				knex: database,
@@ -387,92 +369,138 @@ describe('Services / RoleMembers', () => {
 	});
 
 	describe('the users whose sockets it refreshes', () => {
-		it('reads the users of the memberships it created', async () => {
+		it(oneLine`
+			takes the users of the memberships it created from the payload, reading
+			none, and skips a user the same request creates
+		`, async () => {
 			vi.spyOn(ItemsService.prototype, 'createMany')
-				.mockResolvedValue(['member-id-16', 'member-id-17']);
+				.mockResolvedValue(['member-id-16', 'member-id-17', 'member-id-18']);
 
 			const database = knex.default({ client: MockClient });
 			const tracker = createTracker(database);
 
-			tracker.on
-				.select('directus_role_members')
-				.response([{ user: 'user-id-16' }, { user: 'user-id-17' }]);
-
 			await new RoleMembersService({ knex: database, schema }).createMany([
-				{ role: 'role-id-16', user: 'user-id-16' },
-				{ role: 'role-id-16', user: 'user-id-17' },
+				{ role: 'role-id-16', user: 'USER-ID-16' },
+				{ role: 'role-id-16', user: { id: 'user-id-17', first_name: 'Kim' } },
+				{ role: 'role-id-16', user: { email: 'new@example.com' } },
 			]);
 
-			expect(tracker.history.select).toMatchObject([
-				{
-					sql: 'select "user" from "directus_role_members"'
-						+ ' where "id" in (?, ?)',
-					bindings: ['member-id-16', 'member-id-17'],
-				},
-			]);
+			expect(tracker.history.all).toEqual([]);
 
 			expect(announceMembershipsChanged)
 				.toHaveBeenCalledExactlyOnceWith(['user-id-16', 'user-id-17']);
 		});
 
 		it(oneLine`
-			reads the users of the memberships it updated, before and after, a
-			membership handed to another user changing the roles of both
+			takes the users of the memberships an update or a delete wrote off the
+			write statement's RETURNING
 		`, async () => {
-			vi.spyOn(ItemsService.prototype, 'updateGroups')
-				.mockResolvedValue(['member-id-18']);
-
 			const database = knex.default({ client: MockClient });
-			const tracker = createTracker(database);
+			const service = new RoleMembersService({ knex: database, schema });
 
-			tracker.on
-				.select('directus_role_members')
-				.responseOnce([{ user: 'user-id-18' }]);
+			expect(service['writtenRowColumns']).toEqual(['user']);
 
-			tracker.on
-				.select('directus_role_members')
-				.responseOnce([{ user: 'user-id-19' }]);
-
-			await new RoleMembersService({ knex: database, schema })
-				.updateBatch([{ id: 'member-id-18', user: 'user-id-19' }]);
-
-			expect(tracker.history.select).toMatchObject([
-				{
-					sql: 'select "user" from "directus_role_members" where "id" in (?)',
-					bindings: ['member-id-18'],
-				},
-				{
-					sql: 'select "user" from "directus_role_members" where "id" in (?)',
-					bindings: ['member-id-18'],
-				},
-			]);
+			await service['onKeyRowsWritten'](
+				[{ user: 'user-id-18' }, { user: 'user-id-19' }],
+				database,
+			);
 
 			expect(announceMembershipsChanged)
 				.toHaveBeenCalledExactlyOnceWith(['user-id-18', 'user-id-19']);
 		});
+	});
 
-		it('reads the users of the memberships before it deletes them', async () => {
-			const deleteMany = vi.spyOn(ItemsService.prototype, 'deleteMany')
-				.mockResolvedValue(['member-id-20']);
-
+	describe('user', () => {
+		it.each([
+			['a request', {
+				admin: true,
+				app: true,
+				ip: null,
+				memberRoles: [],
+				roles: [],
+				user: 'admin-id-1',
+			}],
+			['the code, without accountability', null],
+		])('refuses %s handing a membership to another user', async (
+			_writer,
+			accountability,
+		) => {
 			const database = knex.default({ client: MockClient });
 			const tracker = createTracker(database);
-			const deletedBeforeRead: boolean[] = [];
 
 			tracker.on
 				.select('directus_role_members')
-				.response(() => {
-					deletedBeforeRead.push(deleteMany.mock.calls.length > 0);
-					return [{ user: 'user-id-20' }];
-				});
+				.response([{
+					id: '6f1c2a4e-0000-4000-8000-000000000021',
+					managed_by: null,
+					user: 'user-id-21',
+					role: 'role-id-21',
+				}]);
 
-			await new RoleMembersService({ knex: database, schema })
-				.deleteMany(['member-id-20']);
+			await expect(new RoleMembersService({
+				accountability,
+				knex: database,
+				schema,
+			})['validateGroupsToUpdate'](
+				[{
+					keys: ['6f1c2a4e-0000-4000-8000-000000000021'],
+					data: { user: 'user-id-22' },
+				}],
+				database,
+			)).rejects.toThrow(new InvalidPayloadError({
+				reason: 'Membership "6f1c2a4e-0000-4000-8000-000000000021" gives role'
+					+ ' "role-id-21" to user "user-id-21", which can\'t change to'
+					+ ' "user-id-22": delete it and create one for that user',
+			}));
 
-			expect(deletedBeforeRead).toEqual([false]);
+			expect(tracker.history.select).toMatchObject([{
+				sql: 'select "id", "managed_by", "user", "role"'
+					+ ' from "directus_role_members" where "id" in (?)',
+				bindings: ['6f1c2a4e-0000-4000-8000-000000000021'],
+			}]);
+		});
 
-			expect(announceMembershipsChanged)
-				.toHaveBeenCalledExactlyOnceWith(['user-id-20']);
+		it('lets a request send a membership\'s user back as stored', async () => {
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			tracker.on
+				.select('directus_role_members')
+				.response([{
+					id: '6f1c2a4e-0000-4000-8000-000000000023',
+					managed_by: null,
+					user: 'user-id-23',
+					role: 'role-id-23',
+				}]);
+
+			await expect(new RoleMembersService({
+				knex: database,
+				schema,
+			})['validateGroupsToUpdate'](
+				[{
+					keys: ['6f1c2a4e-0000-4000-8000-000000000023'],
+					data: { user: { id: 'USER-ID-23' }, role: 'role-id-24' },
+				}],
+				database,
+			)).resolves.toBeUndefined();
+		});
+
+		it('reads nothing for the code updating no user', async () => {
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			await expect(new RoleMembersService({
+				knex: database,
+				schema,
+			})['validateGroupsToUpdate'](
+				[{
+					keys: ['6f1c2a4e-0000-4000-8000-000000000024'],
+					data: { role: 'role-id-24' },
+				}],
+				database,
+			)).resolves.toBeUndefined();
+
+			expect(tracker.history.all).toEqual([]);
 		});
 	});
 
@@ -566,10 +594,6 @@ describe('Services / RoleMembers', () => {
 			}));
 
 			expect(tracker.history.select).toMatchObject([
-				{
-					sql: 'select "user" from "directus_role_members" where "id" in (?)',
-					bindings: ['6f1c2a4e-0000-4000-8000-000000000011'],
-				},
 				{
 					sql: 'select "id", "managed_by", "user", "role"'
 						+ ' from "directus_role_members"'
@@ -703,14 +727,6 @@ describe('Services / RoleMembers', () => {
 			}));
 
 			expect(tracker.history.select).toMatchObject([
-				{
-					sql: 'select "user" from "directus_role_members"'
-						+ ' where "id" in (?, ?)',
-					bindings: [
-						'6f1c2a4e-0000-4000-8000-000000000001',
-						'6f1c2a4e-0000-4000-8000-000000000013',
-					],
-				},
 				{
 					sql: 'select "id", "managed_by", "user", "role"'
 						+ ' from "directus_role_members"'

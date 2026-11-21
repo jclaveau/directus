@@ -85,6 +85,6 @@ Feature: A user taken out of a role through the role drops the cached reads
       | request | table                 | select | insert | update | delete |
       | 3       | directus_access       | 3      | 0      | 0      | 0      |
       | 3       | directus_activity     | 0      | 2      | 0      | 0      |
-      | 3       | directus_role_members | 5      | 0      | 0      | 1      |
+      | 3       | directus_role_members | 4      | 0      | 0      | 1      |
       | 3       | directus_roles        | 6      | 0      | 0      | 0      |
       | 3       | directus_users        | 2      | 0      | 0      | 0      |

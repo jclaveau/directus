@@ -20,9 +20,14 @@ import {
 import { bindTableRowsSteps, insertTableRows } from '@common/table-rows';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import {
+	type MonitoredCommand,
+	monitorRedisCommands,
+} from '@utils/monitor-redis-commands';
 import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
 import { type ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
+import Redis from 'ioredis';
 import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
@@ -74,6 +79,13 @@ const RESPONSE_CELL_KEYS = [
 
 type Row = { request: string; response: string };
 
+type RedisCommandRow = {
+	database: string;
+	command: string;
+	key: string;
+	calls: string;
+};
+
 type InstanceUrls = {
 	main: string;
 	peer: string | null;
@@ -90,6 +102,8 @@ type SpawnedFeatureOptions = {
 	spawnsPeer?: boolean;
 	beforeFeature?: (vendor: Vendor, instanceUrl: string) => Promise<void>;
 	afterFeature?: (vendor: Vendor) => Promise<void>;
+	// The Redis the instances share, whose commands `Then` watches.
+	monitorsRedisPort?: number;
 };
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -100,7 +114,9 @@ const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
  * are sent:` or the rows of its tables, an optional `this read is cached:`,
  * and a `Then these requests get these responses:`, the request|response
  * tables run row after row. `beforeFeature` gets the instance's url, so a
- * collection it creates is in the schema the instance holds.
+ * collection it creates is in the schema the instance holds. With
+ * `monitorsRedisPort`, `And the requests sent Redis these commands:` counts
+ * the commands Redis ran while `Then` ran.
  */
 export function defineSpawnedWriteFeature(
 	featurePath: string,
@@ -182,6 +198,7 @@ export function defineSpawnedWriteFeature(
 					};
 
 					const receivedResponses: Response[] = [];
+					const ranRedisCommands: MonitoredCommand[] = [];
 
 					given.optional('these requests are sent:', async (table: Row[]) => {
 						await sendRows(instanceUrls(), scenarioKeys, table, true, vendor);
@@ -217,19 +234,90 @@ export function defineSpawnedWriteFeature(
 					});
 
 					then('these requests get these responses:', async (table: Row[]) => {
-						receivedResponses.push(...await sendRows(
-							instanceUrls(),
-							scenarioKeys,
-							table,
-							false,
-							vendor,
-						));
+						const sendTable = async () => {
+							receivedResponses.push(...await sendRows(
+								instanceUrls(),
+								scenarioKeys,
+								table,
+								false,
+								vendor,
+							));
+						};
+
+						if (featureOptions.monitorsRedisPort === undefined) {
+							await sendTable();
+
+							return;
+						}
+
+						const redis = new Redis({
+							host: 'localhost',
+							port: featureOptions.monitorsRedisPort,
+						});
+
+						try {
+							ranRedisCommands.push(
+								...await monitorRedisCommands(redis, sendTable),
+							);
+						}
+						finally {
+							await redis.quit();
+						}
 					});
+
+					and.optional(
+						'the requests sent Redis these commands:',
+						(table: RedisCommandRow[]) => {
+							if (featureOptions.monitorsRedisPort === undefined) {
+								throw new Error(
+									`${JSON.stringify(featurePath)} counts Redis commands`
+									+ ' without monitorsRedisPort',
+								);
+							}
+
+							expect(countedRedisCommands(
+								ranRedisCommands,
+								env[vendor]['CACHE_NAMESPACE']!,
+								table,
+							)).toEqual(table);
+						},
+					);
 
 					defineStatementCountsStep(and, vendor, receivedResponses);
 				}, 60_000);
 			}
 		});
+	});
+}
+
+/**
+ * The rows of `table`, each `calls` counting the commands that match it: the
+ * command, whatever its case; the key, its first argument past the namespace,
+ * any when empty; the database, any when empty.
+ */
+function countedRedisCommands(
+	ranCommands: MonitoredCommand[],
+	namespace: string,
+	table: RedisCommandRow[],
+): RedisCommandRow[] {
+	const namespacePrefix = `${namespace}:`;
+
+	return table.map((commandRow) => {
+		const matchingCommands = ranCommands.filter((ranCommand) => {
+			const [commandName = '', firstArg = ''] = ranCommand.commandArgs;
+
+			const keyMatches = commandRow.key === ''
+				|| firstArg === `${namespacePrefix}${commandRow.key}`;
+
+			const databaseMatches = commandRow.database === ''
+				|| String(ranCommand.database) === commandRow.database;
+
+			return commandName.toLowerCase() === commandRow.command.toLowerCase()
+				&& keyMatches
+				&& databaseMatches;
+		});
+
+		return { ...commandRow, calls: String(matchingCommands.length) };
 	});
 }
 
