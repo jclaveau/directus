@@ -44,6 +44,9 @@ import * as services from './services/index.js';
 import { RevisionsService } from './services/revisions.js';
 import type { EventHandler } from './types/index.js';
 import { constructFlowTree } from './utils/construct-flow-tree.js';
+import {
+	validateAccess,
+} from './permissions/modules/validate-access/validate-access.js';
 import { getSchema } from './utils/get-schema.js';
 import { getService } from './utils/get-service.js';
 import { JobQueue } from './utils/job-queue.js';
@@ -750,6 +753,7 @@ class FlowManager {
 				logger,
 				getSchema,
 				scopedCache: createScopedCacheExtensionHandle(getSchema),
+				validateAccess,
 				data: keyedData,
 				accountability: null,
 				...context,

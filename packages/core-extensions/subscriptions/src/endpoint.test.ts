@@ -1,0 +1,848 @@
+import type { AddressInfo } from 'node:net';
+import { ForbiddenError } from '@directus/errors';
+import express from 'express';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import { cancelOwnSubscription } from './cancel/cancel-own-subscription.js';
+import { resumeOwnSubscription } from './cancel/resume-own-subscription.js';
+import { subscriptionsEndpoint } from './endpoint.js';
+import { addOwnBeneficiary } from './members/add-own-beneficiary.js';
+import { createCheckout } from './members/create-checkout.js';
+import { listOwnSubscriptions } from './members/list-own-subscriptions.js';
+import { archivePlan } from './plans/archive-plan.js';
+import { receiveWebhook } from './webhook/receive-webhook.js';
+
+vi.mock('./cancel/cancel-own-subscription.js');
+vi.mock('./cancel/resume-own-subscription.js');
+vi.mock('./members/add-own-beneficiary.js');
+vi.mock('./members/create-checkout.js');
+vi.mock('./members/list-own-subscriptions.js');
+vi.mock('./plans/archive-plan.js');
+vi.mock('./webhook/receive-webhook.js');
+
+afterEach(() => {
+	vi.restoreAllMocks();
+	vi.resetAllMocks();
+});
+
+describe('subscriptionsEndpoint', () => {
+	test('mounts at /subscriptions', () => {
+		expect(subscriptionsEndpoint.name).toBe('subscriptions');
+	});
+
+	test('acknowledges a webhook once its sync is queued', async () => {
+		vi.mocked(receiveWebhook)
+			.mockResolvedValue(undefined);
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use(express.raw({ type: () => true }));
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database', logger: 'logger' },
+		);
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const webhookResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/webhooks/mollie`,
+			{
+				method: 'POST',
+				headers: { 'x-mollie-test': '1' },
+				body: 'id=tr_1',
+			},
+		);
+
+		httpServer.close();
+
+		expect(webhookResponse.status).toBe(200);
+
+		expect(receiveWebhook).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			providerName: 'mollie',
+			rawBody: Buffer.from('id=tr_1'),
+			requestHeaders: expect.objectContaining({ 'x-mollie-test': '1' }),
+			logger: 'logger',
+		});
+	});
+
+	// The CLI loads this endpoint too, before `subscriptions mollie-setup-webhook`
+	// has made the webhook secret a Mollie key requires.
+	test('reads the provider config at a request, not at registration', async () => {
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use(express.raw({ type: () => true }));
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: { SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1' }, database: 'database' },
+		);
+
+		expressApp.use((
+			requestError: Error,
+			_request: express.Request,
+			response: express.Response,
+			_next: express.NextFunction,
+		) => {
+			response.status(500)
+				.send(requestError.message);
+		});
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const webhookResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/webhooks/mollie`,
+			{ method: 'POST', body: 'id=tr_1' },
+		);
+
+		httpServer.close();
+
+		expect({
+			status: webhookResponse.status,
+			body: await webhookResponse.text(),
+		}).toEqual({
+			status: 500,
+			body: '"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" is required when'
+				+ ' "SUBSCRIPTIONS_MOLLIE_API_KEY" is set',
+		});
+
+		expect(receiveWebhook).not.toHaveBeenCalled();
+	});
+
+	test('passes a refused webhook to the error handler', async () => {
+		vi.mocked(receiveWebhook)
+			.mockRejectedValue(new ForbiddenError());
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use(express.raw({ type: () => true }));
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		expressApp.use((
+			routeError: Error & { status: number },
+			_request: express.Request,
+			response: express.Response,
+			_next: express.NextFunction,
+		) => {
+			response.status(routeError.status)
+				.json({ message: routeError.message });
+		});
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const webhookResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/webhooks/mollie`,
+			{ method: 'POST', body: 'id=tr_1' },
+		);
+
+		httpServer.close();
+
+		expect(webhookResponse.status).toBe(403);
+
+		expect(await webhookResponse.json()).toEqual({
+			message: 'You don\'t have permission to access this.',
+		});
+	});
+
+	test('refuses a webhook body that was not read raw', async () => {
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use(express.json());
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		expressApp.use((
+			routeError: Error & { status: number },
+			_request: express.Request,
+			response: express.Response,
+			_next: express.NextFunction,
+		) => {
+			response.status(routeError.status)
+				.json({ message: routeError.message });
+		});
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const webhookResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/webhooks/stripe`,
+			{
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: '{"id":"evt_1"}',
+			},
+		);
+
+		httpServer.close();
+
+		expect(webhookResponse.status).toBe(400);
+
+		expect(await webhookResponse.json()).toEqual({
+			message: 'Invalid payload. the webhook body was not read raw.',
+		});
+
+		expect(receiveWebhook).not.toHaveBeenCalled();
+	});
+
+	test('cancels the requesting user\'s subscription', async () => {
+		vi.mocked(cancelOwnSubscription)
+			.mockResolvedValue(undefined);
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+
+		expressApp.use((request, _response, next) => {
+			Object.assign(request, { accountability: { user: 'user-1' } });
+			next();
+		});
+
+		expressApp.use(express.json());
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const cancelResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/cancel`,
+			{
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: '{"subscription":2}',
+			},
+		);
+
+		httpServer.close();
+
+		expect(cancelResponse.status).toBe(204);
+
+		expect(cancelOwnSubscription).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			userId: 'user-1',
+			subscriptionId: 2,
+		});
+	});
+
+	test('cancels as nobody without accountability', async () => {
+		vi.mocked(cancelOwnSubscription)
+			.mockRejectedValue(new ForbiddenError());
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		expressApp.use((
+			routeError: Error & { status: number },
+			_request: express.Request,
+			response: express.Response,
+			_next: express.NextFunction,
+		) => {
+			response.status(routeError.status)
+				.end();
+		});
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const cancelResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/cancel`,
+			{ method: 'POST' },
+		);
+
+		httpServer.close();
+
+		expect(cancelResponse.status).toBe(403);
+
+		expect(cancelOwnSubscription).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			userId: null,
+			subscriptionId: undefined,
+		});
+	});
+
+	test('resumes the requesting user\'s canceled subscription', async () => {
+		vi.mocked(resumeOwnSubscription)
+			.mockResolvedValue(undefined);
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+
+		expressApp.use((request, _response, next) => {
+			Object.assign(request, { accountability: { user: 'user-1' } });
+			next();
+		});
+
+		expressApp.use(express.json());
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const resumeResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/resume`,
+			{
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: '{"subscription":2}',
+			},
+		);
+
+		httpServer.close();
+
+		expect(resumeResponse.status).toBe(204);
+
+		expect(resumeOwnSubscription).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			userId: 'user-1',
+			subscriptionId: 2,
+		});
+	});
+
+	test('resumes as nobody without accountability', async () => {
+		vi.mocked(resumeOwnSubscription)
+			.mockRejectedValue(new ForbiddenError());
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		expressApp.use((
+			routeError: Error & { status: number },
+			_request: express.Request,
+			response: express.Response,
+			_next: express.NextFunction,
+		) => {
+			response.status(routeError.status)
+				.end();
+		});
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const resumeResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/resume`,
+			{ method: 'POST' },
+		);
+
+		httpServer.close();
+
+		expect(resumeResponse.status).toBe(403);
+
+		expect(resumeOwnSubscription).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			userId: null,
+			subscriptionId: undefined,
+		});
+	});
+
+	test.each(['cancel', 'resume'])(
+		'refuses to %s a subscription named by a string',
+		async (routeVerb) => {
+			const expressApp = express();
+			const subscriptionsRouter = express.Router();
+			expressApp.use(express.json());
+			expressApp.use('/subscriptions', subscriptionsRouter);
+
+			(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+				subscriptionsRouter,
+				{ env: {}, database: 'database' },
+			);
+
+			expressApp.use((
+				routeError: Error & { status: number },
+				_request: express.Request,
+				response: express.Response,
+				_next: express.NextFunction,
+			) => {
+				response.status(routeError.status)
+					.json({ message: routeError.message });
+			});
+
+			const httpServer = expressApp.listen(0);
+			const { port } = httpServer.address() as AddressInfo;
+
+			const refusedResponse = await fetch(
+				`http://127.0.0.1:${port}/subscriptions/${routeVerb}`,
+				{
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: '{"subscription":"2"}',
+				},
+			);
+
+			httpServer.close();
+
+			expect(refusedResponse.status).toBe(400);
+
+			expect(await refusedResponse.json()).toEqual({
+				message: 'Invalid payload. "subscription" must be a subscription'
+					+ ' id, got "2".',
+			});
+
+			expect(cancelOwnSubscription).not.toHaveBeenCalled();
+			expect(resumeOwnSubscription).not.toHaveBeenCalled();
+		},
+	);
+
+	test('lists the requesting user\'s subscriptions', async () => {
+		vi.mocked(listOwnSubscriptions).mockResolvedValue([{
+			id: 2,
+			plan: { code: 'pro', name: 'Pro' },
+			provider: 'stripe',
+			status: 'active',
+			current_period_end: null,
+			cancel_at_period_end: false,
+			roles: ['beneficiary'],
+		}]);
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+
+		expressApp.use((request, _response, next) => {
+			Object.assign(request, { accountability: { user: 'user-1' } });
+			next();
+		});
+
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const mineResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/mine`,
+		);
+
+		httpServer.close();
+
+		expect(mineResponse.status).toBe(200);
+
+		expect(await mineResponse.json()).toEqual({
+			data: [{
+				id: 2,
+				plan: { code: 'pro', name: 'Pro' },
+				provider: 'stripe',
+				status: 'active',
+				current_period_end: null,
+				cancel_at_period_end: false,
+				roles: ['beneficiary'],
+			}],
+		});
+
+		expect(listOwnSubscriptions).toHaveBeenCalledWith('database', 'user-1');
+	});
+
+	test('lists as nobody without accountability', async () => {
+		vi.mocked(listOwnSubscriptions).mockRejectedValue(new ForbiddenError());
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		expressApp.use((
+			routeError: Error & { status: number },
+			_request: express.Request,
+			response: express.Response,
+			_next: express.NextFunction,
+		) => {
+			response.status(routeError.status)
+				.end();
+		});
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const mineResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/mine`,
+		);
+
+		httpServer.close();
+
+		expect(mineResponse.status).toBe(403);
+		expect(listOwnSubscriptions).toHaveBeenCalledWith('database', null);
+	});
+
+	test('checks out with the allow list read at registration', async () => {
+		vi.mocked(createCheckout).mockResolvedValue({
+			subscription: 5,
+			url: 'https://checkout.stripe.com/c/pay/cs_5',
+		});
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+
+		expressApp.use((request, _response, next) => {
+			Object.assign(request, { accountability: { user: 'user-1' } });
+			next();
+		});
+
+		expressApp.use(express.json());
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{
+				env: {
+					SUBSCRIPTIONS_CHECKOUT_URL_ALLOW_LIST: ['https://shop.example.com/ok'],
+				},
+				database: 'database',
+			},
+		);
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const checkoutResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/checkout`,
+			{
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: '{"plan":"pro","provider":"stripe"}',
+			},
+		);
+
+		httpServer.close();
+
+		expect(checkoutResponse.status).toBe(200);
+
+		expect(await checkoutResponse.json()).toEqual({
+			data: {
+				subscription: 5,
+				url: 'https://checkout.stripe.com/c/pay/cs_5',
+			},
+		});
+
+		expect(createCheckout).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			checkoutUrlAllowList: [new URL('https://shop.example.com/ok')],
+			userId: 'user-1',
+			requestBody: { plan: 'pro', provider: 'stripe' },
+		});
+	});
+
+	test('checks out as nobody without accountability', async () => {
+		vi.mocked(createCheckout).mockRejectedValue(new ForbiddenError());
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		expressApp.use((
+			routeError: Error & { status: number },
+			_request: express.Request,
+			response: express.Response,
+			_next: express.NextFunction,
+		) => {
+			response.status(routeError.status)
+				.end();
+		});
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const checkoutResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/checkout`,
+			{ method: 'POST' },
+		);
+
+		httpServer.close();
+
+		expect(checkoutResponse.status).toBe(403);
+
+		expect(createCheckout).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			checkoutUrlAllowList: [],
+			userId: null,
+			requestBody: undefined,
+		});
+	});
+
+	test('seats a beneficiary and answers its id', async () => {
+		vi.mocked(addOwnBeneficiary).mockResolvedValue(4);
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+
+		expressApp.use((request, _response, next) => {
+			Object.assign(request, { accountability: { user: 'user-1' } });
+			next();
+		});
+
+		expressApp.use(express.json());
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const seatResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/beneficiaries`,
+			{
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: '{"subscription":2,"user":"user-2"}',
+			},
+		);
+
+		httpServer.close();
+
+		expect(seatResponse.status).toBe(200);
+		expect(await seatResponse.json()).toEqual({ data: { id: 4 } });
+
+		expect(addOwnBeneficiary).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			userId: 'user-1',
+			requestBody: { subscription: 2, user: 'user-2' },
+			inviteUser: expect.any(Function),
+		});
+	});
+
+	test('sends the invite mail of a user the add created', async () => {
+		const inviteUser = vi.fn().mockResolvedValue(undefined);
+
+		// Called with `new`: vitest 4 constructs only a `function` implementation.
+		const UsersService = vi.fn(function () {
+			return { inviteUser };
+		});
+
+		const subscriptionsRouter = express.Router();
+
+		vi.mocked(addOwnBeneficiary).mockImplementation(async (beneficiaryAdd) => {
+			await beneficiaryAdd.inviteUser('new-1@example.com');
+
+			return 4;
+		});
+
+		const expressApp = express();
+		expressApp.use(express.json());
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{
+				env: {},
+				database: 'database',
+				services: { UsersService },
+				getSchema: vi.fn().mockResolvedValue('schema'),
+			},
+		);
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const seatResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/beneficiaries`,
+			{
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: '{"subscription":2,"email":"new-1@example.com"}',
+			},
+		);
+
+		httpServer.close();
+
+		expect(seatResponse.status).toBe(200);
+
+		expect(UsersService)
+			.toHaveBeenCalledWith({ schema: 'schema', accountability: null });
+
+		expect(inviteUser)
+			.toHaveBeenCalledWith('new-1@example.com', null, null);
+	});
+
+	test('seats as nobody without accountability', async () => {
+		vi.mocked(addOwnBeneficiary).mockRejectedValue(new ForbiddenError());
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		expressApp.use((
+			routeError: Error & { status: number },
+			_request: express.Request,
+			response: express.Response,
+			_next: express.NextFunction,
+		) => {
+			response.status(routeError.status)
+				.end();
+		});
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const seatResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/beneficiaries`,
+			{ method: 'POST' },
+		);
+
+		httpServer.close();
+
+		expect(seatResponse.status).toBe(403);
+
+		expect(addOwnBeneficiary).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			userId: null,
+			requestBody: undefined,
+			inviteUser: expect.any(Function),
+		});
+	});
+
+	test('archives a plan with the typed sentence', async () => {
+		vi.mocked(archivePlan).mockResolvedValue({
+			status: 'archived',
+			ending_subscriptions: 12,
+		});
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use(express.json());
+
+		expressApp.use((request, _response, next) => {
+			Object.assign(request, { accountability: { admin: true } });
+			next();
+		});
+
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const archiveResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/plans/3/archive`,
+			{
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: '{"confirmation":"End 12 subscriptions and lose these customers"}',
+			},
+		);
+
+		httpServer.close();
+
+		expect(archiveResponse.status).toBe(200);
+
+		expect(await archiveResponse.json()).toEqual({
+			data: { status: 'archived', ending_subscriptions: 12 },
+		});
+
+		expect(archivePlan).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			planId: '3',
+			confirmation: 'End 12 subscriptions and lose these customers',
+			accountability: { admin: true },
+		});
+	});
+
+	test('archives without body nor accountability as nobody', async () => {
+		vi.mocked(archivePlan).mockRejectedValue(new ForbiddenError());
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		expressApp.use((
+			routeError: Error & { status: number },
+			_request: express.Request,
+			response: express.Response,
+			_next: express.NextFunction,
+		) => {
+			response.status(routeError.status)
+				.end();
+		});
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const archiveResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/plans/3/archive`,
+			{ method: 'POST' },
+		);
+
+		httpServer.close();
+
+		expect(archiveResponse.status).toBe(403);
+
+		expect(archivePlan).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			planId: '3',
+			confirmation: undefined,
+			accountability: null,
+		});
+	});
+});
