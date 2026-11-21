@@ -2,7 +2,7 @@ import { getUrl } from '@common/config';
 import { defineFeature, loadFeature } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
 import { insertTableRows, bindTableRowsSteps } from '@common/table-rows';
-import { createWebSocketConn } from '@common/transport';
+import { createWebSocketConn, createWebSocketGql } from '@common/transport';
 import { USER } from '@common/variables';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -20,6 +20,7 @@ const scenarioTitles = [
 	'a role taken away ends what a socket opened before hears',
 	'a membership moved to another role ends what a socket opened before hears',
 	'a socket whose roles could not be refreshed is closed, told why',
+	'a GraphQL subscription opened before a role change reads with the new roles',
 ];
 
 describe.each(vendors)('%s', (vendor) => {
@@ -28,6 +29,7 @@ describe.each(vendors)('%s', (vendor) => {
 			scenario(scenarioTitle, ({ given, and, when, then }) => {
 				const scenarioKeys: ScenarioKeys = { run: randomUUID(), keysByName: {} };
 				let memberSocket: ReturnType<typeof createWebSocketConn>;
+				let memberGqlSocket: ReturnType<typeof createWebSocketGql>;
 
 				bindTableRowsSteps(given, feature, scenarioTitle, (tableName, tableRows) => {
 					return insertTableRows(vendor, tableName, tableRows.map((tableRow) => {
@@ -48,6 +50,45 @@ describe.each(vendors)('%s', (vendor) => {
 						query: { fields: ['label'] },
 					});
 				});
+
+				and.optional(
+					'the member\'s GraphQL socket subscribed to the notes',
+					async () => {
+						memberGqlSocket = createWebSocketGql(getUrl(vendor), {
+							auth: { access_token: `member-${scenarioKeys.run}` },
+						});
+
+						await memberGqlSocket.subscribe({
+							collection: collectionMembershipNotes,
+							event: 'create',
+							jsonQuery: { event: true, data: { label: true } },
+						});
+					},
+				);
+
+				// Heard, the subscription is live before the role change.
+				when.optional(
+					/^the admin creates the note "(.+)", which the member's GraphQL socket hears$/,
+					async (label: string) => {
+						const response = await request(getUrl(vendor))
+							.post(`/items/${collectionMembershipNotes}`)
+							.send({ label })
+							.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+						expect(response.statusCode).toEqual(200);
+
+						expect(await memberGqlSocket.getMessages(1)).toEqual([
+							{
+								data: {
+									test_ws_membership_notes_mutated: {
+										event: 'create',
+										data: { label },
+									},
+								},
+							},
+						]);
+					},
+				);
 
 				and.optional('the next read of the member\'s roles fails', async () => {
 					const response = await request(getUrl(vendor))
@@ -96,6 +137,41 @@ describe.each(vendors)('%s', (vendor) => {
 
 					expect(response.statusCode).toEqual(200);
 				});
+
+				and.optional(
+					/^the admin creates the notes "(.+)" and "(.+)"$/,
+					async (firstLabel: string, secondLabel: string) => {
+						for (const label of [firstLabel, secondLabel]) {
+							const response = await request(getUrl(vendor))
+								.post(`/items/${collectionMembershipNotes}`)
+								.send({ label })
+								.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+							expect(response.statusCode).toEqual(200);
+						}
+					},
+				);
+
+				// "hidden" came first: heard, it would be this one.
+				then.optional(
+					/^the next note the member's GraphQL socket heard is "(.+)"$/,
+					async (label: string) => {
+						const heardNotes = await memberGqlSocket.getMessages(1);
+
+						memberGqlSocket.client.dispose();
+
+						expect(heardNotes).toEqual([
+							{
+								data: {
+									test_ws_membership_notes_mutated: {
+										event: 'create',
+										data: { label },
+									},
+								},
+							},
+						]);
+					},
+				);
 
 				// Refused, it carries no uid: WebSocketError.fromError drops it.
 				then.optional('the member\'s socket is refused the note', async () => {
