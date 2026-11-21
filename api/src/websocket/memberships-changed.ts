@@ -152,9 +152,7 @@ async function refreshSocketAccountabilities(
 				if (latestRefreshes.get(client) === refreshMark) {
 					Object.assign(accountability, refreshed);
 
-					for (const rolesRefreshedListener of rolesRefreshedListeners) {
-						rolesRefreshedListener(client);
-					}
+					tellRolesRefreshedListeners(client, socketUser);
 				}
 			}
 			// The roles it holds are no longer the user's: closed, it reconnects
@@ -176,6 +174,25 @@ async function refreshSocketAccountabilities(
 
 				client.close();
 			}
+		}
+	}
+}
+
+// A failing listener is its own: the roles did refresh, the socket stays open.
+function tellRolesRefreshedListeners(
+	client: WebSocketClient,
+	socketUser: string,
+): void {
+	for (const rolesRefreshedListener of rolesRefreshedListeners) {
+		try {
+			rolesRefreshedListener(client);
+		}
+		catch (error) {
+			useLogger().error(
+				error,
+				'[websocket] a listener of the refreshed roles of the socket of'
+					+ ` user ${JSON.stringify(socketUser)} failed: ${error}`,
+			);
 		}
 	}
 }

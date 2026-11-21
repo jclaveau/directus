@@ -103,7 +103,9 @@ export async function up(knex: Knex): Promise<void> {
 			user: id,
 			role,
 			sort: 1,
-			managed_by: provider !== null && providerMapsRoles(provider)
+			managed_by: provider !== null
+				&& provider !== 'default'
+				&& providerMapsRoles(provider)
 				? `auth:${provider}`
 				: null,
 		};
