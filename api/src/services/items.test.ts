@@ -12082,6 +12082,11 @@ describe('ItemsService — the rows an update or a delete returns', () => {
 
 	beforeEach(() => {
 		db = knex.default({ client: MockClient, dialect: 'pg' });
+
+		// As in the pg updateBatch tests: a savepoint client inherits the pg
+		// client's `_events` and re-emits 'query' to itself forever.
+		delete Object.getPrototypeOf(MockClient.prototype)._events;
+
 		tracker = createTracker(db);
 	});
 
