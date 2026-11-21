@@ -852,7 +852,7 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       """
       Subscription 85 is billed
       {"amountCents":2000,"currency":"EUR","interval":{"months":1,"days":0}} by
-      "mollie", its plan "plan-85" sells
+      "mollie", its plan "plan-85" sold it at
       {"amountCents":1000,"currency":"EUR","interval":{"months":1,"days":0}}
       """
 
@@ -877,7 +877,7 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       """
       Subscription 94 is billed
       {"amountCents":2000,"currency":"EUR","interval":{"months":1,"days":0}} by
-      "stripe", its plan "plan-94" sells
+      "stripe", its plan "plan-94" sold it at
       {"amountCents":1000,"currency":"EUR","interval":{"months":1,"days":0}}
       """
 
