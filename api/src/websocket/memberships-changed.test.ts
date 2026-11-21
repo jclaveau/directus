@@ -212,6 +212,78 @@ describe('announceMembershipsChanged', () => {
 		});
 	});
 
+	it(oneLine`
+		closes a socket whose roles a websocket.authenticate filter set,
+		telling it why
+	`, async () => {
+		const memberSocket = {
+			accountability: { user: 'user-member', roles: ['role-editors'] },
+			send: vi.fn(),
+			close: vi.fn(),
+		};
+
+		memberships.customAccountabilities.add(memberSocket.accountability);
+
+		memberships.refreshOnMembershipChange(
+			new Set([memberSocket as unknown as WebSocketClient]),
+		);
+
+		await memberships.announceMembershipsChanged(['user-member']);
+
+		expect(memberSocket.send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({
+			type: 'auth',
+			status: 'error',
+			error: {
+				code: 'ROLES_REFRESH_CUSTOM_ACCOUNTABILITY',
+				message: 'The memberships of user "user-member" changed and the'
+					+ ' roles of this socket came from a "websocket.authenticate"'
+					+ ' filter: reconnect to authenticate again.',
+			},
+		}));
+
+		expect(memberSocket.close).toHaveBeenCalledExactlyOnceWith();
+
+		expect(memberSocket.accountability).toStrictEqual({
+			user: 'user-member',
+			roles: ['role-editors'],
+		});
+
+		expect(fetchUserRoles).not.toHaveBeenCalled();
+	});
+
+	it('tells the listeners of the later refresh only', async () => {
+		const memberSocket = {
+			accountability: { user: 'user-member', roles: ['role-editors'] },
+		} as unknown as WebSocketClient;
+
+		const rolesRefreshedListener = vi.fn();
+
+		memberships.onSocketRolesRefreshed(rolesRefreshedListener);
+		memberships.refreshOnMembershipChange(new Set([memberSocket]));
+
+		let answerEarlierRead: (roles: unknown) => void = () => {};
+
+		vi.mocked(fetchUserRoles)
+			.mockReturnValueOnce(new Promise((resolve) => {
+				answerEarlierRead = resolve as (roles: unknown) => void;
+			}));
+
+		const earlierRefresh = memberships
+			.announceMembershipsChanged(['user-member']);
+
+		await memberships.announceMembershipsChanged(['user-member']);
+
+		answerEarlierRead({
+			memberRoles: ['role-editors'],
+			roles: ['role-editors'],
+		});
+
+		await earlierRefresh;
+
+		expect(rolesRefreshedListener)
+			.toHaveBeenCalledExactlyOnceWith(memberSocket);
+	});
+
 	it('logs a publish the bus refused, and answers', async () => {
 		const refusal = new Error('ECONNREFUSED');
 		vi.mocked(useBus().publish).mockRejectedValueOnce(refusal);

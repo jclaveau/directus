@@ -8,6 +8,7 @@ import { getAccountabilityForToken } from '../utils/get-accountability-for-token
 import { getSchema } from '../utils/get-schema.js';
 import { isEqual } from '../utils/lodash-es-used.js';
 import { WebSocketError } from './errors.js';
+import { customAccountabilities } from './memberships-changed.js';
 import type { BasicAuthMessage, WebSocketResponse } from './messages.js';
 import type { AuthenticationState } from './types.js';
 import { getExpiresAtForToken } from './utils/get-expires-at-for-token.js';
@@ -61,6 +62,7 @@ export async function authenticateConnection(
 		);
 
 		if (customAccountability && isEqual(customAccountability, defaultAccountability) === false) {
+			customAccountabilities.add(customAccountability);
 			authenticationState.accountability = customAccountability;
 		} else {
 			authenticationState.accountability = await getAccountabilityForToken(access_token, defaultAccountability);

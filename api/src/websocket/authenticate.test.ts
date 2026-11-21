@@ -5,6 +5,7 @@ import { describe, expect, test, vi } from 'vitest';
 import emitter from '../emitter.js';
 import { getAccountabilityForToken } from '../utils/get-accountability-for-token.js';
 import { authenticateConnection, authenticationSuccess } from './authenticate.js';
+import { customAccountabilities } from './memberships-changed.js';
 import type { WebSocketAuthMessage } from './messages.js';
 import { getExpiresAtForToken } from './utils/get-expires-at-for-token.js';
 
@@ -108,6 +109,10 @@ describe('authenticateConnection', () => {
 		} as WebSocketAuthMessage);
 
 		expect(accountability).toEqual(customAccountability);
+
+		// A membership write closes its socket rather than refresh the filter's
+		// roles.
+		expect(customAccountabilities.has(customAccountability)).toBe(true);
 	});
 
 	test('Failure token expired', async () => {

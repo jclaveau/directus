@@ -34,6 +34,24 @@ let busSubscribed = false;
 const latestRefreshes = new WeakMap<WebSocketClient, symbol>();
 
 /**
+ * The accountabilities a `websocket.authenticate` filter set: their roles are
+ * the filter's, not the memberships a refresh reads.
+ */
+export const customAccountabilities = new WeakSet<Accountability>();
+
+const rolesRefreshedListeners = new Set<(client: WebSocketClient) => void>();
+
+/**
+ * Hears each socket whose roles a membership write refreshed, for a handler to
+ * drop what the socket may no longer read.
+ */
+export function onSocketRolesRefreshed(
+	listener: (client: WebSocketClient) => void,
+): void {
+	rolesRefreshedListeners.add(listener);
+}
+
+/**
  * Hands the sockets a controller holds open to the refresh a membership write
  * runs, and has this node hear the writes the other nodes make.
  */
@@ -105,6 +123,23 @@ async function refreshSocketAccountabilities(
 				continue;
 			}
 
+			// The filter would set other roles than the memberships: closed, the
+			// socket reconnects and runs it again.
+			if (customAccountabilities.has(client.accountability!)) {
+				client.send(new WebSocketError(
+					'auth',
+					'ROLES_REFRESH_CUSTOM_ACCOUNTABILITY',
+					`The memberships of user ${JSON.stringify(socketUser)} changed`
+						+ ' and the roles of this socket came from a'
+						+ ' "websocket.authenticate" filter: reconnect to'
+						+ ' authenticate again.',
+				).toMessage());
+
+				client.close();
+
+				continue;
+			}
+
 			const refreshMark = Symbol(socketUser);
 			latestRefreshes.set(client, refreshMark);
 
@@ -116,6 +151,10 @@ async function refreshSocketAccountabilities(
 
 				if (latestRefreshes.get(client) === refreshMark) {
 					Object.assign(accountability, refreshed);
+
+					for (const rolesRefreshedListener of rolesRefreshedListeners) {
+						rolesRefreshedListener(client);
+					}
 				}
 			}
 			// The roles it holds are no longer the user's: closed, it reconnects

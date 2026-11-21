@@ -1,6 +1,7 @@
 import { createInspector } from '@directus/schema';
 import type { Knex } from 'knex';
 import { randomUUID } from 'node:crypto';
+import { getConfigFromEnv } from '../../utils/get-config-from-env.js';
 
 const INVITES_UNIQUE_INDEX_NAME = 'directus_invites_user_role_user_created_unique';
 const INVITE_MEMBERSHIPS_INDEX_NAME = 'directus_role_members_invite_index';
@@ -8,8 +9,8 @@ const INVITE_MEMBERSHIPS_INDEX_NAME = 'directus_role_members_invite_index';
 /**
  * A user holds several roles (#746): `directus_role_members` replaces
  * `directus_users.role`. Each user's role becomes their one membership,
- * managed by `auth:<provider>` for a user of a provider other than "default",
- * then the column goes. `directus_invites` records who invited a user to
+ * managed by `auth:<provider>` for a user of a provider mapping roles, then
+ * the column goes. `directus_invites` records who invited a user to
  * which role (D8). `down` puts each user's one membership back in the column,
  * and refuses, changing nothing, while a user holds several roles.
  */
@@ -93,17 +94,18 @@ export async function up(knex: Knex): Promise<void> {
 		.from('directus_users')
 		.whereNotNull('role');
 
-	// An SSO user's role came from its provider: managing the membership by
-	// that provider lets the next mapped login replace it.
+	// A mapped SSO user's role came from its provider: managing the membership
+	// by that provider lets the next login replace it. A provider mapping no
+	// role never replaces it, so an admin keeps it in hand.
 	const memberships = usersWithRole.map(({ id, role, provider }) => {
 		return {
 			id: randomUUID(),
 			user: id,
 			role,
 			sort: 1,
-			managed_by: provider === null || provider === 'default'
-				? null
-				: `auth:${provider}`,
+			managed_by: provider !== null && providerMapsRoles(provider)
+				? `auth:${provider}`
+				: null,
 		};
 	});
 
@@ -121,6 +123,24 @@ export async function up(knex: Knex): Promise<void> {
 
 		table.dropColumn('role');
 	});
+}
+
+// As each driver decides at login whether the roles it maps replace the
+// memberships it manages: oauth2 and openid by ROLE_MAPPING, ldap by GROUP_DN.
+function providerMapsRoles(provider: string): boolean {
+	const { driver, roleMapping, groupDn } = getConfigFromEnv(
+		`AUTH_${provider.toUpperCase()}_`,
+	);
+
+	if (driver === 'ldap') {
+		return Boolean(groupDn);
+	}
+
+	if (driver === 'oauth2' || driver === 'openid') {
+		return Boolean(roleMapping);
+	}
+
+	return false;
 }
 
 export async function down(knex: Knex): Promise<void> {

@@ -85,8 +85,11 @@ if (redisConfigAvailable() && !messengerSubscribed) {
 
 		const { cache, systemCache, lockCache } = getCache();
 
+		// The write that flushed the responses may have changed the roles a user
+		// holds: a request here reading the old ones off this node's permissions
+		// tier would cache a response built with them.
 		if (targets.includes('response')) {
-			await cache?.clear();
+			await Promise.all([cache?.clear(), clearPermissionCache()]);
 		}
 
 		// `schemaChanged` (from the initiator's clearSystemCache) drops each peer's
