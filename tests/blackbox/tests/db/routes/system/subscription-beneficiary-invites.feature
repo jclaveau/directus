@@ -283,21 +283,22 @@ Feature: A manager seats a beneficiary by email, inviting whoever has no account
       Deleted 1 invited user holding no seat since its invite of 30 days
       """
     And these requests get these responses:
-      | request                           | response                            |
-      | method: GET                       | code: 200                           |+
-      | path: /users                      | body:                               |
-      | query:                            |   data:                             |
-      |   fields: email                   |     - email: fresh-177@example.com  |
-      |   sort: email                     |     - email: joined-177@example.com |
-      |   filter[email][_contains]: -177@ |     - email: seated-177@example.com |
-      | method: GET                       | code: 200                           |+
-      | path: /items/subscription_invites | body:                               |
-      | query:                            |   data:                             |
-      |   fields: user                    |     - user: <fresh_177>             |
-      |   sort: user                      |     - user: <joined_177>            |
-      |   filter[user][_in]: >-           |     - user: <seated_177>            |
-      |     <stale_177>,<seated_177>,     |                                     |
-      |     <fresh_177>,<joined_177>      |                                     |
+      | request                           | response                               |
+      | method: GET                       | code: 200                              |+
+      | path: /users                      | body:                                  |
+      | query:                            |   data:                                |
+      |   fields: email                   |     - email: fresh-177@example.com     |
+      |   sort: email                     |     - email: joined-177@example.com    |
+      |   filter[email][_contains]: -177@ |     - email: lifecycle-177@example.com |
+      |                                   |     - email: seated-177@example.com    |
+      | method: GET                       | code: 200                              |+
+      | path: /items/subscription_invites | body:                                  |
+      | query:                            |   data:                                |
+      |   fields: user                    |     - user: <fresh_177>                |
+      |   sort: user                      |     - user: <joined_177>               |
+      |   filter[user][_in]: >-           |     - user: <seated_177>               |
+      |     <stale_177>,<seated_177>,     |                                        |
+      |     <fresh_177>,<joined_177>      |                                        |
 
   Scenario: a swept email seated again gets a new invite mail
     Given the rows of directus_users:

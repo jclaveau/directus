@@ -201,6 +201,7 @@ describe.each(vendors)('%s', (vendor) => {
 			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_test_blackbox',
 			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: STRIPE_WEBHOOK_SECRET,
 			BLACKBOX_PROVIDERS_PORT: String(fakeProviders.listeningPort),
+			SUBSCRIPTIONS_CHECKOUT_URL_ALLOW_LIST: 'https://shop.example.com/ok',
 			EMAIL_TRANSPORT: 'smtp',
 			EMAIL_SMTP_HOST: '127.0.0.1',
 			EMAIL_SMTP_PORT: String(fakeMailbox.listeningPort),
@@ -901,9 +902,15 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 	}
 
-	async function expectReceivedWrites(
+	// One parameter: jest-cucumber hands a step function declaring more than its
+	// arguments a callback, and waits on it until the scenario times out.
+	function expectReceivedWrites(rowsTable: Record<string, string>[]) {
+		return expectReceivedWritesAt(rowsTable, undefined);
+	}
+
+	async function expectReceivedWritesAt(
 		rowsTable: Record<string, string>[],
-		keptPath?: string,
+		keptPath: string | undefined,
 	) {
 		await expect.poll(() => {
 			return fakeProviders.receivedWrites
@@ -930,7 +937,7 @@ describe.each(vendors)('%s', (vendor) => {
 		const subscriptionsPath = `/v2/customers/${
 			withKeys(customerId, scenarioKeys)}/subscriptions`;
 
-		await expectReceivedWrites(
+		await expectReceivedWritesAt(
 			[{
 				method: 'POST',
 				path: subscriptionsPath,
