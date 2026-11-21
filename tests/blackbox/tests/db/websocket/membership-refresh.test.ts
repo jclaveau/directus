@@ -21,6 +21,8 @@ const scenarioTitles = [
 	'a membership moved to another role ends what a socket opened before hears',
 	'a socket whose roles could not be refreshed is closed, told why',
 	'a GraphQL subscription opened before a role change reads with the new roles',
+	'a logs socket whose user is no longer an admin is refused the logs',
+	'a socket whose roles a websocket.authenticate filter set is closed, told why',
 ];
 
 describe.each(vendors)('%s', (vendor) => {
@@ -30,6 +32,7 @@ describe.each(vendors)('%s', (vendor) => {
 				const scenarioKeys: ScenarioKeys = { run: randomUUID(), keysByName: {} };
 				let memberSocket: ReturnType<typeof createWebSocketConn>;
 				let memberGqlSocket: ReturnType<typeof createWebSocketGql>;
+				let memberLogsSocket: ReturnType<typeof createWebSocketConn>;
 
 				bindTableRowsSteps(given, feature, scenarioTitle, (tableName, tableRows) => {
 					return insertTableRows(vendor, tableName, tableRows.map((tableRow) => {
@@ -50,6 +53,38 @@ describe.each(vendors)('%s', (vendor) => {
 						query: { fields: ['label'] },
 					});
 				});
+
+				and.optional(
+					'the member\'s logs socket subscribed to the logs',
+					async () => {
+						memberLogsSocket = createWebSocketConn(getUrl(vendor), {
+							path: 'websocket/logs',
+							auth: { access_token: `member-${scenarioKeys.run}` },
+						});
+
+						await memberLogsSocket.sendMessage({
+							type: 'subscribe',
+							log_level: 'fatal',
+						});
+
+						expect(await memberLogsSocket.getMessages(1)).toEqual([
+							{ type: 'logs', event: 'subscribe', log_level: 'fatal' },
+						]);
+					},
+				);
+
+				and.optional(
+					'the member\'s socket authenticated through ws-auth-narrow',
+					async () => {
+						memberSocket = createWebSocketConn(getUrl(vendor), {
+							auth: {
+								access_token: `ws-auth-narrow-member-${scenarioKeys.run}`,
+							},
+						});
+
+						await memberSocket.waitForState(WebSocket.OPEN);
+					},
+				);
 
 				and.optional(
 					'the member\'s GraphQL socket subscribed to the notes',
@@ -248,6 +283,70 @@ describe.each(vendors)('%s', (vendor) => {
 										+ ` ${JSON.stringify(withKeys('<member>', scenarioKeys))}`
 										+ ' changed and the roles of this socket could not be'
 										+ ' refreshed: reconnect to authenticate again.',
+								},
+							},
+						]);
+					},
+				);
+
+				then.optional(
+					'the member\'s logs socket is told it may no longer read the logs',
+					async () => {
+						expect(await memberLogsSocket.getMessages(1)).toEqual([
+							{
+								type: 'logs',
+								status: 'error',
+								error: {
+									code: 'FORBIDDEN',
+									message: 'You don\'t have permission to access this.',
+								},
+							},
+						]);
+					},
+				);
+
+				// Answered, the socket is still open.
+				and.optional(
+					'the member\'s logs socket is refused the logs it subscribes to again',
+					async () => {
+						await memberLogsSocket.sendMessage({
+							type: 'subscribe',
+							log_level: 'fatal',
+						});
+
+						const subscribeReplies = await memberLogsSocket.getMessages(1);
+
+						memberLogsSocket.conn.close();
+
+						expect(subscribeReplies).toEqual([
+							{
+								type: 'logs',
+								status: 'error',
+								error: {
+									code: 'FORBIDDEN',
+									message: 'You don\'t have permission to access this.',
+								},
+							},
+						]);
+					},
+				);
+
+				then.optional(
+					'the member\'s socket is told its roles came from a filter',
+					async () => {
+						expect(await memberSocket.getMessages(1, {
+							targetState: WebSocket.CLOSED,
+						})).toEqual([
+							{
+								type: 'auth',
+								status: 'error',
+								error: {
+									code: 'ROLES_REFRESH_CUSTOM_ACCOUNTABILITY',
+									message: 'The memberships of user'
+										+ ` ${JSON.stringify(withKeys('<member>', scenarioKeys))}`
+										+ ' changed and the roles of this socket came from a'
+										+ ' "websocket.authenticate" filter: reconnect to'
+										+ ' authenticate again.',
 								},
 							},
 						]);

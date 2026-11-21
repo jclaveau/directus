@@ -15,6 +15,11 @@ Feature: A socket hears what the roles its user holds now may read
     subscription drops an event its user may not read, telling nothing.
   - `roles-refresh-failure` fails the next read of a user's member roles, the
     read a refresh runs.
+  - The member's logs socket subscribes to the `fatal` logs of
+    `/websocket/logs`, which only an admin may read.
+  - `ws-auth-narrow` is a `websocket.authenticate` filter: a socket
+    authenticating with a token starting with `ws-auth-narrow-` holds only the
+    first role of its user by `sort`, not every role the database gives it.
 
   Scenario: a role taken away ends what a socket opened before hears
     Given the rows of directus_policies:
@@ -120,3 +125,47 @@ Feature: A socket hears what the roles its user holds now may read
     And the admin moves the membership of the member to the other role
     And the admin creates the notes "hidden" and "ok"
     Then the next note the member's GraphQL socket heard is "ok"
+
+  Scenario: a logs socket whose user is no longer an admin is refused the logs
+    Given the rows of directus_policies:
+      | id             | name        | app_access | admin_access |
+      | <admin-policy> | admin-<run> | true       | true         |
+    And the rows of directus_roles:
+      | id           | name        |
+      | <admin-role> | admin-<run> |
+    And the rows of directus_access:
+      | id             | role         | policy         |
+      | <admin-access> | <admin-role> | <admin-policy> |
+    And the rows of directus_users:
+      | id       | email                    | token        |
+      | <member> | member-<run>@example.com | member-<run> |
+    And the rows of directus_role_members:
+      | id           | user     | role         | sort |
+      | <membership> | <member> | <admin-role> | 1    |
+    And the member's logs socket subscribed to the logs
+    When the admin takes every role of the member away
+    Then the member's logs socket is told it may no longer read the logs
+    And the member's logs socket is refused the logs it subscribes to again
+
+  Scenario: a socket whose roles a websocket.authenticate filter set is closed, told why
+    Given the rows of directus_policies:
+      | id              | name         | app_access | admin_access |
+      | <reader-policy> | reader-<run> | false      | false        |
+    And the rows of directus_roles:
+      | id            | name         |
+      | <reader-role> | reader-<run> |
+      | <other-role>  | other-<run>  |
+    And the rows of directus_access:
+      | id              | role          | policy          |
+      | <reader-access> | <reader-role> | <reader-policy> |
+    And the rows of directus_users:
+      | id       | email                    | token                       |
+      | <member> | member-<run>@example.com | ws-auth-narrow-member-<run> |
+    And the rows of directus_role_members:
+      | id                 | user     | role          | sort |
+      | <membership>       | <member> | <reader-role> | 1    |
+      | <other-membership> | <member> | <other-role>  | 2    |
+    And the member's socket authenticated through ws-auth-narrow
+    When the admin takes every role of the member away
+    Then the member's socket is told its roles came from a filter
+    And the member's socket is closed

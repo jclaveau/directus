@@ -46,6 +46,7 @@ vi.mock('./logger/index.js', () => ({ useLogger: () => ({ warn: vi.fn() }) }));
 vi.mock('./utils/validate-env.js', () => ({ validateEnv: vi.fn() }));
 
 import { getCache } from './cache.js';
+import { clearCache as clearPermissionCache } from './permissions/cache.js';
 import { nodeId } from './utils/node-id.js';
 
 async function seedTiers() {
@@ -98,6 +99,26 @@ describe('cacheCleared subscriber (peer-side flush)', () => {
 		});
 
 		expect(await cache.get('r')).toBeUndefined();
+	});
+
+	// Else a request on this node, reading its roles off the permissions tier the
+	// write did not clear here, caches a response built with the old roles.
+	it('memory peer drops its permissions along with the responses', async () => {
+		await handlers['cacheCleared']!({
+			targets: ['response'],
+			origin: 'other-node',
+		});
+
+		expect(clearPermissionCache).toHaveBeenCalledWith();
+	});
+
+	it('memory peer keeps its permissions on a system flush', async () => {
+		await handlers['cacheCleared']!({
+			targets: ['system'],
+			origin: 'other-node',
+		});
+
+		expect(clearPermissionCache).not.toHaveBeenCalled();
 	});
 
 	it('memory node keeps what it sent, having cleared it before', async () => {

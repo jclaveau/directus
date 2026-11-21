@@ -21,6 +21,24 @@ vi.mock('node:crypto', () => {
 	return { randomUUID: vi.fn() };
 });
 
+vi.mock('@directus/env', () => {
+	return {
+		useEnv: () => {
+			return {
+				AUTH_MOCKOAUTH_DRIVER: 'oauth2',
+				AUTH_MOCKOAUTH_ROLE_MAPPING: { admins: 'role-b' },
+				AUTH_GITHUB_DRIVER: 'oauth2',
+				AUTH_KEYCLOAK_DRIVER: 'openid',
+				AUTH_KEYCLOAK_ROLE_MAPPING: { admins: 'role-c' },
+				AUTH_COMPANY_DRIVER: 'ldap',
+				AUTH_COMPANY_GROUP_DN: 'ou=groups,dc=example,dc=com',
+				AUTH_DIRECTORY_DRIVER: 'ldap',
+				AUTH_OKTA_DRIVER: 'saml',
+			};
+		},
+	};
+});
+
 describe('the migration', () => {
 	let db: Knex;
 	let tracker: Tracker;
@@ -82,6 +100,63 @@ describe('the migration', () => {
 		expect(tracker.history.any.map(({ sql }) => sql).at(-1)).toEqual(
 			'alter table "directus_users" drop column "role"',
 		);
+	});
+
+	// The next login of a provider mapping no role leaves the membership as is:
+	// managed, no admin could ever take that role away.
+	test('up manages only the memberships of a provider mapping roles', async () => {
+		vi.mocked(randomUUID)
+			.mockReturnValueOnce('00000000-0000-4000-8000-000000000001')
+			.mockReturnValueOnce('00000000-0000-4000-8000-000000000002')
+			.mockReturnValueOnce('00000000-0000-4000-8000-000000000003')
+			.mockReturnValueOnce('00000000-0000-4000-8000-000000000004')
+			.mockReturnValueOnce('00000000-0000-4000-8000-000000000005');
+
+		vi.mocked(createInspector).mockReturnValue({
+			foreignKeys: vi.fn().mockResolvedValue([]),
+		} as any);
+
+		tracker.on.select('directus_users').response([
+			{ id: 'user-1', role: 'role-a', provider: 'github' },
+			{ id: 'user-2', role: 'role-b', provider: 'keycloak' },
+			{ id: 'user-3', role: 'role-c', provider: 'company' },
+			{ id: 'user-4', role: 'role-d', provider: 'directory' },
+			{ id: 'user-5', role: 'role-e', provider: 'okta' },
+		]);
+
+		tracker.on.insert('directus_role_members').response([]);
+
+		await up(db);
+
+		expect(tracker.history.insert.map(({ bindings }) => bindings)).toEqual([
+			[
+				'00000000-0000-4000-8000-000000000001',
+				null,
+				'role-a',
+				1,
+				'user-1',
+				'00000000-0000-4000-8000-000000000002',
+				'auth:keycloak',
+				'role-b',
+				1,
+				'user-2',
+				'00000000-0000-4000-8000-000000000003',
+				'auth:company',
+				'role-c',
+				1,
+				'user-3',
+				'00000000-0000-4000-8000-000000000004',
+				null,
+				'role-d',
+				1,
+				'user-4',
+				'00000000-0000-4000-8000-000000000005',
+				null,
+				'role-e',
+				1,
+				'user-5',
+			],
+		]);
 	});
 
 	test('up drops only the column when no foreign key is left on it', async () => {
