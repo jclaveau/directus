@@ -101,9 +101,12 @@ async function refreshSocketAccountabilities(
 				continue;
 			}
 
+			// Refreshed in place: a GraphQL subscription's service holds this
+			// object, reading every event with it.
 			try {
-				client.accountability = await refreshedAccountability(
+				Object.assign(
 					client.accountability!,
+					await refreshedAccountability(client.accountability!),
 				);
 			}
 			// The roles it holds are no longer the user's: closed, it reconnects

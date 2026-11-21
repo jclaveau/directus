@@ -79,12 +79,16 @@ describe('announceMembershipsChanged', () => {
 		} as unknown as WebSocketClient;
 
 		const publicSocket = { accountability: null } as unknown as WebSocketClient;
+		const memberAccountability = memberSocket.accountability;
 
 		memberships.refreshOnMembershipChange(
 			new Set([memberSocket, otherSocket, publicSocket]),
 		);
 
 		await memberships.announceMembershipsChanged(['user-member', 'user-member']);
+
+		// A GraphQL subscription's service holds the object it had.
+		expect(memberSocket.accountability).toBe(memberAccountability);
 
 		expect(memberSocket.accountability).toStrictEqual({
 			user: 'user-member',
