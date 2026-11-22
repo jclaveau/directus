@@ -82,6 +82,9 @@ export function refreshOnMembershipChange(
  * longer be authenticated: its token expired, the filter refused it, or its
  * refresh failed.
  *
+ * The sockets refresh one after the other, a filter run each for those it let
+ * in: a user holding many sockets holds the write's answer as long.
+ *
  * Never throws: it runs after the write committed.
  */
 export async function announceMembershipsChanged(
@@ -151,12 +154,15 @@ async function refreshSocketAccountabilities(
 						+ ` of user ${JSON.stringify(socketUser)}: ${error}`,
 				);
 
-				closeSocket(
-					client,
-					'ROLES_REFRESH_FILTER_REFUSED',
-					socketUser,
-					'the "websocket.authenticate" filter refused this socket',
-				);
+				// A later run let it in: this one read an earlier state.
+				if (latestRefreshes.get(client) === refreshMark) {
+					closeSocket(
+						client,
+						'ROLES_REFRESH_FILTER_REFUSED',
+						socketUser,
+						'the "websocket.authenticate" filter refused this socket',
+					);
+				}
 
 				continue;
 			}
@@ -168,6 +174,13 @@ async function refreshSocketAccountabilities(
 					?? await refreshedAccountability(accountability);
 
 				if (latestRefreshes.get(client) === refreshMark) {
+					// What the filter no longer hands the socket, it no longer holds.
+					for (const key of Object.keys(accountability)) {
+						if (!(key in refreshed)) {
+							Reflect.deleteProperty(accountability, key);
+						}
+					}
+
 					Object.assign(accountability, refreshed);
 
 					tellRolesRefreshedListeners(client, socketUser);
@@ -182,12 +195,14 @@ async function refreshSocketAccountabilities(
 						+ `${JSON.stringify(socketUser)}: ${error}`,
 				);
 
-				closeSocket(
-					client,
-					'ROLES_REFRESH_FAILED',
-					socketUser,
-					'the roles of this socket could not be refreshed',
-				);
+				if (latestRefreshes.get(client) === refreshMark) {
+					closeSocket(
+						client,
+						'ROLES_REFRESH_FAILED',
+						socketUser,
+						'the roles of this socket could not be refreshed',
+					);
+				}
 			}
 		}
 	}
