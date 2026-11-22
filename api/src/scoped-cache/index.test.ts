@@ -21,7 +21,10 @@ import { oneLine } from '@directus/utils';
 import type { Keyv } from 'keyv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CacheSettingField } from '../cache-settings.js';
-import { tellPeersResponseCacheCleared } from '../cache-peer-notice.js';
+import {
+	tellPeersPermissionsCleared,
+	tellPeersResponseCacheCleared,
+} from '../cache-peer-notice.js';
 import {
 	type ScopedCacheFilterKeying,
 	ScopedCacheReadPlan,
@@ -140,7 +143,10 @@ vi.mock('./reap-requests.js', () => {
 });
 
 vi.mock('../cache-peer-notice.js', () => {
-	return { tellPeersResponseCacheCleared: vi.fn() };
+	return {
+		tellPeersPermissionsCleared: vi.fn(),
+		tellPeersResponseCacheCleared: vi.fn(),
+	};
 });
 
 vi.mock('../cache-build-identity.js', () => {
@@ -1819,6 +1825,33 @@ describe('flushResponseCache', () => {
 			'exec',
 			'bump ns:scoped-cache-epoch:*',
 		]);
+	});
+
+	it(oneLine`
+		names the permissions to the peers of a shared store before the clear — a
+		peer reading its old copy after the clear fills the store with the old roles
+	`, async () => {
+		const { calls, cache } = recordFlush();
+
+		vi.mocked(tellPeersPermissionsCleared).mockImplementationOnce(async () => {
+			calls.push('tell permissions');
+		});
+
+		await flushResponseCache(cache, { permissionsCleared: true });
+
+		expect(calls).toEqual([
+			'tell permissions',
+			'bump ns:scoped-cache-epoch:*',
+			'clear',
+			'scan',
+			'unlink',
+			'exec',
+			'bump ns:scoped-cache-epoch:*',
+		]);
+
+		expect(tellPeersPermissionsCleared).toHaveBeenCalledExactlyOnceWith({
+			permissionsCleared: true,
+		});
 	});
 
 	it('names to the other nodes the permissions its write cleared', async () => {

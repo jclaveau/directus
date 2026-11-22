@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useBus } from './bus/index.js';
-import { tellPeersResponseCacheCleared } from './cache-peer-notice.js';
+import {
+	tellPeersPermissionsCleared,
+	tellPeersResponseCacheCleared,
+} from './cache-peer-notice.js';
 import { useLogger } from './logger/index.js';
 import { redisConfigAvailable } from './redis/index.js';
 import { nodeId } from './utils/node-id.js';
@@ -86,6 +89,63 @@ describe('tellPeersResponseCacheCleared', () => {
 		expect(useLogger().warn).toHaveBeenCalledExactlyOnceWith(
 			refusal,
 			'[cache] could not tell the other nodes to drop their responses:'
+				+ ' Error: ECONNREFUSED',
+		);
+	});
+});
+
+describe('tellPeersPermissionsCleared', () => {
+	// The writer clears the shared responses once: a peer still reading its own
+	// copy of the old permissions would fill them again with the old roles.
+	it('tells the peers of a Redis store to drop their own permissions', async () => {
+		env['CACHE_STORE'] = 'redis';
+
+		await tellPeersPermissionsCleared({ permissionsCleared: true });
+
+		expect(useBus().publish).toHaveBeenCalledExactlyOnceWith('cacheCleared', {
+			targets: ['permissions'],
+			origin: nodeId,
+		});
+	});
+
+	it('tells no peer of a Redis store when no permission changed', async () => {
+		env['CACHE_STORE'] = 'redis';
+
+		await tellPeersPermissionsCleared({ permissionsCleared: false });
+
+		expect(useBus().publish).not.toHaveBeenCalled();
+	});
+
+	// Its peers hear the permissions in the message naming their responses.
+	it('tells no peer of a memory store', async () => {
+		env['CACHE_STORE'] = 'memory';
+
+		await tellPeersPermissionsCleared({ permissionsCleared: true });
+
+		expect(useBus().publish).not.toHaveBeenCalled();
+	});
+
+	it('tells no peer without Redis, as no node shares the bus', async () => {
+		env['CACHE_STORE'] = 'redis';
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+
+		await tellPeersPermissionsCleared({ permissionsCleared: true });
+
+		expect(useBus().publish).not.toHaveBeenCalled();
+	});
+
+	it('logs a publish the bus refused, and answers', async () => {
+		env['CACHE_STORE'] = 'redis';
+		const refusal = new Error('ECONNREFUSED');
+		vi.mocked(useBus().publish).mockRejectedValueOnce(refusal);
+
+		await expect(
+			tellPeersPermissionsCleared({ permissionsCleared: true }),
+		).resolves.toBeUndefined();
+
+		expect(useLogger().warn).toHaveBeenCalledExactlyOnceWith(
+			refusal,
+			'[cache] could not tell the other nodes to drop their permissions:'
 				+ ' Error: ECONNREFUSED',
 		);
 	});

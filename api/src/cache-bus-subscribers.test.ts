@@ -40,7 +40,12 @@ vi.mock('./redis/index.js', () => {
 	};
 });
 
-vi.mock('./scoped-cache/index.js', () => ({ dropScopedCacheIndex: vi.fn() }));
+vi.mock('./scoped-cache/index.js', () => {
+	return {
+		bumpScopedCacheEpochs: vi.fn(),
+		dropScopedCacheIndex: vi.fn(),
+	};
+});
 
 vi.mock('./permissions/cache.js', () => {
 	return {
@@ -57,6 +62,7 @@ import {
 	clearCache as clearPermissionCache,
 	clearLocalCache as clearLocalPermissionCache,
 } from './permissions/cache.js';
+import { bumpScopedCacheEpochs } from './scoped-cache/index.js';
 import { nodeId } from './utils/node-id.js';
 
 async function seedTiers() {
@@ -179,6 +185,59 @@ describe('cacheCleared subscriber (peer-side flush)', () => {
 		expect(await tiers.cache.get('r')).toBe('r');
 		expect(await tiers.systemCache.get('s')).toBe('s');
 		expect(await tiers.lockCache.get('l')).toBe('l');
+	});
+
+	// The writer cleared the shared responses once: a request here reading this
+	// node's old permissions would fill them again with the old roles, and a
+	// read already in flight on them declines its fill once the counter moved.
+	it('redis peer drops its own permissions, then moves the counter', async () => {
+		const tiers = await seedTiers();
+		env['CACHE_STORE'] = 'redis';
+
+		await handlers['cacheCleared']!({
+			targets: ['permissions'],
+			origin: 'other-node',
+		});
+
+		expect(clearLocalPermissionCache).toHaveBeenCalledExactlyOnceWith();
+		expect(bumpScopedCacheEpochs).toHaveBeenCalledExactlyOnceWith(['*']);
+
+		const [permissionsClear] = vi.mocked(clearLocalPermissionCache)
+			.mock
+			.invocationCallOrder;
+
+		const [counterMove] = vi.mocked(bumpScopedCacheEpochs)
+			.mock
+			.invocationCallOrder;
+
+		expect(permissionsClear).toBeLessThan(counterMove!);
+
+		expect(clearPermissionCache).not.toHaveBeenCalled();
+		expect(await tiers.cache.get('r')).toBe('r');
+	});
+
+	it('redis node keeps the permissions it told the peers of', async () => {
+		env['CACHE_STORE'] = 'redis';
+
+		await handlers['cacheCleared']!({
+			targets: ['permissions'],
+			origin: nodeId,
+		});
+
+		expect(clearLocalPermissionCache).not.toHaveBeenCalled();
+		expect(bumpScopedCacheEpochs).not.toHaveBeenCalled();
+	});
+
+	it('redis peer keeps its permissions on a responses-only clear', async () => {
+		env['CACHE_STORE'] = 'redis';
+
+		await handlers['cacheCleared']!({
+			targets: ['response'],
+			origin: 'other-node',
+		});
+
+		expect(clearLocalPermissionCache).not.toHaveBeenCalled();
+		expect(bumpScopedCacheEpochs).not.toHaveBeenCalled();
 	});
 });
 

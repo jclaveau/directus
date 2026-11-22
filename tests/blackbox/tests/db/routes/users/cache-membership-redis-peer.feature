@@ -4,9 +4,12 @@ Feature: A write on one instance alone clears the response store it shares
     user, not its roles: a membership written on one instance has to drop the
     reads every instance cached for that user (#746).
   - On a Redis response store every instance reads the same entries: the
-    clears the writing instance runs are the ones they get, and it tells no
-    other instance to clear again. A role change flushes three times, each
-    flush clearing the store once.
+    clears the writing instance runs are the ones they get. A role change
+    flushes three times, each flush clearing the store once.
+  - Each instance still holds its own copy of the permissions, and a request
+    reading the old copy would fill the store again with the old roles. So
+    before each clear the writing instance tells the others to drop their
+    copy, in one `cacheCleared` message, and none of them clears the store.
   - The feature runs two instances on one database, one bus and one Redis
     response store, held in Redis database 9, which a clear flushes. A row
     sent `on: peer` goes to the second one. The Redis commands are the ones
@@ -66,4 +69,4 @@ Feature: A write on one instance alone clears the response store it shares
     And the requests sent Redis these commands:
       | database | command | key              | calls | senders |
       | 9        | flushdb |                  | 3     | 1       |
-      |          | publish | bus:cacheCleared | 0     | 0       |
+      |          | publish | bus:cacheCleared | 3     | 1       |
