@@ -219,8 +219,10 @@ describe('Services / RoleMembers', () => {
 
 			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
 
-			expect(flushResponseCache)
-				.toHaveBeenCalledWith({ namespace: 'response' });
+			expect(flushResponseCache).toHaveBeenCalledWith(
+				{ namespace: 'response' },
+				{ permissionsCleared: true },
+			);
 
 			expect(clearSystemCache).not.toHaveBeenCalled();
 		});
@@ -294,8 +296,10 @@ describe('Services / RoleMembers', () => {
 
 			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
 
-			expect(flushResponseCache)
-				.toHaveBeenCalledWith({ namespace: 'response' });
+			expect(flushResponseCache).toHaveBeenCalledWith(
+				{ namespace: 'response' },
+				{ permissionsCleared: true },
+			);
 
 			expect(clearSystemCache).not.toHaveBeenCalled();
 		});
@@ -361,8 +365,10 @@ describe('Services / RoleMembers', () => {
 
 			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
 
-			expect(flushResponseCache)
-				.toHaveBeenCalledWith({ namespace: 'response' });
+			expect(flushResponseCache).toHaveBeenCalledWith(
+				{ namespace: 'response' },
+				{ permissionsCleared: true },
+			);
 
 			expect(clearSystemCache).not.toHaveBeenCalled();
 		});

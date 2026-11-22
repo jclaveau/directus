@@ -47,6 +47,18 @@ describe('tellPeersResponseCacheCleared', () => {
 		});
 	});
 
+	// One message, so a peer drops the roles before the responses built with them.
+	it('names the permissions in the same message when they changed', async () => {
+		env['CACHE_STORE'] = 'memory';
+
+		await tellPeersResponseCacheCleared({ permissionsCleared: true });
+
+		expect(useBus().publish).toHaveBeenCalledExactlyOnceWith('cacheCleared', {
+			targets: ['permissions', 'response'],
+			origin: nodeId,
+		});
+	});
+
 	it('tells no peer of a Redis store, which the flush cleared once', async () => {
 		env['CACHE_STORE'] = 'redis';
 

@@ -1821,6 +1821,26 @@ describe('flushResponseCache', () => {
 		]);
 	});
 
+	it('names to the other nodes the permissions its write cleared', async () => {
+		const { cache } = recordFlush();
+
+		await flushResponseCache(cache, { permissionsCleared: true });
+
+		expect(tellPeersResponseCacheCleared).toHaveBeenCalledExactlyOnceWith({
+			permissionsCleared: true,
+		});
+	});
+
+	it('names no permissions to the other nodes by default', async () => {
+		const { cache } = recordFlush();
+
+		await flushResponseCache(cache);
+
+		expect(tellPeersResponseCacheCleared).toHaveBeenCalledExactlyOnceWith({
+			permissionsCleared: false,
+		});
+	});
+
 	it(oneLine`
 		answers when the index scan is refused — a system service runs this in a
 		\`finally\` after its write committed, and a throw here would fail that

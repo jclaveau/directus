@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import { defineCache } from '@directus/memory';
+import { CacheMulti, defineCache } from '@directus/memory';
 import type { Redis } from 'ioredis';
 import { afterEach, expect, test, vi } from 'vitest';
 import { redisConfigAvailable, useRedis } from '../redis/index.js';
@@ -49,4 +49,35 @@ test('clearCache forgets the reads still running', async () => {
 	await clearCache();
 
 	expect([...runningReads.keys()]).toEqual([]);
+});
+
+// The node that sent the clear dropped the shared tier and told every node.
+test('clearLocalCache drops only the copy this process holds', async () => {
+	vi.mocked(redisConfigAvailable).mockReturnValue(true);
+	vi.mocked(useEnv).mockReturnValue({ CACHE_NAMESPACE: 'planner-api' });
+	const multiCache = new CacheMulti({} as any);
+	vi.mocked(defineCache).mockReturnValue(() => multiCache);
+
+	const { clearLocalCache } = await import('./cache.js');
+	const { runningReads } = await import('./running-reads.js');
+	runningReads.set('rows-1', Promise.resolve(['row']));
+
+	await clearLocalCache();
+
+	expect(multiCache.clearLocalTier).toHaveBeenCalledExactlyOnceWith();
+	expect(multiCache.clear).not.toHaveBeenCalled();
+	expect([...runningReads.keys()]).toEqual([]);
+});
+
+test('clearLocalCache clears a cache held by this process alone', async () => {
+	vi.mocked(redisConfigAvailable).mockReturnValue(false);
+	vi.mocked(useEnv).mockReturnValue({ CACHE_NAMESPACE: 'planner-api' });
+	const localCache = { clear: vi.fn() };
+	vi.mocked(defineCache).mockReturnValue(() => localCache as any);
+
+	const { clearLocalCache } = await import('./cache.js');
+
+	await clearLocalCache();
+
+	expect(localCache.clear).toHaveBeenCalledExactlyOnceWith();
 });

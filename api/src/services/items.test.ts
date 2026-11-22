@@ -3926,10 +3926,13 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				},
 			]);
 
-			expect(flushResponseCache).toHaveBeenCalledExactlyOnceWith({
-				clear: expect.any(Function),
-				delete: expect.any(Function),
-			});
+			expect(flushResponseCache).toHaveBeenCalledExactlyOnceWith(
+				{
+					clear: expect.any(Function),
+					delete: expect.any(Function),
+				},
+				{ permissionsCleared: true },
+			);
 
 			expect(transactionStates).toEqual([['committed']]);
 		});
@@ -3980,7 +3983,10 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			);
 
 			expect(flushResponseCache).not.toHaveBeenCalled();
-			expect(onResponseCacheFlushDeferred).toHaveBeenCalledOnce();
+
+			expect(onResponseCacheFlushDeferred).toHaveBeenCalledExactlyOnceWith({
+				permissionsCleared: true,
+			});
 		});
 
 		it('logs a flush that fails once the upsert committed', async () => {
