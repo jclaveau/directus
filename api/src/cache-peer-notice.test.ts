@@ -177,7 +177,36 @@ describe('tellPeersPermissionsCleared', () => {
 			refusal,
 			'[cache] could not tell the other nodes to drop their permissions: the'
 				+ ' bus refused the "cacheCleared" message naming ["permissions"]'
-				+ ' 4 times, the last with: Error: ECONNREFUSED',
+				+ ' on 4 tries: Error: ECONNREFUSED',
+		);
+	});
+
+	// ioredis held it through 20 reconnects already, and a new try would wait
+	// through 21 more before its refusal.
+	it('logs at once a notice ioredis refused past its reconnects', async () => {
+		env['CACHE_STORE'] = 'redis';
+		vi.useFakeTimers();
+
+		const lostConnection = Object.assign(
+			new Error('Reached the max retries per request limit (which is 20).'),
+			{ name: 'MaxRetriesPerRequestError' },
+		);
+
+		vi.mocked(useBus().publish).mockRejectedValueOnce(lostConnection);
+
+		const told = tellPeersPermissionsCleared({ permissionsCleared: true });
+		await vi.runAllTimersAsync();
+
+		await expect(told).resolves.toBeUndefined();
+
+		expect(useBus().publish).toHaveBeenCalledOnce();
+
+		expect(useLogger().warn).toHaveBeenCalledExactlyOnceWith(
+			lostConnection,
+			'[cache] could not tell the other nodes to drop their permissions: the'
+				+ ' bus refused the "cacheCleared" message naming ["permissions"]'
+				+ ' on 1 try: MaxRetriesPerRequestError: Reached the max retries per'
+				+ ' request limit (which is 20).',
 		);
 	});
 });
