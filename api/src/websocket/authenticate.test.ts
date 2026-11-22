@@ -152,6 +152,72 @@ describe('authenticateConnection', () => {
 		).toBe(false);
 	});
 
+	// A refresh reads the memberships of the filter's user, not the token's.
+	test('Marks a socket the filter gave another user of the same roles', async () => {
+		vi.mocked(getAccountabilityForToken).mockResolvedValueOnce({
+			user: 'user-token',
+			memberRoles: ['role-reader'],
+			roles: ['role-reader'],
+			admin: false,
+			app: false,
+			ip: null,
+		});
+
+		const customAccountability = {
+			user: 'user-service',
+			memberRoles: ['role-reader'],
+			roles: ['role-reader'],
+			admin: false,
+			app: false,
+			ip: null,
+		};
+
+		vi.mocked(emitter.emitFilter).mockResolvedValueOnce(customAccountability);
+
+		await authenticateConnection({
+			type: 'auth',
+			access_token: 'access_token',
+		} as WebSocketAuthMessage);
+
+		expect(
+			customAccountabilities.has(customAccountability as Accountability),
+		).toBe(true);
+	});
+
+	// A refresh recomputes the connections the roles grant.
+	test('Marks a socket the filter granted other database connections', async () => {
+		vi.mocked(getAccountabilityForToken).mockResolvedValueOnce({
+			user: 'user-member',
+			memberRoles: ['role-reader'],
+			roles: ['role-reader'],
+			admin: false,
+			app: false,
+			ip: null,
+			grantedDbConnections: [],
+		});
+
+		const customAccountability = {
+			user: 'user-member',
+			memberRoles: ['role-reader'],
+			roles: ['role-reader'],
+			admin: false,
+			app: false,
+			ip: null,
+			grantedDbConnections: ['replica'],
+		};
+
+		vi.mocked(emitter.emitFilter).mockResolvedValueOnce(customAccountability);
+
+		await authenticateConnection({
+			type: 'auth',
+			access_token: 'access_token',
+		} as WebSocketAuthMessage);
+
+		expect(
+			customAccountabilities.has(customAccountability as Accountability),
+		).toBe(true);
+	});
+
 	// No roles to compare with: the filter's are all the socket has.
 	test('Marks a socket whose token only the filter knows', async () => {
 		vi.mocked(getAccountabilityForToken).mockRejectedValueOnce(
