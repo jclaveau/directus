@@ -119,6 +119,7 @@ describe('authenticateConnection', () => {
 
 	// A refresh recomputes only the roles: a socket whose filter left them keeps
 	// what else the filter set, here its ip, and stays open.
+	// The filter sets no connections, the token none either.
 	test('Leaves unmarked a socket the filter only gave an ip', async () => {
 		vi.mocked(getAccountabilityForToken).mockResolvedValueOnce({
 			user: 'user-member',
@@ -127,6 +128,7 @@ describe('authenticateConnection', () => {
 			admin: false,
 			app: false,
 			ip: null,
+			grantedDbConnections: [],
 		});
 
 		const customAccountability = {

@@ -83,7 +83,15 @@ export async function authenticateConnection(
 	}
 }
 
-const ROLE_FIELDS = ['memberRoles', 'roles', 'admin', 'app'] as const;
+// What a refresh recomputes: the roles of the user, and what they grant. A
+// filter rarely sets the connections: none reads as the token's empty list,
+// as the connection pools read it.
+function roleStateOf(accountability: Accountability) {
+	return {
+		...pick(accountability, ['user', 'memberRoles', 'roles', 'admin', 'app']),
+		grantedDbConnections: accountability.grantedDbConnections ?? [],
+	};
+}
 
 /**
  * Whether the `websocket.authenticate` filter handed the socket other roles
@@ -110,8 +118,8 @@ async function filterChangedRoles(
 	}
 
 	return !isEqual(
-		pick(customAccountability, ROLE_FIELDS),
-		pick(tokenAccountability, ROLE_FIELDS),
+		roleStateOf(customAccountability),
+		roleStateOf(tokenAccountability),
 	);
 }
 
