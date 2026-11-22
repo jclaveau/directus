@@ -22,6 +22,10 @@ export interface CacheClearMessage {
  */
 export type PeerNotice = { permissionsCleared: boolean };
 
+// Milliseconds before each new try of a refused peer notice: four tries in all,
+// the last 1050 ms after the first.
+const PEER_NOTICE_RETRY_DELAYS = [50, 200, 800];
+
 /**
  * A Redis store holds one response cache for every node, so the flush clears it
  * once and no peer clears it again. Each node still holds its own copy of the
@@ -29,6 +33,11 @@ export type PeerNotice = { permissionsCleared: boolean };
  * again with the old roles: a write that cleared them names them to the peers
  * before its clear, for each to drop its own copy. A memory store's peers hear
  * them in the message naming their responses.
+ *
+ * A Redis restarting or failing over refuses the publish for less than a
+ * second, so a refused one is tried again after each of
+ * `PEER_NOTICE_RETRY_DELAYS`. Past the last, the peers keep their permissions
+ * until their own cache of them expires, and the warning says so.
  *
  * Never throws: it runs after the write committed, as the flush does.
  */
@@ -41,18 +50,37 @@ export async function tellPeersPermissionsCleared(
 		return;
 	}
 
-	try {
-		await useBus().publish<CacheClearMessage>('cacheCleared', {
-			targets: ['permissions'],
-			origin: nodeId,
-		});
+	const clearMessage: CacheClearMessage = {
+		targets: ['permissions'],
+		origin: nodeId,
+	};
+
+	let lastRefusal: unknown;
+
+	for (const retryDelay of [0, ...PEER_NOTICE_RETRY_DELAYS]) {
+		if (retryDelay > 0) {
+			await new Promise((resolve) => setTimeout(resolve, retryDelay));
+		}
+
+		try {
+			await useBus().publish<CacheClearMessage>('cacheCleared', clearMessage);
+
+			return;
+		}
+		catch (error) {
+			lastRefusal = error;
+		}
 	}
-	catch (error) {
-		useLogger().warn(
-			error,
-			`[cache] could not tell the other nodes to drop their permissions: ${error}`,
-		);
-	}
+
+	const triedCount = PEER_NOTICE_RETRY_DELAYS.length + 1;
+
+	useLogger().warn(
+		lastRefusal,
+		'[cache] could not tell the other nodes to drop their permissions: the bus'
+		+ ` refused the ${JSON.stringify('cacheCleared')} message naming`
+		+ ` ${JSON.stringify(clearMessage.targets)} ${triedCount} times, the last`
+		+ ` with: ${lastRefusal}`,
+	);
 }
 
 /**
