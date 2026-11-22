@@ -35,6 +35,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	vi.useRealTimers();
 	vi.clearAllMocks();
 });
 
@@ -134,19 +135,49 @@ describe('tellPeersPermissionsCleared', () => {
 		expect(useBus().publish).not.toHaveBeenCalled();
 	});
 
-	it('logs a publish the bus refused, and answers', async () => {
+	// A Redis restarting or failing over answers again within the second.
+	it('tells the peers on a second try when the bus refused the first', async () => {
 		env['CACHE_STORE'] = 'redis';
-		const refusal = new Error('ECONNREFUSED');
-		vi.mocked(useBus().publish).mockRejectedValueOnce(refusal);
+		vi.useFakeTimers();
 
-		await expect(
-			tellPeersPermissionsCleared({ permissionsCleared: true }),
-		).resolves.toBeUndefined();
+		vi.mocked(useBus().publish)
+			.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+		const told = tellPeersPermissionsCleared({ permissionsCleared: true });
+		await vi.runAllTimersAsync();
+		await told;
+
+		expect(vi.mocked(useBus().publish).mock.calls).toEqual([
+			['cacheCleared', { targets: ['permissions'], origin: nodeId }],
+			['cacheCleared', { targets: ['permissions'], origin: nodeId }],
+		]);
+
+		expect(useLogger().warn).not.toHaveBeenCalled();
+	});
+
+	it('logs a notice the bus refused on every try, and answers', async () => {
+		env['CACHE_STORE'] = 'redis';
+		vi.useFakeTimers();
+		const refusal = new Error('ECONNREFUSED');
+
+		vi.mocked(useBus().publish)
+			.mockRejectedValueOnce(refusal)
+			.mockRejectedValueOnce(refusal)
+			.mockRejectedValueOnce(refusal)
+			.mockRejectedValueOnce(refusal);
+
+		const told = tellPeersPermissionsCleared({ permissionsCleared: true });
+		await vi.runAllTimersAsync();
+
+		await expect(told).resolves.toBeUndefined();
+
+		expect(useBus().publish).toHaveBeenCalledTimes(4);
 
 		expect(useLogger().warn).toHaveBeenCalledExactlyOnceWith(
 			refusal,
-			'[cache] could not tell the other nodes to drop their permissions:'
-				+ ' Error: ECONNREFUSED',
+			'[cache] could not tell the other nodes to drop their permissions: the'
+				+ ' bus refused the "cacheCleared" message naming ["permissions"]'
+				+ ' 4 times, the last with: Error: ECONNREFUSED',
 		);
 	});
 });
