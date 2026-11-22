@@ -34,13 +34,15 @@ const PEER_NOTICE_RETRY_DELAYS = [50, 200, 800];
  * before its clear, for each to drop its own copy. A memory store's peers hear
  * them in the message naming their responses.
  *
- * A dropped connection already holds the publish in ioredis's offline queue,
- * which rejects it only past `maxRetriesPerRequest` (20 reconnects, ~10 s with
- * the default `REDIS_RETRY_*` delays). What rejects at once is a Redis
- * answering but not yet writable — a failover's `READONLY`, a restart's
- * `LOADING` — for well under a second, so a refused publish is tried again
- * after each of `PEER_NOTICE_RETRY_DELAYS`. Past the last, the peers keep their
- * permissions until their own cache of them expires, and the warning says so.
+ * A Redis answering but not yet writable — a failover's `READONLY`, a
+ * restart's `LOADING` — refuses at once, for well under a second, so a refused
+ * publish is tried again after each of `PEER_NOTICE_RETRY_DELAYS`. A dropped
+ * connection is not: ioredis held the publish in its offline queue through 20
+ * reconnects (~10 s with the default `REDIS_RETRY_*` delays) before its
+ * `MaxRetriesPerRequestError`, and flushes that queue only every 21 reconnects
+ * counted across the connection, so a new try would hold the write's answer as
+ * long again. Past the last try, the peers keep their permissions until their
+ * own cache of them expires, and the warning says so.
  *
  * Never throws: it runs after the write committed, as the flush does.
  */
@@ -59,11 +61,14 @@ export async function tellPeersPermissionsCleared(
 	};
 
 	let lastRefusal: unknown;
+	let triedCount = 0;
 
 	for (const retryDelay of [0, ...PEER_NOTICE_RETRY_DELAYS]) {
 		if (retryDelay > 0) {
 			await new Promise((resolve) => setTimeout(resolve, retryDelay));
 		}
+
+		triedCount += 1;
 
 		try {
 			await useBus().publish<CacheClearMessage>('cacheCleared', clearMessage);
@@ -73,16 +78,23 @@ export async function tellPeersPermissionsCleared(
 		catch (error) {
 			lastRefusal = error;
 		}
+
+		if (lastRefusal instanceof Error
+			&& lastRefusal.name === 'MaxRetriesPerRequestError') {
+			break;
+		}
 	}
 
-	const triedCount = PEER_NOTICE_RETRY_DELAYS.length + 1;
+	const triedWord = triedCount === 1
+		? 'try'
+		: 'tries';
 
 	useLogger().warn(
 		lastRefusal,
 		'[cache] could not tell the other nodes to drop their permissions: the bus'
 		+ ` refused the ${JSON.stringify('cacheCleared')} message naming`
-		+ ` ${JSON.stringify(clearMessage.targets)} ${triedCount} times, the last`
-		+ ` with: ${lastRefusal}`,
+		+ ` ${JSON.stringify(clearMessage.targets)} on ${triedCount} ${triedWord}:`
+		+ ` ${lastRefusal}`,
 	);
 }
 
