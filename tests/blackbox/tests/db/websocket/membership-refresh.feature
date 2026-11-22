@@ -17,13 +17,17 @@ Feature: A socket hears what the roles its user holds now may read
     read a refresh runs.
   - The member's logs socket subscribes to the `fatal` logs of
     `/websocket/logs`, which only an admin may read.
+  - A membership change runs the `websocket.authenticate` filter again on
+    each socket it let in, with the message and connection the socket
+    authenticated with: the socket stays open, holding what the filter hands
+    it now. A socket the filter refuses is closed, told why.
   - `ws-auth-narrow` is a `websocket.authenticate` filter: a socket
     authenticating with a token starting with `ws-auth-narrow-` holds only the
-    first role of its user by `sort`, not every role the database gives it.
+    first role of its user by `sort`, not every role the database gives it,
+    and is refused when its user holds no role.
   - `ws-auth-tag` is a `websocket.authenticate` filter: a socket
     authenticating with a token starting with `ws-auth-tag-` holds every role
-    of its user, as without the filter, and an ip the filter sets. A filter
-    that left the roles as they were has its socket refreshed, not closed.
+    of its user, as without the filter, and an ip the filter sets.
 
   Scenario: a role taken away ends what a socket opened before hears
     Given the rows of directus_policies:
@@ -151,14 +155,17 @@ Feature: A socket hears what the roles its user holds now may read
     Then the member's logs socket is told it may no longer read the logs
     And the member's logs socket is refused the logs it subscribes to again
 
-  Scenario: a socket whose roles a websocket.authenticate filter set is closed, told why
+  Scenario: an admin takes from a member the only role a filter left their socket
     Given the rows of directus_policies:
       | id              | name         | app_access | admin_access |
       | <reader-policy> | reader-<run> | false      | false        |
+    And the rows of directus_permissions:
+      | policy          | collection               | action | fields |
+      | <reader-policy> | test_ws_membership_notes | read   | *      |
     And the rows of directus_roles:
       | id            | name         |
-      | <reader-role> | reader-<run> |
       | <other-role>  | other-<run>  |
+      | <reader-role> | reader-<run> |
     And the rows of directus_access:
       | id              | role          | policy          |
       | <reader-access> | <reader-role> | <reader-policy> |
@@ -166,12 +173,28 @@ Feature: A socket hears what the roles its user holds now may read
       | id       | email                    | token                       |
       | <member> | member-<run>@example.com | ws-auth-narrow-member-<run> |
     And the rows of directus_role_members:
-      | id                 | user     | role          | sort |
-      | <membership>       | <member> | <reader-role> | 1    |
-      | <other-membership> | <member> | <other-role>  | 2    |
+      | id                  | user     | role          | sort |
+      | <membership>        | <member> | <other-role>  | 1    |
+      | <reader-membership> | <member> | <reader-role> | 2    |
+    And the member's socket authenticated through ws-auth-narrow
+    When the admin takes the other role of the member away
+    And the member's socket subscribes to the notes
+    And the admin creates the note "after-<run>"
+    Then the member's socket hears the note "after-<run>"
+
+  Scenario: an admin takes every role from a member whose socket a filter then refuses
+    Given the rows of directus_roles:
+      | id            | name         |
+      | <reader-role> | reader-<run> |
+    And the rows of directus_users:
+      | id       | email                    | token                       |
+      | <member> | member-<run>@example.com | ws-auth-narrow-member-<run> |
+    And the rows of directus_role_members:
+      | id           | user     | role          | sort |
+      | <membership> | <member> | <reader-role> | 1    |
     And the member's socket authenticated through ws-auth-narrow
     When the admin takes every role of the member away
-    Then the member's socket is told its roles came from a filter
+    Then the member's socket is told the filter refused it
     And the member's socket is closed
 
   Scenario: an admin takes every role from a user whose socket a filter gave only an ip

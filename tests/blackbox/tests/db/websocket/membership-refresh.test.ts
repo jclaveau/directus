@@ -22,7 +22,8 @@ const scenarioTitles = [
 	'a socket whose roles could not be refreshed is closed, told why',
 	'a GraphQL subscription opened before a role change reads with the new roles',
 	'a logs socket whose user is no longer an admin is refused the logs',
-	'a socket whose roles a websocket.authenticate filter set is closed, told why',
+	'an admin takes from a member the only role a filter left their socket',
+	'an admin takes every role from a member whose socket a filter then refuses',
 	'an admin takes every role from a user whose socket a filter gave only an ip',
 ];
 
@@ -199,6 +200,32 @@ describe.each(vendors)('%s', (vendor) => {
 				});
 
 				when.optional(
+					'the admin takes the other role of the member away',
+					async () => {
+						const response = await request(getUrl(vendor))
+							.patch(`/users/${withKeys('<member>', scenarioKeys)}`)
+							.send({
+								roles: {
+									delete: [withKeys('<membership>', scenarioKeys)],
+								},
+							})
+							.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+						expect(response.statusCode).toEqual(200);
+					},
+				);
+
+				// Refused while the filter narrowed the socket to the other role.
+				and.optional('the member\'s socket subscribes to the notes', async () => {
+					await memberSocket.subscribe({
+						uid: 'notes',
+						collection: collectionMembershipNotes,
+						event: 'create',
+						query: { fields: ['label'] },
+					});
+				});
+
+				when.optional(
 					'the admin moves the membership of the member to the other role',
 					async () => {
 						const response = await request(getUrl(vendor))
@@ -352,7 +379,25 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 
 				then.optional(
-					'the member\'s socket is told its roles came from a filter',
+					/^the member's socket hears the note "(.+)"$/,
+					async (label: string) => {
+						const heardNotes = await memberSocket.getMessages(1, { uid: 'notes' });
+
+						memberSocket.conn.close();
+
+						expect(heardNotes).toEqual([
+							{
+								type: 'subscription',
+								event: 'create',
+								data: [{ label: withKeys(label, scenarioKeys) }],
+								uid: 'notes',
+							},
+						]);
+					},
+				);
+
+				then.optional(
+					'the member\'s socket is told the filter refused it',
 					async () => {
 						expect(await memberSocket.getMessages(1, {
 							targetState: WebSocket.CLOSED,
@@ -361,12 +406,12 @@ describe.each(vendors)('%s', (vendor) => {
 								type: 'auth',
 								status: 'error',
 								error: {
-									code: 'ROLES_REFRESH_CUSTOM_ACCOUNTABILITY',
+									code: 'ROLES_REFRESH_FILTER_REFUSED',
 									message: 'The memberships of user'
 										+ ` ${JSON.stringify(withKeys('<member>', scenarioKeys))}`
-										+ ' changed and the roles of this socket came from a'
-										+ ' "websocket.authenticate" filter: reconnect to'
-										+ ' authenticate again.',
+										+ ' changed and the "websocket.authenticate" filter'
+										+ ' refused this socket: reconnect to authenticate'
+										+ ' again.',
 								},
 							},
 						]);

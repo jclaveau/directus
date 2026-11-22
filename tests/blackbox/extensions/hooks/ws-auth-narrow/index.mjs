@@ -1,7 +1,8 @@
 // A `websocket.authenticate` filter handing a socket fewer roles than the
 // database gives its user (#746), for membership-refresh.feature: a socket
 // authenticating with a token starting with `ws-auth-narrow-` holds only the
-// first role of its user by `sort`. Every other socket authenticates as usual.
+// first role of its user by `sort`, and is refused when its user holds none.
+// Every other socket authenticates as usual.
 
 const TOKEN_PREFIX = 'ws-auth-narrow-';
 
@@ -34,15 +35,18 @@ export default function registerHooks({ filter }) {
 			.orderBy('sort')
 			.first();
 
-		const narrowedRoles = firstMembership
-			? [firstMembership.role]
-			: [];
+		if (firstMembership === undefined) {
+			throw new Error(
+				`ws-auth-narrow refuses the user ${JSON.stringify(narrowedUser.id)}:`
+					+ ' it holds no role',
+			);
+		}
 
 		return {
 			...accountability,
 			user: narrowedUser.id,
-			memberRoles: narrowedRoles,
-			roles: narrowedRoles,
+			memberRoles: [firstMembership.role],
+			roles: [firstMembership.role],
 		};
 	});
 }

@@ -1,4 +1,3 @@
-import type { Accountability } from '@directus/types';
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useBus } from '../bus/index.js';
@@ -7,6 +6,7 @@ import { fetchUserRoles } from '../permissions/lib/fetch-member-roles.js';
 import {
 	fetchGlobalAccess,
 } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
+import { rerunAuthenticateFilter } from './authenticate.js';
 import type { WebSocketClient } from './types.js';
 
 vi.mock('../utils/node-id.js', () => ({ nodeId: 'this-node' }));
@@ -21,7 +21,12 @@ const mocked = vi.hoisted(() => {
 		logger: { warn: vi.fn(), error: vi.fn() },
 		fetchUserRoles: vi.fn(),
 		fetchGlobalAccess: vi.fn(),
+		rerunAuthenticateFilter: vi.fn(),
 	};
+});
+
+vi.mock('./authenticate.js', () => {
+	return { rerunAuthenticateFilter: mocked.rerunAuthenticateFilter };
 });
 
 vi.mock('../bus/index.js', () => ({ useBus: () => mocked.bus }));
@@ -56,6 +61,9 @@ beforeEach(async () => {
 		app: true,
 		grantedDbConnections: [],
 	} as any);
+
+	// A socket no filter let in.
+	vi.mocked(rerunAuthenticateFilter).mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -214,18 +222,77 @@ describe('announceMembershipsChanged', () => {
 	});
 
 	it(oneLine`
-		closes a socket whose roles a websocket.authenticate filter set,
-		telling it why
+		runs the websocket.authenticate filter again on a socket it let in,
+		refreshing it in place, open
 	`, async () => {
+		const memberSocket = {
+			accountability: {
+				user: 'user-member',
+				roles: ['role-editors'],
+				memberRoles: ['role-editors'],
+				admin: false,
+				app: false,
+				ip: '203.0.113.7',
+			},
+			send: vi.fn(),
+			close: vi.fn(),
+		};
+
+		const memberAccountability = memberSocket.accountability;
+		const rolesRefreshedListener = vi.fn();
+
+		vi.mocked(rerunAuthenticateFilter).mockResolvedValueOnce({
+			user: 'user-member',
+			roles: ['role-press'],
+			memberRoles: ['role-press'],
+			admin: false,
+			app: true,
+			ip: '203.0.113.7',
+		});
+
+		memberships.onSocketRolesRefreshed(rolesRefreshedListener);
+
+		memberships.refreshOnMembershipChange(
+			new Set([memberSocket as unknown as WebSocketClient]),
+		);
+
+		await memberships.announceMembershipsChanged(['user-member']);
+
+		expect(rerunAuthenticateFilter)
+			.toHaveBeenCalledExactlyOnceWith(memberAccountability);
+
+		expect(memberSocket.accountability).toBe(memberAccountability);
+
+		expect(memberSocket.accountability).toStrictEqual({
+			user: 'user-member',
+			roles: ['role-press'],
+			memberRoles: ['role-press'],
+			admin: false,
+			app: true,
+			ip: '203.0.113.7',
+		});
+
+		expect(memberSocket.send).not.toHaveBeenCalled();
+		expect(memberSocket.close).not.toHaveBeenCalled();
+		expect(fetchUserRoles).not.toHaveBeenCalled();
+
+		expect(rolesRefreshedListener)
+			.toHaveBeenCalledExactlyOnceWith(memberSocket);
+	});
+
+	it(oneLine`
+		closes a socket the websocket.authenticate filter refuses on its run
+		again, telling it why, and logs it
+	`, async () => {
+		const refusal = new Error('ws-auth-narrow refuses the user "user-member"');
+
+		vi.mocked(rerunAuthenticateFilter).mockRejectedValueOnce(refusal);
+
 		const memberSocket = {
 			accountability: { user: 'user-member', roles: ['role-editors'] },
 			send: vi.fn(),
 			close: vi.fn(),
 		};
-
-		memberships.customAccountabilities.add(
-			memberSocket.accountability as Accountability,
-		);
 
 		memberships.refreshOnMembershipChange(
 			new Set([memberSocket as unknown as WebSocketClient]),
@@ -237,20 +304,57 @@ describe('announceMembershipsChanged', () => {
 			type: 'auth',
 			status: 'error',
 			error: {
-				code: 'ROLES_REFRESH_CUSTOM_ACCOUNTABILITY',
+				code: 'ROLES_REFRESH_FILTER_REFUSED',
 				message: 'The memberships of user "user-member" changed and the'
-					+ ' roles of this socket came from a "websocket.authenticate"'
-					+ ' filter: reconnect to authenticate again.',
+					+ ' "websocket.authenticate" filter refused this socket:'
+					+ ' reconnect to authenticate again.',
 			},
 		}));
 
 		expect(memberSocket.close).toHaveBeenCalledExactlyOnceWith();
+
+		expect(useLogger().error).toHaveBeenCalledExactlyOnceWith(
+			refusal,
+			'[websocket] the "websocket.authenticate" filter refused the socket of'
+				+ ' user "user-member": Error: ws-auth-narrow refuses the user'
+				+ ' "user-member"',
+		);
 
 		expect(memberSocket.accountability).toStrictEqual({
 			user: 'user-member',
 			roles: ['role-editors'],
 		});
 
+		expect(fetchUserRoles).not.toHaveBeenCalled();
+	});
+
+	it('closes a socket whose token expired, telling it why', async () => {
+		const memberSocket = {
+			accountability: { user: 'user-member', roles: ['role-editors'] },
+			expires_at: Math.floor(Date.now() / 1000) - 1,
+			send: vi.fn(),
+			close: vi.fn(),
+		};
+
+		memberships.refreshOnMembershipChange(
+			new Set([memberSocket as unknown as WebSocketClient]),
+		);
+
+		await memberships.announceMembershipsChanged(['user-member']);
+
+		expect(memberSocket.send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({
+			type: 'auth',
+			status: 'error',
+			error: {
+				code: 'TOKEN_EXPIRED',
+				message: 'The memberships of user "user-member" changed and the'
+					+ ' token of this socket expired: reconnect to authenticate'
+					+ ' again.',
+			},
+		}));
+
+		expect(memberSocket.close).toHaveBeenCalledExactlyOnceWith();
+		expect(rerunAuthenticateFilter).not.toHaveBeenCalled();
 		expect(fetchUserRoles).not.toHaveBeenCalled();
 	});
 
