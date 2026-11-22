@@ -10,6 +10,7 @@ import {
 	fetchGlobalAccess,
 } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { nodeId } from '../utils/node-id.js';
+import { rerunAuthenticateFilter } from './authenticate.js';
 import { WebSocketError } from './errors.js';
 import type { WebSocketClient } from './types.js';
 
@@ -32,14 +33,6 @@ let busSubscribed = false;
 // The latest refresh each socket started: an earlier one ending after it read
 // the memberships before the later write, and is dropped.
 const latestRefreshes = new WeakMap<WebSocketClient, symbol>();
-
-/**
- * The accountabilities whose roles a `websocket.authenticate` filter changed:
- * their roles are the filter's, not the memberships a refresh reads. One the
- * filter left the roles of, giving it an ip say, is refreshed in place, keeping
- * the rest.
- */
-export const customAccountabilities = new WeakSet<Accountability>();
 
 const rolesRefreshedListeners = new Set<(client: WebSocketClient) => void>();
 
@@ -84,7 +77,10 @@ export function refreshOnMembershipChange(
  * sockets its users hold open, on this node before it answers and on every
  * other node once the bus reaches it, without closing them: the next event or
  * message a socket gets is read with the roles the user holds now. A socket
- * whose refresh fails is closed.
+ * the `websocket.authenticate` filter let in has the filter run again, and
+ * holds what it hands. A socket is closed, told why, only when it can no
+ * longer be authenticated: its token expired, the filter refused it, or its
+ * refresh failed.
  *
  * Never throws: it runs after the write committed.
  */
@@ -125,19 +121,15 @@ async function refreshSocketAccountabilities(
 				continue;
 			}
 
-			// The filter would set other roles than the memberships: closed, the
-			// socket reconnects and runs it again.
-			if (customAccountabilities.has(client.accountability!)) {
-				client.send(new WebSocketError(
-					'auth',
-					'ROLES_REFRESH_CUSTOM_ACCOUNTABILITY',
-					`The memberships of user ${JSON.stringify(socketUser)} changed`
-						+ ' and the roles of this socket came from a'
-						+ ' "websocket.authenticate" filter: reconnect to'
-						+ ' authenticate again.',
-				).toMessage());
-
-				client.close();
+			// Past its expiry the token authenticates no one: the timer of the
+			// controller may not have run yet.
+			if (client.expires_at && client.expires_at * 1000 <= Date.now()) {
+				closeSocket(
+					client,
+					'TOKEN_EXPIRED',
+					socketUser,
+					'the token of this socket expired',
+				);
 
 				continue;
 			}
@@ -145,11 +137,35 @@ async function refreshSocketAccountabilities(
 			const refreshMark = Symbol(socketUser);
 			latestRefreshes.set(client, refreshMark);
 
+			const accountability = client.accountability!;
+			let filterAccountability: Accountability | null;
+
+			try {
+				filterAccountability = await rerunAuthenticateFilter(accountability);
+			}
+			// The filter no longer lets the socket in.
+			catch (error) {
+				useLogger().error(
+					error,
+					'[websocket] the "websocket.authenticate" filter refused the socket'
+						+ ` of user ${JSON.stringify(socketUser)}: ${error}`,
+				);
+
+				closeSocket(
+					client,
+					'ROLES_REFRESH_FILTER_REFUSED',
+					socketUser,
+					'the "websocket.authenticate" filter refused this socket',
+				);
+
+				continue;
+			}
+
 			// Refreshed in place: a GraphQL subscription's service holds this
 			// object, reading every event with it.
 			try {
-				const accountability = client.accountability!;
-				const refreshed = await refreshedAccountability(accountability);
+				const refreshed = filterAccountability
+					?? await refreshedAccountability(accountability);
 
 				if (latestRefreshes.get(client) === refreshMark) {
 					Object.assign(accountability, refreshed);
@@ -166,18 +182,31 @@ async function refreshSocketAccountabilities(
 						+ `${JSON.stringify(socketUser)}: ${error}`,
 				);
 
-				client.send(new WebSocketError(
-					'auth',
+				closeSocket(
+					client,
 					'ROLES_REFRESH_FAILED',
-					`The memberships of user ${JSON.stringify(socketUser)} changed`
-						+ ' and the roles of this socket could not be refreshed:'
-						+ ' reconnect to authenticate again.',
-				).toMessage());
-
-				client.close();
+					socketUser,
+					'the roles of this socket could not be refreshed',
+				);
 			}
 		}
 	}
+}
+
+function closeSocket(
+	client: WebSocketClient,
+	errorCode: string,
+	socketUser: string,
+	closeReason: string,
+): void {
+	client.send(new WebSocketError(
+		'auth',
+		errorCode,
+		`The memberships of user ${JSON.stringify(socketUser)} changed and`
+			+ ` ${closeReason}: reconnect to authenticate again.`,
+	).toMessage());
+
+	client.close();
 }
 
 // A failing listener is its own: the roles did refresh, the socket stays open.

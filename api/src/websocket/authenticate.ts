@@ -6,12 +6,26 @@ import { createDefaultAccountability } from '../permissions/utils/create-default
 import { AuthenticationService } from '../services/index.js';
 import { getAccountabilityForToken } from '../utils/get-accountability-for-token.js';
 import { getSchema } from '../utils/get-schema.js';
-import { isEqual, pick } from '../utils/lodash-es-used.js';
+import { isEqual, omit } from '../utils/lodash-es-used.js';
 import { WebSocketError } from './errors.js';
-import { customAccountabilities } from './memberships-changed.js';
 import type { BasicAuthMessage, WebSocketResponse } from './messages.js';
 import type { AuthenticationState } from './types.js';
 import { getExpiresAtForToken } from './utils/get-expires-at-for-token.js';
+
+/**
+ * What a socket the `websocket.authenticate` filter let in authenticated with:
+ * a membership change runs the filter again on it. The password and the
+ * refresh token were spent at authentication, and are not kept.
+ */
+type FilterAuthentication = {
+	message: Record<string, any>;
+	accountabilityOverrides: Partial<Accountability> | undefined;
+};
+
+const filterAuthentications = new WeakMap<
+	Accountability,
+	FilterAuthentication
+>();
 
 export async function authenticateConnection(
 	message: BasicAuthMessage & Record<string, any>,
@@ -48,29 +62,16 @@ export async function authenticateConnection(
 			refresh_token,
 		} as AuthenticationState;
 
-		const customAccountability = await emitter.emitFilter(
-			'websocket.authenticate',
+		const customAccountability = await runAuthenticateFilter(
 			defaultAccountability,
-			{
-				message,
-			},
-			{
-				database: getDatabase(),
-				schema: null,
-				accountability: null,
-			},
+			message,
 		);
 
-		if (customAccountability && isEqual(customAccountability, defaultAccountability) === false) {
-			const rolesChanged = await filterChangedRoles(
-				customAccountability,
-				access_token,
+		if (customAccountability) {
+			filterAuthentications.set(customAccountability, {
+				message: omit(message, ['password', 'refresh_token']),
 				accountabilityOverrides,
-			);
-
-			if (rolesChanged) {
-				customAccountabilities.add(customAccountability);
-			}
+			});
 
 			authenticationState.accountability = customAccountability;
 		} else {
@@ -83,44 +84,54 @@ export async function authenticateConnection(
 	}
 }
 
-// What a refresh recomputes: the roles of the user, and what they grant. A
-// filter rarely sets the connections: none reads as the token's empty list,
-// as the connection pools read it.
-function roleStateOf(accountability: Accountability) {
-	return {
-		...pick(accountability, ['user', 'memberRoles', 'roles', 'admin', 'app']),
-		grantedDbConnections: accountability.grantedDbConnections ?? [],
-	};
+/**
+ * Runs the `websocket.authenticate` filter again on a socket it let in, with
+ * the message and connection the socket authenticated with: its roles are
+ * what the filter hands it, not the memberships alone. Null for a socket the
+ * filter left as its token made it, or leaves so now. Throws the filter's
+ * refusal.
+ */
+export async function rerunAuthenticateFilter(
+	accountability: Accountability,
+): Promise<Accountability | null> {
+	const filterAuthentication = filterAuthentications.get(accountability);
+
+	if (filterAuthentication === undefined) {
+		return null;
+	}
+
+	return runAuthenticateFilter(
+		createDefaultAccountability(filterAuthentication.accountabilityOverrides),
+		filterAuthentication.message,
+	);
 }
 
-/**
- * Whether the `websocket.authenticate` filter handed the socket other roles
- * than its token gives: a membership change recomputes the token's, so only a
- * socket whose filter left them may be refreshed in place. A token only the
- * filter knows has no roles to compare with, the filter's are all it has.
- */
-async function filterChangedRoles(
-	customAccountability: Accountability,
-	accessToken: string,
-	accountabilityOverrides: Partial<Accountability> | undefined,
-): Promise<boolean> {
-	let tokenAccountability: Accountability;
-
-	try {
-		// A fresh default: it fills the accountability it is handed.
-		tokenAccountability = await getAccountabilityForToken(
-			accessToken,
-			createDefaultAccountability(accountabilityOverrides),
-		);
-	}
-	catch {
-		return true;
-	}
-
-	return !isEqual(
-		roleStateOf(customAccountability),
-		roleStateOf(tokenAccountability),
+// The accountability the filter set, or null when it left the default.
+async function runAuthenticateFilter(
+	defaultAccountability: Accountability,
+	message: Record<string, any>,
+): Promise<Accountability | null> {
+	const customAccountability = await emitter.emitFilter(
+		'websocket.authenticate',
+		defaultAccountability,
+		{
+			message,
+		},
+		{
+			database: getDatabase(),
+			schema: null,
+			accountability: null,
+		},
 	);
+
+	const filterLeftDefault = !customAccountability
+		|| isEqual(customAccountability, defaultAccountability);
+
+	if (filterLeftDefault) {
+		return null;
+	}
+
+	return customAccountability;
 }
 
 export function authenticationSuccess(uid?: string | number, refresh_token?: string): string {
