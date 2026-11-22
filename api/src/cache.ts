@@ -10,7 +10,10 @@ import {
 	serializeCacheEnvelope,
 } from './cache-envelope.js';
 import { useLogger } from './logger/index.js';
-import { clearCache as clearPermissionCache } from './permissions/cache.js';
+import {
+	clearCache as clearPermissionCache,
+	clearLocalCache as clearLocalPermissionCache,
+} from './permissions/cache.js';
 import { cacheRedisDatabase, redisConfigAvailable } from './redis/index.js';
 import { withRedisDatabase } from './redis/lib/create-redis.js';
 import {
@@ -56,8 +59,8 @@ interface CacheMessage {
 
 // The subset a flush drops, chosen per-target on the cache page. `system` rides the
 // existing `schemaChanged` broadcast; `response`/`locks` are per-node memory tiers a
-// dedicated channel has to reach (see `clearCacheTargets`). `permissions` needs
-// neither: its cache's own `clear()` tells the peers to drop their memory tier.
+// dedicated channel has to reach (see `clearCacheTargets`). `permissions` rides
+// the same message as the responses a write flushed, so a peer drops them first.
 // The message is `CacheClearMessage` (cache-peer-notice.ts).
 
 if (redisConfigAvailable() && !messengerSubscribed) {
@@ -85,11 +88,15 @@ if (redisConfigAvailable() && !messengerSubscribed) {
 
 		const { cache, systemCache, lockCache } = getCache();
 
-		// The write that flushed the responses may have changed the roles a user
-		// holds: a request here reading the old ones off this node's permissions
-		// tier would cache a response built with them.
+		// Before the responses: a request here reading the old roles off this
+		// node's permissions tier would cache a response built with them. Its own
+		// copy only: the sender dropped the shared tier and told every node.
+		if (targets.includes('permissions')) {
+			await clearLocalPermissionCache();
+		}
+
 		if (targets.includes('response')) {
-			await Promise.all([cache?.clear(), clearPermissionCache()]);
+			await cache?.clear();
 		}
 
 		// `schemaChanged` (from the initiator's clearSystemCache) drops each peer's

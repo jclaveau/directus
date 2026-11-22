@@ -66,13 +66,20 @@ Feature: A write on one instance drops the reads a peer instance cached
       | query:                                          |           |
       |   fields: label                                 |           |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete |
-      | 2       | directus_access       | 1      | 0      | 0      | 0      |
-      | 2       | directus_permissions  | 1      | 0      | 0      | 0      |
-      | 2       | directus_policies     | 1      | 0      | 0      | 0      |
-      | 2       | directus_role_members | 1      | 0      | 0      | 0      |
-      | 2       | directus_roles        | 1      | 0      | 0      | 0      |
-      | 2       | directus_users        | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 2       | directus_access       | 4      | 0      | 0      | 0      | 0    |
+      | 2       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_permissions  | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | geometry_columns      | 0      | 0      | 0      | 0      | 1    |
+      | 2       | information_schema    | 1      | 0      | 0      | 0      | 0    |
+      | 2       | pg_constraint         | 1      | 0      | 0      | 0      | 0    |
+      | 2       | pg_index              | 2      | 0      | 0      | 0      | 0    |
+      | 2       | pg_proc               | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a membership an extension deletes on one instance ends the peer read
     Given the rows of directus_policies:

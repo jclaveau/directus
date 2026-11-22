@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import { defineCache, type CacheConfig } from '@directus/memory';
+import { CacheMulti, defineCache, type CacheConfig } from '@directus/memory';
 import { redisConfigAvailable, useRedis } from '../redis/index.js';
 import { runningReads } from './running-reads.js';
 
@@ -30,4 +30,21 @@ export function clearCache() {
 	runningReads.clear();
 
 	return cache.clear();
+}
+
+/**
+ * Drop the permissions this process holds, telling no other process: the node
+ * that sent the clear dropped the shared tier and told every node already.
+ */
+export async function clearLocalCache() {
+	const cache = useCache();
+	runningReads.clear();
+
+	if (cache instanceof CacheMulti) {
+		await cache.clearLocalTier();
+
+		return;
+	}
+
+	await cache.clear();
 }

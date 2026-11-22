@@ -131,7 +131,13 @@ export class RoleMembersService extends ItemsService {
 	// with the roles of the sockets its users hold open.
 	private async clearCaches(opts?: MutationOptions) {
 		await clearPermissionsCacheAfterCommit(this.knex);
-		await flushResponseCacheAfterCommit(this.knex, this.cache, opts);
+
+		await flushResponseCacheAfterCommit(
+			this.knex,
+			this.cache,
+			opts,
+			{ permissionsCleared: true },
+		);
 	}
 
 	// The users of the memberships an update or a delete wrote, off the write

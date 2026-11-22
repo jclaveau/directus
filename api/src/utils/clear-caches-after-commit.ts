@@ -1,6 +1,7 @@
 import type { MutationOptions, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
 import type { Keyv } from 'keyv';
+import type { PeerNotice } from '../cache-peer-notice.js';
 import { clearSystemCache } from '../cache.js';
 import {
 	createScopedCacheExtensionHandle,
@@ -13,10 +14,11 @@ import { queueAfterCommitOrRollback } from './transaction.js';
 
 /**
  * Set by a batch that runs its rows with `autoPurgeCache` off: a row asking for
- * a response-cache flush reports it here, and the batch flushes once for all.
+ * a response-cache flush reports it here, with whether it cleared the
+ * permissions, and the batch flushes once for all.
  */
 export type ResponseCacheFlushDeferral = {
-	onResponseCacheFlushDeferred?: () => void;
+	onResponseCacheFlushDeferred?: (peerNotice: PeerNotice) => void;
 };
 
 /**
@@ -34,14 +36,14 @@ export async function clearCachesAfterCommit(
 	opts?: MutationOptions & ResponseCacheFlushDeferral,
 ): Promise<void> {
 	if (responseCache && opts?.autoPurgeCache === false) {
-		opts.onResponseCacheFlushDeferred?.();
+		opts.onResponseCacheFlushDeferred?.({ permissionsCleared: true });
 	}
 
 	const clearCaches = async () => {
 		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
 
 		if (responseCache && opts?.autoPurgeCache !== false) {
-			await flushResponseCache(responseCache);
+			await flushResponseCache(responseCache, { permissionsCleared: true });
 		}
 	};
 
@@ -51,24 +53,29 @@ export async function clearCachesAfterCommit(
 /**
  * Flush the response cache once the transaction `knex` belongs to commits or
  * rolls back, as `clearCachesAfterCommit` does; a write that opted out hands
- * the flush on to its own batch, if any.
+ * the flush on to its own batch, if any. `peerNotice` tells the other nodes
+ * whether the write cleared the permissions too.
  */
 export async function flushResponseCacheAfterCommit(
 	knex: Knex,
 	responseCache: Keyv | null,
-	opts?: MutationOptions & ResponseCacheFlushDeferral,
+	opts: (MutationOptions & ResponseCacheFlushDeferral) | undefined,
+	peerNotice: PeerNotice,
 ): Promise<void> {
 	if (!responseCache) {
 		return;
 	}
 
 	if (opts?.autoPurgeCache === false) {
-		opts.onResponseCacheFlushDeferred?.();
+		opts.onResponseCacheFlushDeferred?.(peerNotice);
 
 		return;
 	}
 
-	await runOnceSettled(knex, () => flushResponseCache(responseCache));
+	await runOnceSettled(
+		knex,
+		() => flushResponseCache(responseCache, peerNotice),
+	);
 }
 
 /**
@@ -84,7 +91,7 @@ export async function purgeMutatedRowsAfterCommit(
 	opts?: MutationOptions & ResponseCacheFlushDeferral,
 ): Promise<void> {
 	if (opts?.autoPurgeCache === false) {
-		opts.onResponseCacheFlushDeferred?.();
+		opts.onResponseCacheFlushDeferred?.({ permissionsCleared: false });
 
 		return;
 	}

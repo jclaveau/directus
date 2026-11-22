@@ -34,8 +34,10 @@ let busSubscribed = false;
 const latestRefreshes = new WeakMap<WebSocketClient, symbol>();
 
 /**
- * The accountabilities a `websocket.authenticate` filter set: their roles are
- * the filter's, not the memberships a refresh reads.
+ * The accountabilities whose roles a `websocket.authenticate` filter changed:
+ * their roles are the filter's, not the memberships a refresh reads. One the
+ * filter left the roles of, giving it an ip say, is refreshed in place, keeping
+ * the rest.
  */
 export const customAccountabilities = new WeakSet<Accountability>();
 

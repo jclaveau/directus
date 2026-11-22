@@ -6,7 +6,7 @@ import { createDefaultAccountability } from '../permissions/utils/create-default
 import { AuthenticationService } from '../services/index.js';
 import { getAccountabilityForToken } from '../utils/get-accountability-for-token.js';
 import { getSchema } from '../utils/get-schema.js';
-import { isEqual } from '../utils/lodash-es-used.js';
+import { isEqual, pick } from '../utils/lodash-es-used.js';
 import { WebSocketError } from './errors.js';
 import { customAccountabilities } from './memberships-changed.js';
 import type { BasicAuthMessage, WebSocketResponse } from './messages.js';
@@ -62,7 +62,16 @@ export async function authenticateConnection(
 		);
 
 		if (customAccountability && isEqual(customAccountability, defaultAccountability) === false) {
-			customAccountabilities.add(customAccountability);
+			const rolesChanged = await filterChangedRoles(
+				customAccountability,
+				access_token,
+				accountabilityOverrides,
+			);
+
+			if (rolesChanged) {
+				customAccountabilities.add(customAccountability);
+			}
+
 			authenticationState.accountability = customAccountability;
 		} else {
 			authenticationState.accountability = await getAccountabilityForToken(access_token, defaultAccountability);
@@ -72,6 +81,38 @@ export async function authenticateConnection(
 	} catch {
 		throw new WebSocketError('auth', 'AUTH_FAILED', 'Authentication failed.', message['uid']);
 	}
+}
+
+const ROLE_FIELDS = ['memberRoles', 'roles', 'admin', 'app'] as const;
+
+/**
+ * Whether the `websocket.authenticate` filter handed the socket other roles
+ * than its token gives: a membership change recomputes the token's, so only a
+ * socket whose filter left them may be refreshed in place. A token only the
+ * filter knows has no roles to compare with, the filter's are all it has.
+ */
+async function filterChangedRoles(
+	customAccountability: Accountability,
+	accessToken: string,
+	accountabilityOverrides: Partial<Accountability> | undefined,
+): Promise<boolean> {
+	let tokenAccountability: Accountability;
+
+	try {
+		// A fresh default: it fills the accountability it is handed.
+		tokenAccountability = await getAccountabilityForToken(
+			accessToken,
+			createDefaultAccountability(accountabilityOverrides),
+		);
+	}
+	catch {
+		return true;
+	}
+
+	return !isEqual(
+		pick(customAccountability, ROLE_FIELDS),
+		pick(tokenAccountability, ROLE_FIELDS),
+	);
 }
 
 export function authenticationSuccess(uid?: string | number, refresh_token?: string): string {

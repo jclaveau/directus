@@ -33,6 +33,7 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import { oneLine } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
+import type { PeerNotice } from '../cache-peer-notice.js';
 import { getCache } from '../cache.js';
 import {
 	createScopedCacheHookDeclarations,
@@ -4176,8 +4177,10 @@ implements AbstractService<Item> {
 		};
 
 		// A row whose side effect flushes the response cache (a user's role, a
-		// permission) leaves it to this batch, which flushes once for every row.
+		// permission) leaves it to this batch, which flushes once for every row,
+		// naming the permissions to the other nodes if any row cleared them.
 		let responseCacheFlushDeferred = false;
+		const deferredPeerNotice: PeerNotice = { permissionsCleared: false };
 
 		// Logged, not thrown, like a flush a transaction drains: the rows have
 		// committed, and the scoped purge below must still run.
@@ -4187,7 +4190,12 @@ implements AbstractService<Item> {
 			}
 
 			try {
-				await flushResponseCacheAfterCommit(this.knex, this.cache, opts);
+				await flushResponseCacheAfterCommit(
+					this.knex,
+					this.cache,
+					opts,
+					deferredPeerNotice,
+				);
 			}
 			catch (error) {
 				useLogger().error(
@@ -4236,8 +4244,12 @@ implements AbstractService<Item> {
 
 						hookAddedSnapshots.push(addedSnapshot);
 					},
-					onResponseCacheFlushDeferred: () => {
+					onResponseCacheFlushDeferred: ({ permissionsCleared }) => {
 						responseCacheFlushDeferred = true;
+
+						if (permissionsCleared) {
+							deferredPeerNotice.permissionsCleared = true;
+						}
 					},
 					// counted once every run wrote: a new admin may be created after
 					// the old one is demoted

@@ -585,7 +585,13 @@ export class UsersService extends ItemsService {
 	// cache are all it leaves stale, as in RoleMembersService.
 	private async clearMembershipCaches(trx: Knex, opts: MutationOptions) {
 		await clearPermissionsCacheAfterCommit(trx);
-		await flushResponseCacheAfterCommit(trx, this.cache, opts);
+
+		await flushResponseCacheAfterCommit(
+			trx,
+			this.cache,
+			opts,
+			{ permissionsCleared: true },
+		);
 	}
 
 	/**
@@ -855,10 +861,21 @@ export class UsersService extends ItemsService {
 
 		if (doubledCount > 0) {
 			await clearPermissionsCacheAfterCommit(this.knex);
-			await flushResponseCacheAfterCommit(this.knex, this.cache, opts);
+
+			await flushResponseCacheAfterCommit(
+				this.knex,
+				this.cache,
+				opts,
+				{ permissionsCleared: true },
+			);
 		}
 		else if (handedMemberships === null) {
-			await flushResponseCacheAfterCommit(this.knex, this.cache, opts);
+			await flushResponseCacheAfterCommit(
+				this.knex,
+				this.cache,
+				opts,
+				{ permissionsCleared: false },
+			);
 		}
 		else if (handedMemberships.length > 0) {
 			await purgeMutatedRowsAfterCommit(
