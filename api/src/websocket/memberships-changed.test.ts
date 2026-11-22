@@ -358,6 +358,158 @@ describe('announceMembershipsChanged', () => {
 		expect(fetchUserRoles).not.toHaveBeenCalled();
 	});
 
+	it(oneLine`
+		keeps open a socket the later filter run let in when the earlier
+		refusal ends last
+	`, async () => {
+		const memberSocket = {
+			accountability: { user: 'user-member', roles: ['role-editors'] },
+			send: vi.fn(),
+			close: vi.fn(),
+		};
+
+		const refusal = new Error('ws-auth-narrow refuses the user "user-member"');
+
+		let refuseEarlierRun: (error: Error) => void = () => {};
+
+		vi.mocked(rerunAuthenticateFilter)
+			.mockReturnValueOnce(new Promise((_, reject) => {
+				refuseEarlierRun = reject;
+			}))
+			.mockResolvedValueOnce({
+				user: 'user-member',
+				roles: ['role-press'],
+				memberRoles: ['role-press'],
+				admin: false,
+				app: true,
+				ip: null,
+			});
+
+		memberships.refreshOnMembershipChange(
+			new Set([memberSocket as unknown as WebSocketClient]),
+		);
+
+		const earlierRefresh = memberships
+			.announceMembershipsChanged(['user-member']);
+
+		await memberships.announceMembershipsChanged(['user-member']);
+		refuseEarlierRun(refusal);
+		await earlierRefresh;
+
+		expect(memberSocket.accountability).toStrictEqual({
+			user: 'user-member',
+			roles: ['role-press'],
+			memberRoles: ['role-press'],
+			admin: false,
+			app: true,
+			ip: null,
+		});
+
+		expect(memberSocket.send).not.toHaveBeenCalled();
+		expect(memberSocket.close).not.toHaveBeenCalled();
+
+		expect(useLogger().error).toHaveBeenCalledExactlyOnceWith(
+			refusal,
+			'[websocket] the "websocket.authenticate" filter refused the socket of'
+				+ ' user "user-member": Error: ws-auth-narrow refuses the user'
+				+ ' "user-member"',
+		);
+	});
+
+	it(oneLine`
+		keeps open a socket the later refresh refreshed when the earlier
+		failure ends last
+	`, async () => {
+		const memberSocket = {
+			accountability: { user: 'user-member', roles: ['role-editors'] },
+			send: vi.fn(),
+			close: vi.fn(),
+		};
+
+		const refusal = new Error('Connection terminated');
+
+		let failEarlierRead: (error: Error) => void = () => {};
+
+		vi.mocked(fetchUserRoles)
+			.mockReturnValueOnce(new Promise((_, reject) => {
+				failEarlierRead = reject;
+			}))
+			.mockResolvedValueOnce({
+				memberRoles: ['role-auditors'],
+				roles: ['role-auditors'],
+			});
+
+		memberships.refreshOnMembershipChange(
+			new Set([memberSocket as unknown as WebSocketClient]),
+		);
+
+		const earlierRefresh = memberships
+			.announceMembershipsChanged(['user-member']);
+
+		await memberships.announceMembershipsChanged(['user-member']);
+		failEarlierRead(refusal);
+		await earlierRefresh;
+
+		expect(memberSocket.accountability).toStrictEqual({
+			user: 'user-member',
+			roles: ['role-auditors'],
+			memberRoles: ['role-auditors'],
+			admin: false,
+			app: true,
+			grantedDbConnections: [],
+		});
+
+		expect(memberSocket.send).not.toHaveBeenCalled();
+		expect(memberSocket.close).not.toHaveBeenCalled();
+
+		expect(useLogger().error).toHaveBeenCalledExactlyOnceWith(
+			refusal,
+			'[websocket] could not refresh the roles of the socket of user'
+				+ ' "user-member": Error: Connection terminated',
+		);
+	});
+
+	it(oneLine`
+		drops what the websocket.authenticate filter no longer hands the socket
+		on its run again
+	`, async () => {
+		const memberSocket = {
+			accountability: {
+				user: 'user-member',
+				roles: ['role-press'],
+				memberRoles: ['role-press'],
+				admin: false,
+				app: true,
+				ip: null,
+				grantedDbConnections: ['reporting'],
+			},
+		};
+
+		vi.mocked(rerunAuthenticateFilter).mockResolvedValueOnce({
+			user: 'user-member',
+			roles: ['role-press'],
+			memberRoles: ['role-press'],
+			admin: false,
+			app: true,
+			ip: null,
+		});
+
+		memberships.refreshOnMembershipChange(
+			new Set([memberSocket as unknown as WebSocketClient]),
+		);
+
+		await memberships.announceMembershipsChanged(['user-member']);
+
+		expect(memberSocket.accountability).toStrictEqual({
+			user: 'user-member',
+			roles: ['role-press'],
+			memberRoles: ['role-press'],
+			admin: false,
+			app: true,
+			ip: null,
+		});
+	});
+
 	it('tells the listeners of the later refresh only', async () => {
 		const memberSocket = {
 			accountability: { user: 'user-member', roles: ['role-editors'] },
