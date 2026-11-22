@@ -23,6 +23,39 @@ export interface CacheClearMessage {
 export type PeerNotice = { permissionsCleared: boolean };
 
 /**
+ * A Redis store holds one response cache for every node, so the flush clears it
+ * once and no peer clears it again. Each node still holds its own copy of the
+ * permissions, and a request reading the old copy would fill the shared store
+ * again with the old roles: a write that cleared them names them to the peers
+ * before its clear, for each to drop its own copy. A memory store's peers hear
+ * them in the message naming their responses.
+ *
+ * Never throws: it runs after the write committed, as the flush does.
+ */
+export async function tellPeersPermissionsCleared(
+	peerNotice: PeerNotice,
+): Promise<void> {
+	const sharedStore = useEnv()['CACHE_STORE'] !== 'memory';
+
+	if (!peerNotice.permissionsCleared || !sharedStore || !redisConfigAvailable()) {
+		return;
+	}
+
+	try {
+		await useBus().publish<CacheClearMessage>('cacheCleared', {
+			targets: ['permissions'],
+			origin: nodeId,
+		});
+	}
+	catch (error) {
+		useLogger().warn(
+			error,
+			`[cache] could not tell the other nodes to drop their permissions: ${error}`,
+		);
+	}
+}
+
+/**
  * A memory store holds one response cache per node, so a flush that cleared
  * this node's tells the others to clear theirs: a membership, permission, field
  * or item write reaches every node, whichever path flushed it. A Redis store is

@@ -21,6 +21,7 @@ import {
 	warnOncePerConnectionOutage,
 } from './redis/lib/warn-once-per-connection-outage.js';
 import {
+	bumpScopedCacheEpochs,
 	clearResponseCache,
 	dropScopedCacheIndex,
 	scopedCachePurgeEnabled,
@@ -60,7 +61,8 @@ interface CacheMessage {
 // The subset a flush drops, chosen per-target on the cache page. `system` rides the
 // existing `schemaChanged` broadcast; `response`/`locks` are per-node memory tiers a
 // dedicated channel has to reach (see `clearCacheTargets`). `permissions` rides
-// the same message as the responses a write flushed, so a peer drops them first.
+// the same message as the responses a write flushed, so a peer drops them first;
+// on a Redis store it rides alone, sent before the shared clear.
 // The message is `CacheClearMessage` (cache-peer-notice.ts).
 
 if (redisConfigAvailable() && !messengerSubscribed) {
@@ -79,10 +81,21 @@ if (redisConfigAvailable() && !messengerSubscribed) {
 		targets,
 		origin,
 	}) => {
-		// Redis-backed tiers are shared, so the initiator already cleared them globally;
-		// only a per-node memory store leaves each node its own copy to drop here. The
-		// initiator cleared its own before it published.
-		if (env['CACHE_STORE'] !== 'memory' || origin === nodeId) {
+		// The initiator cleared its own before it published.
+		if (origin === nodeId) {
+			return;
+		}
+
+		// Redis-backed tiers are shared, so the initiator already cleared them
+		// globally. Not this node's copy of the permissions: a request here reading
+		// the old one would fill the shared responses again with the old roles, and
+		// one in flight on it declines its fill once the counter moved.
+		if (env['CACHE_STORE'] !== 'memory') {
+			if (targets.includes('permissions')) {
+				await clearLocalPermissionCache();
+				await bumpScopedCacheEpochs(['*']);
+			}
+
 			return;
 		}
 

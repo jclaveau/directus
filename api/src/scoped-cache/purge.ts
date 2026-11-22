@@ -15,6 +15,7 @@ import {
 	type CachePurgeScan,
 } from '../cache-events.js';
 import {
+	tellPeersPermissionsCleared,
 	tellPeersResponseCacheCleared,
 	type PeerNotice,
 } from '../cache-peer-notice.js';
@@ -815,6 +816,10 @@ export async function flushResponseCache(
 	cache: Keyv | null,
 	peerNotice: PeerNotice = { permissionsCleared: false },
 ): Promise<void> {
+	// Before the clear: a peer of a shared store reading its old permissions
+	// after it would fill the store again with the old roles.
+	await tellPeersPermissionsCleared(peerNotice);
+
 	const flushedDatabase = await clearResponseCache(cache);
 
 	recordScopedCachePurged(null);
