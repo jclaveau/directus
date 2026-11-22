@@ -1,31 +1,17 @@
 import type { Accountability } from '@directus/types';
 import { DEFAULT_AUTH_PROVIDER } from '../constants.js';
-import getDatabase from '../database/index.js';
-import emitter from '../emitter.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
 import { AuthenticationService } from '../services/index.js';
 import { getAccountabilityForToken } from '../utils/get-accountability-for-token.js';
 import { getSchema } from '../utils/get-schema.js';
-import { isEqual, omit } from '../utils/lodash-es-used.js';
+import {
+	keepFilterAuthentication,
+	runAuthenticateFilter,
+} from './authenticate-filter.js';
 import { WebSocketError } from './errors.js';
 import type { BasicAuthMessage, WebSocketResponse } from './messages.js';
 import type { AuthenticationState } from './types.js';
 import { getExpiresAtForToken } from './utils/get-expires-at-for-token.js';
-
-/**
- * What a socket the `websocket.authenticate` filter let in authenticated with:
- * a membership change runs the filter again on it. The password and the
- * refresh token were spent at authentication, and are not kept.
- */
-type FilterAuthentication = {
-	message: Record<string, any>;
-	accountabilityOverrides: Partial<Accountability> | undefined;
-};
-
-const filterAuthentications = new WeakMap<
-	Accountability,
-	FilterAuthentication
->();
 
 export async function authenticateConnection(
 	message: BasicAuthMessage & Record<string, any>,
@@ -68,10 +54,11 @@ export async function authenticateConnection(
 		);
 
 		if (customAccountability) {
-			filterAuthentications.set(customAccountability, {
-				message: omit(message, ['password', 'refresh_token']),
+			keepFilterAuthentication(
+				customAccountability,
+				message,
 				accountabilityOverrides,
-			});
+			);
 
 			authenticationState.accountability = customAccountability;
 		} else {
@@ -82,56 +69,6 @@ export async function authenticateConnection(
 	} catch {
 		throw new WebSocketError('auth', 'AUTH_FAILED', 'Authentication failed.', message['uid']);
 	}
-}
-
-/**
- * Runs the `websocket.authenticate` filter again on a socket it let in, with
- * the message and connection the socket authenticated with: its roles are
- * what the filter hands it, not the memberships alone. Null for a socket the
- * filter left as its token made it, or leaves so now. Throws the filter's
- * refusal.
- */
-export async function rerunAuthenticateFilter(
-	accountability: Accountability,
-): Promise<Accountability | null> {
-	const filterAuthentication = filterAuthentications.get(accountability);
-
-	if (filterAuthentication === undefined) {
-		return null;
-	}
-
-	return runAuthenticateFilter(
-		createDefaultAccountability(filterAuthentication.accountabilityOverrides),
-		filterAuthentication.message,
-	);
-}
-
-// The accountability the filter set, or null when it left the default.
-async function runAuthenticateFilter(
-	defaultAccountability: Accountability,
-	message: Record<string, any>,
-): Promise<Accountability | null> {
-	const customAccountability = await emitter.emitFilter(
-		'websocket.authenticate',
-		defaultAccountability,
-		{
-			message,
-		},
-		{
-			database: getDatabase(),
-			schema: null,
-			accountability: null,
-		},
-	);
-
-	const filterLeftDefault = !customAccountability
-		|| isEqual(customAccountability, defaultAccountability);
-
-	if (filterLeftDefault) {
-		return null;
-	}
-
-	return customAccountability;
 }
 
 export function authenticationSuccess(uid?: string | number, refresh_token?: string): string {

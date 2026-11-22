@@ -4,11 +4,8 @@ import type { Mock } from 'vitest';
 import { describe, expect, test, vi } from 'vitest';
 import emitter from '../emitter.js';
 import { getAccountabilityForToken } from '../utils/get-accountability-for-token.js';
-import {
-	authenticateConnection,
-	authenticationSuccess,
-	rerunAuthenticateFilter,
-} from './authenticate.js';
+import { authenticateConnection, authenticationSuccess } from './authenticate.js';
+import { rerunAuthenticateFilter } from './authenticate-filter.js';
 import type { WebSocketAuthMessage } from './messages.js';
 import { getExpiresAtForToken } from './utils/get-expires-at-for-token.js';
 
@@ -124,7 +121,7 @@ describe('authenticateConnection', () => {
 			{ ip: '10.0.0.1' },
 		);
 
-		await expect(rerunAuthenticateFilter(accountability))
+		await expect(rerunAuthenticateFilter(accountability!))
 			.resolves.toBe(refreshedAccountability);
 
 		expect(emitter.emitFilter).toHaveBeenLastCalledWith(
@@ -154,7 +151,7 @@ describe('authenticateConnection', () => {
 			refresh_token: 'refresh_token',
 		} as WebSocketAuthMessage);
 
-		await expect(rerunAuthenticateFilter(accountability))
+		await expect(rerunAuthenticateFilter(accountability!))
 			.resolves.toBe(refreshedAccountability);
 
 		expect(emitter.emitFilter).toHaveBeenLastCalledWith(
@@ -181,7 +178,7 @@ describe('authenticateConnection', () => {
 			access_token: 'access_token',
 		} as WebSocketAuthMessage);
 
-		await expect(rerunAuthenticateFilter(accountability))
+		await expect(rerunAuthenticateFilter(accountability!))
 			.resolves.toBeNull();
 
 		expect(emitter.emitFilter).toHaveBeenCalledOnce();
@@ -199,7 +196,7 @@ describe('authenticateConnection', () => {
 			access_token: 'ws-auth-narrow-member',
 		} as WebSocketAuthMessage);
 
-		await expect(rerunAuthenticateFilter(accountability))
+		await expect(rerunAuthenticateFilter(accountability!))
 			.resolves.toBeNull();
 	});
 
@@ -215,7 +212,7 @@ describe('authenticateConnection', () => {
 			access_token: 'ws-auth-narrow-member',
 		} as WebSocketAuthMessage);
 
-		await expect(rerunAuthenticateFilter(accountability))
+		await expect(rerunAuthenticateFilter(accountability!))
 			.rejects.toBe(refusal);
 	});
 

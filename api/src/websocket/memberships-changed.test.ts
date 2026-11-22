@@ -6,7 +6,7 @@ import { fetchUserRoles } from '../permissions/lib/fetch-member-roles.js';
 import {
 	fetchGlobalAccess,
 } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
-import { rerunAuthenticateFilter } from './authenticate.js';
+import { rerunAuthenticateFilter } from './authenticate-filter.js';
 import type { WebSocketClient } from './types.js';
 
 vi.mock('../utils/node-id.js', () => ({ nodeId: 'this-node' }));
@@ -25,7 +25,7 @@ const mocked = vi.hoisted(() => {
 	};
 });
 
-vi.mock('./authenticate.js', () => {
+vi.mock('./authenticate-filter.js', () => {
 	return { rerunAuthenticateFilter: mocked.rerunAuthenticateFilter };
 });
 

@@ -10,7 +10,7 @@ import {
 	fetchGlobalAccess,
 } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { nodeId } from '../utils/node-id.js';
-import { rerunAuthenticateFilter } from './authenticate.js';
+import { rerunAuthenticateFilter } from './authenticate-filter.js';
 import { WebSocketError } from './errors.js';
 import type { WebSocketClient } from './types.js';
 
