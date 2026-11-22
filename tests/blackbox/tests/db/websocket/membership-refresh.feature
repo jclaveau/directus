@@ -20,6 +20,10 @@ Feature: A socket hears what the roles its user holds now may read
   - `ws-auth-narrow` is a `websocket.authenticate` filter: a socket
     authenticating with a token starting with `ws-auth-narrow-` holds only the
     first role of its user by `sort`, not every role the database gives it.
+  - `ws-auth-tag` is a `websocket.authenticate` filter: a socket
+    authenticating with a token starting with `ws-auth-tag-` holds every role
+    of its user, as without the filter, and an ip the filter sets. A filter
+    that left the roles as they were has its socket refreshed, not closed.
 
   Scenario: a role taken away ends what a socket opened before hears
     Given the rows of directus_policies:
@@ -169,3 +173,28 @@ Feature: A socket hears what the roles its user holds now may read
     When the admin takes every role of the member away
     Then the member's socket is told its roles came from a filter
     And the member's socket is closed
+
+  Scenario: an admin takes every role from a user whose socket a filter gave only an ip
+    Given the rows of directus_policies:
+      | id              | name         | app_access | admin_access |
+      | <reader-policy> | reader-<run> | false      | false        |
+    And the rows of directus_permissions:
+      | policy          | collection               | action | fields |
+      | <reader-policy> | test_ws_membership_notes | read   | *      |
+    And the rows of directus_roles:
+      | id            | name         |
+      | <reader-role> | reader-<run> |
+    And the rows of directus_access:
+      | id              | role          | policy          |
+      | <reader-access> | <reader-role> | <reader-policy> |
+    And the rows of directus_users:
+      | id       | email                    | token                    |
+      | <member> | member-<run>@example.com | ws-auth-tag-member-<run> |
+    And the rows of directus_role_members:
+      | id           | user     | role          | sort |
+      | <membership> | <member> | <reader-role> | 1    |
+    And the member's socket subscribed to the notes through ws-auth-tag
+    When the admin takes every role of the member away
+    And the admin creates the note "after-<run>"
+    Then the member's socket is refused the note
+    And the member's socket heard of no note

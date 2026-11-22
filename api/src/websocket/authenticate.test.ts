@@ -95,7 +95,7 @@ describe('authenticateConnection', () => {
 		});
 	});
 
-	test('Short-circuits when authenticate filter is used', async () => {
+	test('Marks a socket whose roles the authenticate filter changed', async () => {
 		const TIMESTAMP = 456987;
 		(getExpiresAtForToken as Mock).mockReturnValue(TIMESTAMP);
 
@@ -112,6 +112,63 @@ describe('authenticateConnection', () => {
 
 		// A membership write closes its socket rather than refresh the filter's
 		// roles.
+		expect(
+			customAccountabilities.has(customAccountability as Accountability),
+		).toBe(true);
+	});
+
+	// A refresh recomputes only the roles: a socket whose filter left them keeps
+	// what else the filter set, here its ip, and stays open.
+	test('Leaves unmarked a socket the filter only gave an ip', async () => {
+		vi.mocked(getAccountabilityForToken).mockResolvedValueOnce({
+			user: 'user-member',
+			memberRoles: ['role-reader'],
+			roles: ['role-reader'],
+			admin: false,
+			app: false,
+			ip: null,
+		});
+
+		const customAccountability = {
+			user: 'user-member',
+			memberRoles: ['role-reader'],
+			roles: ['role-reader'],
+			admin: false,
+			app: false,
+			ip: '203.0.113.7',
+		};
+
+		vi.mocked(emitter.emitFilter).mockResolvedValueOnce(customAccountability);
+
+		const { accountability } = await authenticateConnection({
+			type: 'auth',
+			access_token: 'access_token',
+		} as WebSocketAuthMessage);
+
+		expect(accountability).toBe(customAccountability);
+
+		expect(
+			customAccountabilities.has(customAccountability as Accountability),
+		).toBe(false);
+	});
+
+	// No roles to compare with: the filter's are all the socket has.
+	test('Marks a socket whose token only the filter knows', async () => {
+		vi.mocked(getAccountabilityForToken).mockRejectedValueOnce(
+			new InvalidCredentialsError(),
+		);
+
+		const customAccountability = { user: 'user-external', roles: ['role-x'] };
+
+		vi.mocked(emitter.emitFilter).mockResolvedValueOnce(customAccountability);
+
+		const { accountability } = await authenticateConnection({
+			type: 'auth',
+			access_token: 'external-token',
+		} as WebSocketAuthMessage);
+
+		expect(accountability).toBe(customAccountability);
+
 		expect(
 			customAccountabilities.has(customAccountability as Accountability),
 		).toBe(true);

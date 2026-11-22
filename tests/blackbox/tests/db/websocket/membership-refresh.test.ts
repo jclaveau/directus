@@ -23,6 +23,7 @@ const scenarioTitles = [
 	'a GraphQL subscription opened before a role change reads with the new roles',
 	'a logs socket whose user is no longer an admin is refused the logs',
 	'a socket whose roles a websocket.authenticate filter set is closed, told why',
+	'an admin takes every role from a user whose socket a filter gave only an ip',
 ];
 
 describe.each(vendors)('%s', (vendor) => {
@@ -84,6 +85,24 @@ describe.each(vendors)('%s', (vendor) => {
 						});
 
 						await memberSocket.waitForState(WebSocket.OPEN);
+					},
+				);
+
+				and.optional(
+					'the member\'s socket subscribed to the notes through ws-auth-tag',
+					async () => {
+						memberSocket = createWebSocketConn(getUrl(vendor), {
+							auth: {
+								access_token: `ws-auth-tag-member-${scenarioKeys.run}`,
+							},
+						});
+
+						await memberSocket.subscribe({
+							uid: 'notes',
+							collection: collectionMembershipNotes,
+							event: 'create',
+							query: { fields: ['label'] },
+						});
 					},
 				);
 
