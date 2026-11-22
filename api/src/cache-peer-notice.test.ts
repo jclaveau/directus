@@ -135,7 +135,7 @@ describe('tellPeersPermissionsCleared', () => {
 		expect(useBus().publish).not.toHaveBeenCalled();
 	});
 
-	// A Redis restarting or failing over answers again within the second.
+	// A failover's READONLY or a restart's LOADING passes within the second.
 	it('tells the peers on a second try when the bus refused the first', async () => {
 		env['CACHE_STORE'] = 'redis';
 		vi.useFakeTimers();
