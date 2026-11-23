@@ -454,7 +454,9 @@ jobs:
           npm install --global pm2@5
 
           # A bundle needing more than a link (env, a side process) brings a
-          # script; sourced so what it exports reaches Directus below.
+          # script; sourced so what it exports reaches Directus below. It runs from
+          # the repository root under bash -e: it ends with return (exit ends the
+          # step), leaves the cwd as is, and a failing command fails the preview.
           for EXTENSION_SCRIPT in scripts/preview-admin/extensions/*.sh; do
             if [ -f "$EXTENSION_SCRIPT" ]; then
               . "$EXTENSION_SCRIPT"
