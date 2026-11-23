@@ -15,6 +15,55 @@ const PLAN_CODES = ['basic', 'team', 'yearly'];
 
 const REFRESH_MILLISECONDS = 1500;
 
+// The extensions SDK cannot bundle an SFC <style> block, so the module styles
+// its elements inline, from Directus's own theme variables.
+const MODULE_STYLES = {
+	headerIcon: {
+		'--v-button-background-color-disabled': 'var(--theme--primary-background)',
+		'--v-button-color-disabled': 'var(--theme--primary)',
+	},
+	modulePage: {
+		display: 'flex',
+		flexDirection: 'column',
+		gap: '20px',
+		maxWidth: '960px',
+		padding: 'var(--content-padding)',
+		paddingBottom: 'var(--content-padding-bottom)',
+	},
+	planGrid: {
+		display: 'grid',
+		gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+		gap: '20px',
+	},
+	cardBox: {
+		display: 'flex',
+		flexDirection: 'column',
+		gap: '12px',
+		padding: '20px',
+		border: 'var(--theme--border-width) solid'
+			+ ' var(--theme--form--field--input--border-color)',
+		borderRadius: 'var(--theme--border-radius)',
+		backgroundColor: 'var(--theme--background-subdued)',
+	},
+	cardTitle: {
+		color: 'var(--theme--foreground-accent)',
+		fontWeight: '600',
+		fontSize: '18px',
+	},
+	actionRow: {
+		display: 'flex',
+		flexWrap: 'wrap',
+		alignItems: 'center',
+		gap: '8px',
+	},
+	beneficiaryRow: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: '8px',
+	},
+	growingCell: { flex: '1 1 200px' },
+} as const;
+
 const directusApi = useApi();
 
 const examplesPlans = ref<ExamplesPlan[]>([]);
@@ -150,58 +199,92 @@ onUnmounted(() => {
 
 <template>
   <private-view title="Subscriptions">
+    <template #title-outer:prepend>
+      <v-button
+        rounded
+        :style="MODULE_STYLES.headerIcon"
+        icon
+        exact
+        disabled
+      >
+        <v-icon name="card_membership" />
+      </v-button>
+    </template>
+
     <div
       class="examples-module"
-      style="padding: var(--content-padding)"
+      :style="MODULE_STYLES.modulePage"
     >
-      <p
+      <v-notice
         v-if="moduleError !== null"
-        class="examples-error"
-        style="color: var(--theme--danger)"
+        type="danger"
       >
-        {{ moduleError }}
-      </p>
+        <span class="examples-error">{{ moduleError }}</span>
+      </v-notice>
 
       <template v-if="isLoaded && liveSubscriptions.length === 0">
         <div
-          v-for="examplesPlan in examplesPlans"
-          :key="examplesPlan.code"
-          class="examples-plan"
-          :data-plan="examplesPlan.code"
+          class="examples-plans"
+          :style="MODULE_STYLES.planGrid"
         >
-          <p class="examples-line">
-            {{ composePlanLine(examplesPlan) }}
-          </p>
-          <input
-            v-model="customAmounts[examplesPlan.code]"
-            :aria-label="`Amount for ${examplesPlan.name}`"
-            placeholder="Amount (optional)"
-            inputmode="decimal"
+          <div
+            v-for="examplesPlan in examplesPlans"
+            :key="examplesPlan.code"
+            class="examples-plan"
+            :style="MODULE_STYLES.cardBox"
+            :data-plan="examplesPlan.code"
           >
-          <button @click="subscribePlan(examplesPlan.code, 'mollie')">
-            Subscribe with Mollie
-          </button>
-          <button @click="subscribePlan(examplesPlan.code, 'stripe')">
-            Subscribe with Stripe
-          </button>
+            <p
+              class="examples-line"
+              :style="MODULE_STYLES.cardTitle"
+            >
+              {{ composePlanLine(examplesPlan) }}
+            </p>
+            <v-input
+              v-model="customAmounts[examplesPlan.code]"
+              :aria-label="`Amount for ${examplesPlan.name}`"
+              placeholder="Amount (optional)"
+              inputmode="decimal"
+              small
+            />
+            <div :style="MODULE_STYLES.actionRow">
+              <v-button
+                small
+                @click="subscribePlan(examplesPlan.code, 'mollie')"
+              >
+                Subscribe with Mollie
+              </v-button>
+              <v-button
+                small
+                secondary
+                @click="subscribePlan(examplesPlan.code, 'stripe')"
+              >
+                Subscribe with Stripe
+              </v-button>
+            </div>
+          </div>
         </div>
-        <p class="examples-line">
-          {{ NO_SUBSCRIPTION_LINE }}
-        </p>
+        <v-notice type="info">
+          <span class="examples-line">{{ NO_SUBSCRIPTION_LINE }}</span>
+        </v-notice>
       </template>
 
       <div
         v-for="mineSubscription in liveSubscriptions"
         :key="mineSubscription.id"
         class="examples-subscription"
+        :style="MODULE_STYLES.cardBox"
       >
         <p
-          v-for="subscriptionLine in composeSubscriptionLines(
+          v-for="(subscriptionLine, lineIndex) in composeSubscriptionLines(
             mineSubscription,
             findPlan(mineSubscription.plan.code),
           )"
           :key="subscriptionLine"
           class="examples-line"
+          :style="lineIndex === 0
+            ? MODULE_STYLES.cardTitle
+            : undefined"
         >
           {{ subscriptionLine }}
         </p>
@@ -211,37 +294,58 @@ onUnmounted(() => {
             v-for="beneficiaryEmail in mineSubscription.beneficiaries ?? []"
             :key="beneficiaryEmail"
             class="examples-beneficiary"
+            :style="MODULE_STYLES.beneficiaryRow"
           >
-            <span class="examples-line">{{ beneficiaryEmail }}</span>
-            <button
+            <v-icon
+              name="person"
+              small
+            />
+            <span
+              class="examples-line"
+              :style="{ flex: 1 }"
+            >{{ beneficiaryEmail }}</span>
+            <v-button
+              x-small
+              secondary
               @click="removeBeneficiary(mineSubscription.id, beneficiaryEmail)"
             >
               Remove
-            </button>
+            </v-button>
           </div>
 
-          <div class="examples-controls">
-            <input
-              v-model="beneficiaryEmails[mineSubscription.id]"
-              aria-label="Beneficiary email"
-              placeholder="friend@example.com"
-              type="email"
+          <div :style="MODULE_STYLES.actionRow">
+            <div :style="MODULE_STYLES.growingCell">
+              <v-input
+                v-model="beneficiaryEmails[mineSubscription.id]"
+                aria-label="Beneficiary email"
+                placeholder="friend@example.com"
+                type="email"
+                small
+              />
+            </div>
+            <v-button
+              small
+              @click="addBeneficiary(mineSubscription.id)"
             >
-            <button @click="addBeneficiary(mineSubscription.id)">
               Add
-            </button>
-            <button
+            </v-button>
+            <v-button
               v-if="mineSubscription.cancel_at_period_end"
+              small
+              secondary
               @click="changeRenewal(mineSubscription.id, 'resume')"
             >
               Resume
-            </button>
-            <button
+            </v-button>
+            <v-button
               v-else
+              small
+              kind="danger"
+              secondary
               @click="changeRenewal(mineSubscription.id, 'cancel')"
             >
               Cancel
-            </button>
+            </v-button>
           </div>
         </template>
       </div>
