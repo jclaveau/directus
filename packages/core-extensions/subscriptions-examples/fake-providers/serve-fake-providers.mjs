@@ -424,22 +424,16 @@ function answerMollieSubscription(requestMethod, customerId, subscriptionId) {
 	return { code: 200, body: composeMollieSubscription(mollieSubscription) };
 }
 
-function answerMollieSubscriptionPayments(customerId) {
-	const paidPayments = [...payHoldings.values()]
-		.filter((payHolding) => {
-			return payHolding.customer === customerId
-				&& payHolding.status === 'paid';
-		})
-		.map((payHolding) => {
-			return {
-				resource: 'payment',
-				id: payHolding.payment,
-				status: 'paid',
-				paidAt: payHolding.paid_at,
-			};
-		});
-
-	return answerMollieList('payments', paidPayments);
+function answerMollieCustomerPayments(customerId) {
+	return answerMollieList(
+		'payments',
+		[...payHoldings.values()]
+			.filter((payHolding) => {
+				return payHolding.provider === 'mollie'
+					&& payHolding.customer === customerId;
+			})
+			.map(composeMolliePayment),
+	);
 }
 
 function answerMollieMandates(customerId) {
@@ -482,6 +476,8 @@ function answerMollie(requestMethod, requestPath, requestBody) {
 	const subscriptionMatch = /^\/v2\/customers\/(\w+)\/subscriptions\/(\w+)(\/payments)?$/
 		.exec(requestPath);
 
+	// Mollie links no first payment to the subscription it starts, and the
+	// fakes charge no recurring one: a subscription's payments are none.
 	if (subscriptionMatch !== null) {
 		return subscriptionMatch[3] === undefined
 			? answerMollieSubscription(
@@ -489,10 +485,10 @@ function answerMollie(requestMethod, requestPath, requestBody) {
 				subscriptionMatch[1],
 				subscriptionMatch[2],
 			)
-			: answerMollieSubscriptionPayments(subscriptionMatch[1]);
+			: answerMollieList('payments', []);
 	}
 
-	const customerMatch = /^\/v2\/customers\/(\w+)\/(subscriptions|mandates)$/
+	const customerMatch = /^\/v2\/customers\/(\w+)\/(subscriptions|mandates|payments)$/
 		.exec(requestPath);
 
 	if (customerMatch === null) {
@@ -503,6 +499,10 @@ function answerMollie(requestMethod, requestPath, requestBody) {
 
 	if (customerResource === 'mandates') {
 		return answerMollieMandates(customerId);
+	}
+
+	if (customerResource === 'payments') {
+		return answerMollieCustomerPayments(customerId);
 	}
 
 	if (requestMethod === 'POST') {
@@ -574,9 +574,54 @@ function answerStripeSubscription(subscriptionId, requestText) {
 	return { code: 200, body: composeStripeSubscription(stripeSubscription) };
 }
 
-function answerStripe(requestMethod, requestPath, requestText) {
+/** The checkout's paid session as the subscription's one invoice. */
+function answerStripeInvoices(requestQuery) {
+	const subscriptionId = new URLSearchParams(requestQuery)
+		.get('subscription');
+
+	const subscriptionInvoices = [...payHoldings.values()]
+		.filter((payHolding) => {
+			return payHolding.provider === 'stripe'
+				&& payHolding.subscription === subscriptionId
+				&& payHolding.status === 'paid';
+		})
+		.map((payHolding) => {
+			const paidAt = Math.floor(Date.parse(payHolding.paid_at) / 1000);
+
+			return {
+				id: payHolding.payment.replace(/^cs_/, 'in_'),
+				object: 'invoice',
+				livemode: false,
+				customer: payHolding.customer,
+				subscription: payHolding.subscription,
+				status: 'paid',
+				total: payHolding.unit_amount,
+				currency: payHolding.currency,
+				created: paidAt,
+				status_transitions: { paid_at: paidAt },
+				hosted_invoice_url: null,
+				invoice_pdf: null,
+			};
+		});
+
+	return {
+		code: 200,
+		body: {
+			object: 'list',
+			url: '/v1/invoices',
+			has_more: false,
+			data: subscriptionInvoices,
+		},
+	};
+}
+
+function answerStripe(requestMethod, requestPath, requestQuery, requestText) {
 	if (requestMethod === 'POST' && requestPath === '/v1/checkout/sessions') {
 		return createStripeSession(requestText);
+	}
+
+	if (requestMethod === 'GET' && requestPath === '/v1/invoices') {
+		return answerStripeInvoices(requestQuery);
 	}
 
 	const sessionMatch = /^\/v1\/checkout\/sessions\/(\w+)$/.exec(requestPath);
@@ -663,6 +708,11 @@ async function settleMolliePayment(payHolding, payOutcome) {
 
 async function settleStripeSession(payHolding, payOutcome) {
 	payHolding.status = payOutcome;
+
+	if (payOutcome === 'paid') {
+		payHolding.paid_at = readPaidAt()
+			.toISOString();
+	}
 
 	if (payOutcome !== 'paid') {
 		await sendStripeEvent(
@@ -754,7 +804,13 @@ async function answerPay(requestMethod, paymentId, requestText) {
 	return { code: 200, body: { redirect_url: redirectUrl } };
 }
 
-async function answerRequest(requestMethod, requestPath, requestText, isJson) {
+async function answerRequest({
+	requestMethod,
+	requestPath,
+	requestQuery,
+	requestText,
+	isJson,
+}) {
 	if (requestPath === '/providers-mode') {
 		return answerProvidersMode(requestMethod, requestText);
 	}
@@ -774,14 +830,16 @@ async function answerRequest(requestMethod, requestPath, requestText, isJson) {
 	}
 
 	if (requestPath.startsWith('/v1/')) {
-		return answerStripe(requestMethod, requestPath, requestText);
+		return answerStripe(requestMethod, requestPath, requestQuery, requestText);
 	}
 
 	return undefined;
 }
 
 const fakeServer = createServer(async (providerRequest, providerResponse) => {
-	const requestPath = new URL(providerRequest.url, 'http://provider').pathname;
+	const requestUrl = new URL(providerRequest.url, 'http://provider');
+	const requestPath = requestUrl.pathname;
+	const requestQuery = requestUrl.search;
 	const requestMethod = providerRequest.method;
 	const rawText = await readRequestText(providerRequest);
 
@@ -793,6 +851,7 @@ const fakeServer = createServer(async (providerRequest, providerResponse) => {
 		|| requestPath.startsWith('/v2/'))
 		&& pickProvidersTarget({
 			requestPath,
+			requestQuery,
 			requestText,
 			providersMode,
 			isRealAvailable,
@@ -821,12 +880,13 @@ const fakeServer = createServer(async (providerRequest, providerResponse) => {
 	let fakeAnswer;
 
 	try {
-		fakeAnswer = await answerRequest(
+		fakeAnswer = await answerRequest({
 			requestMethod,
 			requestPath,
+			requestQuery,
 			requestText,
 			isJson,
-		);
+		});
 	}
 	catch (answerError) {
 		console.error(

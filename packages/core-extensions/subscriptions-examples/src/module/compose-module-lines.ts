@@ -21,7 +21,22 @@ export type MineSubscription = {
 	beneficiaries?: string[];
 };
 
+/** One row of `GET /subscriptions/:id/invoices`. */
+export type SubscriptionInvoice = {
+	provider: string;
+	provider_reference: string;
+	status: string;
+	amount: string;
+	currency: string;
+	date_issued: string;
+	date_paid: string | null;
+	hosted_url: string | null;
+	pdf_url: string | null;
+};
+
 export const NO_SUBSCRIPTION_LINE = 'You have no subscription';
+
+export const NO_INVOICE_LINE = 'No invoice yet';
 
 const ENDED_STATUSES = ['canceled', 'expired', 'incomplete_expired'];
 
@@ -165,4 +180,13 @@ export function composeSubscriptionLines(
 	}
 
 	return subscriptionLines;
+}
+
+/** `2026-11-23 · 25.00 EUR · paid`, the day it was issued. */
+export function composeInvoiceLine(
+	subscriptionInvoice: SubscriptionInvoice,
+): string {
+	return `${subscriptionInvoice.date_issued.slice(0, 10)}`
+		+ ` · ${formatAmount(subscriptionInvoice.amount)}`
+		+ ` ${subscriptionInvoice.currency} · ${subscriptionInvoice.status}`;
 }

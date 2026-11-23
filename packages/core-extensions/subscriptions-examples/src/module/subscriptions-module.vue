@@ -2,14 +2,17 @@
 import { useApi } from '@directus/extensions-sdk';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import {
+	composeInvoiceLine,
 	composePlanLine,
 	composeSubscriptionLines,
 	type ExamplesPlan,
 	isLiveSubscription,
 	isManaged,
 	type MineSubscription,
+	NO_INVOICE_LINE,
 	NO_SUBSCRIPTION_LINE,
 	normalizeCustomAmount,
+	type SubscriptionInvoice,
 } from './compose-module-lines.js';
 
 const PLAN_CODES = ['basic', 'team', 'yearly'];
@@ -83,6 +86,9 @@ const examplesPlans = ref<ExamplesPlan[]>([]);
 const mineSubscriptions = ref<MineSubscription[]>([]);
 const customAmounts = ref<Record<string, string>>({});
 const beneficiaryEmails = ref<Record<number, string>>({});
+
+/** The invoices of each subscription whose list is open. */
+const shownInvoices = ref<Record<number, SubscriptionInvoice[]>>({});
 const moduleError = ref<string | null>(null);
 const isLoaded = ref(false);
 const providersMode = ref<ProvidersMode | null>(null);
@@ -232,6 +238,27 @@ function changeRenewal(
 			subscription: subscriptionId,
 		});
 	});
+}
+
+async function toggleInvoices(subscriptionId: number): Promise<void> {
+	if (shownInvoices.value[subscriptionId] !== undefined) {
+		delete shownInvoices.value[subscriptionId];
+
+		return;
+	}
+
+	moduleError.value = null;
+
+	try {
+		const invoicesResponse = await directusApi.get(
+			`/subscriptions/${subscriptionId}/invoices`,
+		);
+
+		shownInvoices.value[subscriptionId] = invoicesResponse.data.data;
+	}
+	catch (requestError) {
+		moduleError.value = readErrorMessage(requestError);
+	}
 }
 
 onMounted(() => {
@@ -395,7 +422,54 @@ onUnmounted(() => {
               />
               Cancel at period end
             </v-button>
+            <v-button
+              small
+              secondary
+              @click="toggleInvoices(mineSubscription.id)"
+            >
+              <v-icon
+                name="receipt_long"
+                left
+              />
+              Invoices
+            </v-button>
           </div>
+
+          <template v-if="shownInvoices[mineSubscription.id] !== undefined">
+            <p
+              v-if="shownInvoices[mineSubscription.id]?.length === 0"
+              class="examples-line"
+            >
+              {{ NO_INVOICE_LINE }}
+            </p>
+            <div
+              v-for="subscriptionInvoice in shownInvoices[mineSubscription.id]"
+              :key="subscriptionInvoice.provider_reference"
+              class="examples-invoice"
+              :style="MODULE_STYLES.beneficiaryRow"
+            >
+              <v-icon
+                name="receipt"
+                small
+              />
+              <span
+                class="examples-line"
+                :style="{ flex: 1 }"
+              >{{ composeInvoiceLine(subscriptionInvoice) }}</span>
+              <a
+                v-if="subscriptionInvoice.hosted_url !== null"
+                :href="subscriptionInvoice.hosted_url"
+                target="_blank"
+                rel="noopener"
+              >View</a>
+              <a
+                v-if="subscriptionInvoice.pdf_url !== null"
+                :href="subscriptionInvoice.pdf_url"
+                target="_blank"
+                rel="noopener"
+              >PDF</a>
+            </div>
+          </template>
 
           <div
             v-for="beneficiaryEmail in mineSubscription.beneficiaries ?? []"

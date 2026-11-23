@@ -6,6 +6,24 @@ import {
 
 describe('pickProvidersTarget', () => {
 	test.each([
+		['?subscription=sub_examples_7', 'real', 'fake'],
+		['?subscription=sub_1QxAbc&limit=100', 'fake', 'real'],
+		['?limit=100', 'real', 'real'],
+		['?limit=100', 'fake', 'fake'],
+	])(
+		'sends /v1/invoices%s in mode %s to %s',
+		(requestQuery, providersMode, target) => {
+			expect(pickProvidersTarget({
+				requestPath: '/v1/invoices',
+				requestQuery,
+				requestText: null,
+				providersMode,
+				isRealAvailable: true,
+			})).toBe(target);
+		},
+	);
+
+	test.each([
 		['/v2/payments/tr_examples_7', null, 'real', true, 'fake'],
 		['/v2/payments', '{"customerId":"cst_examples_7"}', 'real', true, 'fake'],
 		['/v1/checkout/sessions', 'mode=subscription', 'real', false, 'fake'],

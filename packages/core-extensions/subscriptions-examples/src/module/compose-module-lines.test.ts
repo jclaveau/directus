@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+	composeInvoiceLine,
 	composePlanLine,
 	composeSeatLine,
 	composeSubscriptionLines,
@@ -217,5 +218,24 @@ describe('composeSubscriptionLines', () => {
 			},
 			undefined,
 		)).toEqual(['#10 Basic · pending', 'Beneficiaries: 1']);
+	});
+});
+
+describe('composeInvoiceLine', () => {
+	test.each([
+		['paid', '25.00', '2026-11-23 · 25.00 EUR · paid'],
+		['open', '9.9', '2026-11-23 · 9.90 EUR · open'],
+	])('shows a %s invoice of %s', (invoiceStatus, invoiceAmount, invoiceLine) => {
+		expect(composeInvoiceLine({
+			provider: 'stripe',
+			provider_reference: 'in_1',
+			status: invoiceStatus,
+			amount: invoiceAmount,
+			currency: 'EUR',
+			date_issued: '2026-11-23T10:00:00.000Z',
+			date_paid: null,
+			hosted_url: null,
+			pdf_url: null,
+		})).toBe(invoiceLine);
 	});
 });

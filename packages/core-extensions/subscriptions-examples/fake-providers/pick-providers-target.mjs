@@ -12,6 +12,9 @@ const REAL_PROVIDER_HOSTS = {
 // `/v2/customers/cst_8wmq/subscriptions`: the object lives where it was made.
 const NAMED_OBJECT = /\/[a-z]{2,4}_[A-Za-z0-9]+(?:\/|$)/;
 
+// A list filtered on an object, as `?subscription=sub_1Qx`.
+const NAMED_FILTER = /[?&][a-z_]+=[a-z]{2,4}_[A-Za-z0-9]+(?:&|$)/;
+
 /**
  * An object the fakes made carries `_examples_` in its id, and an object named
  * otherwise was made by the real provider: both stay where they live whatever
@@ -19,11 +22,13 @@ const NAMED_OBJECT = /\/[a-z]{2,4}_[A-Za-z0-9]+(?:\/|$)/;
  */
 export function pickProvidersTarget({
 	requestPath,
+	requestQuery = '',
 	requestText,
 	providersMode,
 	isRealAvailable,
 }) {
-	if (`${requestPath} ${requestText ?? ''}`.includes('_examples_')) {
+	if (`${requestPath}${requestQuery} ${requestText ?? ''}`
+		.includes('_examples_')) {
 		return 'fake';
 	}
 
@@ -31,7 +36,7 @@ export function pickProvidersTarget({
 		return 'fake';
 	}
 
-	if (NAMED_OBJECT.test(requestPath)) {
+	if (NAMED_OBJECT.test(requestPath) || NAMED_FILTER.test(requestQuery)) {
 		return 'real';
 	}
 
