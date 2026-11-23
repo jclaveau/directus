@@ -124,6 +124,8 @@ export class GraphQLSubscriptionController extends SocketController {
 									}
 								}
 
+								// set after the await: an init sent while the first one's
+								// token is checked still passes, as before this guard
 								connectionInitReceived = true;
 							} else if (this.authentication.mode === 'handshake' && !client.accountability?.user) {
 								// the first message should authenticate successfully in this mode
