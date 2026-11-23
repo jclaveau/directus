@@ -142,7 +142,7 @@ describe('composeSubscriptionLines', () => {
 				beneficiaries_max: 3,
 			},
 		)).toEqual([
-			'Team · active',
+			'#7 Team · active',
 			'30.00 EUR / month',
 			'Renews on 2099-02-01',
 			'Beneficiaries: 1 of 3 seats',
@@ -172,7 +172,7 @@ describe('composeSubscriptionLines', () => {
 				beneficiaries_max: 1,
 			},
 		)).toEqual([
-			'Basic · active',
+			'#8 Basic · active',
 			'10.00 EUR / month',
 			'Ends on 2099-02-01',
 			'Beneficiaries: 1 of 1 seat',
@@ -198,7 +198,7 @@ describe('composeSubscriptionLines', () => {
 				interval: '{"months":1}',
 				beneficiaries_max: 3,
 			},
-		)).toEqual(['Team · active', 'Renews on 2099-02-01']);
+		)).toEqual(['#9 Team · active', 'Renews on 2099-02-01']);
 	});
 
 	test('shows a pending checkout without a period end', () => {
@@ -216,6 +216,6 @@ describe('composeSubscriptionLines', () => {
 				beneficiaries: ['tester@example.com'],
 			},
 			undefined,
-		)).toEqual(['Basic · pending', 'Beneficiaries: 1']);
+		)).toEqual(['#10 Basic · pending', 'Beneficiaries: 1']);
 	});
 });

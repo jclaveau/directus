@@ -137,7 +137,8 @@ export function composeSubscriptionLines(
 	subscriptionPlan: ExamplesPlan | undefined,
 ): string[] {
 	const subscriptionLines = [
-		`${mineSubscription.plan.name} · ${mineSubscription.status}`,
+		`#${mineSubscription.id} ${mineSubscription.plan.name}`
+		+ ` · ${mineSubscription.status}`,
 	];
 
 	if (isManaged(mineSubscription) && subscriptionPlan !== undefined) {
