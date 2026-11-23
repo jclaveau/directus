@@ -77,6 +77,8 @@ export class GraphQLSubscriptionController extends SocketController {
 	}
 
 	private bindEvents(client: WebSocketClient) {
+		let connectionInitReceived = false;
+
 		const closedHandler = this.gql.opened(
 			{
 				protocol: client.protocol,
@@ -89,6 +91,17 @@ export class GraphQLSubscriptionController extends SocketController {
 					client.on('parsed-message', async (message: WebSocketMessage) => {
 						try {
 							if (getMessageType(message) === 'connection_init' && this.authentication.mode !== 'strict') {
+								// graphql-ws refuses it too, but only after the token below
+								// would have swapped the accountability
+								if (connectionInitReceived) {
+									client.close(
+										CloseCode.TooManyInitialisationRequests,
+										'Too many initialisation requests',
+									);
+
+									return;
+								}
+
 								const params = ConnectionParams.parse(message['payload'] ?? {});
 
 								if (this.authentication.mode === 'handshake') {
@@ -110,6 +123,8 @@ export class GraphQLSubscriptionController extends SocketController {
 										return;
 									}
 								}
+
+								connectionInitReceived = true;
 							} else if (this.authentication.mode === 'handshake' && !client.accountability?.user) {
 								// the first message should authenticate successfully in this mode
 								client.close(CloseCode.Forbidden, 'Forbidden');
