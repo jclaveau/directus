@@ -452,6 +452,17 @@ jobs:
           # has a supervisor to report, pointed at one log file so the streaming
           # step below is unchanged.
           npm install --global pm2@5
+
+          # A bundle needing more than a link (env, a side process) brings a
+          # script; sourced so what it exports reaches Directus below. It runs from
+          # the repository root under bash -e: it ends with return (exit ends the
+          # step), leaves the cwd as is, and a failing command fails the preview.
+          for EXTENSION_SCRIPT in scripts/preview-admin/extensions/*.sh; do
+            if [ -f "$EXTENSION_SCRIPT" ]; then
+              . "$EXTENSION_SCRIPT"
+            fi
+          done
+
           # --wait-ready and the matching listen_timeout are what
           # ecosystem.config.cjs declares, and a rolling restart retiring a
           # worker before its replacement serves is what they prevent.
