@@ -29,6 +29,7 @@ type MollieSubscription = {
 	amount: { currency: string; value: string };
 	interval: string;
 	nextPaymentDate?: string | null;
+	startDate?: string;
 	metadata: unknown;
 };
 
@@ -568,7 +569,8 @@ function mapMollieNotFound(
 /**
  * Mollie has no period end: the next payment date while the subscription
  * runs, else the newest paid payment plus one interval. A subscription canceled
- * before its first charge has none: null, so its access ends at once.
+ * before its first charge ends at its start date: the checkout's first payment
+ * or the resumed subscription paid up to it. With neither, null.
  */
 async function readPeriodEnd(
 	mollieClient: MollieClient,
@@ -586,7 +588,9 @@ async function readPeriodEnd(
 		.find((molliePayment) => molliePayment.status === 'paid');
 
 	if (newestPaidPayment?.paidAt === undefined) {
-		return null;
+		return typeof mollieSubscription.startDate === 'string'
+			? new Date(`${mollieSubscription.startDate}T00:00:00Z`)
+			: null;
 	}
 
 	return addMollieInterval(
