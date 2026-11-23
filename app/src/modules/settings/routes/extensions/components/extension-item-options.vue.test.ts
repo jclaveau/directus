@@ -48,18 +48,18 @@ function mountOptions(
 	});
 }
 
-test('locks the uninstall of a registry extension in production', () => {
+test('locks a registry uninstall while the Marketplace is closed', () => {
 	const uninstall = mountOptions('interface', false).find('.uninstall');
 
 	expect(uninstall.attributes('disabled')).toBe('true');
 
 	expect(uninstall.attributes('title')).toBe(
-		'The Marketplace is disabled in production, where extensions change'
-			+ ' only with a deploy',
+		'The Marketplace is disabled on this instance: extensions change only'
+			+ ' with a deploy',
 	);
 });
 
-test('opens the uninstall of a registry extension outside production', () => {
+test('opens a registry uninstall while the Marketplace is open', () => {
 	const uninstall = mountOptions('interface', true).find('.uninstall');
 
 	expect(uninstall.attributes('disabled')).toBe('false');
@@ -88,18 +88,18 @@ test('locks enabling or disabling an app extension in dev mode', () => {
 	);
 });
 
-test('locks enabling or disabling an extension in production', () => {
+test('locks the enable toggle while the Marketplace is closed', () => {
 	const toggle = mountOptions('interface', false).find('v-list-item[clickable]');
 
 	expect(toggle.attributes('disabled')).toBe('true');
 
 	expect(toggle.attributes('title')).toBe(
-		'The Marketplace is disabled in production, where extensions change'
-			+ ' only with a deploy',
+		'The Marketplace is disabled on this instance: extensions change only'
+			+ ' with a deploy',
 	);
 });
 
-test('opens enabling or disabling an extension outside production', () => {
+test('opens the enable toggle while the Marketplace is open', () => {
 	const toggle = mountOptions('interface', true).find('v-list-item[clickable]');
 
 	expect(toggle.attributes('disabled')).toBe('false');

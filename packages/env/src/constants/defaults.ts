@@ -171,6 +171,7 @@ export const DEFAULTS = {
 	EMAIL_TEMPLATES_PATH: './templates',
 
 	MARKETPLACE_TRUST: 'sandbox',
+	MARKETPLACE_ENABLED: false,
 
 	TELEMETRY: false,
 	TELEMETRY_URL: 'https://telemetry.directus.io',

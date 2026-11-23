@@ -71,6 +71,7 @@ import {
 	validateUnreadEnv,
 	validateAutoMigrateEnv,
 	validateSubscriptionsEnv,
+	validateMarketplaceEnabledEnv,
 } from './utils/validate-env.js';
 import { initSharedSettings } from './processes/lib/shared-settings.js';
 import { initPoolHealthMirror } from './processes/lib/pool-health.js';
@@ -145,6 +146,7 @@ export default async function createApp(): Promise<express.Application> {
 	validateUnreadEnv();
 	validateAutoMigrateEnv();
 	validateSubscriptionsEnv();
+	validateMarketplaceEnabledEnv();
 
 	await validateDatabaseConnection();
 

@@ -341,3 +341,28 @@ const SUBSCRIPTIONS_ENV_PAIRS = [
 	['SUBSCRIPTIONS_MOLLIE_API_KEY', 'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS'],
 	['SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS', 'SUBSCRIPTIONS_MOLLIE_API_KEY'],
 ] as const;
+
+/**
+ * Refuse `MARKETPLACE_ENABLED=true` in production: there extensions change only
+ * with a deploy (#627), so the variable closes the Marketplace elsewhere, never
+ * opens it there.
+ */
+export function validateMarketplaceEnabledEnv(): void {
+	validateBooleanEnv(['MARKETPLACE_ENABLED']);
+
+	if (useEnv()['MARKETPLACE_ENABLED'] !== true) {
+		return;
+	}
+
+	const nodeEnv = process.env['NODE_ENV'] || 'production';
+
+	if (nodeEnv === 'production') {
+		useLogger().error(
+			'"MARKETPLACE_ENABLED" Environment Variable is true while NODE_ENV is'
+				+ ` ${JSON.stringify(nodeEnv)}: production changes its extensions`
+				+ ' only with a deploy.',
+		);
+
+		process.exit(1);
+	}
+}

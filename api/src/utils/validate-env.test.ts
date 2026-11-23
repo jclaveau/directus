@@ -18,6 +18,7 @@ import {
 	validateDurationEnv,
 	validateEnv,
 	validateHeaderNameEnv,
+	validateMarketplaceEnabledEnv,
 	validateSubscriptionsEnv,
 	validateUnreadEnv,
 } from './validate-env.js';
@@ -528,6 +529,74 @@ describe('validateSubscriptionsEnv', () => {
 
 		expect(mockLogger.error).toHaveBeenCalledWith(
 			'"SUBSCRIPTIONS_MOLLIE_API_KEY" Environment Variable is empty.',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+});
+
+describe('validateMarketplaceEnabledEnv', () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	test('refuses true in production', () => {
+		vi.stubEnv('NODE_ENV', 'production');
+		vi.mocked(useEnv).mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
+
+		validateMarketplaceEnabledEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"MARKETPLACE_ENABLED" Environment Variable is true while NODE_ENV is'
+				+ ' "production": production changes its extensions only with a'
+				+ ' deploy.',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('refuses true with NODE_ENV unset', () => {
+		vi.stubEnv('NODE_ENV', '');
+		vi.mocked(useEnv).mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
+
+		validateMarketplaceEnabledEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"MARKETPLACE_ENABLED" Environment Variable is true while NODE_ENV is'
+				+ ' "production": production changes its extensions only with a'
+				+ ' deploy.',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('takes false in production', () => {
+		vi.stubEnv('NODE_ENV', 'production');
+		vi.mocked(useEnv).mockReturnValueOnce({ MARKETPLACE_ENABLED: false });
+
+		validateMarketplaceEnabledEnv();
+
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test('takes true in development', () => {
+		vi.stubEnv('NODE_ENV', 'development');
+		vi.mocked(useEnv).mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
+
+		validateMarketplaceEnabledEnv();
+
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test('refuses a value that is not a boolean', () => {
+		vi.stubEnv('MARKETPLACE_ENABLED', 'no');
+		vi.mocked(useEnv).mockReturnValueOnce({ MARKETPLACE_ENABLED: false });
+
+		validateMarketplaceEnabledEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"MARKETPLACE_ENABLED" Environment Variable is "no", which is not a'
+				+ ' boolean. Use one of true, false, 1, 0.',
 		);
 
 		expect(process.exit).toHaveBeenCalledWith(1);
