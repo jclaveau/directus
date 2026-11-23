@@ -14,7 +14,7 @@ After every push to a `Preview`-labelled PR, and every preview dispatch with `pr
 When the PR head's Preview Admin run is still waiting for a runner, it rewrites the admin-preview block of the PR body:
 
 ```
-- **State:** ⏳ queued since 10:27 UTC, no runner yet: 20 jobs waiting on the account, longest 349s · [run 45156321958](…)
+- **State:** ⏳ queued since 10:27 UTC, no runner yet: 20 jobs waiting on the account, longest 349s, then deployed ~1m46s after a runner takes it (median of 10 past deploys) · [run 45156321958](…)
 ```
 
 It does nothing when no run is queued or the job has started. The block takes the queued run's id as its owner, so the run's own "claimed" publish replaces it on boot.
