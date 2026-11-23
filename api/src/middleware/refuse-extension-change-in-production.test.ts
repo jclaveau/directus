@@ -1,10 +1,17 @@
+import { useEnv } from '@directus/env';
 import { RouteNotFoundError } from '@directus/errors';
 import type { Request, Response } from 'express';
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
 	isMarketplaceEnabled,
 	refuseExtensionChangeInProduction,
 } from './refuse-extension-change-in-production.js';
+
+vi.mock('@directus/env');
+
+beforeEach(() => {
+	vi.mocked(useEnv).mockReturnValue({});
+});
 
 afterEach(() => {
 	vi.unstubAllEnvs();
@@ -20,6 +27,24 @@ test.each([
 
 	expect(isMarketplaceEnabled()).toBe(enabled);
 });
+
+test.each([
+	{ nodeEnv: 'development', marketplaceEnabled: false, enabled: false },
+	{ nodeEnv: 'development', marketplaceEnabled: true, enabled: true },
+	{ nodeEnv: 'production', marketplaceEnabled: false, enabled: false },
+])(
+	'reads NODE_ENV $nodeEnv with MARKETPLACE_ENABLED $marketplaceEnabled'
+		+ ' as enabled: $enabled',
+	({ nodeEnv, marketplaceEnabled, enabled }) => {
+		vi.stubEnv('NODE_ENV', nodeEnv);
+
+		vi.mocked(useEnv).mockReturnValue({
+			MARKETPLACE_ENABLED: marketplaceEnabled,
+		});
+
+		expect(isMarketplaceEnabled()).toBe(enabled);
+	},
+);
 
 test('refuses a registry route in production', () => {
 	vi.stubEnv('NODE_ENV', 'production');
@@ -50,6 +75,23 @@ test('names the bare registry path the client asked for', () => {
 
 	expect(() => refuseExtensionChangeInProduction(req, {} as Response, vi.fn()))
 		.toThrow(new RouteNotFoundError({ path: '/extensions/registry' }));
+});
+
+test('refuses a registry route when MARKETPLACE_ENABLED is false', () => {
+	vi.stubEnv('NODE_ENV', 'development');
+	vi.mocked(useEnv).mockReturnValue({ MARKETPLACE_ENABLED: false });
+	const next = vi.fn();
+
+	const req = {
+		baseUrl: '/extensions/registry',
+		path: '/install',
+		originalUrl: '/extensions/registry/install',
+	} as Request;
+
+	expect(() => refuseExtensionChangeInProduction(req, {} as Response, next))
+		.toThrow(new RouteNotFoundError({ path: '/extensions/registry/install' }));
+
+	expect(next).not.toHaveBeenCalled();
 });
 
 test('passes a registry route outside production', () => {
