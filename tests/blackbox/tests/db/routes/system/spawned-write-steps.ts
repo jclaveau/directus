@@ -67,7 +67,7 @@ const RESPONSE_CELL_KEYS = [
 
 type Row = { request: string; response: string };
 
-type ScenarioKeys = {
+export type ScenarioKeys = {
 	run: string;
 	keysByName: Record<string, string>;
 };
@@ -186,7 +186,7 @@ export function defineSpawnedWriteFeature(
 
 // `<run>` is unique to the scenario; a `<name>` met for the first time stands
 // for a fresh uuid, or for the key a remembering row stored before.
-function withKeys(cell: string, scenarioKeys: ScenarioKeys) {
+export function withKeys(cell: string, scenarioKeys: ScenarioKeys) {
 	return cell.replaceAll(/<([\w-]+)>/g, (_placeholder, name: string) => {
 		if (name === 'run') {
 			return scenarioKeys.run;
