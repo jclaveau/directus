@@ -9,6 +9,7 @@ import {
 	isManaged,
 	type MineSubscription,
 	NO_SUBSCRIPTION_LINE,
+	normalizeCustomAmount,
 } from './compose-module-lines.js';
 
 const PLAN_CODES = ['basic', 'team', 'yearly'];
@@ -124,7 +125,9 @@ async function runAction(moduleAction: () => Promise<unknown>): Promise<void> {
 
 function subscribePlan(planCode: string, providerName: string): Promise<void> {
 	return runAction(async () => {
-		const customAmount = customAmounts.value[planCode]?.trim() ?? '';
+		const customAmount = normalizeCustomAmount(
+			customAmounts.value[planCode] ?? '',
+		);
 
 		const checkoutResponse = await directusApi.post('/subscriptions/checkout', {
 			plan: planCode,

@@ -5,6 +5,7 @@ import {
 	composeSubscriptionLines,
 	formatInterval,
 	isLiveSubscription,
+	normalizeCustomAmount,
 } from './compose-module-lines.js';
 
 describe('formatInterval', () => {
@@ -34,6 +35,23 @@ describe('composePlanLine', () => {
 			interval: '{"months":12}',
 			beneficiaries_max: 1,
 		})).toBe('Yearly 100.00 EUR / year');
+	});
+});
+
+describe('normalizeCustomAmount', () => {
+	test.each([
+		['12', '12.00'],
+		['12.5', '12.50'],
+		['12,5', '12.50'],
+		['12.', '12.00'],
+		['14.90', '14.90'],
+		[' 30 ', '30.00'],
+		['12.505', '12.505'],
+		['1,000.00', '1,000.00'],
+		['-5', '-5'],
+		['twelve', 'twelve'],
+	])('sends %j as %j', (amountText, checkoutAmount) => {
+		expect(normalizeCustomAmount(amountText)).toBe(checkoutAmount);
 	});
 });
 

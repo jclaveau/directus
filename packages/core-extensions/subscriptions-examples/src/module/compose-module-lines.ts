@@ -56,6 +56,27 @@ export function formatAmount(planAmount: string | number): string {
 		.toFixed(2);
 }
 
+// What a user may type in the amount field: whole units, or up to 2 decimals
+// after a dot or a comma.
+const TYPED_AMOUNT = /^(\d+)(?:[.,](\d{0,2}))?$/;
+
+/**
+ * The checkout takes "14.90" only; "12", "12.5" and "12,5" are padded to it.
+ * Any other text goes out as typed, for the checkout to refuse it by name.
+ */
+export function normalizeCustomAmount(amountText: string): string {
+	const trimmedAmount = amountText.trim();
+	const amountMatch = TYPED_AMOUNT.exec(trimmedAmount);
+
+	if (amountMatch === null) {
+		return trimmedAmount;
+	}
+
+	const [, wholePart, decimalPart = ''] = amountMatch;
+
+	return `${wholePart}.${decimalPart.padEnd(2, '0')}`;
+}
+
 export function composePlanLine(examplesPlan: ExamplesPlan): string {
 	return `${examplesPlan.name} ${formatAmount(examplesPlan.amount)}`
 		+ ` ${examplesPlan.currency} / ${formatInterval(examplesPlan.interval)}`;
