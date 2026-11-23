@@ -99,7 +99,11 @@ const providersTooltip = computed(() => {
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 
 const liveSubscriptions = computed(() => {
-	return mineSubscriptions.value.filter(isLiveSubscription);
+	const checkedAt = new Date();
+
+	return mineSubscriptions.value.filter((mineSubscription) => {
+		return isLiveSubscription(mineSubscription, checkedAt);
+	});
 });
 
 function findPlan(planCode: string): ExamplesPlan | undefined {
@@ -365,6 +369,34 @@ onUnmounted(() => {
         </p>
 
         <template v-if="isManaged(mineSubscription)">
+          <div :style="MODULE_STYLES.actionRow">
+            <v-button
+              v-if="mineSubscription.cancel_at_period_end"
+              small
+              secondary
+              @click="changeRenewal(mineSubscription.id, 'resume')"
+            >
+              <v-icon
+                name="autorenew"
+                left
+              />
+              Resume subscription
+            </v-button>
+            <v-button
+              v-else
+              small
+              kind="danger"
+              secondary
+              @click="changeRenewal(mineSubscription.id, 'cancel')"
+            >
+              <v-icon
+                name="event_busy"
+                left
+              />
+              Cancel at period end
+            </v-button>
+          </div>
+
           <div
             v-for="beneficiaryEmail in mineSubscription.beneficiaries ?? []"
             :key="beneficiaryEmail"
@@ -403,23 +435,6 @@ onUnmounted(() => {
               @click="addBeneficiary(mineSubscription.id)"
             >
               Add
-            </v-button>
-            <v-button
-              v-if="mineSubscription.cancel_at_period_end"
-              small
-              secondary
-              @click="changeRenewal(mineSubscription.id, 'resume')"
-            >
-              Resume
-            </v-button>
-            <v-button
-              v-else
-              small
-              kind="danger"
-              secondary
-              @click="changeRenewal(mineSubscription.id, 'cancel')"
-            >
-              Cancel
             </v-button>
           </div>
         </template>

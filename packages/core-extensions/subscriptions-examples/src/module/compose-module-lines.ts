@@ -92,7 +92,20 @@ export function composePlanLine(examplesPlan: ExamplesPlan): string {
 			: 's'}`;
 }
 
-export function isLiveSubscription(mineSubscription: MineSubscription): boolean {
+/**
+ * Mollie marks a cancelled subscription `canceled` at once, while the bundle
+ * keeps its access until `current_period_end`: it stays shown till then.
+ */
+export function isLiveSubscription(
+	mineSubscription: MineSubscription,
+	checkedAt: Date,
+): boolean {
+	if (mineSubscription.status === 'canceled'
+		&& mineSubscription.cancel_at_period_end
+		&& mineSubscription.current_period_end !== null) {
+		return new Date(mineSubscription.current_period_end) > checkedAt;
+	}
+
 	return !ENDED_STATUSES.includes(mineSubscription.status);
 }
 

@@ -89,22 +89,33 @@ describe('composeSeatLine', () => {
 
 describe('isLiveSubscription', () => {
 	test.each([
-		['pending', true],
-		['active', true],
-		['past_due', true],
-		['canceled', false],
-		['expired', false],
-	])('takes a %s subscription as live: %s', (subscriptionStatus, isLive) => {
-		expect(isLiveSubscription({
-			id: 1,
-			plan: { code: 'basic', name: 'Basic' },
-			provider: 'mollie',
-			status: subscriptionStatus,
-			current_period_end: null,
-			cancel_at_period_end: false,
-			roles: ['beneficiary'],
-		})).toBe(isLive);
-	});
+		['pending', null, false, true],
+		['active', null, false, true],
+		['active', '2026-12-23T10:00:00.000Z', true, true],
+		['past_due', null, false, true],
+		['canceled', null, false, false],
+		['canceled', '2026-12-23T10:00:00.000Z', false, false],
+		['canceled', '2026-12-23T10:00:00.000Z', true, true],
+		['canceled', '2026-11-22T10:00:00.000Z', true, false],
+		['canceled', null, true, false],
+		['expired', null, false, false],
+	])(
+		'takes a %s subscription paid until %s, cancel at period end %s, as live: %s',
+		(subscriptionStatus, periodEnd, isCancelAtPeriodEnd, isLive) => {
+			expect(isLiveSubscription(
+				{
+					id: 1,
+					plan: { code: 'basic', name: 'Basic' },
+					provider: 'mollie',
+					status: subscriptionStatus,
+					current_period_end: periodEnd,
+					cancel_at_period_end: isCancelAtPeriodEnd,
+					roles: ['beneficiary'],
+				},
+				new Date('2026-11-23T10:00:00.000Z'),
+			)).toBe(isLive);
+		},
+	);
 });
 
 describe('composeSubscriptionLines', () => {
