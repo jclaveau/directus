@@ -557,6 +557,40 @@ describe('fetchSubscription', () => {
 		});
 	});
 
+	test('ends at startDate when canceled before any charge', async () => {
+		await expect(createMollieProvider({
+			customerSubscriptions: {
+				get: vi.fn().mockResolvedValue({
+					id: 'sub_1',
+					customerId: 'cst_1',
+					status: 'canceled',
+					amount: { currency: 'EUR', value: '10.00' },
+					interval: '1 month',
+					startDate: '2026-12-23',
+					metadata: { directus_subscription: '1' },
+				}),
+			},
+			subscriptionPayments: {
+				iterate: vi.fn().mockReturnValue({
+					find: vi.fn().mockResolvedValue(undefined),
+				}),
+			},
+		} as unknown as MollieClient)
+			.fetchSubscription('cst_1/sub_1')).resolves.toEqual({
+			subscriptionId: 'sub_1',
+			customerId: 'cst_1',
+			status: 'canceled',
+			currentPeriodEnd: new Date('2026-12-23T00:00:00Z'),
+			cancelAtPeriodEnd: true,
+			directusSubscription: 1,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
+		});
+	});
+
 	test('has no period end before any paid payment', async () => {
 		const mollieClient = {
 			customerSubscriptions: {
