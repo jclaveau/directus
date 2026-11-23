@@ -1,7 +1,7 @@
 Feature: A GraphQL socket refuses a second connection_init before reading its token
 
-  - The shared instance runs the GraphQL websocket at its defaults:
-    `WEBSOCKETS_GRAPHQL_ENABLED` true and `WEBSOCKETS_GRAPHQL_AUTH` handshake,
+  - The shared instance turns `WEBSOCKETS_GRAPHQL_ENABLED` on and keeps
+    `WEBSOCKETS_GRAPHQL_AUTH` at its default, handshake,
     so a socket authenticates with the `access_token` of its first
     `connection_init`.
   - graphql-ws closes a socket sending a second `connection_init` with 4429
