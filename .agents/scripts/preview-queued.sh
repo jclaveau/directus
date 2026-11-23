@@ -43,10 +43,17 @@ run_url=${queued_run#* }
 job_state=$(gh api "repos/$repository/actions/runs/$run_id/jobs" \
 	--jq '.jobs[] | select(.name == "preview") | "\(.status) \(.created_at)"')
 
-if [ -z "$job_state" ] || [ "${job_state%% *}" != "queued" ]; then
-	echo "run $run_id job is ${job_state%% *}: the run owns the block"
-	exit 0
-fi
+job_status=${job_state%% *}
+
+# A job the runner has not taken yet reads queued, or pending / waiting while
+# a concurrency group or an environment holds it.
+case "$job_status" in
+	queued | pending | waiting) ;;
+	*)
+		echo "run $run_id job is ${job_status:-absent}: the run owns the block"
+		exit 0
+		;;
+esac
 
 queued_since=${job_state#* }
 
@@ -112,7 +119,7 @@ job_status = call_github(
 
 # The runner may have picked the job up since the first check: its own publish
 # then holds the block, and "queued" would overwrite "deploying".
-if job_status != 'queued':
+if job_status not in ('queued', 'pending', 'waiting'):
 	print(f"run {run_id} job is {json.dumps(job_status)} now: block left as is")
 	raise SystemExit(0)
 
