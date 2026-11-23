@@ -17,6 +17,7 @@ import {
 	selectDueSync,
 	type SyncQueueRow,
 } from '../queue/sync-queue.js';
+import { copySubscriptionInvoices } from './copy-subscription-invoices.js';
 import {
 	closeMissingSubscription,
 	readPlanInterval,
@@ -81,6 +82,7 @@ async function syncNextRow({
 	}
 
 	let committedSync: SyncedSubscription | undefined;
+	let syncedResourceId: string | undefined;
 
 	try {
 		const subscriptionProvider = findProvider(
@@ -163,7 +165,7 @@ async function syncNextRow({
 				return undefined;
 			}
 
-			const syncedResourceId = subscriptionProvider.composeResourceId({
+			syncedResourceId = subscriptionProvider.composeResourceId({
 				subscriptionId: fetchedSubscription.subscriptionId,
 				customerId: fetchedSubscription.customerId,
 			});
@@ -201,6 +203,19 @@ async function syncNextRow({
 		else {
 			logger.warn(failureMessage);
 		}
+	}
+
+	// Only a synced provider subscription, once committed: a closed one has none.
+	if (committedSync !== undefined && syncedResourceId !== undefined) {
+		await copySubscriptionInvoices({
+			database,
+			subscriptionProvider: findProvider(enabledProviders, leasedRow.provider),
+			providerName: leasedRow.provider,
+			resourceId: syncedResourceId,
+			subscriptionId: committedSync.subscription,
+			copiedAt: new Date(),
+			logger,
+		});
 	}
 
 	// Past the commit and outside the try: a listener's throw is no sync failure.

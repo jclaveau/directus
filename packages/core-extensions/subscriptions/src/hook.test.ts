@@ -12,6 +12,7 @@ import {
 	refusePlanDelete,
 	refusePlanStatusUpdate,
 	refuseSubscriptionEventWrite,
+	refuseSubscriptionInvoiceWrite,
 	refuseSubscriptionStateUpdate,
 } from './plans/refuse-direct-writes.js';
 import { enqueueReconcile } from './sync/enqueue-reconcile.js';
@@ -145,7 +146,7 @@ describe('subscriptionsHook', () => {
 		});
 	});
 
-	test('filters the writes around the plans, managers and history', () => {
+	test('filters the writes around the plans, managers, history, invoices', () => {
 		const filter = vi.fn();
 
 		(subscriptionsHook.config as (...args: unknown[]) => void)(
@@ -164,6 +165,9 @@ describe('subscriptionsHook', () => {
 			['subscription_events.items.delete', expect.any(Function)],
 			['subscription_beneficiaries.items.delete', expect.any(Function)],
 			['subscription_beneficiaries.items.update', expect.any(Function)],
+			['subscription_invoices.items.create', expect.any(Function)],
+			['subscription_invoices.items.update', expect.any(Function)],
+			['subscription_invoices.items.delete', expect.any(Function)],
 		]);
 	});
 
@@ -348,6 +352,30 @@ describe('subscriptionsHook', () => {
 			},
 			refuseBeneficiaryMove,
 			[[{ data: { user: 'user-2' }, keys: [1] }], 'filter database'],
+		],
+		[
+			'subscription_invoices.items.create',
+			10,
+			{ status: 'paid' },
+			{ action: 'create', collection: 'subscription_invoices' },
+			refuseSubscriptionInvoiceWrite,
+			[],
+		],
+		[
+			'subscription_invoices.items.update',
+			11,
+			[{ data: { status: 'paid' }, keys: [1] }],
+			{ action: 'update', collection: 'subscription_invoices' },
+			refuseSubscriptionInvoiceWrite,
+			[],
+		],
+		[
+			'subscription_invoices.items.delete',
+			12,
+			[1],
+			{ action: 'delete', collection: 'subscription_invoices' },
+			refuseSubscriptionInvoiceWrite,
+			[],
 		],
 	] as const;
 

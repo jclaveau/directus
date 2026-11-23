@@ -11,6 +11,7 @@ import {
 } from './config/read-subscriptions-config.js';
 import { addOwnBeneficiary } from './members/add-own-beneficiary.js';
 import { createCheckout } from './members/create-checkout.js';
+import { listOwnInvoices } from './members/list-own-invoices.js';
 import { listOwnSubscriptions } from './members/list-own-subscriptions.js';
 import { archivePlan } from './plans/archive-plan.js';
 import { createProviders } from './providers/create-providers.js';
@@ -73,6 +74,23 @@ export const subscriptionsEndpoint = defineEndpoint(
 					response.json({ data: ownSubscriptions });
 				}, next);
 		});
+
+		router.get(
+			'/:id/invoices',
+			(request: AccountableRequest, response, next) => {
+				Promise.resolve()
+					.then(() => {
+						return listOwnInvoices(
+							database,
+							request.accountability?.user ?? null,
+							String(request.params['id']),
+						);
+					})
+					.then((ownInvoices) => {
+						response.json({ data: ownInvoices });
+					}, next);
+			},
+		);
 
 		router.post('/checkout', (request: AccountableRequest, response, next) => {
 			Promise.resolve()

@@ -13,7 +13,10 @@ import {
 	createSubscriptionTables,
 } from '../migrations/create-subscription-tables.js';
 import type { SubscriptionProvider } from '../providers/types.js';
+import { copySubscriptionInvoices } from './copy-subscription-invoices.js';
 import { runSyncBatch } from './run-sync-batch.js';
+
+vi.mock('./copy-subscription-invoices.js');
 
 let database: Knex;
 
@@ -42,6 +45,7 @@ beforeEach(async () => {
 afterEach(async () => {
 	vi.useRealTimers();
 	vi.restoreAllMocks();
+	vi.resetAllMocks();
 	await database.destroy();
 });
 
@@ -132,6 +136,16 @@ describe('runSyncBatch', () => {
 		expect(fetchSubscription).toHaveBeenCalledWith('sub_1');
 		expect(logger.warn).not.toHaveBeenCalled();
 		expect(logger.error).not.toHaveBeenCalled();
+
+		expect(vi.mocked(copySubscriptionInvoices).mock.calls).toEqual([[{
+			database,
+			subscriptionProvider: expect.objectContaining({ fetchSubscription }),
+			providerName: 'stripe',
+			resourceId: 'sub_1',
+			subscriptionId: 1,
+			copiedAt: new Date('2026-11-05T00:00:00Z'),
+			logger,
+		}]]);
 
 		expect(await database('subscription_sync_queue')).toEqual([{
 			id: 1,
@@ -224,6 +238,8 @@ describe('runSyncBatch', () => {
 			'Subscription sync of "stripe" "sub_1" failed, attempt 3:'
 			+ ' "Unreadable customer"',
 		);
+
+		expect(copySubscriptionInvoices).not.toHaveBeenCalled();
 
 		expect(await database('subscriptions').select('status'))
 			.toEqual([{ status: 'pending' }]);
@@ -729,6 +745,7 @@ describe('runSyncBatch', () => {
 
 		expect(accessService.deleteOne).toHaveBeenCalledWith('access-1');
 		expect(await database('subscription_sync_queue')).toEqual([]);
+		expect(copySubscriptionInvoices).not.toHaveBeenCalled();
 
 		expect(await database('subscriptions').select('status'))
 			.toEqual([{ status: 'canceled' }]);

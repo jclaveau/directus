@@ -12,6 +12,7 @@ import {
 	refusePlanDelete,
 	refusePlanStatusUpdate,
 	refuseSubscriptionEventWrite,
+	refuseSubscriptionInvoiceWrite,
 	refuseSubscriptionStateUpdate,
 } from './refuse-direct-writes.js';
 
@@ -360,6 +361,17 @@ describe('refuseSubscriptionEventWrite', () => {
 		}).toThrow(new InvalidPayloadError({
 			reason: '"subscription_events" only records what the subscriptions'
 				+ ' bundle did',
+		}));
+	});
+});
+
+describe('refuseSubscriptionInvoiceWrite', () => {
+	test('refuses any write', () => {
+		expect(() => {
+			refuseSubscriptionInvoiceWrite();
+		}).toThrow(new InvalidPayloadError({
+			reason: '"subscription_invoices" only copies what the providers'
+				+ ' billed',
 		}));
 	});
 });

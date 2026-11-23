@@ -20,6 +20,7 @@ import {
 	refusePlanDelete,
 	refusePlanStatusUpdate,
 	refuseSubscriptionEventWrite,
+	refuseSubscriptionInvoiceWrite,
 	refuseSubscriptionStateUpdate,
 } from './plans/refuse-direct-writes.js';
 import { createProviders } from './providers/create-providers.js';
@@ -104,18 +105,22 @@ export const subscriptionsHook = defineHook(
 			}
 		}
 
-		function refuseEventWriteAs(action: ExtensionAccessCheck['action']) {
+		function refuseRecordWriteAs(
+			recordCollection: string,
+			action: ExtensionAccessCheck['action'],
+			refuseRecordWrite: () => never,
+		) {
 			return async (
 				_eventPayload: unknown,
 				_eventMeta: unknown,
 				filterContext: WriteFilterContext,
 			): Promise<never> => {
 				await validateWriteAccess(
-					{ action, collection: 'subscription_events' },
+					{ action, collection: recordCollection },
 					filterContext,
 				);
 
-				return refuseSubscriptionEventWrite();
+				return refuseRecordWrite();
 			};
 		}
 
@@ -201,9 +206,32 @@ export const subscriptionsHook = defineHook(
 			},
 		);
 
-		filter('subscription_events.items.create', refuseEventWriteAs('create'));
-		filter('subscription_events.items.update', refuseEventWriteAs('update'));
-		filter('subscription_events.items.delete', refuseEventWriteAs('delete'));
+		filter(
+			'subscription_events.items.create',
+			refuseRecordWriteAs(
+				'subscription_events',
+				'create',
+				refuseSubscriptionEventWrite,
+			),
+		);
+
+		filter(
+			'subscription_events.items.update',
+			refuseRecordWriteAs(
+				'subscription_events',
+				'update',
+				refuseSubscriptionEventWrite,
+			),
+		);
+
+		filter(
+			'subscription_events.items.delete',
+			refuseRecordWriteAs(
+				'subscription_events',
+				'delete',
+				refuseSubscriptionEventWrite,
+			),
+		);
 
 		// Before the rows go, in the delete's transaction: a beneficiary removed by
 		// a request would otherwise keep the policy it no longer pays for.
@@ -246,6 +274,33 @@ export const subscriptionsHook = defineHook(
 					filterContext.database,
 				);
 			},
+		);
+
+		filter(
+			'subscription_invoices.items.create',
+			refuseRecordWriteAs(
+				'subscription_invoices',
+				'create',
+				refuseSubscriptionInvoiceWrite,
+			),
+		);
+
+		filter(
+			'subscription_invoices.items.update',
+			refuseRecordWriteAs(
+				'subscription_invoices',
+				'update',
+				refuseSubscriptionInvoiceWrite,
+			),
+		);
+
+		filter(
+			'subscription_invoices.items.delete',
+			refuseRecordWriteAs(
+				'subscription_invoices',
+				'delete',
+				refuseSubscriptionInvoiceWrite,
+			),
 		);
 
 		schedule(SYNC_BATCH_CRON, async () => {
