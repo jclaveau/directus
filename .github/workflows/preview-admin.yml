@@ -425,7 +425,15 @@ jobs:
           echo "PREVIEW_STRIPE_WEBHOOK_ID=$(jq -r .id <<<"$STRIPE_ANSWER")" >> "$GITHUB_ENV"
 
           # Mollie resolves the URL before it takes it, and a fresh tunnel's
-          # hostname takes a while to reach every resolver.
+          # hostname takes a while to reach every resolver: wait for 1.1.1.1 to
+          # answer it, as the Mollie probe does, then retry what still races.
+          TUNNEL_HOST=${URL#https://}
+          for _ in $(seq 1 30); do
+            curl -sS -H 'accept: application/dns-json' \
+              "https://1.1.1.1/dns-query?name=$TUNNEL_HOST&type=A" \
+            | jq -e '(.Answer // []) | length > 0' >/dev/null && break
+            sleep 2
+          done
           for _ in $(seq 1 12); do
             MOLLIE_ANSWER=$(curl -sS https://api.mollie.com/v2/webhooks \
               -H "Authorization: Bearer $MOLLIE_ACCESS_TOKEN" \
