@@ -5,6 +5,9 @@ import { subscriptionsHook } from './hook.js';
 import { addCheckoutColumns } from './migrations/add-checkout-columns.js';
 import { createInvitesTable } from './migrations/create-invites-table.js';
 import {
+	createInvoicesTable,
+} from './migrations/create-invoices-table.js';
+import {
 	createParkedSyncsPreset,
 } from './migrations/create-parked-syncs-preset.js';
 import {
@@ -20,6 +23,7 @@ export default defineBundleApi([
 	showSubscriptionCollections,
 	addCheckoutColumns,
 	createInvitesTable,
+	createInvoicesTable,
 	subscriptionsCliHook,
 	subscriptionsHook,
 	subscriptionsEndpoint,

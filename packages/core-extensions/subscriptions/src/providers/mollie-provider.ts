@@ -18,6 +18,7 @@ import { readDirectusSubscription } from './read-directus-subscription.js';
 import type {
 	BillingInterval,
 	ProviderBilling,
+	ProviderInvoice,
 	ProviderSubscriptionIds,
 	SubscriptionProvider,
 } from './types.js';
@@ -289,6 +290,67 @@ export function createMollieProvider(
 				subscriptionId: createdSubscription.id,
 			});
 		},
+
+		/**
+		 * The subscription's payments, and the checkout's first payment, which
+		 * carries no subscriptionId: the customer created for that checkout holds
+		 * it, under the subscription's `directus_subscription`. A resume is its own
+		 * row: the payments of the subscription it resumes stay on that row.
+		 */
+		async listInvoices(resourceId) {
+			const { customerId, subscriptionId } = parseMollieResourceId(resourceId);
+
+			const mollieSubscription = await mollieClient.customerSubscriptions
+				.get(subscriptionId, { customerId });
+
+			const providerInvoices: ProviderInvoice[] = [];
+
+			for await (const subscriptionPayment of mollieClient
+				.subscriptionPayments.iterate({ customerId, subscriptionId })) {
+				providerInvoices.push(readMolliePayment(subscriptionPayment));
+			}
+
+			if (readMetadataText(mollieSubscription, 'resumes') !== null) {
+				return providerInvoices;
+			}
+
+			const directusSubscription = readDirectusSubscription(
+				mollieSubscription.metadata,
+			);
+
+			for await (const customerPayment of mollieClient.customerPayments
+				.iterate({ customerId })) {
+				if (customerPayment.sequenceType === SequenceType.first
+					&& readDirectusSubscription(customerPayment.metadata)
+					=== directusSubscription) {
+					providerInvoices.push(readMolliePayment(customerPayment));
+				}
+			}
+
+			return providerInvoices;
+		},
+	};
+}
+
+/** Mollie has no invoice page for a payment: the URLs stay null. */
+function readMolliePayment(molliePayment: {
+	id: string;
+	status: string;
+	amount: { currency: string; value: string };
+	createdAt: string;
+	paidAt?: string;
+}): ProviderInvoice {
+	return {
+		providerReference: molliePayment.id,
+		status: molliePayment.status,
+		amount: molliePayment.amount.value,
+		currency: molliePayment.amount.currency.toUpperCase(),
+		dateIssued: new Date(molliePayment.createdAt),
+		datePaid: molliePayment.paidAt === undefined
+			? null
+			: new Date(molliePayment.paidAt),
+		hostedUrl: null,
+		pdfUrl: null,
 	};
 }
 

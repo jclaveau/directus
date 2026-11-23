@@ -500,6 +500,74 @@ describe('resumeCancel', () => {
 	});
 });
 
+describe('listInvoices', () => {
+	test('lists the subscription invoices, paid or not', async () => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		vi.spyOn(stripeClient.invoices, 'list').mockReturnValue([
+			{
+				id: 'in_2',
+				status: 'open',
+				total: 990,
+				currency: 'eur',
+				created: 1_798_761_600,
+				status_transitions: { paid_at: null },
+				hosted_invoice_url: 'https://invoice.stripe.com/i/in_2',
+				invoice_pdf: null,
+			},
+			{
+				id: 'in_1',
+				status: 'paid',
+				total: 2500,
+				currency: 'eur',
+				created: 1_796_083_200,
+				status_transitions: { paid_at: 1_796_083_260 },
+				hosted_invoice_url: 'https://invoice.stripe.com/i/in_1',
+				invoice_pdf: 'https://pay.stripe.com/invoice/in_1/pdf',
+			},
+		] as never);
+
+		await expect(createStripeProvider(stripeClient, 'whsec_1')
+			.listInvoices('sub_1')).resolves.toEqual([
+			{
+				providerReference: 'in_2',
+				status: 'open',
+				amount: '9.90',
+				currency: 'EUR',
+				dateIssued: new Date('2027-01-01T00:00:00Z'),
+				datePaid: null,
+				hostedUrl: 'https://invoice.stripe.com/i/in_2',
+				pdfUrl: null,
+			},
+			{
+				providerReference: 'in_1',
+				status: 'paid',
+				amount: '25.00',
+				currency: 'EUR',
+				dateIssued: new Date('2026-12-01T00:00:00Z'),
+				datePaid: new Date('2026-12-01T00:01:00Z'),
+				hostedUrl: 'https://invoice.stripe.com/i/in_1',
+				pdfUrl: 'https://pay.stripe.com/invoice/in_1/pdf',
+			},
+		]);
+
+		expect(stripeClient.invoices.list)
+			.toHaveBeenCalledWith({ subscription: 'sub_1', limit: 100 });
+	});
+
+	test('refuses an invoice with no status', async () => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		vi.spyOn(stripeClient.invoices, 'list').mockReturnValue([
+			{ id: 'in_1', status: null },
+		] as never);
+
+		await expect(createStripeProvider(stripeClient, 'whsec_1')
+			.listInvoices('sub_1'))
+			.rejects.toThrow(new Error('Stripe invoice "in_1" has no status'));
+	});
+});
+
 describe('composeResourceId', () => {
 	test('keys Stripe resources on the subscription id', () => {
 		expect(createStripeProvider(new Stripe('sk_test_1'), 'whsec_1')
