@@ -424,24 +424,32 @@ jobs:
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET"
           echo "PREVIEW_STRIPE_WEBHOOK_ID=$(jq -r .id <<<"$STRIPE_ANSWER")" >> "$GITHUB_ENV"
 
-          MOLLIE_ANSWER=$(curl -sS https://api.mollie.com/v2/webhooks \
-            -H "Authorization: Bearer $MOLLIE_ACCESS_TOKEN" \
-            -H 'Content-Type: application/json' \
-            -d "$(jq -n --arg url "$URL/subscriptions/webhooks/mollie" \
-              --arg name "$WEBHOOK_LABEL" '{
-                name: $name,
-                url: $url,
-                eventTypes: [
-                  "payment.paid",
-                  "payment.authorized",
-                  "payment.failed",
-                  "payment.canceled",
-                  "payment.expired",
-                  "payment.pending"
-                ],
-                testmode: true
-              }')")
-          MOLLIE_WEBHOOK_SECRET=$(jq -r '.webhookSecret // empty' <<<"$MOLLIE_ANSWER")
+          # Mollie resolves the URL before it takes it, and a fresh tunnel's
+          # hostname takes a while to reach every resolver.
+          for _ in $(seq 1 12); do
+            MOLLIE_ANSWER=$(curl -sS https://api.mollie.com/v2/webhooks \
+              -H "Authorization: Bearer $MOLLIE_ACCESS_TOKEN" \
+              -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg url "$URL/subscriptions/webhooks/mollie" \
+                --arg name "$WEBHOOK_LABEL" '{
+                  name: $name,
+                  url: $url,
+                  eventTypes: [
+                    "payment.paid",
+                    "payment.authorized",
+                    "payment.failed",
+                    "payment.canceled",
+                    "payment.expired",
+                    "payment.pending"
+                  ],
+                  testmode: true
+                }')")
+            MOLLIE_WEBHOOK_SECRET=$(jq -r '.webhookSecret // empty' <<<"$MOLLIE_ANSWER")
+            [ -n "$MOLLIE_WEBHOOK_SECRET" ] && break
+            jq -e '(.detail // "") | startswith("Unsafe URL")' <<<"$MOLLIE_ANSWER" \
+              >/dev/null || break
+            sleep 10
+          done
           if [ -z "$MOLLIE_WEBHOOK_SECRET" ]; then
             echo "Mollie refused the webhook: $(jq -c '.detail' <<<"$MOLLIE_ANSWER")"
             exit 1
