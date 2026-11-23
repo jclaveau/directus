@@ -38,6 +38,8 @@ permissions:
   contents: read
   # Post the preview link + throwaway credentials as a PR comment (pull_request_target runs).
   pull-requests: write
+  # Read the past preview runs' step times for the block's deploy ETA.
+  actions: read
 
 jobs:
   preview:
@@ -89,7 +91,7 @@ jobs:
       PREVIEW_SHA: ${{ github.event.pull_request.head.sha || inputs.ref }}
       PREVIEW_TIMEOUT_MINUTES: ${{ inputs.timeout_minutes || '180' }}
       PREVIEW_PUBLISHER: |
-        import json, os, re, subprocess, sys, time
+        import calendar, json, os, re, subprocess, sys, time
 
         preview_state = sys.argv[1]
         pr_number = os.environ['PREVIEW_PR']
@@ -111,6 +113,59 @@ jobs:
         def utc_clock(epoch_seconds):
             return time.strftime('%H:%M UTC', time.gmtime(epoch_seconds))
 
+        # Median time from this step's start to "deployed" over the last past
+        # previews, cancelled ones included: most previews end cancelled.
+        def read_deploy_history():
+            def read_github(api_path):
+                return json.loads(subprocess.run(
+                    ['gh', 'api', api_path], capture_output=True, text=True, check=True,
+                ).stdout)
+
+            def parse_stamp(stamp_text):
+                return calendar.timegm(time.strptime(stamp_text, '%Y-%m-%dT%H:%M:%SZ'))
+
+            listed_runs = read_github(
+                f"repos/{repository}/actions/workflows/preview-admin.yml/runs?per_page=100",
+            )['workflow_runs']
+            booted_runs = [
+                listed_run for listed_run in listed_runs
+                if listed_run['conclusion'] != 'skipped' and str(listed_run['id']) != run_id
+            ]
+            deploy_durations = []
+            # 30 job reads at most: a run cancelled before deploying adds none.
+            for listed_run in booted_runs[:30]:
+                run_jobs = read_github(f"repos/{repository}/actions/runs/{listed_run['id']}/jobs")['jobs']
+                job_steps = {
+                    job_step['name']: job_step
+                    for run_job in run_jobs if run_job['name'] == 'preview'
+                    for job_step in run_job['steps']
+                }
+                deploying_step = job_steps.get('Mark the preview deploying in the PR description')
+                deployed_step = job_steps.get('Mark the preview deployed in the PR description')
+                if deploying_step is None or deployed_step is None or deployed_step['conclusion'] != 'success':
+                    continue
+                deploy_durations.append(
+                    parse_stamp(deployed_step['completed_at']) - parse_stamp(deploying_step['started_at']),
+                )
+                if len(deploy_durations) == 10:
+                    break
+            if not deploy_durations:
+                return ''
+            deploy_durations.sort()
+            return f"{round(deploy_durations[len(deploy_durations) // 2])} {len(deploy_durations)}"
+
+        # Read once on claim, then carried to "booting" by $GITHUB_ENV.
+        if preview_state == 'claimed':
+            try:
+                deploy_history = read_deploy_history()
+            except subprocess.CalledProcessError as gh_error:
+                print(f"::warning::no deploy ETA: gh api failed with {json.dumps(gh_error.stderr)}")
+                deploy_history = ''
+            with open(os.environ['GITHUB_ENV'], 'a') as env_file:
+                env_file.write(f"PREVIEW_DEPLOY_HISTORY={deploy_history}\n")
+        else:
+            deploy_history = os.environ.get('PREVIEW_DEPLOY_HISTORY', '')
+
         if preview_state in ('claimed', 'booting'):
             state_line = f"⏳ deploying since {utc_clock(started_at)}"
         elif preview_state == 'deployed' and os.environ.get('FIXTURES_OUTCOME') == 'failure':
@@ -125,6 +180,13 @@ jobs:
             state_line = f"🔴 failed at {utc_clock(now)}, link dead"
         else:
             raise SystemExit(f"unknown preview state {json.dumps(preview_state)}")
+
+        if preview_state in ('claimed', 'booting') and deploy_history:
+            deploy_seconds, deploy_samples = deploy_history.split()
+            state_line += (
+                f", deployed ~{utc_clock(started_at + int(deploy_seconds))}"
+                f" (median of {deploy_samples} past deploys)"
+            )
 
         block_lines = [
             '<!-- admin-preview:start -->',
