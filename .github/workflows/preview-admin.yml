@@ -38,6 +38,8 @@ permissions:
   contents: read
   # Post the preview link + throwaway credentials as a PR comment (pull_request_target runs).
   pull-requests: write
+  # Tell an ended preview run's leftover provider webhooks from a live one's.
+  actions: read
 
 jobs:
   preview:
@@ -370,6 +372,7 @@ jobs:
           STRIPE_TEST_KEY: ${{ secrets.SUBSCRIPTIONS_STRIPE_SECRET_KEY }}
           MOLLIE_TEST_KEY: ${{ secrets.SUBSCRIPTIONS_MOLLIE_API_KEY }}
           MOLLIE_ACCESS_TOKEN: ${{ secrets.MOLLIE_PROBE_ACCESS_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           [[ "$STRIPE_TEST_KEY" =~ ^sk_test_ ]] \
             || { echo "SUBSCRIPTIONS_STRIPE_SECRET_KEY is not an sk_test_ key"; exit 1; }
@@ -381,28 +384,40 @@ jobs:
           WEBHOOK_LABEL="scalabus-preview $GITHUB_RUN_ID $(date +%s)"
           STALE_BEFORE=$(( $(date +%s) - 3 * 3600 ))
 
-          # A run killed before its cleanup leaves its webhooks: drop the ones
-          # older than any preview, by the epoch their label carries.
+          # A run that ended no longer uses its webhooks, and a cancel or a failed
+          # delete can leave them: drop each preview webhook whose run, named in
+          # its label, is over, or that is older than any preview.
+          is_webhook_stale() {
+            local label_run=$1 label_epoch=$2
+            [[ "$label_epoch" =~ ^[0-9]+$ ]] || return 0
+            [ "$label_epoch" -lt "$STALE_BEFORE" ] && return 0
+            [ "$(curl -sS -H "Authorization: Bearer $GH_TOKEN" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$label_run" \
+              | jq -r '.status // empty')" = completed ]
+          }
           curl -sS -u "$STRIPE_TEST_KEY:" \
             'https://api.stripe.com/v1/webhook_endpoints?limit=100' \
-          | jq -r --argjson before "$STALE_BEFORE" '.data[]?
+          | jq -r '.data[]?
               | select((.description // "") | startswith("scalabus-preview "))
-              | select(((.description | split(" "))[2] | tonumber? // 0) < $before)
-              | .id' \
-          | while read -r STALE_ID; do
-              curl -sS -o /dev/null -u "$STRIPE_TEST_KEY:" -X DELETE \
+              | [.id, (.description | split(" "))[1, 2]] | @tsv' \
+          | while read -r STALE_ID LABEL_RUN LABEL_EPOCH; do
+              is_webhook_stale "$LABEL_RUN" "$LABEL_EPOCH" || continue
+              curl -sS -o /dev/null -w "Stale Stripe webhook $STALE_ID delete: %{http_code}\n" \
+                -u "$STRIPE_TEST_KEY:" -X DELETE \
                 "https://api.stripe.com/v1/webhook_endpoints/$STALE_ID" || true
             done
+          # Mollie takes testmode in the body of a DELETE: in the query it answers 422.
           curl -sS -H "Authorization: Bearer $MOLLIE_ACCESS_TOKEN" \
             'https://api.mollie.com/v2/webhooks?testmode=true&limit=250' \
-          | jq -r --argjson before "$STALE_BEFORE" '._embedded.webhooks[]?
+          | jq -r '._embedded.webhooks[]?
               | select((.name // "") | startswith("scalabus-preview "))
-              | select(((.name | split(" "))[2] | tonumber? // 0) < $before)
-              | .id' \
-          | while read -r STALE_ID; do
-              curl -sS -o /dev/null -H "Authorization: Bearer $MOLLIE_ACCESS_TOKEN" \
-                -X DELETE \
-                "https://api.mollie.com/v2/webhooks/$STALE_ID?testmode=true" || true
+              | [.id, (.name | split(" "))[1, 2]] | @tsv' \
+          | while read -r STALE_ID LABEL_RUN LABEL_EPOCH; do
+              is_webhook_stale "$LABEL_RUN" "$LABEL_EPOCH" || continue
+              curl -sS -o /dev/null -w "Stale Mollie webhook $STALE_ID delete: %{http_code}\n" \
+                -H "Authorization: Bearer $MOLLIE_ACCESS_TOKEN" \
+                -H 'Content-Type: application/json' -d '{"testmode":true}' \
+                -X DELETE "https://api.mollie.com/v2/webhooks/$STALE_ID" || true
             done
 
           # The API version the bundle's Stripe probe pins, read as text only.
@@ -860,8 +875,9 @@ jobs:
           fi
           if [ -n "${PREVIEW_MOLLIE_WEBHOOK_ID:-}" ]; then
             curl -sS -o /dev/null -w 'Mollie webhook delete: %{http_code}\n' \
-              -H "Authorization: Bearer $MOLLIE_ACCESS_TOKEN" -X DELETE \
-              "https://api.mollie.com/v2/webhooks/$PREVIEW_MOLLIE_WEBHOOK_ID?testmode=true"
+              -H "Authorization: Bearer $MOLLIE_ACCESS_TOKEN" \
+              -H 'Content-Type: application/json' -d '{"testmode":true}' \
+              -X DELETE "https://api.mollie.com/v2/webhooks/$PREVIEW_MOLLIE_WEBHOOK_ID"
           fi
 
       # A cancelled run (a new push, a click, or the job's timeout-minutes) and a
