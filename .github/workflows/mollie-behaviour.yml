@@ -10,6 +10,10 @@ name: Mollie behaviour
 # next-gen webhook jean made in the dashboard and says which of
 # MOLLIE_ROTATION_SECRET_A / _B signed it: how long a rolled secret keeps
 # signing. It skips, green, while secret A or the webhook id is unset.
+#
+# mode=checkout-session (dispatch only) instead asks whether the Checkout
+# Sessions API (beta) behind Mollie Components can start a subscription's first
+# payment in test mode, and uploads what Mollie answered.
 
 on:
   workflow_dispatch:
@@ -17,7 +21,7 @@ on:
       mode:
         description: behaviour compares with the baseline; rotation-check pings
         type: choice
-        options: [behaviour, rotation-check]
+        options: [behaviour, rotation-check, checkout-session]
         default: behaviour
       rotation_webhook_id:
         description: rotation-check's hook_ id (default vars.MOLLIE_ROTATION_WEBHOOK_ID)
@@ -83,8 +87,10 @@ jobs:
         env:
           SUBSCRIPTIONS_MOLLIE_API_KEY: ${{ secrets.SUBSCRIPTIONS_MOLLIE_API_KEY }}
           MOLLIE_PROBE_ACCESS_TOKEN: ${{ secrets.MOLLIE_PROBE_ACCESS_TOKEN }}
+          PROBE_MODE: ${{ inputs.mode || 'behaviour' }}
         run: |
           node scripts/mollie-behaviour/mollie-webhook-probe.mjs \
+            --mode "$PROBE_MODE" \
             --output-directory "$RUNNER_TEMP/mollie-behaviour"
 
       - name: Upload the captures

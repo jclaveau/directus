@@ -15,6 +15,16 @@
 //    created then canceled; each carries a classic webhookUrl <tunnel>/classic
 // 5. listens, then compares what reached which webhook with the baseline
 //
+// `--mode checkout-session` does none of that either: it asks whether the
+// Checkout Sessions API (beta) behind Mollie Components can start a
+// subscription's first payment in test mode. It creates a customer and a
+// `sequenceType: first` session, reads it back, mounts the Methods Component
+// on a tunnel page in headless Chromium (screenshot in the output directory),
+// pays through any test checkout link the session carries, then lists the
+// customer's mandates and tries a subscription on them. It writes what Mollie
+// answered to checkout-session.json; no baseline yet, so it fails only when a
+// call it relies on throws.
+//
 // `--mode rotation-check` does none of that: it points an existing next-gen
 // webhook (made by hand in the dashboard, whose secret only creation returns)
 // at the tunnel, pings it, and says which of two secrets signed the delivery,
@@ -71,9 +81,11 @@ const { values: cliOptions } = parseArgs({
 
 const probeMode = cliOptions['mode'];
 
-if (!['behaviour', 'rotation-check'].includes(probeMode)) {
+const probeModes = ['behaviour', 'rotation-check', 'checkout-session'];
+
+if (!probeModes.includes(probeMode)) {
 	throw new Error(
-		'--mode must be "behaviour" or "rotation-check", got'
+		`--mode must be one of ${JSON.stringify(probeModes)}, got`
 		+ ` ${JSON.stringify(probeMode)}`,
 	);
 }
@@ -288,6 +300,10 @@ function parseCapturedBody(requestPath, rawBody) {
 	}
 }
 
+// The page mounting Mollie Components, set by --mode checkout-session once its
+// session holds a client access token.
+let componentsPage = null;
+
 const receiverServer = createServer((incomingRequest, serverResponse) => {
 	const bodyChunks = [];
 	incomingRequest.on('data', (bodyChunk) => bodyChunks.push(bodyChunk));
@@ -308,6 +324,18 @@ const receiverServer = createServer((incomingRequest, serverResponse) => {
 			if (headerName.toLowerCase() === 'x-mollie-signature') {
 				signatureLines.push(incomingRequest.rawHeaders[headerIndex + 1]);
 			}
+		}
+
+		if (
+			incomingRequest.method === 'GET'
+			&& incomingRequest.url === '/components'
+			&& componentsPage !== null
+		) {
+			serverResponse
+				.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+				.end(componentsPage);
+
+			return;
 		}
 
 		if (incomingRequest.method === 'GET') {
@@ -1196,6 +1224,337 @@ async function checkRotation() {
 
 	console.log(`rotation: no delivery in ${listenSeconds} s`);
 	process.exitCode = 1;
+}
+
+// The status and detail of a refusal, so a refused beta call is a finding
+// rather than the end of the run.
+async function callMollieVerdict(method, path, { body, bearerToken } = {}) {
+	try {
+		const mollieAnswer = await callMollie(method, path, { body, bearerToken });
+		return { httpStatus: 'ok', mollieDetail: null, mollieAnswer };
+	}
+	catch (mollieError) {
+		let mollieDetail = String(mollieError);
+
+		try {
+			const errorBody = JSON.parse(mollieError.responseText);
+
+			mollieDetail = errorBody.field === undefined
+				? errorBody.detail
+				: `${errorBody.field}: ${errorBody.detail}`;
+		}
+		catch {
+			// not a Mollie error body: keep the error text
+		}
+
+		return {
+			httpStatus: mollieError.httpStatus ?? null,
+			mollieDetail: redactSecrets(mollieDetail),
+			mollieAnswer: null,
+		};
+	}
+}
+
+// Keys, links and a few fields of an answer, never a token's value.
+function describeVerdict(mollieVerdict) {
+	const { httpStatus, mollieDetail, mollieAnswer } = mollieVerdict;
+
+	if (mollieAnswer === null) {
+		return { httpStatus, detail: mollieDetail };
+	}
+
+	return {
+		httpStatus,
+		keys: Object.keys(mollieAnswer).sort(),
+		linkKeys: Object.keys(mollieAnswer._links ?? {}).sort(),
+		embeddedKeys: Object.keys(mollieAnswer._embedded ?? {}).sort(),
+		status: mollieAnswer.status ?? null,
+		mode: mollieAnswer.mode ?? null,
+		sequenceType: mollieAnswer.sequenceType ?? null,
+		hasClientAccessToken: typeof mollieAnswer.clientAccessToken === 'string',
+		paymentFields: Object.fromEntries(Object.entries(mollieAnswer)
+			.filter(([answerKey]) => /payment/i.test(answerKey))
+			.map(([answerKey, answerValue]) => {
+				return [answerKey, redactSecrets(JSON.stringify(answerValue))];
+			})),
+	};
+}
+
+// Mounts the Methods Component on a tunnel page: does it render in test mode,
+// and what does it show?
+// eslint-disable-next-line local/no-single-caller-function -- browser plumbing
+async function mountMethodsComponent(checkoutBrowser, clientAccessToken) {
+	componentsPage = `<!doctype html>
+<html><head><meta charset="utf-8">
+<script src="https://js.mollie.com/v2/mollie.js"></script></head>
+<body><div id="methods-component"></div><pre id="mount-outcome"></pre>
+<script>
+	const mountOutcome = document.getElementById('mount-outcome');
+	try {
+		const mollieCheckout = Mollie.Checkout(
+			${JSON.stringify(clientAccessToken)},
+			{ locale: 'en-US' },
+		);
+		mollieCheckout.create('methods-component').mount('#methods-component');
+		mountOutcome.textContent = 'mounted';
+	}
+	catch (mountError) {
+		mountOutcome.textContent = 'mount failed: ' + String(mountError);
+	}
+</script></body></html>`;
+
+	const componentsTab = await checkoutBrowser.newPage();
+	const consoleErrors = [];
+
+	componentsTab.on('console', (consoleMessage) => {
+		if (consoleMessage.type() === 'error') {
+			consoleErrors.push(redactSecrets(consoleMessage.text()).slice(0, 200));
+		}
+	});
+
+	await componentsTab.goto(`${tunnelUrl}/components`, { waitUntil: 'load' });
+	await waitSeconds(10);
+
+	await componentsTab.screenshot({
+		path: join(outputDirectory, 'methods-component.png'),
+		fullPage: true,
+	});
+
+	const frameDescriptions = [];
+
+	for (const componentFrame of componentsTab.frames().slice(1)) {
+		const frameText = await componentFrame
+			.evaluate(() => document.body?.innerText ?? '')
+			.catch((frameError) => `unreadable: ${String(frameError)}`);
+
+		frameDescriptions.push({
+			host: new URL(componentFrame.url()).host,
+			text: redactSecrets(frameText)
+				.replace(/\s+/g, ' ')
+				.slice(0, 300),
+		});
+	}
+
+	const mountOutcome = await componentsTab.textContent('#mount-outcome');
+	await componentsTab.close();
+	componentsPage = null;
+
+	return {
+		mountOutcome: redactSecrets(mountOutcome ?? ''),
+		consoleErrors,
+		frames: frameDescriptions,
+	};
+}
+
+// Pays a test checkout page by its `final_state` radio, wherever a frame
+// holds it.
+// eslint-disable-next-line local/no-single-caller-function -- browser plumbing
+async function payTestCheckout(checkoutBrowser, checkoutHref) {
+	const checkoutTab = await checkoutBrowser.newPage();
+	await checkoutTab.goto(checkoutHref, { waitUntil: 'networkidle' });
+	const paidRadio = 'input[name="final_state"][value="paid"]';
+
+	for (const checkoutFrame of checkoutTab.frames()) {
+		if (await checkoutFrame.locator(paidRadio).count() === 0) {
+			continue;
+		}
+
+		await checkoutFrame.check(paidRadio);
+
+		await Promise.all([
+			checkoutTab.waitForURL(
+				(pageUrl) => pageUrl.href.startsWith(tunnelUrl),
+				{ timeout: 30_000 },
+			),
+			checkoutFrame.click('button[name="submit"]'),
+		]);
+
+		await checkoutTab.close();
+		return 'paid on the test checkout';
+	}
+
+	await checkoutTab.screenshot({
+		path: join(outputDirectory, 'session-checkout.png'),
+		fullPage: true,
+	});
+
+	await checkoutTab.close();
+	// url() is the last known one, still readable once the tab is closed
+	return `no final_state radio on ${new URL(checkoutTab.url()).host}`;
+}
+
+// eslint-disable-next-line local/no-single-caller-function -- returns early
+async function checkCheckoutSession() {
+	const sessionFindings = {};
+
+	const probeCustomer = await callMollie('POST', '/customers', {
+		body: { name: 'scalabus probe session', email: 'probe@example.com' },
+	});
+
+	console.log(`  customer ${probeCustomer.id}`);
+
+	cleanupSteps.push(async () => {
+		await callMollie('DELETE', `/customers/${probeCustomer.id}`);
+		console.log(`  deleted customer ${probeCustomer.id}`);
+	});
+
+	const sessionBody = {
+		amount: { currency: 'EUR', value: '10.00' },
+		description: 'scalabus probe session first',
+		lines: [
+			{
+				description: 'scalabus probe plan',
+				quantity: 1,
+				unitPrice: { currency: 'EUR', value: '10.00' },
+				totalAmount: { currency: 'EUR', value: '10.00' },
+			},
+		],
+		redirectUrl: `${tunnelUrl}/return`,
+		sequenceType: 'first',
+		customerId: probeCustomer.id,
+	};
+
+	let sessionBearer = apiKey;
+	let sessionQuery = '';
+
+	let sessionCreation = await callMollieVerdict('POST', '/sessions', {
+		body: sessionBody,
+	});
+
+	sessionFindings.creationWithApiKey = describeVerdict(sessionCreation);
+
+	if (sessionCreation.mollieAnswer === null) {
+		sessionBearer = accessToken;
+		sessionQuery = '?testmode=true';
+
+		sessionCreation = await callMollieVerdict('POST', '/sessions', {
+			body: { ...sessionBody, testmode: true },
+			bearerToken: accessToken,
+		});
+
+		sessionFindings.creationWithAccessToken = describeVerdict(sessionCreation);
+	}
+
+	const createdSession = sessionCreation.mollieAnswer;
+
+	if (createdSession === null) {
+		return sessionFindings;
+	}
+
+	console.log(`  session ${createdSession.id}`);
+
+	const sessionReading = await callMollieVerdict(
+		'GET',
+		`/sessions/${createdSession.id}${sessionQuery}`,
+		{ bearerToken: sessionBearer },
+	);
+
+	sessionFindings.reading = describeVerdict(sessionReading);
+
+	const { chromium } = await import(
+		process.env.PLAYWRIGHT_CORE_PATH ?? 'playwright-core'
+	);
+
+	const checkoutBrowser = await chromium.launch();
+	cleanupSteps.push(async () => checkoutBrowser.close());
+
+	sessionFindings.methodsComponent = typeof createdSession.clientAccessToken
+		=== 'string'
+		? await mountMethodsComponent(
+			checkoutBrowser,
+			createdSession.clientAccessToken,
+		)
+		: 'no clientAccessToken to mount it with';
+
+	const checkoutHref = sessionReading.mollieAnswer?._links?.checkout?.href
+		?? createdSession._links?.checkout?.href
+		?? null;
+
+	sessionFindings.completion = checkoutHref === null
+		? 'needs a browser: no checkout link, only the Mollie.js components'
+		: await payTestCheckout(checkoutBrowser, checkoutHref);
+
+	let listedMandates = [];
+
+	for (let pollNumber = 0; pollNumber < 10; pollNumber++) {
+		const mandateList = await callMollie(
+			'GET',
+			`/customers/${probeCustomer.id}/mandates`,
+		);
+
+		listedMandates = mandateList._embedded.mandates;
+
+		if (listedMandates.length > 0 || checkoutHref === null) {
+			break;
+		}
+
+		await waitSeconds(3);
+	}
+
+	sessionFindings.mandates = listedMandates.map((listedMandate) => {
+		return `${listedMandate.method} ${listedMandate.status}`;
+	});
+
+	const subscriptionCreation = await callMollieVerdict(
+		'POST',
+		`/customers/${probeCustomer.id}/subscriptions`,
+		{
+			body: {
+				amount: { currency: 'EUR', value: '10.00' },
+				interval: '1 month',
+				description: `scalabus probe ${Date.now()}`,
+			},
+		},
+	);
+
+	sessionFindings.subscription = describeVerdict(subscriptionCreation);
+	const createdSubscription = subscriptionCreation.mollieAnswer;
+
+	if (createdSubscription !== null) {
+		await callMollie(
+			'DELETE',
+			`/customers/${probeCustomer.id}/subscriptions/${createdSubscription.id}`,
+		);
+
+		console.log(`  canceled ${createdSubscription.id}`);
+	}
+
+	return sessionFindings;
+}
+
+if (probeMode === 'checkout-session') {
+	try {
+		console.log(`== tunnel ${tunnelUrl} -> 127.0.0.1:${receiverPort}`);
+		await waitForTunnel();
+		console.log('  tunnel reachable');
+		console.log('\n== checkout session, sequenceType first');
+
+		const sessionJson = `${JSON.stringify(
+			await checkCheckoutSession(),
+			null,
+			'\t',
+		)}\n`;
+
+		writeFileSync(join(outputDirectory, 'checkout-session.json'), sessionJson);
+		console.log(sessionJson);
+
+		if (process.env.GITHUB_STEP_SUMMARY !== undefined) {
+			appendFileSync(
+				process.env.GITHUB_STEP_SUMMARY,
+				`## Mollie checkout session\n\n\`\`\`json\n${sessionJson}\`\`\`\n`,
+			);
+		}
+	}
+	catch (sessionError) {
+		const errorText = redactSecrets(JSON.stringify(String(sessionError)));
+		console.log(`\ncheckout session check failed: ${errorText}`);
+		process.exitCode = 1;
+	}
+	finally {
+		await runCleanup();
+	}
+
+	process.exit();
 }
 
 if (probeMode === 'rotation-check') {
