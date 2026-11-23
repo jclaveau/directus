@@ -1,14 +1,14 @@
+import { useEnv } from '@directus/env';
 import { RouteNotFoundError } from '@directus/errors';
-import { getNodeEnv } from '@directus/utils/node';
 import type { RequestHandler } from 'express';
 
 /**
  * The Marketplace installs, reinstalls and uninstalls extensions on a running
- * server. In production extensions change only with a deploy (#627), so it is
- * open outside production only. An unset NODE_ENV counts as production.
+ * server, so it is open only when `MARKETPLACE_ENABLED` is true, which the boot
+ * refuses in production: there extensions change only with a deploy (#627).
  */
 export function isMarketplaceEnabled(): boolean {
-	return (getNodeEnv() || 'production') !== 'production';
+	return useEnv()['MARKETPLACE_ENABLED'] === true;
 }
 
 export const refuseExtensionChangeInProduction: RequestHandler = (

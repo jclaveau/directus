@@ -105,6 +105,8 @@ const directusConfig = {
 	QUERY_LIMIT_DEFAULT: '90', // Must be less than MAX_BATCH_MUTATION by at least 3
 	ACCESS_TOKEN_TTL: '25d', // should be larger than 24.86 days to test Expires value larger than 32-bit signed integer
 	WEBSOCKETS_ENABLED: 'true',
+	// The extension suites install, uninstall and toggle extensions at runtime.
+	MARKETPLACE_ENABLED: 'true',
 	// A day, so a server re-reads a shared setting only when it hears it
 	// announced: the suites writing one announce it on a bus of their own, and a
 	// re-read landing in their window would switch every other server's cache.

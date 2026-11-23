@@ -247,3 +247,28 @@ export function validateAutoMigrateEnv(): void {
 		process.exit(1);
 	}
 }
+
+/**
+ * Refuse `MARKETPLACE_ENABLED=true` in production: there extensions change only
+ * with a deploy (#627), so the variable closes the Marketplace elsewhere, never
+ * opens it there.
+ */
+export function validateMarketplaceEnabledEnv(): void {
+	validateBooleanEnv(['MARKETPLACE_ENABLED']);
+
+	if (useEnv()['MARKETPLACE_ENABLED'] !== true) {
+		return;
+	}
+
+	const nodeEnv = process.env['NODE_ENV'] || 'production';
+
+	if (nodeEnv === 'production') {
+		useLogger().error(
+			'"MARKETPLACE_ENABLED" Environment Variable is true while NODE_ENV is'
+				+ ` ${JSON.stringify(nodeEnv)}: production changes its extensions`
+				+ ' only with a deploy.',
+		);
+
+		process.exit(1);
+	}
+}
