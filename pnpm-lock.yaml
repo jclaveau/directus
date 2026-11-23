@@ -516,14 +516,14 @@ catalogs:
       specifier: 2.4.11
       version: 2.4.11
     '@vueuse/core':
-      specifier: 14.3.0
-      version: 14.3.0
+      specifier: 15.1.0
+      version: 15.1.0
     '@vueuse/integrations':
-      specifier: 14.3.0
-      version: 14.3.0
+      specifier: 15.1.0
+      version: 15.1.0
     '@vueuse/router':
-      specifier: 14.3.0
-      version: 14.3.0
+      specifier: 15.1.0
+      version: 15.1.0
     apexcharts:
       specifier: 4.7.0
       version: 4.7.0
@@ -1838,13 +1838,13 @@ importers:
         version: 2.4.11(@vue/compiler-dom@3.5.40)(@vue/server-renderer@3.5.38(vue@3.5.40(typescript@5.8.3)))(vue@3.5.40(typescript@5.8.3))
       '@vueuse/core':
         specifier: 'catalog:'
-        version: 14.3.0(vue@3.5.40(typescript@5.8.3))
+        version: 15.1.0(vue@3.5.40(typescript@5.8.3))
       '@vueuse/integrations':
         specifier: 'catalog:'
-        version: 14.3.0(axios@1.18.1(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))(change-case@5.4.4)(focus-trap@8.2.2)(fuse.js@7.5.0)(qrcode@1.5.4)(sortablejs@1.14.0)(vue@3.5.40(typescript@5.8.3))
+        version: 15.1.0(axios@1.18.1(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))(change-case@5.4.4)(focus-trap@8.2.2)(fuse.js@7.5.0)(qrcode@1.5.4)(sortablejs@1.14.0)(vue@3.5.40(typescript@5.8.3))
       '@vueuse/router':
         specifier: 'catalog:'
-        version: 14.3.0(vue-router@5.2.0(@vue/compiler-sfc@3.5.38)(pinia@2.3.1(typescript@5.8.3)(vue@3.5.40(typescript@5.8.3)))(rolldown@1.2.10)(rollup@4.62.2)(vite@8.3.0(@types/node@26.0.0)(jiti@2.7.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(yaml@2.9.0))(vue@3.5.40(typescript@5.8.3)))(vue@3.5.40(typescript@5.8.3))
+        version: 15.1.0(vue-router@5.2.0(@vue/compiler-sfc@3.5.38)(pinia@2.3.1(typescript@5.8.3)(vue@3.5.40(typescript@5.8.3)))(rolldown@1.2.10)(rollup@4.62.2)(vite@8.3.0(@types/node@26.0.0)(jiti@2.7.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(yaml@2.9.0))(vue@3.5.40(typescript@5.8.3)))(vue@3.5.40(typescript@5.8.3))
       apexcharts:
         specifier: 'catalog:'
         version: 4.7.0
@@ -2824,7 +2824,7 @@ importers:
     dependencies:
       '@vueuse/core':
         specifier: 'catalog:'
-        version: 14.3.0(vue@3.5.40(typescript@5.8.3))
+        version: 15.1.0(vue@3.5.40(typescript@5.8.3))
     devDependencies:
       '@directus/tsconfig':
         specifier: 'catalog:'
@@ -6412,6 +6412,9 @@ packages:
   '@smithy/core@3.35.0':
     resolution: {integrity: sha512-zRMhfkByhT2snNdr1si24vJitU6Cr9ix2MikUfWmkAgp4jrNP0GcKSP5YvwQ+TlI8AZXER5QOGJn3JsVtSD9/A==}
     engines: {node: '>=18.0.0'}
+    deprecated: |-
+      Deprecated due to a bug in custom logger data redaction. Upgrade to the latest version. If you used a custom logger with this
+        version, review your logs and rotate any credentials or other secrets. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -6792,8 +6795,8 @@ packages:
   '@types/uuid@9.0.8':
     resolution: {integrity: sha512-jg+97EGIcY9AGHJJRaaPVgetKDsrTgbRjQ5Msgjh/DQKEFl0DtyRr/VCOyD1T2R1MNeWPK/u7JoGhlDZnKBAfA==}
 
-  '@types/web-bluetooth@0.0.21':
-    resolution: {integrity: sha512-oIQLCGWtcFZy2JW77j9k8nHzAOpqMHLQejDA48XXMWH6tjCQHz5RCFz1bzsmROyL6PUm+LLnUiI4BCn221inxA==}
+  '@types/web-bluetooth@0.0.22':
+    resolution: {integrity: sha512-4O7kU0Ut0irZvFyk3EvgDrzFYBQI80Puhkb65I7eV6WTZX4iOo5zoDrEfjDBRB7x5Stz31csoHO4hAjSiRTALw==}
 
   '@types/wellknown@0.5.8':
     resolution: {integrity: sha512-/tXv+IfentaS3F0VplScdl+pwP7biW4RBnOxCTtoWlpNiulFBQWqA8rA7r/knavu9SELsFcNVtdGo6YNIElMdw==}
@@ -7048,18 +7051,20 @@ packages:
       '@vue/server-renderer':
         optional: true
 
-  '@vueuse/core@14.3.0':
-    resolution: {integrity: sha512-aHfz47g0ZhMtTVHmIzMVpJy8ePhhOy68GY5bv110+5DVtZ+W7BsOx+m61UNQqfrWyPztIHIanWa3E2tib3NFIw==}
+  '@vueuse/core@15.1.0':
+    resolution: {integrity: sha512-OuZ5ecLw/sikX0HFjlJM/p/PkfL0567Ntfov9G0jYlw92QqZpPVikZOoB1Mpe4unZ+7E/QQ+uFpEgAjj2FYRbw==}
+    engines: {node: '>=22'}
     peerDependencies:
       vue: ^3.5.0
 
-  '@vueuse/integrations@14.3.0':
-    resolution: {integrity: sha512-76I5FT2ESvCmCaSwapI+a/u/CFtNXmzl9f9lNp1hRtx8vKB8hfiokJr8IvQqcQG5ckGXElyXK516b54ozV3MvA==}
+  '@vueuse/integrations@15.1.0':
+    resolution: {integrity: sha512-wkWMVNeK8kpLzX1piF5Oo5RUEiCsPj6eAQINrlP0OUp1vWF1mFsaTKH9qK7/qiWZDfkZfkLREDeTVutcJsR2aQ==}
+    engines: {node: '>=22'}
     peerDependencies:
       async-validator: ^4
       axios: ^1
       change-case: ^5
-      drauu: ^0.4
+      drauu: ^1 || ^0.4
       focus-trap: ^7 || ^8
       fuse.js: ^7
       idb-keyval: ^6
@@ -7095,17 +7100,20 @@ packages:
       universal-cookie:
         optional: true
 
-  '@vueuse/metadata@14.3.0':
-    resolution: {integrity: sha512-BwxmbAzwAVF50+MW57GXOUEV61nFBGnlBvrTqj49PqWJu3uw7hdu72ztXeZ33RdZtDY6kO+bfCAE1PCn88Tktw==}
+  '@vueuse/metadata@15.1.0':
+    resolution: {integrity: sha512-yHKFelRTdQdp7vdjXXEw68Wh9v8OgyxWm1v1aHbGM6Z4qbqHhB6QgB8MTNB76pZYh22wPeALCdr8qjShlxPBHA==}
+    engines: {node: '>=22'}
 
-  '@vueuse/router@14.3.0':
-    resolution: {integrity: sha512-MK7YETFDPyDDF9aSP4W3TzUIHLZ+uq0n/t4VMxOP39e0qGbCZ21ZRsGE93ML84teKtCtPDlN+73CTk2e3xVl9w==}
+  '@vueuse/router@15.1.0':
+    resolution: {integrity: sha512-muyX+JmyxV87ugzcNA3IVYikxonk3kg3WLNpD21ZAne10g00rHhG64h85gVwFwYW8Otpp4tEp3X1T/ntilZwWw==}
+    engines: {node: '>=22'}
     peerDependencies:
       vue: ^3.5.0
       vue-router: ^4.0.0 || ^5.0.0
 
-  '@vueuse/shared@14.3.0':
-    resolution: {integrity: sha512-bZpge9eSXwa4ToSiqJ7j6KRwhAsneMFoSz3LMWKQDkqimm3D/tbFlrklrs/IOqC8tEcYmXQZJ6N0UrjhBirVCg==}
+  '@vueuse/shared@15.1.0':
+    resolution: {integrity: sha512-JAbQLO+vOULt8MPR4oRbvstBuztTTMIX4LOfCGeBvp9JSgj5OppZDing3gKDrmlyUQvYYFSPIX4dxkfJgdsxWQ==}
+    engines: {node: '>=22'}
     peerDependencies:
       vue: ^3.5.0
 
@@ -17981,7 +17989,7 @@ snapshots:
 
   '@types/uuid@9.0.8': {}
 
-  '@types/web-bluetooth@0.0.21': {}
+  '@types/web-bluetooth@0.0.22': {}
 
   '@types/wellknown@0.5.8': {}
 
@@ -18384,17 +18392,17 @@ snapshots:
     optionalDependencies:
       '@vue/server-renderer': 3.5.38(vue@3.5.40(typescript@5.8.3))
 
-  '@vueuse/core@14.3.0(vue@3.5.40(typescript@5.8.3))':
+  '@vueuse/core@15.1.0(vue@3.5.40(typescript@5.8.3))':
     dependencies:
-      '@types/web-bluetooth': 0.0.21
-      '@vueuse/metadata': 14.3.0
-      '@vueuse/shared': 14.3.0(vue@3.5.40(typescript@5.8.3))
+      '@types/web-bluetooth': 0.0.22
+      '@vueuse/metadata': 15.1.0
+      '@vueuse/shared': 15.1.0(vue@3.5.40(typescript@5.8.3))
       vue: 3.5.40(typescript@5.8.3)
 
-  '@vueuse/integrations@14.3.0(axios@1.18.1(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))(change-case@5.4.4)(focus-trap@8.2.2)(fuse.js@7.5.0)(qrcode@1.5.4)(sortablejs@1.14.0)(vue@3.5.40(typescript@5.8.3))':
+  '@vueuse/integrations@15.1.0(axios@1.18.1(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))(change-case@5.4.4)(focus-trap@8.2.2)(fuse.js@7.5.0)(qrcode@1.5.4)(sortablejs@1.14.0)(vue@3.5.40(typescript@5.8.3))':
     dependencies:
-      '@vueuse/core': 14.3.0(vue@3.5.40(typescript@5.8.3))
-      '@vueuse/shared': 14.3.0(vue@3.5.40(typescript@5.8.3))
+      '@vueuse/core': 15.1.0(vue@3.5.40(typescript@5.8.3))
+      '@vueuse/shared': 15.1.0(vue@3.5.40(typescript@5.8.3))
       vue: 3.5.40(typescript@5.8.3)
     optionalDependencies:
       axios: 1.18.1(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
@@ -18404,15 +18412,15 @@ snapshots:
       qrcode: 1.5.4
       sortablejs: 1.14.0
 
-  '@vueuse/metadata@14.3.0': {}
+  '@vueuse/metadata@15.1.0': {}
 
-  '@vueuse/router@14.3.0(vue-router@5.2.0(@vue/compiler-sfc@3.5.38)(pinia@2.3.1(typescript@5.8.3)(vue@3.5.40(typescript@5.8.3)))(rolldown@1.2.10)(rollup@4.62.2)(vite@8.3.0(@types/node@26.0.0)(jiti@2.7.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(yaml@2.9.0))(vue@3.5.40(typescript@5.8.3)))(vue@3.5.40(typescript@5.8.3))':
+  '@vueuse/router@15.1.0(vue-router@5.2.0(@vue/compiler-sfc@3.5.38)(pinia@2.3.1(typescript@5.8.3)(vue@3.5.40(typescript@5.8.3)))(rolldown@1.2.10)(rollup@4.62.2)(vite@8.3.0(@types/node@26.0.0)(jiti@2.7.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(yaml@2.9.0))(vue@3.5.40(typescript@5.8.3)))(vue@3.5.40(typescript@5.8.3))':
     dependencies:
-      '@vueuse/shared': 14.3.0(vue@3.5.40(typescript@5.8.3))
+      '@vueuse/shared': 15.1.0(vue@3.5.40(typescript@5.8.3))
       vue: 3.5.40(typescript@5.8.3)
       vue-router: 5.2.0(@vue/compiler-sfc@3.5.38)(pinia@2.3.1(typescript@5.8.3)(vue@3.5.40(typescript@5.8.3)))(rolldown@1.2.10)(rollup@4.62.2)(vite@8.3.0(@types/node@26.0.0)(jiti@2.7.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(yaml@2.9.0))(vue@3.5.40(typescript@5.8.3))
 
-  '@vueuse/shared@14.3.0(vue@3.5.40(typescript@5.8.3))':
+  '@vueuse/shared@15.1.0(vue@3.5.40(typescript@5.8.3))':
     dependencies:
       vue: 3.5.40(typescript@5.8.3)
 
