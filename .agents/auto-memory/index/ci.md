@@ -28,3 +28,4 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [no-restricted-imports misses require and dynamic import](../reference_eslint_restricted_imports_static_only.md) — a lazy-load pin needs a no-restricted-syntax pair; mutation-test the pin or the ignores are dead config
 - [Style (changes) red on a stale base](../reference_directus_style_changes_stale_base.md) — diffs vs base.sha, so an old base lints trunk lines; merge hhh-dev in, never hand-fix them
 - [CodeRabbit never auto-reviews here](../reference_directus_coderabbit_no_auto_review.md) — repo < 10 stars: only a "Trigger review" checkbox; skip the CR watch, ticking it is jean's call
+- [Preview queued state](../feedback_directus_preview_queued_state.md) — after a push/dispatch starting a preview, run `.agents/scripts/preview-queued.sh <pr>`: block says "queued" while no runner is free
