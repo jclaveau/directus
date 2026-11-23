@@ -9,6 +9,7 @@ vi.mock('../../bus/index.js', () => ({ useBus: () => ({ subscribe: vi.fn() }) })
 vi.mock('../../rate-limiter.js', () => ({ createRateLimiter: vi.fn() }));
 vi.mock('../../utils/get-address.js', () => ({ getAddress: vi.fn() }));
 vi.mock('./hooks.js', () => ({ registerWebSocketEvents: vi.fn() }));
+vi.mock('../authenticate.js', () => ({ authenticateConnection: vi.fn() }));
 
 vi.mock('../../services/graphql/subscription.js', () => {
 	return { bindPubSub: vi.fn() };
@@ -46,6 +47,7 @@ import {
 } from '../../scoped-cache/purged-record.js';
 import { executingService } from '../../services/graphql/schema-cache.js';
 import { GraphQLService } from '../../services/index.js';
+import { authenticateConnection } from '../authenticate.js';
 import type { UpgradeContext } from '../types.js';
 import { GraphQLSubscriptionController } from './graphql.js';
 
@@ -153,5 +155,57 @@ describe('GraphQLSubscriptionController', () => {
 			accountability: expect.objectContaining({ ip: '10.10.10.1' }),
 			expires_at: null,
 		});
+	});
+
+	test(oneLine`
+		a second connection_init in handshake mode closes the socket without
+		authenticating its token
+	`, async () => {
+		const controller = new GraphQLSubscriptionController(
+			new EventEmitter() as unknown as HttpServer,
+		);
+
+		controller.authentication = { mode: 'handshake', timeout: 10000 };
+
+		vi.mocked(authenticateConnection)
+			.mockResolvedValueOnce({
+				accountability: { user: 'first' } as any,
+				expires_at: 1000,
+			})
+			.mockResolvedValueOnce({
+				accountability: { user: 'second' } as any,
+				expires_at: 2000,
+			});
+
+		const client = Object.assign(new EventEmitter(), {
+			protocol: 'graphql-transport-ws',
+			accountability: null,
+			expires_at: null,
+			send: vi.fn((_data: string, done: () => void) => done()),
+			close: vi.fn(),
+		});
+
+		(controller as any).bindEvents(client);
+
+		const [onParsedMessage] = client.listeners('parsed-message');
+
+		await onParsedMessage!({
+			type: 'connection_init',
+			payload: { access_token: 'first-token' },
+		});
+
+		await onParsedMessage!({
+			type: 'connection_init',
+			payload: { access_token: 'second-token' },
+		});
+
+		expect(client.close).toHaveBeenCalledExactlyOnceWith(
+			4429,
+			'Too many initialisation requests',
+		);
+
+		expect(authenticateConnection).toHaveBeenCalledTimes(1);
+		expect(client.accountability).toEqual({ user: 'first' });
+		expect(client.expires_at).toBe(1000);
 	});
 });

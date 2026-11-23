@@ -163,6 +163,9 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/websocket/relation-update.test.ts': 500,
 	// Not measured yet: one PATCH, one create and one message.
 	'/tests/db/websocket/membership-refresh.test.ts': 500,
+	// Not measured yet: three sockets, two of them waiting on a note created
+	// until their subscription hears it.
+	'/tests/db/websocket/graphql-second-init.test.ts': 3_000,
 	// Not measured yet: one table created, dropped and inspected.
 	'/tests/db/schema/inspector-concurrent-drop.test.ts': 300,
 	// Not measured yet: a few requests each, like nested-upsert.

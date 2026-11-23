@@ -263,18 +263,18 @@ describe('ServerService health', () => {
 
 describe('ServerService serverInfo', () => {
 	afterEach(() => {
-		vi.unstubAllEnvs();
+		delete mockEnv['MARKETPLACE_ENABLED'];
 	});
 
-	// Extensions change only with a deploy in production (#627), so the app
-	// hides the Marketplace there.
 	it.each([
-		{ nodeEnv: 'production', marketplace: false },
-		{ nodeEnv: 'development', marketplace: true },
+		{ marketplaceEnabled: undefined, marketplace: false },
+		{ marketplaceEnabled: false, marketplace: false },
+		{ marketplaceEnabled: true, marketplace: true },
 	])(oneLine`
-		tells a user the Marketplace is $marketplace under NODE_ENV $nodeEnv
-	`, async ({ nodeEnv, marketplace }) => {
-		vi.stubEnv('NODE_ENV', nodeEnv);
+		tells a user the Marketplace is $marketplace under MARKETPLACE_ENABLED
+		$marketplaceEnabled
+	`, async ({ marketplaceEnabled, marketplace }) => {
+		mockEnv['MARKETPLACE_ENABLED'] = marketplaceEnabled;
 		vi.resetModules();
 		const { ServerService } = await import('./server.js');
 
