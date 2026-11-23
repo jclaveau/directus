@@ -141,7 +141,7 @@ jobs:
             block_lines.append('- The tunnel answers 502 until Directus finishes booting.')
         block_lines += [
             '- Seeded: `items` → `sub_items` (both with `user_created`), then the `scripts/preview-admin/fixtures/*.mjs` the ref ships.',
-            '- Subscriptions bundle loaded when the ref ships it, with no Stripe or Mollie key: its tables and admin show, no provider is called.',
+            '- Subscriptions bundle loaded when the ref ships it. With its examples, a run the owner starts on a branch of this repository also gets the real Stripe and Mollie test mode, switched in the examples module header; every other run stays on fake providers.',
             '- Runs under PM2 (cluster workers, 400M cap), so Settings → Processes has a real supervisor to report.',
             '- A second PM2 app scales that pool, so the autoscaling panel on that page reports a live configuration.',
             '- [ ] 🔄 Re-run admin preview',
@@ -351,7 +351,120 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 -c "$PREVIEW_PUBLISHER" booting
 
+      # The real Stripe and Mollie test mode, for the subscriptions examples only,
+      # and only on a run the owner starts on a branch of this repository: never a
+      # fork's code. Workflow-owned: the Mollie access token creates and deletes
+      # this tunnel's webhooks here and below, and never reaches the previewed
+      # code nor Directus. The test keys and the webhook secrets do, through the
+      # Bootstrap env; a key without its test prefix is refused. Any failure keeps
+      # the preview on the fake providers.
+      - name: Create the preview's real provider webhooks
+        id: real-providers
+        if: >-
+          hashFiles('scripts/preview-admin/extensions/subscriptions-examples.sh') != ''
+          && (github.event_name == 'workflow_dispatch'
+            || github.event.pull_request.head.repo.full_name == github.repository)
+          && github.actor == github.repository_owner
+        continue-on-error: true
+        env:
+          STRIPE_TEST_KEY: ${{ secrets.SUBSCRIPTIONS_STRIPE_SECRET_KEY }}
+          MOLLIE_TEST_KEY: ${{ secrets.SUBSCRIPTIONS_MOLLIE_API_KEY }}
+          MOLLIE_ACCESS_TOKEN: ${{ secrets.MOLLIE_PROBE_ACCESS_TOKEN }}
+        run: |
+          [[ "$STRIPE_TEST_KEY" =~ ^sk_test_ ]] \
+            || { echo "SUBSCRIPTIONS_STRIPE_SECRET_KEY is not an sk_test_ key"; exit 1; }
+          [[ "$MOLLIE_TEST_KEY" =~ ^test_ ]] \
+            || { echo "SUBSCRIPTIONS_MOLLIE_API_KEY is not a test_ key"; exit 1; }
+          [[ "$MOLLIE_ACCESS_TOKEN" =~ ^access_ ]] \
+            || { echo "MOLLIE_PROBE_ACCESS_TOKEN is not an access_ token"; exit 1; }
+
+          WEBHOOK_LABEL="scalabus-preview $GITHUB_RUN_ID $(date +%s)"
+          STALE_BEFORE=$(( $(date +%s) - 3 * 3600 ))
+
+          # A run killed before its cleanup leaves its webhooks: drop the ones
+          # older than any preview, by the epoch their label carries.
+          curl -sS -u "$STRIPE_TEST_KEY:" \
+            'https://api.stripe.com/v1/webhook_endpoints?limit=100' \
+          | jq -r --argjson before "$STALE_BEFORE" '.data[]?
+              | select((.description // "") | startswith("scalabus-preview "))
+              | select(((.description | split(" "))[2] | tonumber? // 0) < $before)
+              | .id' \
+          | while read -r STALE_ID; do
+              curl -sS -o /dev/null -u "$STRIPE_TEST_KEY:" -X DELETE \
+                "https://api.stripe.com/v1/webhook_endpoints/$STALE_ID" || true
+            done
+          curl -sS -H "Authorization: Bearer $MOLLIE_ACCESS_TOKEN" \
+            'https://api.mollie.com/v2/webhooks?testmode=true&limit=250' \
+          | jq -r --argjson before "$STALE_BEFORE" '._embedded.webhooks[]?
+              | select((.name // "") | startswith("scalabus-preview "))
+              | select(((.name | split(" "))[2] | tonumber? // 0) < $before)
+              | .id' \
+          | while read -r STALE_ID; do
+              curl -sS -o /dev/null -H "Authorization: Bearer $MOLLIE_ACCESS_TOKEN" \
+                -X DELETE \
+                "https://api.mollie.com/v2/webhooks/$STALE_ID?testmode=true" || true
+            done
+
+          # The API version the bundle's Stripe probe pins, read as text only.
+          STRIPE_API_VERSION=$(grep -oE "stripeApiVersion = '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[a-z]+'" \
+            scripts/stripe-behaviour/stripe-webhook-probe.mjs 2>/dev/null \
+            | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[a-z]+' || true)
+
+          STRIPE_ANSWER=$(curl -sS -u "$STRIPE_TEST_KEY:" \
+            https://api.stripe.com/v1/webhook_endpoints \
+            -d "url=$URL/subscriptions/webhooks/stripe" \
+            -d 'enabled_events[]=*' \
+            -d "description=$WEBHOOK_LABEL" \
+            ${STRIPE_API_VERSION:+-d "api_version=$STRIPE_API_VERSION"})
+          STRIPE_WEBHOOK_SECRET=$(jq -r '.secret // empty' <<<"$STRIPE_ANSWER")
+          if [ -z "$STRIPE_WEBHOOK_SECRET" ]; then
+            echo "Stripe refused the webhook: $(jq -c '.error.message' <<<"$STRIPE_ANSWER")"
+            exit 1
+          fi
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET"
+          echo "PREVIEW_STRIPE_WEBHOOK_ID=$(jq -r .id <<<"$STRIPE_ANSWER")" >> "$GITHUB_ENV"
+
+          MOLLIE_ANSWER=$(curl -sS https://api.mollie.com/v2/webhooks \
+            -H "Authorization: Bearer $MOLLIE_ACCESS_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg url "$URL/subscriptions/webhooks/mollie" \
+              --arg name "$WEBHOOK_LABEL" '{
+                name: $name,
+                url: $url,
+                eventTypes: [
+                  "payment.paid",
+                  "payment.authorized",
+                  "payment.failed",
+                  "payment.canceled",
+                  "payment.expired",
+                  "payment.pending"
+                ],
+                testmode: true
+              }')")
+          MOLLIE_WEBHOOK_SECRET=$(jq -r '.webhookSecret // empty' <<<"$MOLLIE_ANSWER")
+          if [ -z "$MOLLIE_WEBHOOK_SECRET" ]; then
+            echo "Mollie refused the webhook: $(jq -c '.detail' <<<"$MOLLIE_ANSWER")"
+            exit 1
+          fi
+          echo "::add-mask::$MOLLIE_WEBHOOK_SECRET"
+          echo "PREVIEW_MOLLIE_WEBHOOK_ID=$(jq -r .id <<<"$MOLLIE_ANSWER")" >> "$GITHUB_ENV"
+
+          {
+            echo "PREVIEW_STRIPE_WEBHOOK_SECRET=$STRIPE_WEBHOOK_SECRET"
+            echo "PREVIEW_MOLLIE_WEBHOOK_SECRET=$MOLLIE_WEBHOOK_SECRET"
+            echo "PREVIEW_REAL_PROVIDERS_READY=true"
+          } >> "$GITHUB_ENV"
+          echo "real Stripe and Mollie test webhooks created for this tunnel"
+
       - name: Bootstrap + start Directus
+        env:
+          # Empty unless the step above made this tunnel's webhooks.
+          PREVIEW_STRIPE_SECRET_KEY: >-
+            ${{ env.PREVIEW_REAL_PROVIDERS_READY == 'true'
+              && secrets.SUBSCRIPTIONS_STRIPE_SECRET_KEY || '' }}
+          PREVIEW_MOLLIE_API_KEY: >-
+            ${{ env.PREVIEW_REAL_PROVIDERS_READY == 'true'
+              && secrets.SUBSCRIPTIONS_MOLLIE_API_KEY || '' }}
         run: |
           # Not masked on purpose: it shows in the run summary for manual login. On a public
           # repo that summary is world-readable — acceptable here, the instance is a throwaway
@@ -428,9 +541,10 @@ jobs:
           };
           IDX
 
-          # The subscriptions bundle (#680), once the previewed ref ships it. No
-          # provider key is passed: this job runs the PR head, which must not get
-          # the secrets. Its tables and admin show; no provider is ever called.
+          # The subscriptions bundle (#680), once the previewed ref ships it. It
+          # gets no provider key here: only the examples' script below may get
+          # the test keys, on a run the step "Create the preview's real provider
+          # webhooks" let through. Its tables and admin show either way.
           SUBSCRIPTIONS_BUNDLE="$PWD/packages/core-extensions/subscriptions"
           if [ -f "$SUBSCRIPTIONS_BUNDLE/dist/api.js" ]; then
             mkdir -p preview-extensions/node_modules/@scalabus
@@ -712,6 +826,27 @@ jobs:
           # No idle shutdown — stay up until the job's hard timeout, so a paused tab still
           # works when you come back (sleep, not wait, survives a dropped log stream).
           sleep infinity
+
+      # Runs on a cancel too: the tunnel dies with the job, so do its webhooks.
+      - name: Delete the preview's real provider webhooks
+        if: >-
+          always()
+          && (env.PREVIEW_STRIPE_WEBHOOK_ID != '' || env.PREVIEW_MOLLIE_WEBHOOK_ID != '')
+        continue-on-error: true
+        env:
+          STRIPE_TEST_KEY: ${{ secrets.SUBSCRIPTIONS_STRIPE_SECRET_KEY }}
+          MOLLIE_ACCESS_TOKEN: ${{ secrets.MOLLIE_PROBE_ACCESS_TOKEN }}
+        run: |
+          if [ -n "${PREVIEW_STRIPE_WEBHOOK_ID:-}" ]; then
+            curl -sS -o /dev/null -w 'Stripe webhook delete: %{http_code}\n' \
+              -u "$STRIPE_TEST_KEY:" -X DELETE \
+              "https://api.stripe.com/v1/webhook_endpoints/$PREVIEW_STRIPE_WEBHOOK_ID"
+          fi
+          if [ -n "${PREVIEW_MOLLIE_WEBHOOK_ID:-}" ]; then
+            curl -sS -o /dev/null -w 'Mollie webhook delete: %{http_code}\n' \
+              -H "Authorization: Bearer $MOLLIE_ACCESS_TOKEN" -X DELETE \
+              "https://api.mollie.com/v2/webhooks/$PREVIEW_MOLLIE_WEBHOOK_ID?testmode=true"
+          fi
 
       # A cancelled run (a new push, a click, or the job's timeout-minutes) and a
       # failed one both kill the tunnel: say so where the link was.
