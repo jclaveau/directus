@@ -9,6 +9,7 @@ import { readDirectusSubscription } from './read-directus-subscription.js';
 import type {
 	BillingInterval,
 	ProviderBilling,
+	ProviderInvoice,
 	SubscriptionProvider,
 } from './types.js';
 
@@ -173,6 +174,42 @@ export function createStripeProvider(
 				+ ` ${JSON.stringify(paymentId)}`,
 			);
 		},
+
+		async listInvoices(resourceId) {
+			const providerInvoices: ProviderInvoice[] = [];
+
+			// The list promise pages through every invoice as it is iterated.
+			for await (const stripeInvoice of stripeClient.invoices
+				.list({ subscription: resourceId, limit: 100 })) {
+				providerInvoices.push(readStripeInvoice(stripeInvoice));
+			}
+
+			return providerInvoices;
+		},
+	};
+}
+
+/** A paid invoice's paid time is the transition's, not its creation. */
+function readStripeInvoice(stripeInvoice: Stripe.Invoice): ProviderInvoice {
+	if (stripeInvoice.status === null) {
+		throw new Error(
+			`Stripe invoice ${JSON.stringify(stripeInvoice.id)} has no status`,
+		);
+	}
+
+	const paidTime = stripeInvoice.status_transitions.paid_at;
+
+	return {
+		providerReference: stripeInvoice.id,
+		status: stripeInvoice.status,
+		amount: (stripeInvoice.total / 100).toFixed(2),
+		currency: stripeInvoice.currency.toUpperCase(),
+		dateIssued: new Date(stripeInvoice.created * 1000),
+		datePaid: paidTime === null
+			? null
+			: new Date(paidTime * 1000),
+		hostedUrl: stripeInvoice.hosted_invoice_url ?? null,
+		pdfUrl: stripeInvoice.invoice_pdf ?? null,
 	};
 }
 

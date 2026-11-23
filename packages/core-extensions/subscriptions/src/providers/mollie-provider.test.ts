@@ -1033,6 +1033,136 @@ describe('resumeCancel', () => {
 	});
 });
 
+describe('listInvoices', () => {
+	test(oneLine`
+		lists the subscription payments, then the checkout's first payment
+	`, async () => {
+		const mollieClient = {
+			customerSubscriptions: {
+				get: vi.fn().mockResolvedValue({
+					id: 'sub_1',
+					metadata: { directus_subscription: '7' },
+				}),
+			},
+			subscriptionPayments: {
+				iterate: vi.fn().mockReturnValue([
+					{
+						id: 'tr_2',
+						status: 'paid',
+						amount: { currency: 'eur', value: '25.00' },
+						createdAt: '2026-12-23T08:00:00+00:00',
+						paidAt: '2026-12-23T08:05:00+00:00',
+						subscriptionId: 'sub_1',
+						sequenceType: 'recurring',
+					},
+				]),
+			},
+			customerPayments: {
+				iterate: vi.fn().mockReturnValue([
+					{
+						id: 'tr_2',
+						sequenceType: 'recurring',
+						metadata: null,
+					},
+					{
+						id: 'tr_other',
+						sequenceType: 'first',
+						metadata: { directus_subscription: '8' },
+					},
+					{
+						id: 'tr_1',
+						status: 'paid',
+						amount: { currency: 'EUR', value: '25.00' },
+						createdAt: '2026-11-23T10:00:00+00:00',
+						paidAt: '2026-11-23T10:01:00+00:00',
+						sequenceType: 'first',
+						metadata: { directus_subscription: '7' },
+					},
+				]),
+			},
+		};
+
+		await expect(createMollieProvider(
+			mollieClient as unknown as MollieClient,
+			['mollie_secret_1'],
+		)
+			.listInvoices('cst_1/sub_1')).resolves.toEqual([
+			{
+				providerReference: 'tr_2',
+				status: 'paid',
+				amount: '25.00',
+				currency: 'EUR',
+				dateIssued: new Date('2026-12-23T08:00:00Z'),
+				datePaid: new Date('2026-12-23T08:05:00Z'),
+				hostedUrl: null,
+				pdfUrl: null,
+			},
+			{
+				providerReference: 'tr_1',
+				status: 'paid',
+				amount: '25.00',
+				currency: 'EUR',
+				dateIssued: new Date('2026-11-23T10:00:00Z'),
+				datePaid: new Date('2026-11-23T10:01:00Z'),
+				hostedUrl: null,
+				pdfUrl: null,
+			},
+		]);
+
+		expect(mollieClient.customerSubscriptions.get)
+			.toHaveBeenCalledWith('sub_1', { customerId: 'cst_1' });
+
+		expect(mollieClient.subscriptionPayments.iterate)
+			.toHaveBeenCalledWith({ customerId: 'cst_1', subscriptionId: 'sub_1' });
+
+		expect(mollieClient.customerPayments.iterate)
+			.toHaveBeenCalledWith({ customerId: 'cst_1' });
+	});
+
+	test(oneLine`
+		leaves a resume's first payment to the subscription it resumes
+	`, async () => {
+		const mollieClient = {
+			customerSubscriptions: {
+				get: vi.fn().mockResolvedValue({
+					id: 'sub_2',
+					metadata: { directus_subscription: '7', resumes: 'sub_1' },
+				}),
+			},
+			subscriptionPayments: {
+				iterate: vi.fn().mockReturnValue([
+					{
+						id: 'tr_3',
+						status: 'open',
+						amount: { currency: 'EUR', value: '25.00' },
+						createdAt: '2027-01-23T08:00:00+00:00',
+					},
+				]),
+			},
+			customerPayments: { iterate: vi.fn() },
+		};
+
+		await expect(createMollieProvider(
+			mollieClient as unknown as MollieClient,
+			['mollie_secret_1'],
+		)
+			.listInvoices('cst_1/sub_2')).resolves.toEqual([
+			{
+				providerReference: 'tr_3',
+				status: 'open',
+				amount: '25.00',
+				currency: 'EUR',
+				dateIssued: new Date('2027-01-23T08:00:00Z'),
+				datePaid: null,
+				hostedUrl: null,
+				pdfUrl: null,
+			},
+		]);
+
+		expect(mollieClient.customerPayments.iterate).not.toHaveBeenCalled();
+	});
+});
+
 describe('composeResourceId', () => {
 	test('keys Mollie resources on the customer and subscription ids', () => {
 		expect(createMollieProvider({} as MollieClient, ['mollie_secret_1'])

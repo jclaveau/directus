@@ -7,6 +7,7 @@ import { resumeOwnSubscription } from './cancel/resume-own-subscription.js';
 import { subscriptionsEndpoint } from './endpoint.js';
 import { addOwnBeneficiary } from './members/add-own-beneficiary.js';
 import { createCheckout } from './members/create-checkout.js';
+import { listOwnInvoices } from './members/list-own-invoices.js';
 import { listOwnSubscriptions } from './members/list-own-subscriptions.js';
 import { archivePlan } from './plans/archive-plan.js';
 import { receiveWebhook } from './webhook/receive-webhook.js';
@@ -15,6 +16,7 @@ vi.mock('./cancel/cancel-own-subscription.js');
 vi.mock('./cancel/resume-own-subscription.js');
 vi.mock('./members/add-own-beneficiary.js');
 vi.mock('./members/create-checkout.js');
+vi.mock('./members/list-own-invoices.js');
 vi.mock('./members/list-own-subscriptions.js');
 vi.mock('./plans/archive-plan.js');
 vi.mock('./webhook/receive-webhook.js');
@@ -507,6 +509,98 @@ describe('subscriptionsEndpoint', () => {
 
 		expect(mineResponse.status).toBe(403);
 		expect(listOwnSubscriptions).toHaveBeenCalledWith('database', null);
+	});
+
+	test('lists the invoices of a subscription the user manages', async () => {
+		vi.mocked(listOwnInvoices).mockResolvedValue([{
+			id: 1,
+			provider_reference: 'in_1',
+			status: 'paid',
+			amount: '25.00',
+			currency: 'EUR',
+			date_issued: '2026-11-23T10:00:00.000Z',
+			date_paid: '2026-11-23T10:01:00.000Z',
+			hosted_url: null,
+			pdf_url: null,
+		}]);
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+
+		expressApp.use((request, _response, next) => {
+			Object.assign(request, { accountability: { user: 'user-1' } });
+			next();
+		});
+
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const invoicesResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/7/invoices`,
+		);
+
+		httpServer.close();
+
+		expect(invoicesResponse.status).toBe(200);
+
+		expect(await invoicesResponse.json()).toEqual({
+			data: [{
+				id: 1,
+				provider_reference: 'in_1',
+				status: 'paid',
+				amount: '25.00',
+				currency: 'EUR',
+				date_issued: '2026-11-23T10:00:00.000Z',
+				date_paid: '2026-11-23T10:01:00.000Z',
+				hosted_url: null,
+				pdf_url: null,
+			}],
+		});
+
+		expect(listOwnInvoices)
+			.toHaveBeenCalledWith('database', 'user-1', '7');
+	});
+
+	test('lists invoices as nobody without accountability', async () => {
+		vi.mocked(listOwnInvoices).mockRejectedValue(new ForbiddenError());
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		expressApp.use((
+			routeError: Error & { status: number },
+			_request: express.Request,
+			response: express.Response,
+			_next: express.NextFunction,
+		) => {
+			response.status(routeError.status)
+				.end();
+		});
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const invoicesResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/7/invoices`,
+		);
+
+		httpServer.close();
+
+		expect(invoicesResponse.status).toBe(403);
+		expect(listOwnInvoices).toHaveBeenCalledWith('database', null, '7');
 	});
 
 	test('checks out with the allow list read at registration', async () => {

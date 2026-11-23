@@ -68,6 +68,21 @@ export type PaidCheckout = {
 	interval: BillingInterval;
 };
 
+/** A bill the provider issued: a Stripe invoice, a Mollie payment. */
+export type ProviderInvoice = {
+	providerReference: string;
+	/** The provider's own word: `paid`, `open`, `failed`… */
+	status: string;
+	/** Two decimals, "9.90" for 9.90 euros. */
+	amount: string;
+	/** ISO 4217, upper case. */
+	currency: string;
+	dateIssued: Date;
+	datePaid: Date | null;
+	hostedUrl: string | null;
+	pdfUrl: string | null;
+};
+
 export interface SubscriptionProvider {
 	/** Resolves to the resource id the sync queue keys the event on. */
 	verifyWebhook(
@@ -83,6 +98,8 @@ export interface SubscriptionProvider {
 	createCheckout(checkoutStart: CheckoutStart): Promise<string>;
 	/** Resolves to the resource id of the subscription the payment started. */
 	startPaidCheckout(paidCheckout: PaidCheckout): Promise<string>;
+	/** What the subscription the resource id names was billed, any order. */
+	listInvoices(resourceId: string): Promise<ProviderInvoice[]>;
 }
 
 export type SubscriptionProviders = Map<string, SubscriptionProvider>;

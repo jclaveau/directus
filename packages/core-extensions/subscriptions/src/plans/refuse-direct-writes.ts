@@ -319,6 +319,14 @@ export function refuseSubscriptionEventWrite(): never {
 	});
 }
 
+/** The sync copies these from the providers, which stay the truth. */
+export function refuseSubscriptionInvoiceWrite(): never {
+	throw new InvalidPayloadError({
+		reason: '"subscription_invoices" only copies what the providers'
+			+ ' billed',
+	});
+}
+
 function listUpdatedKeys(
 	updateEntries: UpdateEntries,
 	fieldNames: string[],
