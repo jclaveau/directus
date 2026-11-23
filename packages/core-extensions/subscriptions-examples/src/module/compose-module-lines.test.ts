@@ -34,7 +34,29 @@ describe('composePlanLine', () => {
 			currency: 'EUR',
 			interval: '{"months":12}',
 			beneficiaries_max: 1,
-		})).toBe('Yearly 100.00 EUR / year');
+		})).toBe('Yearly 100.00 EUR / year · 1 seat');
+	});
+
+	test('shows the seats a plan sells', () => {
+		expect(composePlanLine({
+			code: 'team',
+			name: 'Team',
+			amount: '25.00',
+			currency: 'EUR',
+			interval: '{"months":1}',
+			beneficiaries_max: 3,
+		})).toBe('Team 25.00 EUR / month · 3 seats');
+	});
+
+	test('leaves the seats out when the column is hidden', () => {
+		expect(composePlanLine({
+			code: 'team',
+			name: 'Team',
+			amount: '25.00',
+			currency: 'EUR',
+			interval: '{"months":1}',
+			beneficiaries_max: null,
+		})).toBe('Team 25.00 EUR / month');
 	});
 });
 

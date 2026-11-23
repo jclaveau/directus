@@ -78,8 +78,18 @@ export function normalizeCustomAmount(amountText: string): string {
 }
 
 export function composePlanLine(examplesPlan: ExamplesPlan): string {
-	return `${examplesPlan.name} ${formatAmount(examplesPlan.amount)}`
+	const priceLine = `${examplesPlan.name} ${formatAmount(examplesPlan.amount)}`
 		+ ` ${examplesPlan.currency} / ${formatInterval(examplesPlan.interval)}`;
+
+	// A policy that hides the column leaves the seats out rather than guess.
+	if (examplesPlan.beneficiaries_max === null) {
+		return priceLine;
+	}
+
+	return `${priceLine} · ${examplesPlan.beneficiaries_max}`
+		+ ` seat${examplesPlan.beneficiaries_max === 1
+			? ''
+			: 's'}`;
 }
 
 export function isLiveSubscription(mineSubscription: MineSubscription): boolean {
