@@ -2,12 +2,21 @@
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import {
+	composeRealProviderUrl,
+	pickProvidersTarget,
+	PROVIDERS_MODES,
+} from './pick-providers-target.mjs';
 
 // The preview's Stripe and Mollie: one process holding what each checkout
 // created, so every PM2 worker of Directus reads the same payments. Directus
 // reaches it through the examples endpoint's reroute of api.stripe.com and
 // api.mollie.com; its pay page posts the outcome picked to `/pay/<payment>`,
 // which sends the provider's signed webhook back to Directus.
+//
+// Started with the real test-mode keys (SUBSCRIPTIONS_EXAMPLES_REAL_PROVIDERS),
+// it also forwards calls to Stripe and Mollie themselves, per the mode the
+// examples module's header switches through `/providers-mode`.
 
 const PAY_PATH = '/subscriptions-examples/pay/';
 
@@ -103,6 +112,13 @@ const mollieSecret = readRequiredEnv('SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS')
 	.split(',')[0]
 	.trim();
 
+const isRealAvailable = process.env['SUBSCRIPTIONS_EXAMPLES_REAL_PROVIDERS']
+	=== 'true';
+
+let providersMode = isRealAvailable
+	? 'real'
+	: 'fake';
+
 /** Mollie first payments and Stripe checkout sessions, by their id. */
 const payHoldings = new Map();
 
@@ -133,12 +149,76 @@ async function readRequestText(providerRequest) {
 		bodyChunks.push(bodyChunk);
 	}
 
-	const requestText = Buffer.concat(bodyChunks)
+	return Buffer.concat(bodyChunks)
 		.toString('utf8');
+}
 
-	return requestText === '' || requestText === '{}'
-		? null
-		: requestText;
+function answerProvidersMode(requestMethod, requestText) {
+	if (requestMethod === 'GET') {
+		return {
+			code: 200,
+			body: { mode: providersMode, real_available: isRealAvailable },
+		};
+	}
+
+	const { mode: pickedMode } = JSON.parse(requestText ?? '{}');
+
+	if (!PROVIDERS_MODES.includes(pickedMode)) {
+		return {
+			code: 400,
+			body: {
+				error: '"mode" is "fake" or "real", got'
+					+ ` ${JSON.stringify(pickedMode ?? null)}`,
+			},
+		};
+	}
+
+	if (pickedMode === 'real' && !isRealAvailable) {
+		return {
+			code: 409,
+			body: {
+				error: 'the preview booted with no real Stripe and Mollie test keys:'
+					+ ' only a run its repository\'s owner starts on one of its own'
+					+ ' branches gets them',
+			},
+		};
+	}
+
+	providersMode = pickedMode;
+
+	return {
+		code: 200,
+		body: { mode: providersMode, real_available: isRealAvailable },
+	};
+}
+
+const DROPPED_HEADERS = [
+	'host',
+	'connection',
+	'content-length',
+	'transfer-encoding',
+	'accept-encoding',
+];
+
+/** Never logs the call: its Authorization header holds the real key. */
+async function forwardToRealProvider(providerRequest, rawText, providerResponse) {
+	const realAnswer = await fetch(composeRealProviderUrl(providerRequest.url), {
+		method: providerRequest.method,
+		headers: Object.fromEntries(
+			Object.entries(providerRequest.headers).filter(([headerName]) => {
+				return !DROPPED_HEADERS.includes(headerName);
+			}),
+		),
+		body: ['GET', 'HEAD'].includes(providerRequest.method)
+			? undefined
+			: rawText,
+	});
+
+	providerResponse.writeHead(realAnswer.status, {
+		'Content-Type': realAnswer.headers.get('content-type') ?? 'application/json',
+	});
+
+	providerResponse.end(await realAnswer.text());
 }
 
 function composeMolliePayment(payHolding) {
@@ -675,6 +755,10 @@ async function answerPay(requestMethod, paymentId, requestText) {
 }
 
 async function answerRequest(requestMethod, requestPath, requestText, isJson) {
+	if (requestPath === '/providers-mode') {
+		return answerProvidersMode(requestMethod, requestText);
+	}
+
 	const payMatch = /^\/pay\/(\w+)$/.exec(requestPath);
 
 	if (payMatch !== null) {
@@ -699,7 +783,37 @@ async function answerRequest(requestMethod, requestPath, requestText, isJson) {
 const fakeServer = createServer(async (providerRequest, providerResponse) => {
 	const requestPath = new URL(providerRequest.url, 'http://provider').pathname;
 	const requestMethod = providerRequest.method;
-	const requestText = await readRequestText(providerRequest);
+	const rawText = await readRequestText(providerRequest);
+
+	const requestText = rawText === '' || rawText === '{}'
+		? null
+		: rawText;
+
+	const isRealCall = (requestPath.startsWith('/v1/')
+		|| requestPath.startsWith('/v2/'))
+		&& pickProvidersTarget({
+			requestPath,
+			requestText,
+			providersMode,
+			isRealAvailable,
+		}) === 'real';
+
+	if (isRealCall) {
+		try {
+			await forwardToRealProvider(providerRequest, rawText, providerResponse);
+		}
+		catch (forwardError) {
+			console.error(
+				`${requestMethod} ${JSON.stringify(requestPath)} to the real`
+				+ ` provider failed: ${JSON.stringify(String(forwardError))}`,
+			);
+
+			providerResponse.writeHead(502);
+			providerResponse.end();
+		}
+
+		return;
+	}
 
 	const isJson = (providerRequest.headers['content-type'] ?? '')
 		.startsWith('application/json');
@@ -749,6 +863,7 @@ const fakeServer = createServer(async (providerRequest, providerResponse) => {
 
 fakeServer.listen(listeningPort, '127.0.0.1', () => {
 	console.log(
-		`Fake Stripe and Mollie listening on 127.0.0.1:${listeningPort}`,
+		`Fake Stripe and Mollie listening on 127.0.0.1:${listeningPort},`
+		+ ` providers mode ${JSON.stringify(providersMode)}`,
 	);
 });

@@ -1,6 +1,11 @@
-import { createError, InvalidPayloadError } from '@directus/errors';
+import {
+	createError,
+	ForbiddenError,
+	InvalidPayloadError,
+} from '@directus/errors';
 import { defineEndpoint } from '@directus/extensions-sdk/scalabus';
-import express from 'express';
+import type { Accountability } from '@directus/types';
+import express, { type Request } from 'express';
 import {
 	composePayPage,
 	PAY_OUTCOMES,
@@ -8,6 +13,8 @@ import {
 	type PayHolding,
 } from './pay-page/compose-pay-page.js';
 import { rerouteProviderApis } from './pay-page/reroute-provider-apis.js';
+
+type AccountableRequest = Request & { accountability?: Accountability | null };
 
 const FAKE_FLAG = 'SUBSCRIPTIONS_EXAMPLES_FAKE_PROVIDERS';
 
@@ -108,6 +115,56 @@ export const subscriptionsExamplesEndpoint = defineEndpoint(
 
 			return payAnswer;
 		};
+
+		// Any signed-in user switches the whole preview between the fake
+		// providers and the real test-mode ones.
+		const callProvidersMode = async (
+			requestInit: RequestInit,
+		): Promise<Record<string, unknown>> => {
+			const modeResponse = await fetch(
+				`${providersUrl}/providers-mode`,
+				requestInit,
+			);
+
+			const modeAnswer = await modeResponse.json() as Record<string, unknown>;
+
+			if (!modeResponse.ok) {
+				throw new InvalidPayloadError({
+					reason: `the providers mode stays as it was:`
+						+ ` ${JSON.stringify(modeAnswer['error'])}`,
+				});
+			}
+
+			return modeAnswer;
+		};
+
+		router.get('/providers-mode', (request, response, next) => {
+			if (!(request as AccountableRequest).accountability?.user) {
+				next(new ForbiddenError());
+
+				return;
+			}
+
+			callProvidersMode({})
+				.then((modeAnswer) => response.json({ data: modeAnswer }))
+				.catch(next);
+		});
+
+		router.put('/providers-mode', (request, response, next) => {
+			if (!(request as AccountableRequest).accountability?.user) {
+				next(new ForbiddenError());
+
+				return;
+			}
+
+			callProvidersMode({
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ mode: request.body?.mode ?? null }),
+			})
+				.then((modeAnswer) => response.json({ data: modeAnswer }))
+				.catch(next);
+		});
 
 		router.get('/pay/:payment', (request, response, next) => {
 			callFakePay(request.params.payment)

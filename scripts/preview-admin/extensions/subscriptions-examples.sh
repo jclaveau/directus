@@ -2,9 +2,13 @@
 # with $URL the preview's public URL: what it exports reaches Directus.
 #
 # Loads @scalabus/subscriptions-examples next to the bundle, with fake Stripe
-# and Mollie on localhost and a Mailpit for the mails. Every key below is made
-# up at boot: this job runs the PR head and gets no secret, so no provider and
-# no mailbox outside the runner is ever reached.
+# and Mollie on localhost and a Mailpit for the mails.
+#
+# A run the repository's owner starts on one of its own branches also gets the
+# real Stripe and Mollie test keys, and the webhook secrets of the endpoints
+# preview-admin.yml created for this tunnel (PREVIEW_* below). The examples
+# module's header then switches between the fakes and the real test mode.
+# Every other run makes its keys up at boot and reaches no provider.
 
 EXAMPLES_BUNDLE="$PWD/packages/core-extensions/subscriptions-examples"
 
@@ -22,10 +26,27 @@ mv /tmp/preview-extensions.json preview-extensions/package.json
 
 export SUBSCRIPTIONS_EXAMPLES_FAKE_PROVIDERS=true
 export SUBSCRIPTIONS_EXAMPLES_PROVIDERS_PORT=8057
-export SUBSCRIPTIONS_STRIPE_SECRET_KEY="sk_test_examples_$(openssl rand -hex 12)"
-export SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET="whsec_$(openssl rand -hex 24)"
-export SUBSCRIPTIONS_MOLLIE_API_KEY="test_$(openssl rand -hex 15)"
-export SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS="$(openssl rand -hex 24)"
+
+if [[ "${PREVIEW_STRIPE_SECRET_KEY:-}" =~ ^sk_test_ ]] \
+  && [[ "${PREVIEW_MOLLIE_API_KEY:-}" =~ ^test_ ]] \
+  && [ -n "${PREVIEW_STRIPE_WEBHOOK_SECRET:-}" ] \
+  && [ -n "${PREVIEW_MOLLIE_WEBHOOK_SECRET:-}" ]; then
+  # The fakes sign their webhooks with these same secrets.
+  export SUBSCRIPTIONS_EXAMPLES_REAL_PROVIDERS=true
+  export SUBSCRIPTIONS_STRIPE_SECRET_KEY="$PREVIEW_STRIPE_SECRET_KEY"
+  export SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET="$PREVIEW_STRIPE_WEBHOOK_SECRET"
+  export SUBSCRIPTIONS_MOLLIE_API_KEY="$PREVIEW_MOLLIE_API_KEY"
+  export SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS="$PREVIEW_MOLLIE_WEBHOOK_SECRET"
+  echo "subscriptions examples: real Stripe and Mollie test mode available"
+else
+  export SUBSCRIPTIONS_EXAMPLES_REAL_PROVIDERS=false
+  export SUBSCRIPTIONS_STRIPE_SECRET_KEY="sk_test_examples_$(openssl rand -hex 12)"
+  export SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET="whsec_$(openssl rand -hex 24)"
+  export SUBSCRIPTIONS_MOLLIE_API_KEY="test_$(openssl rand -hex 15)"
+  export SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS="$(openssl rand -hex 24)"
+  echo "subscriptions examples: fake providers only, no real test keys"
+fi
+unset PREVIEW_STRIPE_SECRET_KEY PREVIEW_MOLLIE_API_KEY
 export SUBSCRIPTIONS_CHECKOUT_URL_ALLOW_LIST="$URL/admin/subscriptions-examples,http://localhost:8055/admin/subscriptions-examples"
 
 docker run -d --name preview-mailpit --network host axllent/mailpit:v1.34.0

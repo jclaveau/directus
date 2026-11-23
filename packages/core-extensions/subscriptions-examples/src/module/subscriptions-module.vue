@@ -63,7 +63,19 @@ const MODULE_STYLES = {
 		gap: '8px',
 	},
 	growingCell: { flex: '1 1 200px' },
+	providersSwitch: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: '4px',
+	},
 } as const;
+
+type ProvidersMode = 'fake' | 'real';
+
+const PROVIDERS_SWITCH = [
+	{ mode: 'fake', icon: 'science', label: 'Fake providers' },
+	{ mode: 'real', icon: 'public', label: 'Real (test mode)' },
+] as const;
 
 const directusApi = useApi();
 
@@ -73,6 +85,16 @@ const customAmounts = ref<Record<string, string>>({});
 const beneficiaryEmails = ref<Record<number, string>>({});
 const moduleError = ref<string | null>(null);
 const isLoaded = ref(false);
+const providersMode = ref<ProvidersMode | null>(null);
+const isRealAvailable = ref(false);
+
+const providersTooltip = computed(() => {
+	return isRealAvailable.value
+		? 'Real: Stripe and Mollie in test mode, their own checkout pages, no'
+		+ ' money moves. Fake: this preview\'s own pay page.'
+		: 'This preview has no real Stripe and Mollie test keys: only a run the'
+		+ ' repository\'s owner starts on one of its own branches gets them.';
+});
 
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -109,6 +131,32 @@ async function loadSubscriptions(): Promise<void> {
 	examplesPlans.value = plansResponse.data.data;
 	mineSubscriptions.value = mineResponse.data.data;
 	isLoaded.value = true;
+}
+
+type ProvidersModeAnswer = { mode: ProvidersMode; real_available: boolean };
+
+function storeProvidersMode(modeAnswer: ProvidersModeAnswer): void {
+	providersMode.value = modeAnswer.mode;
+	isRealAvailable.value = modeAnswer.real_available;
+}
+
+async function loadProvidersMode(): Promise<void> {
+	const modeResponse = await directusApi.get(
+		'/subscriptions-examples/providers-mode',
+	);
+
+	storeProvidersMode(modeResponse.data.data);
+}
+
+function pickProvidersMode(pickedMode: ProvidersMode): Promise<void> {
+	return runAction(async () => {
+		const modeResponse = await directusApi.put(
+			'/subscriptions-examples/providers-mode',
+			{ mode: pickedMode },
+		);
+
+		storeProvidersMode(modeResponse.data.data);
+	});
 }
 
 async function runAction(moduleAction: () => Promise<unknown>): Promise<void> {
@@ -183,7 +231,7 @@ function changeRenewal(
 }
 
 onMounted(() => {
-	runAction(() => Promise.resolve());
+	runAction(loadProvidersMode);
 
 	// The webhooks land after the pay page redirected here, and the bundle
 	// syncs them in the background.
@@ -212,6 +260,30 @@ onUnmounted(() => {
       >
         <v-icon name="card_membership" />
       </v-button>
+    </template>
+
+    <template #actions>
+      <div
+        v-if="providersMode !== null"
+        v-tooltip.bottom="providersTooltip"
+        class="examples-providers-switch"
+        :style="MODULE_STYLES.providersSwitch"
+      >
+        <v-button
+          v-for="switchOption in PROVIDERS_SWITCH"
+          :key="switchOption.mode"
+          small
+          :secondary="providersMode !== switchOption.mode"
+          :disabled="switchOption.mode === 'real' && !isRealAvailable"
+          @click="pickProvidersMode(switchOption.mode)"
+        >
+          <v-icon
+            :name="switchOption.icon"
+            left
+          />
+          {{ switchOption.label }}
+        </v-button>
+      </div>
     </template>
 
     <div
