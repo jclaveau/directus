@@ -185,5 +185,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: acceptance-report
-          path: tests/acceptance/playwright-report
+          # The list reporter writes no HTML report: the screenshots, traces and
+          # error contexts of the failed tests land in test-results.
+          path: |
+            tests/acceptance/test-results
+            /tmp/directus.log
           retention-days: 7

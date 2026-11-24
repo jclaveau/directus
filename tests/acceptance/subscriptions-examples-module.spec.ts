@@ -363,7 +363,7 @@ test(
 	'a subscription cancelled at period end says when it ends',
 	async ({ page }) => {
 		await subscribePaid(page, 'Basic', 'Stripe');
-		await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+		await page.getByRole('button', { name: 'Cancel at period end' }).click();
 
 		await expect(page.locator('.examples-line')).toHaveText([
 			/^#\d+ Basic · active$/,
@@ -406,7 +406,7 @@ test(
 			`Renews on ${readTodayPlusMonth()}`,
 		], LINE_TIMEOUT);
 
-		await expect(page.getByRole('button', { name: 'Cancel', exact: true }))
+		await expect(page.getByRole('button', { name: 'Cancel at period end' }))
 			.toHaveCount(0);
 	},
 );
