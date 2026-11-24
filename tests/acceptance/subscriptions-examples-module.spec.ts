@@ -200,6 +200,16 @@ test('the module lists the sample plans at their price', async ({ page }) => {
 	], LINE_TIMEOUT);
 });
 
+test('the module advises Stripe when Mollie fails', async ({ page }) => {
+	await openModule(page);
+
+	await expect(page.locator('.examples-advice')).toHaveText(
+		'We favour Mollie, a European payment provider; its in-page checkout is'
+		+ ' still young. If it fails, pay with Stripe.',
+		LINE_TIMEOUT,
+	);
+});
+
 test(
 	'a plan paid at its price on the fake Mollie page shows as'
 		+ ' active',

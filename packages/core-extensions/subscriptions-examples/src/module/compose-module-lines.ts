@@ -38,6 +38,10 @@ export const NO_SUBSCRIPTION_LINE = 'You have no subscription';
 
 export const NO_INVOICE_LINE = 'No invoice yet';
 
+export const PROVIDER_ADVICE_LINE = 'We favour Mollie, a European payment'
+	+ ' provider; its in-page checkout is still young. If it fails, pay with'
+	+ ' Stripe.';
+
 const ENDED_STATUSES = ['canceled', 'expired', 'incomplete_expired'];
 
 export function formatInterval(

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useApi } from '@directus/extensions-sdk';
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import {
 	composeInvoiceLine,
 	composePlanLine,
@@ -12,12 +12,65 @@ import {
 	NO_INVOICE_LINE,
 	NO_SUBSCRIPTION_LINE,
 	normalizeCustomAmount,
+	PROVIDER_ADVICE_LINE,
 	type SubscriptionInvoice,
 } from './compose-module-lines.js';
 
 const PLAN_CODES = ['basic', 'team', 'yearly'];
 
 const REFRESH_MILLISECONDS = 1500;
+
+/** Stripe.js matches the API version the bundle's stripe client pins. */
+const PROVIDER_SCRIPTS: Record<string, string> = {
+	stripe: 'https://js.stripe.com/endive/stripe.js',
+	mollie: 'https://js.mollie.com/v2/mollie.js',
+};
+
+/**
+ * `/subscriptions/mine` lists no unpaid row, so the in-page checkout's
+ * subscription is kept here across the provider's redirect back.
+ */
+const PAID_CHECKOUT_KEY = 'subscriptions-examples:checkout';
+
+/** About 30 s of refreshes for the payment to turn paid after the redirect. */
+const CONFIRM_TRIES_MAX = 20;
+
+type CheckoutAnswer =
+	| { subscription: number; url: string }
+	| {
+		subscription: number;
+		client_token: string;
+		publishable_key: string | null;
+	};
+
+type StripeCheckout = {
+	createPaymentElement: () => { mount: (formTarget: HTMLElement) => void };
+	loadActions: () => Promise<{
+		actions?: {
+			confirm: () => Promise<
+				{ type: 'success' } | { type: 'error'; error: { message: string } }
+			>;
+		};
+		error?: { message: string };
+	}>;
+};
+
+type ProviderGlobals = {
+	Stripe?: (publishableKey: string) => {
+		initCheckoutElementsSdk: (
+			sdkOptions: { clientSecret: string },
+		) => StripeCheckout;
+	};
+	Mollie?: {
+		Checkout: (clientToken: string, checkoutOptions: { locale: string }) => {
+			create: (componentName: string) => {
+				mount: (formTarget: HTMLElement) => void;
+			};
+		};
+	};
+};
+
+const loadedScripts = new Map<string, Promise<void>>();
 
 // The extensions SDK cannot bundle an SFC <style> block, so the module styles
 // its elements inline, from Directus's own theme variables.
@@ -71,6 +124,7 @@ const MODULE_STYLES = {
 		alignItems: 'center',
 		gap: '4px',
 	},
+	checkoutForm: { minHeight: '200px' },
 } as const;
 
 type ProvidersMode = 'fake' | 'real';
@@ -93,6 +147,16 @@ const moduleError = ref<string | null>(null);
 const isLoaded = ref(false);
 const providersMode = ref<ProvidersMode | null>(null);
 const isRealAvailable = ref(false);
+
+/** The provider whose form is mounted in the page, null while none is. */
+const inPageProvider = ref<string | null>(null);
+const checkoutForm = ref<HTMLElement | null>(null);
+
+/** Each provider that answered 503 to a checkout, with its message. */
+const unavailableProviders = ref<Record<string, string>>({});
+
+let stripeCheckout: StripeCheckout | null = null;
+let confirmTries = 0;
 
 const providersTooltip = computed(() => {
 	return isRealAvailable.value
@@ -124,6 +188,12 @@ function readErrorMessage(requestError: unknown): string {
 	}).response?.data?.errors;
 
 	return responseErrors?.[0]?.message ?? String(requestError);
+}
+
+function readErrorCode(requestError: unknown): string | undefined {
+	return (requestError as {
+		response?: { data?: { errors?: { extensions?: { code?: string } }[] } };
+	}).response?.data?.errors?.[0]?.extensions?.code;
 }
 
 async function loadSubscriptions(): Promise<void> {
@@ -187,7 +257,7 @@ function subscribePlan(planCode: string, providerName: string): Promise<void> {
 			customAmounts.value[planCode] ?? '',
 		);
 
-		const checkoutResponse = await directusApi.post('/subscriptions/checkout', {
+		const checkoutAnswer = await postCheckout({
 			plan: planCode,
 			provider: providerName,
 			...customAmount === ''
@@ -196,8 +266,170 @@ function subscribePlan(planCode: string, providerName: string): Promise<void> {
 			redirect_url: window.location.href,
 		});
 
-		window.location.assign(checkoutResponse.data.data.url);
+		if ('url' in checkoutAnswer) {
+			window.location.assign(checkoutAnswer.url);
+
+			return;
+		}
+
+		sessionStorage.setItem(
+			PAID_CHECKOUT_KEY,
+			JSON.stringify(checkoutAnswer.subscription),
+		);
+
+		await mountInPageCheckout(providerName, checkoutAnswer);
 	});
+}
+
+async function postCheckout(
+	checkoutBody: Record<string, string>,
+): Promise<CheckoutAnswer> {
+	try {
+		const checkoutResponse = await directusApi.post(
+			'/subscriptions/checkout',
+			checkoutBody,
+		);
+
+		return checkoutResponse.data.data;
+	}
+	catch (requestError) {
+		// Greyed out: the other provider is the one left to pay with.
+		if (readErrorCode(requestError) === 'PROVIDER_UNAVAILABLE') {
+			unavailableProviders.value[checkoutBody['provider'] as string]
+				= readErrorMessage(requestError);
+		}
+
+		throw requestError;
+	}
+}
+
+function loadProviderScript(providerName: string): Promise<void> {
+	const scriptUrl = PROVIDER_SCRIPTS[providerName];
+
+	if (scriptUrl === undefined) {
+		throw new Error(
+			`No in-page form is known for provider ${JSON.stringify(providerName)}`,
+		);
+	}
+
+	const loadingScript = loadedScripts.get(scriptUrl)
+		?? new Promise<void>((resolve, reject) => {
+			const scriptElement = document.createElement('script');
+
+			scriptElement.src = scriptUrl;
+			scriptElement.addEventListener('load', () => resolve());
+
+			scriptElement.addEventListener('error', () => {
+				loadedScripts.delete(scriptUrl);
+				scriptElement.remove();
+				reject(new Error(`${JSON.stringify(scriptUrl)} did not load`));
+			});
+
+			document.head.append(scriptElement);
+		});
+
+	loadedScripts.set(scriptUrl, loadingScript);
+
+	return loadingScript;
+}
+
+async function mountInPageCheckout(
+	providerName: string,
+	{ client_token: clientToken, publishable_key: publishableKey }: {
+		client_token: string;
+		publishable_key: string | null;
+	},
+): Promise<void> {
+	await loadProviderScript(providerName);
+	inPageProvider.value = providerName;
+	await nextTick();
+
+	const formTarget = checkoutForm.value as HTMLElement;
+	const providerGlobals = window as unknown as ProviderGlobals;
+
+	if (providerName === 'stripe') {
+		if (providerGlobals.Stripe === undefined || publishableKey === null) {
+			throw new Error('Stripe.js or the publishable key is missing');
+		}
+
+		stripeCheckout = providerGlobals.Stripe(publishableKey)
+			.initCheckoutElementsSdk({ clientSecret: clientToken });
+
+		stripeCheckout.createPaymentElement()
+			.mount(formTarget);
+
+		return;
+	}
+
+	if (providerGlobals.Mollie === undefined) {
+		throw new Error('Mollie.js loaded without its Mollie global');
+	}
+
+	// The component pays on its own and redirects to the checkout's
+	// redirect_url, this page.
+	providerGlobals.Mollie.Checkout(clientToken, { locale: 'en-US' })
+		.create('methods-component')
+		.mount(formTarget);
+}
+
+function payWithStripe(): Promise<void> {
+	return runAction(async () => {
+		const loadedActions = await (stripeCheckout as StripeCheckout)
+			.loadActions();
+
+		if (loadedActions.actions === undefined) {
+			throw new Error(
+				`Stripe refused the checkout:`
+				+ ` ${JSON.stringify(loadedActions.error?.message)}`,
+			);
+		}
+
+		// Redirects to return_url once paid: only a refusal comes back here.
+		const confirmResult = await loadedActions.actions.confirm();
+
+		if (confirmResult.type === 'error') {
+			throw new Error(confirmResult.error.message);
+		}
+	});
+}
+
+function closeInPageCheckout(): void {
+	inPageProvider.value = null;
+	stripeCheckout = null;
+	sessionStorage.removeItem(PAID_CHECKOUT_KEY);
+}
+
+/**
+ * Mollie sends no webhook for an in-page payment: the module asks the bundle
+ * to look the paid payment up, until it is found or the tries run out.
+ */
+async function confirmReturnedCheckout(): Promise<void> {
+	const storedSubscription = sessionStorage.getItem(PAID_CHECKOUT_KEY);
+
+	if (storedSubscription === null || inPageProvider.value !== null) {
+		return;
+	}
+
+	confirmTries += 1;
+	let isConfirmDone = confirmTries >= CONFIRM_TRIES_MAX;
+
+	try {
+		const confirmResponse = await directusApi.post(
+			'/subscriptions/checkout/confirm',
+			{ subscription: JSON.parse(storedSubscription) },
+		);
+
+		const { status: checkoutStatus, sync_queued: isSyncQueued }
+			= confirmResponse.data.data as { status: string; sync_queued: boolean };
+
+		isConfirmDone ||= checkoutStatus !== 'pending' || isSyncQueued;
+	}
+	finally {
+		// A refusal is shown by the caller; the last try stops the retries.
+		if (isConfirmDone) {
+			sessionStorage.removeItem(PAID_CHECKOUT_KEY);
+		}
+	}
 }
 
 function addBeneficiary(subscriptionId: number): Promise<void> {
@@ -267,7 +499,8 @@ onMounted(() => {
 	// The webhooks land after the pay page redirected here, and the bundle
 	// syncs them in the background.
 	refreshTimer = setInterval(() => {
-		loadSubscriptions()
+		confirmReturnedCheckout()
+			.then(loadSubscriptions)
 			.catch((refreshError: unknown) => {
 				moduleError.value = readErrorMessage(refreshError);
 			});
@@ -356,6 +589,8 @@ onUnmounted(() => {
             <div :style="MODULE_STYLES.actionRow">
               <v-button
                 small
+                :disabled="inPageProvider !== null
+                  || unavailableProviders['mollie'] !== undefined"
                 @click="subscribePlan(examplesPlan.code, 'mollie')"
               >
                 Subscribe with Mollie
@@ -363,6 +598,8 @@ onUnmounted(() => {
               <v-button
                 small
                 secondary
+                :disabled="inPageProvider !== null
+                  || unavailableProviders['stripe'] !== undefined"
                 @click="subscribePlan(examplesPlan.code, 'stripe')"
               >
                 Subscribe with Stripe
@@ -370,6 +607,35 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
+        <div
+          v-if="inPageProvider !== null"
+          class="examples-checkout"
+          :style="MODULE_STYLES.cardBox"
+        >
+          <div
+            ref="checkoutForm"
+            :style="MODULE_STYLES.checkoutForm"
+          />
+          <div :style="MODULE_STYLES.actionRow">
+            <v-button
+              v-if="inPageProvider === 'stripe'"
+              small
+              @click="payWithStripe"
+            >
+              Pay
+            </v-button>
+            <v-button
+              small
+              secondary
+              @click="closeInPageCheckout"
+            >
+              Close
+            </v-button>
+          </div>
+        </div>
+        <v-notice type="info">
+          <span class="examples-advice">{{ PROVIDER_ADVICE_LINE }}</span>
+        </v-notice>
         <v-notice type="info">
           <span class="examples-line">{{ NO_SUBSCRIPTION_LINE }}</span>
         </v-notice>

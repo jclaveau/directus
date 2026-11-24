@@ -44,6 +44,11 @@ if [[ "${PREVIEW_STRIPE_SECRET_KEY:-}" =~ ^sk_test_ ]] \
   if [[ "${PREVIEW_STRIPE_PUBLISHABLE_KEY:-}" =~ ^pk_test_ ]]; then
     export SUBSCRIPTIONS_CHECKOUT_UI=in_page
     export SUBSCRIPTIONS_STRIPE_PUBLISHABLE_KEY="$PREVIEW_STRIPE_PUBLISHABLE_KEY"
+    # The admin's CSP loads neither provider's script nor frame. Directus merges
+    # these arrays by index into its defaults, so the defaults are listed too.
+    STRIPE_HOSTS="https://js.stripe.com,https://*.js.stripe.com"
+    export CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC="array:'self','unsafe-eval',$STRIPE_HOSTS,https://js.mollie.com"
+    export CONTENT_SECURITY_POLICY_DIRECTIVES__FRAME_SRC="array:'self',$STRIPE_HOSTS,https://hooks.stripe.com,https://js.mollie.com"
   else
     export SUBSCRIPTIONS_CHECKOUT_UI=hosted
     echo "subscriptions examples: no PREVIEW_STRIPE_PUBLISHABLE_KEY, hosted checkout"
