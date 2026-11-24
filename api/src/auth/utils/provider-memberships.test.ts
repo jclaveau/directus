@@ -114,7 +114,7 @@ describe('providerMemberships', () => {
 });
 
 describe('syncProviderMemberships', () => {
-	let knexMock: Knex;
+	let knexMock: Knex.Transaction;
 
 	let userRows: {
 		id: string;
@@ -149,7 +149,7 @@ describe('syncProviderMemberships', () => {
 			transaction: vi.fn(async () => knexMock),
 			commit: vi.fn(),
 			rollback: vi.fn(),
-		} as unknown as Knex;
+		} as unknown as Knex.Transaction;
 	});
 
 	test('reads the user\'s rows in one select', async () => {

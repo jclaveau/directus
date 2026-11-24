@@ -196,7 +196,7 @@ export class RoleMembersService extends ItemsService {
 
 	protected override async validateKeysToDelete(
 		keys: PrimaryKey[],
-		opts: MutationOptions,
+		_opts: MutationOptions,
 		trx: Knex,
 	): Promise<void> {
 		if (!this.accountability) {

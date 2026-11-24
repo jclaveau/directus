@@ -491,7 +491,7 @@ describe('Services / RoleMembers', () => {
 			const writeRows = async function (
 				this: RoleMembersService,
 				_input: unknown,
-				opts: MutationOptions,
+				opts: MutationOptions = {},
 			) {
 				await this['onKeyRowsWritten']([{ user: 'user-id-20' }], this.knex, opts);
 

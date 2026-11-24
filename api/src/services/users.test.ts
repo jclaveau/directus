@@ -1027,8 +1027,16 @@ describe('Integration Tests', () => {
 					.mockResolvedValueOnce(['admin-child-role', 'admin-role']);
 
 				vi.mocked(fetchGlobalAccessForRoles)
-					.mockResolvedValueOnce({ admin: false, app: true })
-					.mockResolvedValueOnce({ admin: true, app: true });
+					.mockResolvedValueOnce({
+						admin: false,
+						app: true,
+						grantedDbConnections: [],
+					})
+					.mockResolvedValueOnce({
+						admin: true,
+						app: true,
+						grantedDbConnections: [],
+					});
 
 				const promise = new UsersService({
 					knex: db,
