@@ -200,6 +200,16 @@ jobs:
           ./codecov upload-coverage -f "$COVERAGE_DIR/lcov.info" -F blackbox -Z --disable-search \
             -C "$COMMIT_SHA"
 
+      # branch-audit.mjs, in blackbox-pr.yml, merges every shard's report once the run ends.
+      - name: Upload blackbox coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-coverage-common
+          path: coverage/blackbox/coverage-final.json
+          if-no-files-found: warn
+          retention-days: 14
+
   db:
     name: ${{ matrix.vendor }} (shard ${{ matrix.shard }})
     needs: setup
@@ -354,3 +364,13 @@ jobs:
 
           ./codecov upload-coverage -f "$COVERAGE_DIR/lcov.info" -F blackbox -Z --disable-search \
             -C "$COMMIT_SHA"
+
+      # branch-audit.mjs, in blackbox-pr.yml, merges every shard's report once the run ends.
+      - name: Upload blackbox coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-coverage-${{ matrix.vendor }}-${{ matrix.shard }}
+          path: coverage/blackbox/coverage-final.json
+          if-no-files-found: warn
+          retention-days: 14

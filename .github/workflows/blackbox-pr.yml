@@ -94,3 +94,39 @@ jobs:
     # Reusable workflows don't inherit caller secrets implicitly; blackbox.yml needs
     # CODECOV_TOKEN to upload the `blackbox` coverage flag (protected repo rejects tokenless).
     secrets: inherit
+
+  # Once every shard has ended, list the branch arms and statements the PR adds to api/src
+  # that no blackbox server ran. Report only: the job summary carries the list.
+  branch-audit:
+    name: Blackbox branch audit
+    needs: blackbox-tests
+    if: always() && needs.blackbox-tests.result != 'skipped' && needs.blackbox-tests.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # The shards built the merge commit, so its first parent is the base the PR adds to.
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Download shard coverage
+        uses: actions/download-artifact@v4
+        with:
+          pattern: blackbox-coverage-*
+          path: coverage-shards
+
+      - name: Audit added branches
+        run: |
+          node tests/blackbox/branch-audit.mjs coverage-shards HEAD^1 HEAD \
+            coverage-shards/branch-audit.md
+          cat coverage-shards/branch-audit.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-branch-audit
+          path: coverage-shards/branch-audit.md
+          if-no-files-found: ignore
+          retention-days: 30
