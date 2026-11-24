@@ -17,14 +17,18 @@ interface StampFieldRow {
 	collection: string;
 	field: string;
 	special: string;
+	options: string | Record<string, unknown> | null;
 }
+
+// Where up keeps the o2m alias it deletes off `directus_roles`, for down.
+const ROLE_ALIAS_OPTION = 'formerRoleAlias';
 
 async function readStampFields(
 	knex: Knex,
 	specialNames: string[],
 ): Promise<StampFieldRow[]> { // bb-unit-only: bb migrates an empty database
 	const fieldRows: StampFieldRow[] = await knex
-		.select('id', 'collection', 'field', 'special')
+		.select('id', 'collection', 'field', 'special', 'options')
 		.from('directus_fields')
 		.whereNotNull('special')
 		.orderBy('id');
@@ -57,8 +61,10 @@ function refuseNonPostgres(knex: Knex, fieldRows: StampFieldRow[]) { // bb-unit-
 /**
  * A user holds several roles (#746): `role-created` / `role-updated` become
  * `roles-created` / `roles-updated`, stamping a json list of the member roles
- * that allowed the write. Each stored role uuid becomes a list of that one
- * role, and the field stops being a relation to `directus_roles`.
+ * that allowed the write. Each stored role uuid becomes a `jsonb` list of
+ * that one role, and the field stops being a relation to `directus_roles`:
+ * its o2m alias on the role goes too. `jsonb`, unlike `json`, keeps an index
+ * the column holds.
  */
 export async function up(knex: Knex): Promise<void> { // bb-unit-only: bb migrates an empty database
 	const fieldRows = await readStampFields(knex, [...RENAMED_SPECIALS.keys()]);
@@ -84,14 +90,12 @@ export async function up(knex: Knex): Promise<void> { // bb-unit-only: bb migrat
 		}
 
 		await knex.raw(
-			'alter table ?? alter column ?? type json using case when ?? is null'
-			+ ' then null else json_build_array(??) end',
+			'alter table ?? alter column ?? type jsonb using case when ?? is null'
+			+ ' then null else jsonb_build_array(??) end',
 			[collection, field, field, field],
 		);
 
-		await knex('directus_relations')
-			.delete()
-			.where({ many_collection: collection, many_field: field });
+		const roleAliasField = await deleteRoleRelation(knex, collection, field);
 
 		const renamedSpecials = special.split(',')
 			.map((name) => RENAMED_SPECIALS.get(name) ?? name);
@@ -105,7 +109,9 @@ export async function up(knex: Knex): Promise<void> { // bb-unit-only: bb migrat
 			.update({
 				special: renamedSpecials.join(','),
 				interface: 'tags',
-				options: null,
+				options: roleAliasField === null
+					? null
+					: JSON.stringify({ [ROLE_ALIAS_OPTION]: roleAliasField }),
 				display: 'labels',
 				display_options: null,
 			})
@@ -116,6 +122,42 @@ export async function up(knex: Knex): Promise<void> { // bb-unit-only: bb migrat
 		`Turned the role stamp fields ${namedFields(fieldRows)} into json lists`
 		+ ' of member roles, dropping their relation to "directus_roles"',
 	);
+}
+
+// The relation's o2m alias field on `directus_roles`, deleted with it.
+async function deleteRoleRelation(
+	knex: Knex,
+	collection: string,
+	field: string,
+): Promise<string | null> { // bb-unit-only: bb migrates an empty database
+	const relationWhere = { many_collection: collection, many_field: field };
+
+	const [relationRow]: { one_field: string | null }[] = await knex
+		.select('one_field')
+		.from('directus_relations')
+		.where(relationWhere);
+
+	await knex('directus_relations').delete()
+		.where(relationWhere);
+
+	const roleAliasField = relationRow?.one_field ?? null;
+
+	if (roleAliasField !== null) {
+		await knex('directus_fields').delete()
+			.where({ collection: 'directus_roles', field: roleAliasField });
+	}
+
+	return roleAliasField;
+}
+
+function storedRoleAlias(
+	options: StampFieldRow['options'],
+): string | null { // bb-unit-only: bb never migrates down
+	const fieldOptions = typeof options === 'string'
+		? JSON.parse(options)
+		: options;
+
+	return fieldOptions?.[ROLE_ALIAS_OPTION] ?? null;
 }
 
 /**
@@ -148,7 +190,7 @@ export async function down(knex: Knex): Promise<void> { // bb-unit-only: bb neve
 		const severalRoleRows: Record<string, unknown>[] = await knex
 			.select(primaryKeyField)
 			.from(collection)
-			.whereRaw('json_array_length(??) > 1', [field])
+			.whereRaw('jsonb_array_length(??) > 1', [field])
 			.orderBy(primaryKeyField);
 
 		if (severalRoleRows.length > 0) {
@@ -172,7 +214,7 @@ export async function down(knex: Knex): Promise<void> { // bb-unit-only: bb neve
 		);
 	}
 
-	for (const { id, collection, field, special } of fieldRows) {
+	for (const { id, collection, field, special, options } of fieldRows) {
 		await knex.raw(
 			'alter table ?? alter column ?? type uuid using (?? ->> 0)::uuid',
 			[collection, field, field],
@@ -184,11 +226,23 @@ export async function down(knex: Knex): Promise<void> { // bb-unit-only: bb neve
 				.onDelete('SET NULL');
 		});
 
+		const roleAliasField = storedRoleAlias(options);
+
 		await knex('directus_relations').insert({
 			many_collection: collection,
 			many_field: field,
 			one_collection: 'directus_roles',
+			one_field: roleAliasField,
 		});
+
+		if (roleAliasField !== null) {
+			await knex('directus_fields').insert({
+				collection: 'directus_roles',
+				field: roleAliasField,
+				special: 'o2m',
+				interface: 'list-o2m',
+			});
+		}
 
 		const formerFieldSpecials = special.split(',')
 			.filter((name) => name !== 'cast-json')

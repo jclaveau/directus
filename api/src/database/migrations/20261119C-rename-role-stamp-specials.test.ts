@@ -42,6 +42,8 @@ describe('the migration', () => {
 		tracker.on.delete('directus_relations').response(1);
 		tracker.on.insert('directus_relations').response([]);
 		tracker.on.update('directus_fields').response(1);
+		tracker.on.delete('directus_fields').response(1);
+		tracker.on.insert('directus_fields').response([]);
 	});
 
 	afterEach(() => {
@@ -73,13 +75,20 @@ describe('the migration', () => {
 			},
 		]);
 
+		tracker.on.select(({ sql, bindings }) => {
+			return sql.includes('directus_relations') && bindings[1] === 'made_by_role';
+		}).response([{ one_field: 'articles_made' }]);
+
+		tracker.on.select('directus_relations').response([]);
+
 		await up(db);
 
 		expect(tracker.history.all.map(({ sql, bindings }) => ({ sql, bindings })))
 			.toEqual([
 				{
-					sql: 'select "id", "collection", "field", "special" from'
-						+ ' "directus_fields" where "special" is not null order by "id" asc',
+					sql: 'select "id", "collection", "field", "special", "options"'
+						+ ' from "directus_fields" where "special" is not null'
+						+ ' order by "id" asc',
 					bindings: [],
 				},
 				{
@@ -88,15 +97,25 @@ describe('the migration', () => {
 					bindings: [],
 				},
 				{
-					sql: 'alter table "articles" alter column "made_by_role" type json'
+					sql: 'alter table "articles" alter column "made_by_role" type jsonb'
 						+ ' using case when "made_by_role" is null then null else'
-						+ ' json_build_array("made_by_role") end',
+						+ ' jsonb_build_array("made_by_role") end',
 					bindings: [],
+				},
+				{
+					sql: 'select "one_field" from "directus_relations" where'
+						+ ' "many_collection" = $1 and "many_field" = $2',
+					bindings: ['articles', 'made_by_role'],
 				},
 				{
 					sql: 'delete from "directus_relations" where "many_collection" = $1'
 						+ ' and "many_field" = $2',
 					bindings: ['articles', 'made_by_role'],
+				},
+				{
+					sql: 'delete from "directus_fields" where "collection" = $1'
+						+ ' and "field" = $2',
+					bindings: ['directus_roles', 'articles_made'],
 				},
 				{
 					sql: 'update "directus_fields" set "special" = $1, "interface" = $2,'
@@ -105,17 +124,22 @@ describe('the migration', () => {
 					bindings: [
 						'roles-created,cast-json',
 						'tags',
-						null,
+						'{"formerRoleAlias":"articles_made"}',
 						'labels',
 						null,
 						3,
 					],
 				},
 				{
-					sql: 'alter table "articles" alter column "changed_by_role" type json'
-						+ ' using case when "changed_by_role" is null then null else'
-						+ ' json_build_array("changed_by_role") end',
+					sql: 'alter table "articles" alter column "changed_by_role" type'
+						+ ' jsonb using case when "changed_by_role" is null then null else'
+						+ ' jsonb_build_array("changed_by_role") end',
 					bindings: [],
+				},
+				{
+					sql: 'select "one_field" from "directus_relations" where'
+						+ ' "many_collection" = $1 and "many_field" = $2',
+					bindings: ['articles', 'changed_by_role'],
 				},
 				{
 					sql: 'delete from "directus_relations" where "many_collection" = $1'
@@ -204,6 +228,8 @@ describe('the migration', () => {
 			},
 		]);
 
+		tracker.on.select('directus_relations').response([]);
+
 		await up(db);
 
 		expect(tracker.history.all.map(({ sql }) => sql)).toContain(
@@ -254,6 +280,7 @@ describe('the migration', () => {
 				collection: 'articles',
 				field: 'made_by_role',
 				special: 'roles-created,cast-json',
+				options: { formerRoleAlias: 'articles_made' },
 			},
 		]);
 
@@ -262,13 +289,14 @@ describe('the migration', () => {
 		expect(tracker.history.all.map(({ sql, bindings }) => ({ sql, bindings })))
 			.toEqual([
 				{
-					sql: 'select "id", "collection", "field", "special" from'
-						+ ' "directus_fields" where "special" is not null order by "id" asc',
+					sql: 'select "id", "collection", "field", "special", "options"'
+						+ ' from "directus_fields" where "special" is not null'
+						+ ' order by "id" asc',
 					bindings: [],
 				},
 				{
 					sql: 'select "id" from "articles" where'
-						+ ' json_array_length("made_by_role") > 1 order by "id" asc',
+						+ ' jsonb_array_length("made_by_role") > 1 order by "id" asc',
 					bindings: [],
 				},
 				{
@@ -284,8 +312,19 @@ describe('the migration', () => {
 				},
 				{
 					sql: 'insert into "directus_relations" ("many_collection",'
-						+ ' "many_field", "one_collection") values ($1, $2, $3)',
-					bindings: ['articles', 'made_by_role', 'directus_roles'],
+						+ ' "many_field", "one_collection", "one_field")'
+						+ ' values ($1, $2, $3, $4)',
+					bindings: [
+						'articles',
+						'made_by_role',
+						'directus_roles',
+						'articles_made',
+					],
+				},
+				{
+					sql: 'insert into "directus_fields" ("collection", "field",'
+						+ ' "interface", "special") values ($1, $2, $3, $4)',
+					bindings: ['directus_roles', 'articles_made', 'list-o2m', 'o2m'],
 				},
 				{
 					sql: 'update "directus_fields" set "special" = $1, "interface" = $2,'
@@ -306,6 +345,30 @@ describe('the migration', () => {
 			'Turned the role stamp fields "articles"."made_by_role" back into one'
 			+ ' role uuid related to "directus_roles"',
 		);
+	});
+
+	test('down re-creates no alias the stamp had none of', async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			primary: vi.fn().mockResolvedValue('id'),
+		} as any);
+
+		tracker.on.select('articles').response([]);
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 3,
+				collection: 'articles',
+				field: 'made_by_role',
+				special: 'roles-created,cast-json',
+				options: '{"choices":null}',
+			},
+		]);
+
+		await down(db);
+
+		expect(tracker.history.insert.map(({ bindings }) => bindings)).toEqual([
+			['articles', 'made_by_role', 'directus_roles', null],
+		]);
 	});
 
 	test('down refuses stamps listing several roles, changing nothing', async () => {
@@ -338,10 +401,10 @@ describe('the migration', () => {
 			},
 		]);
 
-		tracker.on.select(/json_array_length\("made_by_role"\)/)
+		tracker.on.select(/jsonb_array_length\("made_by_role"\)/)
 			.response([{ id: 1 }, { id: 7 }]);
 
-		tracker.on.select(/from "articles" where json_array_length\("changed/)
+		tracker.on.select(/from "articles" where jsonb_array_length\("changed/)
 			.response([]);
 
 		tracker.on.select('notes').response([{ code: 'n-1' }]);
