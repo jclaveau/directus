@@ -470,7 +470,9 @@ Feature: Only an admin or code writes who may do what
       | 6       | directus_access      | 1      | 0      | 0      | 0      | 0    |
       | 6       | directus_roles       | 2      | 0      | 0      | 0      | 0    |
       | 6       | directus_users       | 1      | 0      | 0      | 0      | 0    |
-      | 7       | directus_users       | 0      | 0      | 0      | 0      | 0    |
+      | 7       | directus_access      | 1      | 0      | 0      | 0      | 0    |
+      | 7       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
+      | 7       | directus_users       | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a role a user belongs to stays, an empty one goes, by a non-admin too
     Given the rows of directus_policies:
