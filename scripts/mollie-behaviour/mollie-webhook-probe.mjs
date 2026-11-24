@@ -1586,12 +1586,30 @@ async function checkCheckoutSession() {
 		customerId: probeCustomer.id,
 	};
 
+	// Does the session hand its metadata and webhookUrl down to the payment it
+	// makes? The bundle finds a first payment by `directus_subscription`.
+	const sessionMarker = `probe-session-${Date.now()}`;
+
+	const markedSessionBody = {
+		...sessionBody,
+		metadata: { directus_subscription: sessionMarker },
+		webhookUrl: `${tunnelUrl}/session-payment`,
+	};
+
 	let sessionBearer = apiKey;
 	let sessionQuery = '';
 
 	let sessionCreation = await callMollieVerdict('POST', '/sessions', {
-		body: sessionBody,
+		body: markedSessionBody,
 	});
+
+	sessionFindings.creationWithMetadata = describeVerdict(sessionCreation);
+
+	if (sessionCreation.mollieAnswer === null) {
+		sessionCreation = await callMollieVerdict('POST', '/sessions', {
+			body: sessionBody,
+		});
+	}
 
 	sessionFindings.creationWithApiKey = describeVerdict(sessionCreation);
 
@@ -1684,7 +1702,7 @@ async function checkCheckoutSession() {
 		?? null;
 
 	sessionFindings.completion = checkoutHref === null
-		? 'needs a browser: no checkout link, only the Mollie.js components'
+		? 'no checkout link: paid through the Mollie.js components above'
 		: await payTestCheckout(checkoutBrowser, checkoutHref);
 
 	let listedMandates = [];
@@ -1711,6 +1729,46 @@ async function checkCheckoutSession() {
 			detailsKeys: Object.keys(listedMandate.details ?? {}).sort(),
 		};
 	});
+
+	// Leave the payment's webhook time to reach the tunnel.
+	await waitSeconds(10);
+
+	const customerPayments = await callMollie(
+		'GET',
+		`/customers/${probeCustomer.id}/payments`,
+	);
+
+	const sessionPaymentDeliveries = capturedRequests.filter((capturedRequest) => {
+		return capturedRequest.path === '/session-payment';
+	});
+
+	sessionFindings.customerPayments = customerPayments._embedded.payments
+		.map((listedPayment) => {
+			return {
+				status: listedPayment.status,
+				sequenceType: listedPayment.sequenceType ?? null,
+				hasMandateId: typeof listedPayment.mandateId === 'string',
+				metadataMatches: listedPayment.metadata?.directus_subscription
+					=== sessionMarker,
+				metadataKeys: Object.keys(listedPayment.metadata ?? {}).sort(),
+				hasWebhookUrl: typeof listedPayment.webhookUrl === 'string',
+				webhookUrlIsSessions: listedPayment.webhookUrl
+					=== `${tunnelUrl}/session-payment`,
+				deliveredToSessionWebhook: sessionPaymentDeliveries
+					.some((capturedRequest) => {
+						return capturedRequest.rawBody.includes(listedPayment.id);
+					}),
+				keys: Object.keys(listedPayment).sort(),
+			};
+		});
+
+	sessionFindings.sessionWebhookDeliveries = sessionPaymentDeliveries
+		.map((capturedRequest) => {
+			return {
+				contentType: capturedRequest.contentType,
+				bodyShape: capturedRequest.rawBody.replace(/[A-Za-z0-9]{6,}/g, '…'),
+			};
+		});
 
 	const subscriptionCreation = await callMollieVerdict(
 		'POST',
