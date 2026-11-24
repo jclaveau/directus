@@ -5,15 +5,25 @@ import {
 	messageOfDocString,
 	responseCellOf,
 } from '@common/cucumber';
+import { DeleteCollection } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { load as loadYaml } from 'js-yaml';
 import request from 'supertest';
-import { describe, expect } from 'vitest';
+import { afterAll, describe, expect } from 'vitest';
 import {
 	defineStatementCountsStep,
 	startAuditedInstance,
 } from '@common/query-audit-steps';
+import {
+	collectionBatchBadge,
+	collectionNestedCard,
+	collectionNestedLink,
+	collectionNestedOwner,
+	collectionNestedPage,
+	collectionNestedPost,
+	collectionNestedTask,
+} from './nested-m2o-a2o.seed';
 
 type RequestCell = {
 	method: 'GET' | 'POST' | 'PATCH';
@@ -37,6 +47,22 @@ const feature = loadFeature('./tests/db/routes/items/nested-m2o-a2o.feature');
 
 describe.each(vendors)('%s', (vendor) => {
 	const instanceUrl = startAuditedInstance(vendor);
+
+	// Left alive, the task's foreign key to directus_users runs into every later
+	// user delete of the shard, and into what it reads and purges.
+	afterAll(async () => {
+		for (const collection of [
+			collectionNestedCard,
+			collectionNestedTask,
+			collectionNestedLink,
+			collectionNestedPage,
+			collectionNestedPost,
+			collectionBatchBadge,
+			collectionNestedOwner,
+		]) {
+			await DeleteCollection(vendor, { collection });
+		}
+	});
 
 	defineFeature(feature, (scenario) => {
 		for (const { title } of feature.scenarios) {

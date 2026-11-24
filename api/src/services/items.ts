@@ -43,6 +43,7 @@ import {
 	scopedCacheMutatedFingerprints,
 	scopedCacheUpdatedRows,
 	scopedCacheWrittenRows,
+	type ScopedCacheOnDeleteRows,
 	type ScopedCacheSnapshot,
 	stripScopedCacheOwnershipInjections,
 	takenOverScopedCacheKey,
@@ -120,6 +121,16 @@ export type DeferredPurgeOptions = MutationOptions & ResponseCacheFlushDeferral 
 		hookAddedKeys: PrimaryKey[],
 		oldScopedCacheSnapshot: ScopedCacheSnapshot,
 	) => void;
+};
+
+/**
+ * A collection a delete's `ON DELETE` rules changed: its rows' slices before the
+ * delete, and the keys of the ones that survive rewritten.
+ */
+type OnDeleteSnapshot = {
+	collection: string;
+	rewrittenKeys: PrimaryKey[];
+	oldScopedCacheSnapshot: ScopedCacheSnapshot;
 };
 
 /**
@@ -4854,6 +4865,53 @@ implements AbstractService<Item> {
 	}
 
 	/**
+	 * The old slices of the rows `onDeleteRows` names outside this collection,
+	 * read on the delete's transaction before the delete: one snapshot per
+	 * collection, its rewritten keys kept for the re-read after the commit.
+	 */
+	private async snapshotOnDeleteRows(
+		onDeleteRows: ScopedCacheOnDeleteRows | null,
+		trx: Knex,
+	): Promise<OnDeleteSnapshot[]> {
+		if (onDeleteRows === null) {
+			return [];
+		}
+
+		const changedCollections = new Set([
+			...onDeleteRows.removedKeys.keys(),
+			...onDeleteRows.rewrittenKeys.keys(),
+		]);
+
+		changedCollections.delete(this.collection);
+
+		const onDeleteSnapshots: OnDeleteSnapshot[] = [];
+
+		for (const changedCollection of changedCollections) {
+			const rewrittenKeys =
+				onDeleteRows.rewrittenKeys.get(changedCollection) ?? [];
+
+			const collectionScopedCache = new ItemScopedCacheService(
+				changedCollection,
+				this.schema,
+				trx,
+				this.cache,
+				this.accountability,
+			);
+
+			onDeleteSnapshots.push({
+				collection: changedCollection,
+				rewrittenKeys,
+				oldScopedCacheSnapshot: await collectionScopedCache.snapshot([
+					...onDeleteRows.removedKeys.get(changedCollection) ?? [],
+					...rewrittenKeys,
+				]),
+			});
+		}
+
+		return onDeleteSnapshots;
+	}
+
+	/**
 	 * Delete multiple items by primary key.
 	 */
 	async deleteMany(
@@ -4941,17 +4999,23 @@ implements AbstractService<Item> {
 			// hook that returned a REWRITTEN array (rather than null to cancel) would
 			// otherwise purge rows that survive and leave the deleted ones cached.
 			//
-			// With them, the rows the delete rewrites through a self-relation: the
-			// database moves those between slices under the delete, so they take an
-			// update's old ∪ new snapshot, the new half re-read once the rows are
+			// With them, the rows the database changes under the delete through an
+			// `ON DELETE` rule: the ones it removes, and the ones it rewrites, which
+			// take an update's old ∪ new snapshot, the new half re-read once they are
 			// committed.
-			const selfRelationSurvivorKeys =
-				await service.scopedCache.selfRelationSurvivorKeys(keys);
+			const onDeleteRows =
+				await service.scopedCache.rowsChangedByOnDelete(keys);
 
 			const oldScopedCacheSnapshot = await service.scopedCache.snapshot([
 				...keys,
-				...selfRelationSurvivorKeys,
+				...onDeleteRows?.removedKeys.get(this.collection) ?? [],
+				...onDeleteRows?.rewrittenKeys.get(this.collection) ?? [],
 			]);
+
+			const onDeleteSnapshots = await this.snapshotOnDeleteRows(
+				onDeleteRows,
+				trx,
+			);
 
 			if (this.accountability) {
 				await validateAccess(
@@ -5031,8 +5095,9 @@ implements AbstractService<Item> {
 			}
 
 			return {
-				selfRelationSurvivorKeys,
+				onDeleteRows,
 				oldScopedCacheSnapshot,
+				onDeleteSnapshots,
 				activityActionEvents,
 			};
 		}, opts.mutationTracker.snapshot()).catch(async (error) => {
@@ -5083,13 +5148,17 @@ implements AbstractService<Item> {
 			return keys.map(() => null);
 		}
 
-		const { selfRelationSurvivorKeys, oldScopedCacheSnapshot } = deletion;
+		const {
+			onDeleteRows,
+			oldScopedCacheSnapshot,
+			onDeleteSnapshots,
+		} = deletion;
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			// After the commit: a failed read must not fail a delete that went through.
 			// Null widens the purge to the collection, as in updateMany.
 			const survivorScopedCacheSnapshot = await this.scopedCache
-				.snapshot(selfRelationSurvivorKeys)
+				.snapshot(onDeleteRows?.rewrittenKeys.get(this.collection) ?? [])
 				.catch(() => null);
 
 			await this.scopedCache.purge(
@@ -5098,21 +5167,53 @@ implements AbstractService<Item> {
 					survivorScopedCacheSnapshot,
 				),
 				scopedCacheHookDeclarations,
-				scopedCacheCollectionsChangedByOnDelete(
-					this.schema,
-					this.collection,
-				),
+				// Rows past naming: every collection the rules reach goes whole.
+				onDeleteRows === null
+					? scopedCacheCollectionsChangedByOnDelete(
+						this.schema,
+						this.collection,
+					)
+					: [],
 				{
 					includeBareFingerprint: opts.purgeBareFingerprint !== false,
-					// The deleted rows as they last were, plus both sides of the rows
-					// the delete rewrote through a self-relation. No `changed`: a row
-					// leaving the result set takes every field with it.
+					// The deleted rows as they last were, the ones a self-relation
+					// removed with them, and both sides of the ones it rewrote. No
+					// `changed`: a row leaving the result set takes every field with it.
 					rows: scopedCacheWrittenRows(
 						oldScopedCacheSnapshot,
 						survivorScopedCacheSnapshot,
 					),
 				},
 			);
+
+			for (const onDeleteSnapshot of onDeleteSnapshots) {
+				const collectionScopedCache = new ItemScopedCacheService(
+					onDeleteSnapshot.collection,
+					this.schema,
+					this.knex,
+					this.cache,
+					this.accountability,
+				);
+
+				const rewrittenScopedCacheSnapshot = await collectionScopedCache
+					.snapshot(onDeleteSnapshot.rewrittenKeys)
+					.catch(() => null);
+
+				await collectionScopedCache.purge(
+					scopedCacheMutatedFingerprints(
+						onDeleteSnapshot.oldScopedCacheSnapshot,
+						rewrittenScopedCacheSnapshot,
+					),
+					undefined,
+					[],
+					{
+						rows: scopedCacheWrittenRows(
+							onDeleteSnapshot.oldScopedCacheSnapshot,
+							rewrittenScopedCacheSnapshot,
+						),
+					},
+				);
+			}
 		}
 
 		if (opts.emitEvents !== false) {

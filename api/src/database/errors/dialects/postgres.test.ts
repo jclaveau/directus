@@ -307,6 +307,61 @@ describe('foreign key violation (23503)', () => {
 	});
 });
 
+describe('restrict violation (23001)', () => {
+	it('maps a delete a RESTRICT rule refuses to a still-referenced parent', () => {
+		const error = pgError({
+			code: '23001',
+			table: 'on_delete_lock',
+			constraint: 'on_delete_lock_task_foreign',
+			detail: 'Key (id)=(5) is referenced from table "on_delete_lock".',
+		});
+
+		const result = extractError(error, {}, {
+			collection: 'on_delete_task',
+			operation: 'delete',
+		});
+
+		expect(result).toBeInstanceOf(InvalidForeignKeyError);
+
+		expect((result as any).extensions).toEqual({
+			collection: 'on_delete_task',
+			field: 'id',
+			value: '5',
+			constraint: 'on_delete_lock_task_foreign',
+			relatedCollection: 'on_delete_lock',
+			reason: 'still_referenced',
+			operation: 'delete',
+		});
+	});
+
+	it(oneLine`
+		maps an update a RESTRICT rule refuses to a still-referenced parent,
+		its detail naming no "still referenced"
+	`, () => {
+		const error = pgError({
+			code: '23001',
+			table: 'on_delete_lock',
+			constraint: 'on_delete_lock_task_foreign',
+			detail: 'Key (id)=(5) is referenced from table "on_delete_lock".',
+		});
+
+		const result = extractError(error, {}, {
+			collection: 'on_delete_task',
+			operation: 'update',
+		});
+
+		expect((result as any).extensions).toEqual({
+			collection: 'on_delete_task',
+			field: 'id',
+			value: '5',
+			constraint: 'on_delete_lock_task_foreign',
+			relatedCollection: 'on_delete_lock',
+			reason: 'still_referenced',
+			operation: 'update',
+		});
+	});
+});
+
 describe('unhandled code', () => {
 	it('returns the raw error for an unknown SQLSTATE', () => {
 		const error = pgError({ code: '99999', message: 'something else' });

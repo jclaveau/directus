@@ -412,12 +412,13 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 		.toEqual(['node']);
 	});
 
-	// Left out here on purpose: the delete snapshots those survivors by key
-	// (selfRelationSurvivorKeys), not through this walk's coarse fan-out.
-	it('leaves itself out when a self-relation only nulls the foreign key', () => {
+	// The walk only runs for rows past naming, so the survivors are not named
+	// either: the collection goes whole.
+	it('reports itself when a self-relation only nulls the foreign key', () => {
 		const schema = { relations: [nullifyRelation('node', 'node')] } as any;
 
-		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'node')).toEqual([]);
+		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'node'))
+		.toEqual(['node']);
 	});
 
 	// The rule is reached from ANOTHER collection, so the rows it rewrites are not
