@@ -53,6 +53,10 @@ describe('the migration', () => {
 
 	beforeEach(() => {
 		tracker.on.any(/^(create|alter|drop) (unique )?(table|index)/).response(undefined);
+
+		tracker.on
+			.select(/from "directus_(relations|permissions|presets|fields|operations|panels)"/)
+			.response([]);
 	});
 
 	afterEach(() => {
@@ -322,5 +326,186 @@ describe('the migration', () => {
 		expect(tracker.history.update).toEqual([]);
 		expect(tracker.history.delete).toEqual([]);
 		expect(tracker.history.any).toEqual([]);
+	});
+});
+
+describe('the stored paths to a user\'s role', () => {
+	let db: Knex;
+	let tracker: Tracker;
+
+	beforeAll(() => {
+		db = knex.default({ client: MockClient, dialect: 'pg' });
+		tracker = createTracker(db);
+	});
+
+	beforeEach(() => {
+		tracker.on.any(/^(create|alter|drop) (unique )?(table|index)/).response(undefined);
+
+		vi.mocked(createInspector).mockReturnValue({
+			foreignKeys: vi.fn().mockResolvedValue([]),
+		} as any);
+
+		tracker.on.select('directus_relations').response([
+			{
+				many_collection: 'notes',
+				many_field: 'by',
+				one_collection: 'directus_users',
+				one_field: null,
+			},
+		]);
+	});
+
+	afterEach(() => {
+		tracker.reset();
+		vi.restoreAllMocks();
+	});
+
+	test('up moves a permission\'s filter, fields, preset to roles.role', async () => {
+		tracker.on.select('directus_users').response([]);
+
+		tracker.on.select('directus_permissions').response([
+			{
+				id: 1,
+				collection: 'notes',
+				permissions: '{"by":{"role":{"_in":"$CURRENT_MEMBER_ROLES"}}}',
+				validation: null,
+				presets: null,
+				fields: '*',
+			},
+			{
+				id: 2,
+				collection: 'directus_users',
+				permissions: { role: { name: { _eq: 'Editor' } } },
+				validation: { email: { _nnull: true } },
+				presets: { role: 'role-a', status: 'active' },
+				fields: 'id,role,email',
+			},
+		]);
+
+		tracker.on.select(/from "directus_(presets|fields|operations|panels)"/)
+			.response([]);
+
+		tracker.on.update('directus_permissions').response(1);
+
+		await up(db);
+
+		expect(tracker.history.update.map(({ sql, bindings }) => [sql, bindings]))
+			.toEqual([
+				[
+					'update "directus_permissions" set "permissions" = ?'
+					+ ' where "id" = ?',
+					['{"by":{"roles":{"role":{"_in":"$CURRENT_MEMBER_ROLES"}}}}', 1],
+				],
+				[
+					'update "directus_permissions" set "permissions" = ?'
+					+ ' where "id" = ?',
+					['{"roles":{"role":{"name":{"_eq":"Editor"}}}}', 2],
+				],
+				[
+					'update "directus_permissions" set "presets" = ?'
+					+ ' where "id" = ?',
+					['{"status":"active","roles":[{"role":"role-a"}]}', 2],
+				],
+				[
+					'update "directus_permissions" set "fields" = ?'
+					+ ' where "id" = ?',
+					['id,roles,email', 2],
+				],
+			]);
+	});
+
+	test('up moves the filters of a field\'s, a panel\'s options', async () => {
+		tracker.on.select('directus_users').response([]);
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 7,
+				collection: 'notes',
+				field: 'by',
+				options: { filter: { role: { _eq: 'role-a' } } },
+				conditions: null,
+				validation: null,
+			},
+		]);
+
+		tracker.on.select('directus_panels').response([
+			{
+				id: 'panel-1',
+				options: {
+					collection: 'directus_users',
+					filter: { role: { _eq: 'role-a' } },
+				},
+			},
+			{
+				id: 'panel-2',
+				options: { filter: { role: { _eq: 'role-a' } } },
+			},
+		]);
+
+		tracker.on.select(/from "directus_(permissions|presets|operations)"/)
+			.response([]);
+
+		tracker.on.update(/^update "directus_(fields|panels)"/).response(1);
+
+		await up(db);
+
+		expect(tracker.history.update.map(({ sql, bindings }) => [sql, bindings]))
+			.toEqual([
+				[
+					'update "directus_fields" set "options" = ?'
+					+ ' where "id" = ?',
+					['{"filter":{"roles":{"role":{"_eq":"role-a"}}}}', 7],
+				],
+				[
+					'update "directus_panels" set "options" = ?'
+					+ ' where "id" = ?',
+					[
+						'{"collection":"directus_users",'
+						+ '"filter":{"roles":{"role":{"_eq":"role-a"}}}}',
+						'panel-1',
+					],
+				],
+			]);
+	});
+
+	test('down moves them back to the role column', async () => {
+		tracker.on.select('directus_role_members').response([]);
+
+		tracker.on.select('directus_permissions').response([
+			{
+				id: 2,
+				collection: 'directus_users',
+				permissions: { roles: { role: { name: { _eq: 'Editor' } } } },
+				validation: null,
+				presets: { status: 'active', roles: [{ role: 'role-a' }] },
+				fields: 'id,roles,email',
+			},
+		]);
+
+		tracker.on.select(/from "directus_(presets|fields|operations|panels)"/)
+			.response([]);
+
+		tracker.on.update('directus_permissions').response(1);
+
+		await down(db);
+
+		expect(tracker.history.update.map(({ sql, bindings }) => [sql, bindings]))
+			.toEqual([
+				[
+					'update "directus_permissions" set "permissions" = ?'
+					+ ' where "id" = ?',
+					['{"role":{"name":{"_eq":"Editor"}}}', 2],
+				],
+				[
+					'update "directus_permissions" set "presets" = ?'
+					+ ' where "id" = ?',
+					['{"status":"active","role":"role-a"}', 2],
+				],
+				[
+					'update "directus_permissions" set "fields" = ?'
+					+ ' where "id" = ?',
+					['id,role,email', 2],
+				],
+			]);
 	});
 });
