@@ -528,7 +528,7 @@ describe('the stored paths to a user\'s role', () => {
 			]);
 	});
 
-	test('down keeps a preset of no or several memberships', async () => {
+	test('down keeps a preset of no, several or a null membership', async () => {
 		tracker.on.select('directus_role_members').response([]);
 
 		tracker.on.select('directus_permissions').response([
@@ -546,6 +546,14 @@ describe('the stored paths to a user\'s role', () => {
 				permissions: null,
 				validation: null,
 				presets: { roles: [{ role: 'role-a' }, { role: 'role-b' }] },
+				fields: null,
+			},
+			{
+				id: 7,
+				collection: 'directus_users',
+				permissions: null,
+				validation: null,
+				presets: { roles: [null] },
 				fields: null,
 			},
 		]);
