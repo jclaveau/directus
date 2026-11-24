@@ -16,12 +16,17 @@ export type CheckoutCreate = {
 	checkoutUrlAllowList: URL[];
 	userId: string | null;
 	requestBody: unknown;
+	logger: { warn: (message: string) => void };
 };
 
-export type CreatedCheckout = {
-	subscription: number;
-	url: string;
-};
+/** A `client_token` mounts the provider's form in the page, a `url` leaves it. */
+export type CreatedCheckout =
+	| { subscription: number; url: string }
+	| {
+		subscription: number;
+		client_token: string;
+		publishable_key: string | null;
+	};
 
 type CheckoutPayload = {
 	planCode: unknown;
@@ -53,6 +58,7 @@ export async function createCheckout({
 	checkoutUrlAllowList,
 	userId,
 	requestBody,
+	logger,
 }: CheckoutCreate): Promise<CreatedCheckout> {
 	if (userId === null) {
 		throw new ForbiddenError();
@@ -72,9 +78,28 @@ export async function createCheckout({
 		return await storePendingCheckout(trx, userId, checkoutPayload);
 	});
 
+	const checkoutPage = await subscriptionProvider.createCheckout(checkoutStart);
+
+	if ('clientToken' in checkoutPage) {
+		return {
+			subscription: checkoutStart.directusSubscription,
+			client_token: checkoutPage.clientToken,
+			publishable_key: checkoutPage.publishableKey,
+		};
+	}
+
+	if (checkoutPage.inPageRefusal !== null) {
+		logger.warn(
+			`${JSON.stringify(checkoutPayload.providerName)} refused the in-page`
+			+ ` checkout of subscription`
+			+ ` ${JSON.stringify(checkoutStart.directusSubscription)}, sent to its`
+			+ ` page instead: ${JSON.stringify(checkoutPage.inPageRefusal)}`,
+		);
+	}
+
 	return {
 		subscription: checkoutStart.directusSubscription,
-		url: await subscriptionProvider.createCheckout(checkoutStart),
+		url: checkoutPage.url,
 	};
 }
 

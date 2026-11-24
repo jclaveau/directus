@@ -6,6 +6,7 @@ import {
 	MissingProviderSubscriptionError,
 	NoValidMandateError,
 	PaidCheckoutError,
+	ProviderUnavailableError,
 	WebhookIgnoredError,
 	WebhookSignatureError,
 	WebhookUnreadableError,
@@ -1250,7 +1251,10 @@ describe('createCheckout', () => {
 				planName: 'Pro',
 				redirectUrl: 'https://shop.example.com/ok',
 			}))
-			.resolves.toBe('https://www.mollie.com/checkout/tr_5');
+			.resolves.toEqual({
+				url: 'https://www.mollie.com/checkout/tr_5',
+				inPageRefusal: null,
+			});
 
 		expect(mollieClient.customers.create).toHaveBeenCalledWith({
 			email: 'payer@example.com',
@@ -1265,6 +1269,120 @@ describe('createCheckout', () => {
 			redirectUrl: 'https://shop.example.com/ok',
 			metadata: { directus_subscription: '5' },
 		});
+	});
+
+	test('opens the in-page form on a session of the customer', async () => {
+		const mollieClient = {
+			customers: {
+				create: vi.fn().mockResolvedValue({ id: 'cst_5' }),
+			},
+			payments: { create: vi.fn() },
+		};
+
+		const createMollieSession = vi.fn().mockResolvedValue('session_token_5');
+
+		await expect(createMollieProvider(
+			mollieClient as unknown as MollieClient,
+			['mollie_secret_1'],
+			createMollieSession,
+		)
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '14.90' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.resolves.toEqual({
+				clientToken: 'session_token_5',
+				publishableKey: null,
+			});
+
+		expect(createMollieSession).toHaveBeenCalledWith({
+			amount: { currency: 'EUR', value: '14.90' },
+			description: 'Subscription 5',
+			planName: 'Pro',
+			redirectUrl: 'https://shop.example.com/ok',
+			customerId: 'cst_5',
+			metadata: { directus_subscription: '5' },
+		});
+
+		expect(mollieClient.payments.create).not.toHaveBeenCalled();
+	});
+
+	test('sends the payer to its page when Mollie refuses the session', async () => {
+		await expect(createMollieProvider(
+			{
+				customers: {
+					create: vi.fn().mockResolvedValue({ id: 'cst_5' }),
+				},
+				payments: {
+					create: vi.fn().mockResolvedValue({
+						id: 'tr_5',
+						getCheckoutUrl: () => 'https://www.mollie.com/checkout/tr_5',
+					}),
+				},
+			} as unknown as MollieClient,
+			['mollie_secret_1'],
+			vi.fn().mockRejectedValue(
+				new Error('Mollie answered 422 to a session: "Beta"'),
+			),
+		)
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '14.90' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.resolves.toEqual({
+				url: 'https://www.mollie.com/checkout/tr_5',
+				inPageRefusal: 'Mollie answered 422 to a session: "Beta"',
+			});
+	});
+
+	test.each([
+		[new MollieApiError('Failed to fetch', {})],
+		[new MollieApiError('Unavailable', { statusCode: 503 })],
+	])('answers 503 when Mollie is down: %s', async (mollieFailure) => {
+		await expect(createMollieProvider({
+			customers: { create: vi.fn().mockRejectedValue(mollieFailure) },
+		} as unknown as MollieClient)
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '14.90' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.rejects.toThrow(new ProviderUnavailableError({
+				provider: 'mollie',
+				reason: mollieFailure.message,
+			}));
+	});
+
+	test('throws a refused payment as Mollie sent it', async () => {
+		const invalidAmount = new MollieApiError(
+			'The amount is lower than the minimum',
+			{ statusCode: 422 },
+		);
+
+		await expect(createMollieProvider({
+			customers: { create: vi.fn().mockResolvedValue({ id: 'cst_5' }) },
+			payments: { create: vi.fn().mockRejectedValue(invalidAmount) },
+		} as unknown as MollieClient)
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '0.01' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.rejects.toBe(invalidAmount);
 	});
 
 	test('refuses a payment without a checkout URL', async () => {

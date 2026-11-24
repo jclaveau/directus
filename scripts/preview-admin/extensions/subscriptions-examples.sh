@@ -38,12 +38,24 @@ if [[ "${PREVIEW_STRIPE_SECRET_KEY:-}" =~ ^sk_test_ ]] \
   export SUBSCRIPTIONS_MOLLIE_API_KEY="$PREVIEW_MOLLIE_API_KEY"
   export SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS="$PREVIEW_MOLLIE_WEBHOOK_SECRET"
   echo "subscriptions examples: real Stripe and Mollie test mode available"
+
+  # Stripe's in-page form mounts from the publishable key; none, the hosted
+  # page. The fakes refuse the in-page form, so their checkouts get the pay page.
+  if [[ "${PREVIEW_STRIPE_PUBLISHABLE_KEY:-}" =~ ^pk_test_ ]]; then
+    export SUBSCRIPTIONS_CHECKOUT_UI=in_page
+    export SUBSCRIPTIONS_STRIPE_PUBLISHABLE_KEY="$PREVIEW_STRIPE_PUBLISHABLE_KEY"
+  else
+    export SUBSCRIPTIONS_CHECKOUT_UI=hosted
+    echo "subscriptions examples: no PREVIEW_STRIPE_PUBLISHABLE_KEY, hosted checkout"
+  fi
 else
   export SUBSCRIPTIONS_EXAMPLES_REAL_PROVIDERS=false
   export SUBSCRIPTIONS_STRIPE_SECRET_KEY="sk_test_examples_$(openssl rand -hex 12)"
   export SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET="whsec_$(openssl rand -hex 24)"
   export SUBSCRIPTIONS_MOLLIE_API_KEY="test_$(openssl rand -hex 15)"
   export SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS="$(openssl rand -hex 24)"
+  # The fakes have only their pay page.
+  export SUBSCRIPTIONS_CHECKOUT_UI=hosted
   echo "subscriptions examples: fake providers only, no real test keys"
 fi
 unset PREVIEW_STRIPE_SECRET_KEY PREVIEW_MOLLIE_API_KEY

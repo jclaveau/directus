@@ -53,6 +53,29 @@ const MOLLIE_ALREADY_CANCELED = {
 	},
 };
 
+// The fakes have only their pay page: refusing the in-page form sends the
+// checkout there, the way a provider refusing it in production does.
+const MOLLIE_NO_SESSIONS = {
+	code: 422,
+	body: {
+		status: 422,
+		title: 'Unprocessable Entity',
+		detail: 'The fake providers have no in-page form',
+		_links: {},
+	},
+};
+
+const STRIPE_NO_ELEMENTS = {
+	code: 400,
+	body: {
+		error: {
+			type: 'invalid_request_error',
+			param: 'ui_mode',
+			message: 'The fake providers have no in-page form',
+		},
+	},
+};
+
 const STRIPE_NOT_FOUND = {
 	code: 404,
 	body: {
@@ -463,6 +486,10 @@ function answerMollie(requestMethod, requestPath, requestBody) {
 		return createMolliePayment(requestBody);
 	}
 
+	if (requestMethod === 'POST' && requestPath === '/v2/sessions') {
+		return MOLLIE_NO_SESSIONS;
+	}
+
 	const paymentMatch = /^\/v2\/payments\/(\w+)$/.exec(requestPath);
 
 	if (paymentMatch !== null) {
@@ -521,6 +548,11 @@ function answerMollie(requestMethod, requestPath, requestBody) {
 
 function createStripeSession(requestText) {
 	const sessionForm = parseStripeForm(requestText);
+
+	if (sessionForm['ui_mode'] !== undefined) {
+		return STRIPE_NO_ELEMENTS;
+	}
+
 	const pricePrefix = 'line_items[0][price_data]';
 
 	const checkoutId = sessionForm[

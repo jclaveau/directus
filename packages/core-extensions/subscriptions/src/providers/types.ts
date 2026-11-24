@@ -57,6 +57,15 @@ export type CheckoutStart = {
 	redirectUrl: string;
 };
 
+/**
+ * Where the payer pays: the provider's own page, or a form mounted in ours from
+ * `clientToken`, with Stripe.js loaded on `publishableKey`. `inPageRefusal` says
+ * why a provider refused the in-page form a hosted page then stands in for.
+ */
+export type CheckoutPage =
+	| { url: string; inPageRefusal: string | null }
+	| { clientToken: string; publishableKey: string | null };
+
 /** A Mollie first payment, paid: the mandate a checkout's subscription bills. */
 export type PaidCheckout = {
 	paymentId: string;
@@ -94,8 +103,7 @@ export interface SubscriptionProvider {
 	/** Resolves to the resource id to sync: a new subscription's on Mollie. */
 	resumeCancel(cancelResume: CancelResume): Promise<ResumedSubscription>;
 	composeResourceId(subscriptionIds: ProviderSubscriptionIds): string;
-	/** Resolves to the provider's payment page. */
-	createCheckout(checkoutStart: CheckoutStart): Promise<string>;
+	createCheckout(checkoutStart: CheckoutStart): Promise<CheckoutPage>;
 	/** Resolves to the resource id of the subscription the payment started. */
 	startPaidCheckout(paidCheckout: PaidCheckout): Promise<string>;
 	/** What the subscription the resource id names was billed, any order. */

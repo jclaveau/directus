@@ -1,9 +1,19 @@
+export type CheckoutUi = 'in_page' | 'hosted';
+
 export type SubscriptionsConfig = {
-	stripe: { secretKey: string; webhookSecret: string } | null;
+	checkoutUi: CheckoutUi;
+	stripe: {
+		secretKey: string;
+		webhookSecret: string;
+		/** Null under a hosted checkout, which loads no Stripe.js. */
+		publishableKey: string | null;
+	} | null;
 	mollie: { apiKey: string; webhookSecrets: string[] } | null;
 };
 
 const DEFAULT_RECONCILE_CRON = '*/15 * * * *';
+
+const CHECKOUT_UIS: CheckoutUi[] = ['in_page', 'hosted'];
 
 export function readSubscriptionsConfig(
 	env: Record<string, unknown>,
@@ -32,9 +42,31 @@ export function readSubscriptionsConfig(
 		[mollieSecrets, 'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS'],
 	);
 
+	const checkoutUi = readCheckoutUi(env);
+
+	const publishableKey = readOptionalString(
+		env,
+		'SUBSCRIPTIONS_STRIPE_PUBLISHABLE_KEY',
+	);
+
+	if (checkoutUi === 'in_page' && stripeKey !== null && publishableKey === null) {
+		throw new Error(
+			'"SUBSCRIPTIONS_STRIPE_PUBLISHABLE_KEY" is required when'
+			+ ' "SUBSCRIPTIONS_STRIPE_SECRET_KEY" is set and'
+			+ ' "SUBSCRIPTIONS_CHECKOUT_UI" is "in_page"',
+		);
+	}
+
 	return {
+		checkoutUi,
 		stripe: stripeKey !== null && stripeSecret !== null
-			? { secretKey: stripeKey, webhookSecret: stripeSecret }
+			? {
+				secretKey: stripeKey,
+				webhookSecret: stripeSecret,
+				publishableKey: checkoutUi === 'in_page'
+					? publishableKey
+					: null,
+			}
 			: null,
 		mollie: mollieKey !== null && mollieSecrets !== null
 			? {
@@ -66,6 +98,20 @@ export function readMollieAccessToken(env: Record<string, unknown>): string {
 	}
 
 	return accessToken;
+}
+
+/** Unset, the payer pays in a form of our page; `hosted` sends them away. */
+function readCheckoutUi(env: Record<string, unknown>): CheckoutUi {
+	const checkoutUi = env['SUBSCRIPTIONS_CHECKOUT_UI'] ?? 'in_page';
+
+	if (!CHECKOUT_UIS.includes(checkoutUi as CheckoutUi)) {
+		throw new Error(
+			`"SUBSCRIPTIONS_CHECKOUT_UI" must be one of`
+			+ ` ${JSON.stringify(CHECKOUT_UIS)}, got ${JSON.stringify(checkoutUi)}`,
+		);
+	}
+
+	return checkoutUi as CheckoutUi;
 }
 
 export function readReconcileCron(env: Record<string, unknown>): string {

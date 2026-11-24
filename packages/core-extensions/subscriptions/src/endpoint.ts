@@ -101,6 +101,7 @@ export const subscriptionsEndpoint = defineEndpoint(
 						checkoutUrlAllowList,
 						userId: request.accountability?.user ?? null,
 						requestBody: request.body,
+						logger,
 					});
 				})
 				.then((createdCheckout) => {

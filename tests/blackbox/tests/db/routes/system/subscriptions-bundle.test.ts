@@ -201,6 +201,8 @@ describe.each(vendors)('%s', (vendor) => {
 				`${MOLLIE_WEBHOOK_SECRET},${MOLLIE_OLD_WEBHOOK_SECRET}`,
 			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_test_blackbox',
 			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: STRIPE_WEBHOOK_SECRET,
+			// The scenarios pay on the fake pay page; unit tests cover the in-page form.
+			SUBSCRIPTIONS_CHECKOUT_UI: 'hosted',
 			BLACKBOX_PROVIDERS_PORT: String(fakeProviders.listeningPort),
 			SUBSCRIPTIONS_CHECKOUT_URL_ALLOW_LIST: 'https://shop.example.com/ok',
 			EMAIL_TRANSPORT: 'smtp',
