@@ -10,6 +10,9 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import type { Knex } from 'knex';
 import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
 import { ItemsService } from './items.js';
+import {
+	refusePermissionModelWrite,
+} from '../utils/refuse-permission-model-write.js';
 
 const MANAGED_ACCESS_GRANT_FIELDS = ['role', 'user', 'policy'] as const;
 
@@ -131,6 +134,8 @@ export class AccessService extends ItemsService {
 	protected override async validateRowsToCreate(
 		rows: Partial<Item>[],
 	): Promise<void> {
+		refusePermissionModelWrite(this.accountability);
+
 		if (this.accountability && rows.some((row) => setsManagedBy(row))) {
 			throw new ManagedBySetError();
 		}
@@ -154,6 +159,8 @@ export class AccessService extends ItemsService {
 		opts: MutationOptions,
 		trx: Knex,
 	): Promise<void> {
+		refusePermissionModelWrite(this.accountability);
+
 		if (!this.accountability || opts.deletesManagedAccess) {
 			return;
 		}
@@ -173,6 +180,8 @@ export class AccessService extends ItemsService {
 		groups: UpdateGroup<Item>[],
 		trx: Knex,
 	): Promise<void> {
+		refusePermissionModelWrite(this.accountability);
+
 		if (!this.accountability) {
 			return;
 		}

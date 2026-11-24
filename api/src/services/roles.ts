@@ -17,6 +17,9 @@ import { emitActionEvents, ItemsService } from './items.js';
 import { AccessService } from './access.js';
 import { PresetsService } from './presets.js';
 import { UsersService } from './users.js';
+import {
+	refusePermissionModelWrite,
+} from '../utils/refuse-permission-model-write.js';
 
 const DESCENDANT_PARENT_REASON =
 	'A role cannot have a parent that is already a descendant of itself';
@@ -29,6 +32,24 @@ export class RolesService extends ItemsService {
 	// No need to check user integrity in createOne, as the creation of a role itself does not influence the number of
 	// users, as the role of a user is actually updated in the UsersService on the user, which will make sure to
 	// initiate a user integrity check if necessary. Same goes for role nesting check as well as cache clearing.
+
+	// A role reaches its parent's policies, so its parent is the permission
+	// model's; a role with no parent grants nothing.
+	protected override async validateRowsToCreate(
+		rows: Partial<Item>[],
+	): Promise<void> {
+		if (rows.some((row) => row['parent'] !== null && row['parent'] !== undefined)) {
+			refusePermissionModelWrite(this.accountability);
+		}
+	}
+
+	protected override async validateGroupsToUpdate(
+		groups: UpdateGroup<Item>[],
+	): Promise<void> {
+		if (groups.some(({ data }) => 'parent' in data)) {
+			refusePermissionModelWrite(this.accountability);
+		}
+	}
 
 	override async updateGroups(
 		groups: UpdateGroup<Item>[],
