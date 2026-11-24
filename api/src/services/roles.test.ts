@@ -1,3 +1,4 @@
+import { InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { MutationOptions } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
@@ -12,9 +13,7 @@ import {
 	AccessService,
 	ItemsService,
 	PresetsService,
-	RoleMembersService,
 	RolesService,
-	UsersService,
 } from './index.js';
 
 vi.mock('../../src/database/index', () => ({
@@ -200,19 +199,11 @@ describe('Integration Tests', () => {
 				.spyOn(PresetsService.prototype, 'deleteByQuery')
 				.mockResolvedValue(['preset-id-1']);
 
-			const usersUpdateManySpy = vi.spyOn(UsersService.prototype, 'updateMany')
-				.mockResolvedValue(['user-id-1']);
-
-			const roleMembersDeleteByQuerySpy = vi
-				.spyOn(RoleMembersService.prototype, 'deleteByQuery')
-				.mockResolvedValue(['membership-id-1']);
-
 			const rolesUpdateByQuerySpy = vi.spyOn(RolesService.prototype, 'updateByQuery').mockResolvedValue(['role-id-6']);
 			const itemsDeleteManySpy = vi.spyOn(ItemsService.prototype, 'deleteMany').mockResolvedValue(['item-id-1']);
 
 			beforeEach(() => {
-				tracker.on.select('directus_role_members')
-					.response([{ user: 'user-id-1' }]);
+				tracker.on.select('directus_role_members').response([]);
 			});
 
 			afterEach(() => {
@@ -246,20 +237,6 @@ describe('Integration Tests', () => {
 					opts,
 				);
 
-				expect(usersUpdateManySpy).toHaveBeenCalledWith(
-					['user-id-1'],
-					{ status: 'suspended' },
-					opts,
-				);
-
-				expect(roleMembersDeleteByQuerySpy).toHaveBeenCalledWith(
-					{
-						filter: { role: { _in: keys } },
-						limit: -1,
-					},
-					{ ...opts, deletesManagedMemberships: true },
-				);
-
 				expect(rolesUpdateByQuerySpy).toHaveBeenCalledWith(
 					{
 						filter: { parent: { _in: keys } },
@@ -274,46 +251,60 @@ describe('Integration Tests', () => {
 				});
 			});
 
-			it('suspends only the users left with no role', async () => {
+			it('refuses the delete of a role a user holds, deleting nothing', async () => {
 				tracker.reset();
 
-				tracker.on.select('directus_role_members').response([
-					{ user: 'user-id-2' },
-					{ user: 'user-id-3' },
-				]);
+				tracker.on.select('directus_role_members')
+					.response([{ role: 'role-id-14' }]);
 
-				await service.deleteMany(['role-id-13', 'role-id-14']);
+				await expect(service.deleteMany(['role-id-13', 'role-id-14']))
+					.rejects.toEqual(new InvalidPayloadError({
+						reason: 'Role "role-id-14" is held by users:'
+							+ ' delete their memberships of it first',
+					}));
 
-				expect(tracker.history.select[0]!.bindings).toEqual([
-					'role-id-13',
-					'role-id-14',
-					'role-id-13',
-					'role-id-14',
-				]);
-
-				expect(usersUpdateManySpy).toHaveBeenCalledWith(
-					['user-id-2', 'user-id-3'],
-					{ status: 'suspended' },
-					expect.objectContaining({ bypassLimits: true }),
+				expect(tracker.history.select[0]!.sql).toBe(
+					'select "role" from "directus_role_members"'
+					+ ' where "role" in ($1, $2) order by "role" asc limit $3',
 				);
+
+				expect(tracker.history.select[0]!.bindings)
+					.toEqual(['role-id-13', 'role-id-14', 1]);
+
+				expect(accessDeleteRoleAccessSpy).not.toHaveBeenCalled();
+				expect(presetsDeleteByQuerySpy).not.toHaveBeenCalled();
+				expect(rolesUpdateByQuerySpy).not.toHaveBeenCalled();
+				expect(itemsDeleteManySpy).not.toHaveBeenCalled();
 			});
 
-			it('suspends nobody when every member keeps another role', async () => {
-				tracker.reset();
-				tracker.on.select('directus_role_members').response([]);
-				usersUpdateManySpy.mockClear();
+			it('cleans an empty role up as code, deletes it as asked', async () => {
+				const accountability = {
+					user: 'user-id-4',
+					role: null,
+					roles: [],
+					admin: false,
+					app: true,
+					ip: null,
+				} as any;
 
-				await service.deleteMany(['role-id-15']);
+				const seenAccountabilities: unknown[] = [];
 
-				expect(usersUpdateManySpy).not.toHaveBeenCalled();
+				const recordAccountability = async function (this: any) {
+					seenAccountabilities.push(this.accountability);
 
-				expect(roleMembersDeleteByQuerySpy).toHaveBeenCalledWith(
-					{
-						filter: { role: { _in: ['role-id-15'] } },
-						limit: -1,
-					},
-					expect.objectContaining({ bypassLimits: true }),
-				);
+					return [];
+				};
+
+				accessDeleteRoleAccessSpy.mockImplementationOnce(recordAccountability);
+				presetsDeleteByQuerySpy.mockImplementationOnce(recordAccountability);
+				rolesUpdateByQuerySpy.mockImplementationOnce(recordAccountability);
+				itemsDeleteManySpy.mockImplementationOnce(recordAccountability);
+
+				await new RolesService({ knex: db, schema, accountability })
+					.deleteMany(['role-id-15']);
+
+				expect(seenAccountabilities)
+					.toEqual([null, null, null, accountability]);
 			});
 
 			it('fires no action of a delete that rolled back', async () => {

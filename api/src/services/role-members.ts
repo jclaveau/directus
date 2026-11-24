@@ -199,7 +199,7 @@ export class RoleMembersService extends ItemsService {
 		opts: MutationOptions,
 		trx: Knex,
 	): Promise<void> {
-		if (!this.accountability || opts.deletesManagedMemberships) {
+		if (!this.accountability) {
 			return;
 		}
 

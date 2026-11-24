@@ -5,8 +5,8 @@ Feature: A user holds several roles, each one a membership
     every member role's policies allow, and app access lets them read their
     own memberships. The single `role` field is gone: a write sending it is
     refused.
-  - A deleted role takes its memberships along, and suspends only the users
-    it leaves with no role.
+  - A role users hold is refused its delete: its memberships go first, and a
+    user they leave with no role stays active, with no role.
   - A role changes what its user may do: only an admin, or code, writes a
     membership. A request of anyone else is refused, whatever the permissions
     say; `/users/invite` writes invites, never a membership.
@@ -106,7 +106,7 @@ Feature: A user holds several roles, each one a membership
       | query:                        |   data:                                |
       |   fields: roles               |     roles: []                          |
 
-  Scenario: a deleted role suspends only the users it leaves with no role
+  Scenario: a role is deleted once its memberships are, its users staying active
     Given the rows of directus_roles:
       | id             | name          |
       | <deleted-role> | deleted-<run> |
@@ -122,12 +122,24 @@ Feature: A user holds several roles, each one a membership
       | <member-3> | <double-member> | <kept-role>    | 2    |
     Then these requests get these responses:
       | request                      | response                  |
+      | method: PATCH                | code: 200                 |+
+      | path: /users/<only-member>   |                           |
+      | payload:                     |                           |
+      |   roles:                     |                           |
+      |     delete:                  |                           |
+      |       - <member-1>           |                           |
+      | method: PATCH                | code: 200                 |+
+      | path: /users/<double-member> |                           |
+      | payload:                     |                           |
+      |   roles:                     |                           |
+      |     delete:                  |                           |
+      |       - <member-2>           |                           |
       | method: DELETE               | code: 204                 |+
       | path: /roles/<deleted-role>  |                           |
       | method: GET                  | code: 200                 |+
       | path: /users/<only-member>   | body:                     |
       | query:                       |   data:                   |
-      |   fields: status,roles.role  |     status: suspended     |
+      |   fields: status,roles.role  |     status: active        |
       |                              |     roles: []             |
       | method: GET                  | code: 200                 |+
       | path: /users/<double-member> | body:                     |

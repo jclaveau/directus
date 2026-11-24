@@ -199,12 +199,6 @@ export type MutationOptions = {
 	deletesManagedAccess?: boolean | undefined;
 
 	/**
-	 * A delete of memberships takes the managed ones too, as a role delete
-	 * does: the database's cascade does the same for a deleted user.
-	 */
-	deletesManagedMemberships?: boolean | undefined;
-
-	/**
 	 * The memberships are created in the same write as their user: no cache
 	 * holds the user yet, so none is cleared.
 	 */

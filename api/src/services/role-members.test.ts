@@ -883,29 +883,5 @@ describe('Services / RoleMembers', () => {
 				},
 			]);
 		});
-
-		it('lets a role delete take its managed memberships along', async () => {
-			const database = knex.default({ client: MockClient });
-			const tracker = createTracker(database);
-
-			await expect(new RoleMembersService({
-				accountability: {
-					admin: true,
-					app: true,
-					ip: null,
-					memberRoles: [],
-					roles: [],
-					user: 'admin-id-1',
-				},
-				knex: database,
-				schema,
-			})['validateKeysToDelete'](
-				['6f1c2a4e-0000-4000-8000-000000000013'],
-				{ deletesManagedMemberships: true },
-				database,
-			)).resolves.toBeUndefined();
-
-			expect(tracker.history.select).toEqual([]);
-		});
 	});
 });
