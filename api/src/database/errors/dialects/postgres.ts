@@ -14,8 +14,6 @@ import type { Item } from '@directus/types';
 
 enum PostgresErrorCodes {
 	FOREIGN_KEY_VIOLATION = '23503',
-	// What a RESTRICT constraint raises since postgres 18.
-	RESTRICT_VIOLATION = '23001',
 	NOT_NULL_VIOLATION = '23502',
 	NUMERIC_VALUE_OUT_OF_RANGE = '22003',
 	RESTRICT_VIOLATION = '23001',
@@ -50,7 +48,6 @@ export function extractError(
 		case PostgresErrorCodes.NOT_NULL_VIOLATION:
 			return notNullViolation();
 		case PostgresErrorCodes.FOREIGN_KEY_VIOLATION:
-		case PostgresErrorCodes.RESTRICT_VIOLATION:
 			return foreignKeyViolation(context);
 		// Postgres 18 raises it for a RESTRICT rule, where NO ACTION raises 23503.
 		case PostgresErrorCodes.RESTRICT_VIOLATION:
