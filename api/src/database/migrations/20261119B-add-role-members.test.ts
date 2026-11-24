@@ -237,11 +237,11 @@ describe('the migration', () => {
 				+ ' "directus_invites_role_foreign" foreign key ("role")'
 				+ ' references "directus_roles" ("id") on delete CASCADE',
 				'alter table "directus_invites" add constraint'
-				+ ' "directus_invites_user_created_foreign" foreign key'
+				+ ' "directus_invites_inviter_foreign" foreign key'
 				+ ' ("user_created") references "directus_users" ("id")'
 				+ ' on delete SET NULL',
 				'alter table "directus_invites" add constraint'
-				+ ' "directus_invites_user_role_user_created_unique"'
+				+ ' "directus_invites_user_role_inviter_unique"'
 				+ ' unique ("user", "role", "user_created")',
 			]),
 		);

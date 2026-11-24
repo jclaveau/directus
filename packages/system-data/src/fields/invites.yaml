@@ -24,7 +24,7 @@ fields:
 
   # Set by the invite code: a `user-created` special would overwrite the null
   # of an invite naming no user.
-  - field: user_created
+  - field: inviter
     hidden: true
     readonly: true
     width: half

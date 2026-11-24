@@ -894,7 +894,7 @@ describe('Integration Tests', () => {
 						rows: [{
 							user: 'user-id-1',
 							role: 'invite-role',
-							user_created: 'inviter-id',
+							inviter: 'inviter-id',
 						}],
 						opts: {},
 					},
@@ -970,12 +970,12 @@ describe('Integration Tests', () => {
 						{
 							user: 'user-id-1',
 							role: 'first-role',
-							user_created: 'inviter-id',
+							inviter: 'inviter-id',
 						},
 						{
 							user: 'user-id-1',
 							role: 'second-role',
-							user_created: 'inviter-id',
+							inviter: 'inviter-id',
 						},
 					],
 					{},
@@ -1142,7 +1142,7 @@ describe('Integration Tests', () => {
 
 				expect(tracker.history.select).toMatchObject([{
 					sql: 'select "id", "role" from "directus_invites"'
-						+ ' where "user" = ? and ("user_created" = ?)',
+						+ ' where "user" = ? and ("inviter" = ?)',
 					bindings: ['8e2b4c10-5d3a-4f6e-9a7b-000000000017', 'inviter-id'],
 				}]);
 
@@ -1152,7 +1152,7 @@ describe('Integration Tests', () => {
 						rows: [{
 							user: '8e2b4c10-5d3a-4f6e-9a7b-000000000017',
 							role: 'new-role',
-							user_created: 'inviter-id',
+							inviter: 'inviter-id',
 						}],
 						opts: {},
 					},
@@ -1211,7 +1211,7 @@ describe('Integration Tests', () => {
 						rows: [{
 							user: 'user-id-1',
 							role: 'invite-role',
-							user_created: null,
+							inviter: null,
 						}],
 						opts: {},
 					},
@@ -1250,7 +1250,7 @@ describe('Integration Tests', () => {
 
 				expect(tracker.history.select).toMatchObject([{
 					sql: 'select "id", "role" from "directus_invites"'
-						+ ' where "user" = ? and ("user_created" is null)',
+						+ ' where "user" = ? and ("inviter" is null)',
 					bindings: ['8e2b4c10-5d3a-4f6e-9a7b-000000000020'],
 				}]);
 
@@ -1260,7 +1260,7 @@ describe('Integration Tests', () => {
 						rows: [{
 							user: '8e2b4c10-5d3a-4f6e-9a7b-000000000020',
 							role: 'invite-role',
-							user_created: null,
+							inviter: null,
 						}],
 						opts: {},
 					},

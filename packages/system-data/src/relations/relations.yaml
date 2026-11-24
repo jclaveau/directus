@@ -57,7 +57,7 @@ data:
     one_collection: directus_roles
 
   - many_collection: directus_invites
-    many_field: user_created
+    many_field: inviter
     one_collection: directus_users
 
   - many_collection: directus_users

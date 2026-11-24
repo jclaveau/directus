@@ -17,7 +17,7 @@ Feature: A user's role, status and deletion purge the cache as today
     from; the rows are written straight into the database. A user's role is a
     `directus_role_members` row. An invited user is the rows `/users/invite`
     writes: a `directus_users` row with the `invited` status and a
-    `directus_invites` row per role; a `user_created` of null names no
+    `directus_invites` row per role; an `inviter` of null names no
     inviter.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
@@ -117,7 +117,7 @@ Feature: A user's role, status and deletion purge the cache as today
       | id        | email                     | status  |
       | <invitee> | invitee-<run>@example.com | invited |
     And the rows of directus_invites:
-      | id       | user      | role           | user_created |
+      | id       | user      | role           | inviter      |
       | <invite> | <invitee> | <invitee-role> | null         |
     And the rows of cache_user_activate_notes:
       | label |
@@ -173,7 +173,7 @@ Feature: A user's role, status and deletion purge the cache as today
       | id                   | user      | role           | sort | managed_by |
       | <inviter-membership> | <inviter> | <inviter-role> | 1    | null       |
     And the rows of directus_invites:
-      | id       | user      | role           | user_created |
+      | id       | user      | role           | inviter      |
       | <invite> | <invitee> | <invitee-role> | <inviter>    |
     And the rows of cache_user_delete_notes:
       | label |
@@ -211,9 +211,9 @@ Feature: A user's role, status and deletion purge the cache as today
       | method: GET                               | code: 200                         |+
       | path: /users/<invitee>                    | body:                             |
       | query:                                    |   data:                           |
-      |   fields: invites.id,invites.user_created |     invites:                      |
+      |   fields: invites.id,invites.inviter      |     invites:                      |
       |                                           |       - id: <invite>              |
-      |                                           |         user_created: null        |
+      |                                           |         inviter: null             |
     And on postgres the requests ran these statements:
       | request | table                   | select | insert | update | delete |
       | 1       | directus_access         | 1      | 0      | 0      | 0      |
@@ -233,7 +233,7 @@ Feature: A user's role, status and deletion purge the cache as today
       | id        | email                       | status  |
       | <invitee> | accepting-<run>@example.com | invited |
     And the rows of directus_invites:
-      | id       | user      | role           | user_created |
+      | id       | user      | role           | inviter      |
       | <invite> | <invitee> | <invitee-role> | null         |
     And the rows of cache_user_accept_notes:
       | label |
@@ -294,7 +294,7 @@ Feature: A user's role, status and deletion purge the cache as today
       | id               | user      | policy           |
       | <inviter-access> | <inviter> | <inviter-policy> |
     And the rows of directus_invites:
-      | id       | user      | role        | user_created |
+      | id       | user      | role        | inviter      |
       | <invite> | <invitee> | <same-role> | <inviter>    |
     And the rows of cache_user_reinvite_notes:
       | label |
@@ -335,7 +335,7 @@ Feature: A user's role, status and deletion purge the cache as today
       | id        | email                   | status  |
       | <invitee> | again-<run>@example.com | invited |
     And the rows of directus_invites:
-      | id       | user      | role        | user_created | date_created         |
+      | id       | user      | role        | inviter      | date_created         |
       | <invite> | <invitee> | <same-role> | null         | 2026-01-01T00:00:00Z |
     And the rows of cache_user_again_notes:
       | label |
@@ -386,7 +386,7 @@ Feature: A user's role, status and deletion purge the cache as today
       | id        | email                    | status  |
       | <invitee> | second-<run>@example.com | invited |
     And the rows of directus_invites:
-      | id       | user      | role         | user_created |
+      | id       | user      | role         | inviter      |
       | <invite> | <invitee> | <first-role> | null         |
     And the rows of cache_user_second_notes:
       | label |

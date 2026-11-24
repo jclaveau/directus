@@ -7,7 +7,7 @@ Feature: A user is invited, re-invited and accepts the invitation
   - A Given states the database rows a scenario starts from, written straight
     into the database. An invited user is the rows `/users/invite` writes: a
     `directus_users` row with the `invited` status and a `directus_invites`
-    row per role, read through the user's `invites` field; a `user_created`
+    row per role, read through the user's `invites` field; an `inviter`
     of null names no inviter. No membership is written until the user
     accepts: accepting turns the invites into memberships and deletes them.
   - An inviter allowed to create the `directus_invites` rows invites, admin
@@ -71,7 +71,7 @@ Feature: A user is invited, re-invited and accepts the invitation
       | id          | email                       | status  |
       | <accepting> | accepting-<run>@example.com | invited |
     And the rows of directus_invites:
-      | id       | user        | role           | user_created |
+      | id       | user        | role           | inviter      |
       | <invite> | <accepting> | <invitee-role> | null         |
     Then these requests get these responses:
       | request                                      | response                       |
@@ -176,7 +176,7 @@ Feature: A user is invited, re-invited and accepts the invitation
       | <again> | again-<run>@example.com | invited |
       | <known> | known-<run>@example.com | active  |
     And the rows of directus_invites:
-      | id       | user    | role         | user_created |
+      | id       | user    | role         | inviter      |
       | <invite> | <again> | <again-role> | null         |
     Then these requests get these responses:
       | request                           | response                                |
@@ -246,7 +246,7 @@ Feature: A user is invited, re-invited and accepts the invitation
       | id               | user      | policy           |
       | <inviter-access> | <inviter> | <inviter-policy> |
     And the rows of directus_invites:
-      | id       | user        | role        | user_created |
+      | id       | user        | role        | inviter      |
       | <invite> | <same-user> | <same-role> | <inviter>    |
     Then these requests get these responses:
       | request                         | response                    |
@@ -279,7 +279,7 @@ Feature: A user is invited, re-invited and accepts the invitation
       | id          | email                   | status  |
       | <same-user> | again-<run>@example.com | invited |
     And the rows of directus_invites:
-      | id       | user        | role        | user_created | date_created         |
+      | id       | user        | role        | inviter      | date_created         |
       | <invite> | <same-user> | <same-role> | null         | 2026-01-01T00:00:00Z |
     Then these requests get these responses:
       | request                              | response                           |
@@ -296,11 +296,11 @@ Feature: A user is invited, re-invited and accepts the invitation
       |     { invites(                       |       - id: <invite>               |
       |     filter: {user: {id: {_eq:        |         role:                      |
       |     "<same-user>"}}},                |           id: <same-role>          |
-      |     sort: ["date_created"])          |         user_created: null         |
+      |     sort: ["date_created"])          |         inviter: null              |
       |     { id role { id }                 |       - id: <new-invite>           |
-      |     user_created { email } } }       |         role:                      |
+      |     inviter { email } } }            |         role:                      |
       |                                      |           id: <same-role>          |
-      |                                      |         user_created:              |
+      |                                      |         inviter:                   |
       |                                      |           email: admin@default.com |
       | method: GET                          | code: 200                          |+
       | path: /users                         | body:                              |
@@ -388,7 +388,7 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   filter[email][_eq]: >-                |       roles: []              |
       |     invited-<run>@example.com           |       invites:               |
       |                                         |         - role: <some-role>  |
-      |                                         |           user_created: >-   |
+      |                                         |           inviter: >-        |
       |                                         |             <inviter>        |
 
   Scenario: an invitation from a user not allowed to create its invite is refused

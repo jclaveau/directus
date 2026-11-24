@@ -276,7 +276,7 @@ Feature: A user holds several roles, each one a membership
       | <access-1> | <alice> | <inviter> |
       | <access-2> | <carol> | <inviter> |
     And the rows of directus_invites:
-      | id         | user  | role    | user_created | date_created         |
+      | id         | user  | role    | inviter      | date_created         |
       | <invite-1> | <bob> | <staff> | <alice>      | 2026-01-01T00:00:00Z |
       | <invite-2> | <bob> | <staff> | <carol>      | 2026-01-02T00:00:00Z |
     Then these requests get these responses:
@@ -288,12 +288,12 @@ Feature: A user holds several roles, each one a membership
       | method: GET                               | code: 200                  |+
       | path: /users/<bob>                        | body:                      |
       | query:                                    |   data:                    |
-      |   fields: invites.id,invites.user_created |     invites:               |
+      |   fields: invites.id,invites.inviter      |     invites:               |
       |   deep: >-                                |       - id: <invite-1>     |
-      |     {"invites":{"_sort":                  |         user_created: null |
+      |     {"invites":{"_sort":                  |         inviter: null      |
       |     ["date_created"]}}                    |                            |
       |                                           |       - id: <invite-2>     |
-      |                                           |         user_created: null |
+      |                                           |         inviter: null      |
       | method: POST                              | code: 204                  |+
       | path: /users/invite/accept                |                            |
       | payload:                                  |                            |
@@ -316,7 +316,7 @@ Feature: A user holds several roles, each one a membership
       | id    | email                 | status  |
       | <bob> | bob-<run>@example.com | invited |
     And the rows of directus_invites:
-      | id       | user  | role    | user_created |
+      | id       | user  | role    | inviter      |
       | <invite> | <bob> | <staff> | null         |
     Then these requests get these responses:
       | request                      | response              |

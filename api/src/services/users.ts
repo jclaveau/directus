@@ -644,10 +644,10 @@ export class UsersService extends ItemsService {
 				.where({ user: invitedUser })
 				.where((inviterQuery) => {
 					if (inviter === null) {
-						inviterQuery.whereNull('user_created');
+						inviterQuery.whereNull('inviter');
 					}
 					else {
-						inviterQuery.where('user_created', inviter);
+						inviterQuery.where('inviter', inviter);
 					}
 				});
 
@@ -664,7 +664,7 @@ export class UsersService extends ItemsService {
 		if (addedRoles.length > 0) {
 			await invitesService.createMany(
 				addedRoles.map((role) => {
-					return { user: invitedUser, role, user_created: inviter };
+					return { user: invitedUser, role, inviter: inviter };
 				}),
 				{},
 			);

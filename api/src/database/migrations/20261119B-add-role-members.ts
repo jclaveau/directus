@@ -3,7 +3,7 @@ import type { Knex } from 'knex';
 import { randomUUID } from 'node:crypto';
 import { getConfigFromEnv } from '../../utils/get-config-from-env.js';
 
-const INVITES_UNIQUE_INDEX_NAME = 'directus_invites_user_role_user_created_unique';
+const INVITES_UNIQUE_INDEX_NAME = 'directus_invites_user_role_inviter_unique';
 
 // Self-contained on purpose: a migration must not move when runtime code does.
 const ROLE_PATH_COLUMNS: Record<string, string[]> = {
@@ -86,7 +86,7 @@ export async function up(knex: Knex): Promise<void> { // bb-unit-only: bb migrat
 			.notNullable()
 			.onDelete('CASCADE');
 
-		table.uuid('user_created')
+		table.uuid('inviter')
 			.references('directus_users.id')
 			.nullable()
 			.onDelete('SET NULL');
@@ -97,7 +97,7 @@ export async function up(knex: Knex): Promise<void> { // bb-unit-only: bb migrat
 	// Each null counts as distinct: an inviter deleted leaves as many invites
 	// naming no user as they made, and code replaces its own before writing.
 	await knex.schema.alterTable('directus_invites', (table) => {
-		table.unique(['user', 'role', 'user_created'], {
+		table.unique(['user', 'role', 'inviter'], {
 			indexName: INVITES_UNIQUE_INDEX_NAME,
 		});
 	});
