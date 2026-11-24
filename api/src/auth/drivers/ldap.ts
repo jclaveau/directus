@@ -242,7 +242,7 @@ export class LDAPAuthDriver extends AuthDriver {
 		return user?.id;
 	}
 
-	async getUserID(payload: Record<string, any>): Promise<string> {
+	async getUserID(payload: Record<string, any>): Promise<string> { // bb-out-of-scope: #619 LDAP login
 		if (!payload['identifier']) {
 			throw new InvalidCredentialsError();
 		}

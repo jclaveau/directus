@@ -22,7 +22,7 @@ interface StampFieldRow {
 async function readStampFields(
 	knex: Knex,
 	specialNames: string[],
-): Promise<StampFieldRow[]> {
+): Promise<StampFieldRow[]> { // bb-unit-only: bb migrates an empty database
 	const fieldRows: StampFieldRow[] = await knex
 		.select('id', 'collection', 'field', 'special')
 		.from('directus_fields')
@@ -34,7 +34,7 @@ async function readStampFields(
 	});
 }
 
-function namedFields(fieldRows: StampFieldRow[]) {
+function namedFields(fieldRows: StampFieldRow[]) { // bb-unit-only: bb migrates an empty database
 	return fieldRows
 		.map(({ collection, field }) => {
 			return `${JSON.stringify(collection)}.${JSON.stringify(field)}`;
@@ -43,10 +43,10 @@ function namedFields(fieldRows: StampFieldRow[]) {
 }
 
 // TODO(#610): sqlite, mariadb and cockroachdb need their own column rewrite.
-function refuseNonPostgres(knex: Knex, fieldRows: StampFieldRow[]) {
+function refuseNonPostgres(knex: Knex, fieldRows: StampFieldRow[]) { // bb-unit-only: bb migrates an empty database
 	const databaseClient = getDatabaseClient(knex);
 
-	if (databaseClient !== 'postgres') {
+	if (databaseClient !== 'postgres') { // bb-out-of-scope: #610 non-Postgres
 		throw new Error(
 			`The role stamp fields ${namedFields(fieldRows)} can only be`
 			+ ` converted on postgres, not on ${JSON.stringify(databaseClient)}`,
@@ -60,7 +60,7 @@ function refuseNonPostgres(knex: Knex, fieldRows: StampFieldRow[]) {
  * that allowed the write. Each stored role uuid becomes a list of that one
  * role, and the field stops being a relation to `directus_roles`.
  */
-export async function up(knex: Knex): Promise<void> {
+export async function up(knex: Knex): Promise<void> { // bb-unit-only: bb migrates an empty database
 	const fieldRows = await readStampFields(knex, [...RENAMED_SPECIALS.keys()]);
 
 	if (fieldRows.length === 0) {
@@ -122,7 +122,7 @@ export async function up(knex: Knex): Promise<void> {
  * Back to one role uuid, related to `directus_roles` again. Refused, changing
  * nothing, while a stamp lists several roles: one uuid cannot hold them.
  */
-export async function down(knex: Knex): Promise<void> {
+export async function down(knex: Knex): Promise<void> { // bb-unit-only: bb never migrates down
 	const fieldRows = await readStampFields(knex, [...FORMER_SPECIALS.keys()]);
 
 	if (fieldRows.length === 0) {

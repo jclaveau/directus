@@ -14,7 +14,7 @@ const INVITE_MEMBERSHIPS_INDEX_NAME = 'directus_role_members_invite_index';
  * which role (D8). `down` puts each user's one membership back in the column,
  * and refuses, changing nothing, while a user holds several roles.
  */
-export async function up(knex: Knex): Promise<void> {
+export async function up(knex: Knex): Promise<void> { // bb-unit-only: bb migrates an empty database
 	await knex.schema.createTable('directus_role_members', (table) => {
 		table.uuid('id').primary();
 
@@ -60,7 +60,7 @@ export async function up(knex: Knex): Promise<void> {
 
 	// TODO(#610): MariaDB indexes no expression, so two invites naming no user
 	// to the same role still pass there.
-	if (String(knex.client.dialect).startsWith('mysql')) {
+	if (String(knex.client.dialect).startsWith('mysql')) { // bb-out-of-scope: #610 MySQL
 		await knex.schema.alterTable('directus_invites', (table) => {
 			table.unique(['user', 'role', 'user_created'], {
 				indexName: INVITES_UNIQUE_INDEX_NAME,
@@ -78,7 +78,7 @@ export async function up(knex: Knex): Promise<void> {
 	// A user deleted checks every `invite` membership for an invite left: the
 	// rest of the memberships stay out of that scan.
 	// TODO(#610): MariaDB has no partial index.
-	if (!String(knex.client.dialect).startsWith('mysql')) {
+	if (!String(knex.client.dialect).startsWith('mysql')) { // bb-out-of-scope: #610 MySQL
 		await knex.raw(
 			`create index "${INVITE_MEMBERSHIPS_INDEX_NAME}" on "directus_role_members"`
 			+ ' ("user", "role") where "managed_by" = \'invite\'',
@@ -129,7 +129,7 @@ export async function up(knex: Knex): Promise<void> {
 
 // As each driver decides at login whether the roles it maps replace the
 // memberships it manages: oauth2 and openid by ROLE_MAPPING, ldap by GROUP_DN.
-function providerMapsRoles(provider: string): boolean {
+function providerMapsRoles(provider: string): boolean { // bb-unit-only: bb migrates an empty database
 	const { driver, roleMapping, groupDn } = getConfigFromEnv(
 		`AUTH_${provider.toUpperCase()}_`,
 	);
@@ -145,7 +145,7 @@ function providerMapsRoles(provider: string): boolean {
 	return false;
 }
 
-export async function down(knex: Knex): Promise<void> {
+export async function down(knex: Knex): Promise<void> { // bb-unit-only: bb never migrates down
 	const memberships: { user: string; role: string }[] = await knex
 		.select('user', 'role')
 		.from('directus_role_members')
@@ -184,7 +184,7 @@ export async function down(knex: Knex): Promise<void> {
 			.where({ id: user });
 	}
 
-	if (!String(knex.client.dialect).startsWith('mysql')) {
+	if (!String(knex.client.dialect).startsWith('mysql')) { // bb-out-of-scope: #610 MySQL
 		await knex.raw(`drop index "${INVITE_MEMBERSHIPS_INDEX_NAME}"`);
 	}
 

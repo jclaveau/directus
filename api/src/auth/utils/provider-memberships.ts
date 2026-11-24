@@ -4,7 +4,7 @@ import { RoleMembersService } from '../../services/role-members.js';
 import { lowerCaseRowKey } from '../../utils/managed-rows.js';
 import { transaction } from '../../utils/transaction.js';
 
-function removedRoleError(eventName: string): Error {
+function removedRoleError(eventName: string): Error { // bb-out-of-scope: #753 provider roles
 	return new Error(
 		`The ${JSON.stringify(eventName)} payload has no "role" since multi-role`
 		+ ' (#746): read or set "roles"',
@@ -20,7 +20,7 @@ export function withProviderRoles(
 	eventName: string,
 	userPayload: Item,
 	providerRoles: string[] | undefined,
-): Item {
+): Item { // bb-out-of-scope: #753 provider roles
 	const hookPayload: Item = providerRoles === undefined
 		? { ...userPayload }
 		: { ...userPayload, roles: providerRoles };
@@ -45,7 +45,7 @@ export function withProviderRoles(
 export function takeProviderRoles(eventName: string, hookPayload: Item): {
 	userPayload: Item;
 	providerRoles: string[] | undefined;
-} {
+} { // bb-out-of-scope: #753 provider roles
 	if (Object.getOwnPropertyDescriptor(hookPayload, 'role')?.enumerable) {
 		throw removedRoleError(eventName);
 	}
@@ -78,7 +78,7 @@ export function providerMemberships(
 	provider: string,
 	providerRoles: string[] | undefined,
 	isRoleMapped: boolean,
-): Item[] {
+): Item[] { // bb-out-of-scope: #753 provider roles
 	const managedBy = isRoleMapped
 		? providerManager(provider)
 		: null;
@@ -109,7 +109,7 @@ export async function syncProviderMemberships(
 	provider: string,
 	providerRoles: string[],
 	context: { knex: Knex; schema: SchemaOverview },
-): Promise<void> {
+): Promise<void> { // bb-out-of-scope: #753 provider roles
 	const userRows: {
 		id: string;
 		role: string;

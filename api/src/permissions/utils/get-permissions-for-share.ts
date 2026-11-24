@@ -16,7 +16,7 @@ export async function getPermissionsForShare(
 	accountability: Pick<Accountability, 'share' | 'ip'>,
 	collections: string[] | undefined,
 	context: Context,
-): Promise<Permission[]> {
+): Promise<Permission[]> { // bb-out-of-scope: #657 shares
 	const defaults: Permission = {
 		action: 'read',
 		collection: '',

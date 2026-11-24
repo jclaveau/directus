@@ -152,7 +152,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 		return user?.id;
 	}
 
-	override async getUserID(payload: Record<string, any>): Promise<string> {
+	override async getUserID(payload: Record<string, any>): Promise<string> { // bb-out-of-scope: #622 OAuth2 login
 		const logger = useLogger();
 
 		if (!payload['code'] || !payload['codeVerifier'] || !payload['state']) {

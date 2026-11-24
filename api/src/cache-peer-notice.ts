@@ -64,7 +64,7 @@ export async function tellPeersPermissionsCleared(
 	let triedCount = 0;
 
 	for (const retryDelay of [0, ...PEER_NOTICE_RETRY_DELAYS]) {
-		if (retryDelay > 0) {
+		if (retryDelay > 0) { // bb-unit-only: Redis never refuses in bb
 			await new Promise((resolve) => setTimeout(resolve, retryDelay));
 		}
 
@@ -76,20 +76,20 @@ export async function tellPeersPermissionsCleared(
 			return;
 		}
 		catch (error) {
-			lastRefusal = error;
+			lastRefusal = error; // bb-unit-only: Redis never refuses in bb
 		}
 
-		if (lastRefusal instanceof Error
+		if (lastRefusal instanceof Error // bb-unit-only: Redis never refuses in bb
 			&& lastRefusal.name === 'MaxRetriesPerRequestError') {
 			break;
 		}
 	}
 
-	const triedWord = triedCount === 1
+	const triedWord = triedCount === 1 // bb-unit-only: Redis never refuses in bb
 		? 'try'
 		: 'tries';
 
-	useLogger().warn(
+	useLogger().warn( // bb-unit-only: Redis never refuses in bb
 		lastRefusal,
 		'[cache] could not tell the other nodes to drop their permissions: the bus'
 		+ ` refused the ${JSON.stringify('cacheCleared')} message naming`
@@ -122,7 +122,7 @@ export async function tellPeersResponseCacheCleared(
 		});
 	}
 	catch (error) {
-		useLogger().warn(
+		useLogger().warn( // bb-unit-only: Redis never refuses in bb
 			error,
 			`[cache] could not tell the other nodes to drop their responses: ${error}`,
 		);

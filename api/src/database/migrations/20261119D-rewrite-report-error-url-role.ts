@@ -11,7 +11,7 @@ const ROLES_TEMPLATE_PATTERN = /\{\{\s*roles\b[^}]*\}\}/g;
  * refuses, changing nothing, while a template reads `roles` another way.
  * {{role.name}} ↔ {{roles[0].name}}
  */
-export async function up(knex: Knex): Promise<void> {
+export async function up(knex: Knex): Promise<void> { // bb-unit-only: bb migrates an empty database
 	for (const { id, report_error_url } of await readTemplates(knex)) {
 		const rewrittenUrl = report_error_url
 			.replaceAll(ROLE_TEMPLATE_PATTERN, '{{roles[0].$1}}');
@@ -24,7 +24,7 @@ export async function up(knex: Knex): Promise<void> {
 	}
 }
 
-export async function down(knex: Knex): Promise<void> {
+export async function down(knex: Knex): Promise<void> { // bb-unit-only: bb never migrates down
 	const restoredTemplates = (await readTemplates(knex)).map((template) => {
 		return {
 			...template,

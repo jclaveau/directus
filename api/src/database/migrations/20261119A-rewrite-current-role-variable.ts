@@ -44,7 +44,7 @@ function swapOperators(
 	operatorSwaps: Record<string, string>,
 	fromVariable: string,
 	toVariable: string,
-): unknown {
+): unknown { // bb-unit-only: bb migrates an empty database
 	if (Array.isArray(value)) {
 		return value.map((item) => {
 			return swapOperators(item, operatorSwaps, fromVariable, toVariable);
@@ -77,7 +77,7 @@ function swapOperators(
 	}));
 }
 
-export function rewriteCurrentRole(value: unknown) {
+export function rewriteCurrentRole(value: unknown) { // bb-unit-only: bb migrates an empty database
 	return swapOperators(
 		value,
 		REWRITTEN_OPERATORS,
@@ -86,7 +86,7 @@ export function rewriteCurrentRole(value: unknown) {
 	);
 }
 
-export function restoreCurrentRole(value: unknown) {
+export function restoreCurrentRole(value: unknown) { // bb-unit-only: bb migrates an empty database
 	return swapOperators(
 		value,
 		RESTORED_OPERATORS,
@@ -95,7 +95,7 @@ export function restoreCurrentRole(value: unknown) {
 	);
 }
 
-export function findCurrentRole(value: unknown): string | null {
+export function findCurrentRole(value: unknown): string | null { // bb-unit-only: bb migrates an empty database
 	if (typeof value === 'string') {
 		const isRemovedVariable = value === REMOVED_VARIABLE
 			|| value.startsWith(`${REMOVED_VARIABLE}.`);
@@ -121,7 +121,7 @@ export function findCurrentRole(value: unknown): string | null {
 }
 
 // A JSON column reads as text outside Postgres.
-function parsedColumnValue(columnValue: unknown) {
+function parsedColumnValue(columnValue: unknown) { // bb-unit-only: bb migrates an empty database
 	if (typeof columnValue !== 'string') {
 		return columnValue;
 	}
@@ -134,7 +134,7 @@ function parsedColumnValue(columnValue: unknown) {
 	}
 }
 
-async function readStoredValues(knex: Knex) {
+async function readStoredValues(knex: Knex) { // bb-unit-only: bb migrates an empty database
 	const storedValues: StoredValue[] = [];
 
 	for (const [table, columns] of Object.entries(ROLE_VARIABLE_COLUMNS)) {
@@ -163,7 +163,7 @@ async function writeChangedValues(
 	knex: Knex,
 	storedValues: StoredValue[],
 	changeValue: (value: unknown) => unknown,
-) {
+) { // bb-unit-only: bb migrates an empty database
 	for (const { table, id, column, value } of storedValues) {
 		const changedValue = changeValue(value);
 
@@ -177,7 +177,7 @@ async function writeChangedValues(
 	}
 }
 
-export async function up(knex: Knex): Promise<void> {
+export async function up(knex: Knex): Promise<void> { // bb-unit-only: bb migrates an empty database
 	const storedValues = await readStoredValues(knex);
 
 	const unrewritableValues = storedValues.flatMap((storedValue) => {
@@ -204,7 +204,7 @@ export async function up(knex: Knex): Promise<void> {
 	await writeChangedValues(knex, storedValues, rewriteCurrentRole);
 }
 
-export async function down(knex: Knex): Promise<void> {
+export async function down(knex: Knex): Promise<void> { // bb-unit-only: bb never migrates down
 	await writeChangedValues(
 		knex,
 		await readStoredValues(knex),

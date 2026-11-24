@@ -7,7 +7,7 @@ const UNIQUE_INDEX_NAME = 'directus_role_members_user_role_managed_by_unique';
  * managed_by), a null `managed_by` counting as one manager. `up` refuses,
  * changing nothing, while a role is held twice, naming the rows.
  */
-export async function up(knex: Knex): Promise<void> {
+export async function up(knex: Knex): Promise<void> { // bb-unit-only: bb migrates an empty database
 	const membershipRows: {
 		id: string;
 		user: string;
@@ -51,7 +51,7 @@ export async function up(knex: Knex): Promise<void> {
 
 	// TODO(#610): MariaDB indexes no expression, so two rows of the same role
 	// with a null managed_by still pass there.
-	if (String(knex.client.dialect).startsWith('mysql')) {
+	if (String(knex.client.dialect).startsWith('mysql')) { // bb-out-of-scope: #610 MySQL
 		await knex.schema.alterTable('directus_role_members', (table) => {
 			table.unique(['user', 'role', 'managed_by'], {
 				indexName: UNIQUE_INDEX_NAME,
@@ -68,8 +68,8 @@ export async function up(knex: Knex): Promise<void> {
 	);
 }
 
-export async function down(knex: Knex): Promise<void> {
-	if (String(knex.client.dialect).startsWith('mysql')) {
+export async function down(knex: Knex): Promise<void> { // bb-unit-only: bb never migrates down
+	if (String(knex.client.dialect).startsWith('mysql')) { // bb-out-of-scope: #610 MySQL
 		await knex.schema.alterTable('directus_role_members', (table) => {
 			table.dropUnique(['user', 'role', 'managed_by'], UNIQUE_INDEX_NAME);
 		});
