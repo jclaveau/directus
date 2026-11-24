@@ -19,6 +19,7 @@ const env: Record<string, any> = {
 	CACHE_AUTO_PURGE: true,
 	CACHE_AUTO_PURGE_IGNORE_LIST: [],
 	CACHE_NAMESPACE: 'scalabus',
+	CACHE_SCOPED_MAX_ON_DELETE_ROWS: 1000,
 	CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
 	CACHE_SCOPED_MAX_QUERY_CASES: 16,
 	MAX_BATCH_MUTATION: 100000,
@@ -118,6 +119,7 @@ const selfRefSchema = new SchemaBuilder()
 	.build();
 
 selfRefSchema.collections['test']!.scopedCacheFields = ['student'];
+selfRefSchema.relations[0]!.schema!.foreign_key_column = 'id';
 
 // The same collection declaring NO scope field, where the primary key is the only
 // pinning axis there is — the shape every deployment has on every collection.
@@ -453,11 +455,11 @@ describe(oneLine`
 
 		await service(selfRefSchema).deleteMany([1]);
 
-		expect(tracker.history.select[0]?.sql).toMatch(
-			/where \("parent" in \(\?\)\) and "id" not in \(\?\)/,
-		);
+		expect(tracker.history.select[0]).toMatchObject({
+			sql: 'select "id" from "test" where "parent" in (?) limit ?',
+			bindings: [1, 1001],
+		});
 
-		expect(tracker.history.select[0]?.bindings).toEqual([1, 1]);
 		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
 		expect(purgeScopedCache).toHaveBeenCalledWith(

@@ -637,8 +637,9 @@ export class ItemScopedCacheService {
 	 * counts as removed. Every row read is locked until the commit, so no child
 	 * joins a deleted parent between this read and the delete. Null when the
 	 * rows cannot all be named: past `CACHE_SCOPED_MAX_ON_DELETE_ROWS`, or a
-	 * foreign key naming a column other than its parent's primary key. Nothing to
-	 * walk costs no query.
+	 * foreign key naming a column other than its parent's primary key, or a
+	 * child with no primary key; the last two are told from the schema, before
+	 * any query. Nothing to walk costs no query.
 	 */
 	async rowsChangedByOnDelete(
 		deletedKeys: PrimaryKey[],
@@ -654,6 +655,10 @@ export class ItemScopedCacheService {
 			|| this.onDeleteRelationsOf(this.collection).length === 0
 		) {
 			return changedRows;
+		}
+
+		if (!this.onDeleteRowsAreNameable()) {
+			return null;
 		}
 
 		const supportsRowLocks = getHelpers(this.knex)
@@ -689,15 +694,7 @@ export class ItemScopedCacheService {
 					const childCollection = relation.collection;
 
 					const childPrimaryKey =
-						this.schema.collections[childCollection]?.primary;
-
-					if (
-						childPrimaryKey === undefined
-						|| relation.schema!.foreign_key_column
-							!== this.schema.collections[parentCollection]!.primary
-					) {
-						return null;
-					}
+						this.schema.collections[childCollection]!.primary;
 
 					const remainingRows = rowCeiling - walkedRowCount;
 
@@ -774,6 +771,44 @@ export class ItemScopedCacheService {
 		}
 
 		return changedRows;
+	}
+
+	/**
+	 * Whether every foreign key the walk from `this.collection` reaches names its
+	 * parent's primary key, from a child that has one: the walk reads children
+	 * by their foreign key and names them by their primary key.
+	 */
+	private onDeleteRowsAreNameable(): boolean {
+		const walkedCollections = new Set([this.collection]);
+		const pendingCollections = [this.collection];
+
+		while (pendingCollections.length > 0) {
+			const parentCollection = pendingCollections.shift()!;
+
+			const parentPrimaryKey =
+				this.schema.collections[parentCollection]?.primary;
+
+			for (const relation of this.onDeleteRelationsOf(parentCollection)) {
+				const childCollection = relation.collection;
+
+				if (
+					this.schema.collections[childCollection]?.primary === undefined
+					|| relation.schema!.foreign_key_column !== parentPrimaryKey
+				) {
+					return false;
+				}
+
+				if (
+					relation.schema!.on_delete === 'CASCADE'
+					&& !walkedCollections.has(childCollection)
+				) {
+					walkedCollections.add(childCollection);
+					pendingCollections.push(childCollection);
+				}
+			}
+		}
+
+		return true;
 	}
 
 	/**

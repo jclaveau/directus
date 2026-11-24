@@ -184,6 +184,11 @@ Feature: A delete purges by key the rows its ON DELETE rules change
       | method: DELETE                     | code: 400                          |+
       | path: /items/on_delete_task/<task> | headers:                           |
       |                                    |   x-scoped-cache-purged-tags: null |
+      |                                    | body:                              |
+      |                                    |   errors:                          |
+      |                                    |     - extensions:                  |
+      |                                    |         code: INVALID_FOREIGN_KEY  |
+      |                                    |         reason: still_referenced   |
       | method: GET                        | code: 200                          |+
       | path: /items/on_delete_lock        | headers:                           |
       | query:                             |   x-cache-status: HIT              |

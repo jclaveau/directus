@@ -48,6 +48,9 @@ describe('a collection-wide purge takes every slice the collection owns', () => 
 		env[vendor]['REDIS_HOST'] = 'localhost';
 		env[vendor]['REDIS_PORT'] = '6108';
 		env[vendor]['CACHE_NAMESPACE'] = `directus-slice-index-${vendor}`;
+		// The owner's delete names no row it changes, so it purges the sliced
+		// collection whole: the purge this test is about.
+		env[vendor]['CACHE_SCOPED_MAX_ON_DELETE_ROWS'] = '0';
 
 		let instance: ChildProcess;
 		let doomedOwner: number;

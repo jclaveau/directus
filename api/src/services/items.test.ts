@@ -2598,23 +2598,12 @@ describe('Integration Tests', () => {
 					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
 				);
 
-				// The rows an ON DELETE rule reaches are read locked, so none joins
-				// the deleted parent before the delete.
 				expect(tracker.history.transactions).toEqual([{
 					id: 0,
 					state: 'committed',
-					queries: [
-						expect.objectContaining({
-							sql: 'select "id" from "test" where "id" in (?) for update',
-						}),
-						expect.objectContaining({
-							sql: 'select "id" from "children" where "parent_id" in (?)'
-								+ ' limit ? for update',
-						}),
-						expect.objectContaining({
-							sql: 'delete from "test" where "id" in (?)',
-						}),
-					],
+					queries: [expect.objectContaining({
+						sql: 'delete from "test" where "id" in (?)',
+					})],
 				}]);
 
 				// The survivors' re-read after the commit is the only one outside it.

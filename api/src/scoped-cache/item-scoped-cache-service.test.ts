@@ -996,15 +996,15 @@ describe('rowsChangedByOnDelete', () => {
 
 		expect(tracker.history.select).toMatchObject([
 			{
-				sql: 'select "id" from "comment" where "task" in (?) limit ?',
+				sql: 'select "id" from "comment" where "task" in ($1) limit $2',
 				bindings: [5, 1001],
 			},
 			{
-				sql: 'select "id" from "task" where "parent" in (?) limit ?',
+				sql: 'select "id" from "task" where "parent" in ($1) limit $2',
 				bindings: [5, 999],
 			},
 			{
-				sql: 'select "id" from "reaction" where "comment" in (?, ?) limit ?',
+				sql: 'select "id" from "reaction" where "comment" in ($1, $2) limit $3',
 				bindings: [8, 9, 998],
 			},
 		]);
@@ -1183,6 +1183,40 @@ describe('rowsChangedByOnDelete', () => {
 					related_collection: 'task',
 					schema: { on_delete: 'CASCADE', foreign_key_column: 'code' },
 				}],
+			} as any,
+			db,
+			null,
+			null,
+		);
+
+		expect(await scopedCache.rowsChangedByOnDelete([5])).toBe(null);
+		expect(tracker.history.all).toEqual([]);
+	});
+
+	it(oneLine`
+		locks nothing when a foreign key below a cascade names a column other
+		than its parent's primary key
+	`, async () => {
+		rowLocksSupported = true;
+
+		const scopedCache = new ItemScopedCacheService(
+			'task',
+			{
+				...taskSchema,
+				relations: [
+					{
+						collection: 'comment',
+						field: 'task',
+						related_collection: 'task',
+						schema: { on_delete: 'CASCADE', foreign_key_column: 'id' },
+					},
+					{
+						collection: 'reaction',
+						field: 'comment',
+						related_collection: 'comment',
+						schema: { on_delete: 'SET NULL', foreign_key_column: 'code' },
+					},
+				],
 			} as any,
 			db,
 			null,
