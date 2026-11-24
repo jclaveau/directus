@@ -1,7 +1,7 @@
 Feature: The access a subscription grants is the subscriptions bundle's alone
 
   - A request authenticates as the admin unless its `as` names a token;
-    `as: anonymous` sends none, like Mollie.
+    `as: public` sends none, like Mollie.
   - The instance loads the real `@scalabus/subscriptions` bundle and was
     bootstrapped, which creates its tables.
   - Its Mollie client calls a fake Mollie, answering what `Mollie holds`;
@@ -145,7 +145,7 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | 900 | 900          | <refused_user> |
     Then these requests get these responses:
       | request                            | response                                   |
-      | as: anonymous                      | code: 403                                  |+
+      | as: public                         | code: 403                                  |+
       | method: DELETE                     | body:                                      |
       | path: /items/subscription_plans/10 |   errors:                                  |
       |                                    |     - message: >-                          |
@@ -174,7 +174,7 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       |                                    |         instead.                           |
       |                                    |       extensions:                          |
       |                                    |         code: INVALID_PAYLOAD              |
-      | as: anonymous                      | code: 403                                  |+
+      | as: public                         | code: 403                                  |+
       | method: PATCH                      | body:                                      |
       | path: /items/subscription_plans/10 |   errors:                                  |
       | payload:                           |     - message: >-                          |
@@ -261,7 +261,7 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       |                                    |         follow its provider.               |
       |                                    |       extensions:                          |
       |                                    |         code: INVALID_PAYLOAD              |
-      | as: anonymous                      | code: 403                                  |+
+      | as: public                         | code: 403                                  |+
       | method: POST                       | body:                                      |
       | path: /items/subscription_events   |   errors:                                  |
       | payload:                           |     - message: >-                          |
