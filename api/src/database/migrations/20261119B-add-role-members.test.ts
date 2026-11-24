@@ -352,6 +352,18 @@ describe('the stored paths to a user\'s role', () => {
 				one_collection: 'directus_users',
 				one_field: null,
 			},
+			{
+				many_collection: 'notes',
+				many_field: 'item',
+				one_collection: null,
+				one_field: null,
+			},
+			{
+				many_collection: 'directus_users',
+				many_field: 'team',
+				one_collection: 'teams',
+				one_field: 'members',
+			},
 		]);
 	});
 
@@ -466,6 +478,84 @@ describe('the stored paths to a user\'s role', () => {
 					],
 				],
 			]);
+	});
+
+	test('up follows an o2m alias and a filter list', async () => {
+		tracker.on.select('directus_users').response([]);
+
+		tracker.on.select('directus_permissions').response([
+			{
+				id: 3,
+				collection: 'teams',
+				permissions: { members: { role: { _eq: 'role-a' } } },
+				validation: null,
+				presets: { role: 'role-a' },
+				fields: null,
+			},
+			{
+				id: 4,
+				collection: 'notes',
+				permissions: { _and: [{ by: { role: { _eq: 'role-a' } } }] },
+				validation: null,
+				presets: null,
+				fields: null,
+			},
+		]);
+
+		tracker.on.select('directus_panels').response([
+			{ id: 'panel-3', options: 'not json' },
+		]);
+
+		tracker.on.select(/from "directus_(presets|fields|operations)"/)
+			.response([]);
+
+		tracker.on.update('directus_permissions').response(1);
+
+		await up(db);
+
+		expect(tracker.history.update.map(({ sql, bindings }) => [sql, bindings]))
+			.toEqual([
+				[
+					'update "directus_permissions" set "permissions" = $1'
+					+ ' where "id" = $2',
+					['{"members":{"roles":{"role":{"_eq":"role-a"}}}}', 3],
+				],
+				[
+					'update "directus_permissions" set "permissions" = $1'
+					+ ' where "id" = $2',
+					['{"_and":[{"by":{"roles":{"role":{"_eq":"role-a"}}}}]}', 4],
+				],
+			]);
+	});
+
+	test('down keeps a preset of no or several memberships', async () => {
+		tracker.on.select('directus_role_members').response([]);
+
+		tracker.on.select('directus_permissions').response([
+			{
+				id: 5,
+				collection: 'directus_users',
+				permissions: null,
+				validation: null,
+				presets: { status: 'active' },
+				fields: null,
+			},
+			{
+				id: 6,
+				collection: 'directus_users',
+				permissions: null,
+				validation: null,
+				presets: { roles: [{ role: 'role-a' }, { role: 'role-b' }] },
+				fields: null,
+			},
+		]);
+
+		tracker.on.select(/from "directus_(presets|fields|operations|panels)"/)
+			.response([]);
+
+		await down(db);
+
+		expect(tracker.history.update).toEqual([]);
 	});
 
 	test('down moves them back to the role column', async () => {
