@@ -17,7 +17,8 @@ Feature: A user holds several roles, each one a membership
     then deletes them. A deleted inviter leaves their invites, naming no
     user. A write of the status alone leaves the invites pending.
   - `managed_by` names what manages a membership: `auth:<provider>` or an
-    extension; a request neither sets it nor changes such a membership.
+    extension; a request neither sets it nor changes such a membership. An
+    admin deletes one whose provider maps no role: no login replaces it.
   - A user holds a role once per `managed_by`: a second membership of the
     same role from the same manager is refused, whether a write creates it
     or moves another membership onto that role.
@@ -395,6 +396,42 @@ Feature: A user holds several roles, each one a membership
       | path: /users/<alice>         | body:                                 |
       | query:                       |   data:                               |
       |   fields: roles.role         |     roles: []                         |
+
+  Scenario: an admin deletes a membership of a provider mapping no role
+    Given the rows of directus_roles:
+      | id      | name        |
+      | <staff> | staff-<run> |
+      | <board> | board-<run> |
+    And the rows of directus_users:
+      | id      | email                   |
+      | <alice> | alice-<run>@example.com |
+    And the rows of directus_role_members:
+      | id         | user    | role    | managed_by   | sort |
+      | <member-1> | <alice> | <staff> | auth:retired | 1    |
+      | <member-2> | <alice> | <board> | ext:sync     | 2    |
+    Then these requests get these responses:
+      | request              | response                            |
+      | method: PATCH        | code: 200                           |+
+      | path: /users/<alice> |                                     |
+      | payload:             |                                     |
+      |   roles:             |                                     |
+      |     delete:          |                                     |
+      |       - <member-1>   |                                     |
+      | method: PATCH        | code: 400                           |+
+      | path: /users/<alice> | body:                               |
+      | payload:             |   errors:                           |
+      |   roles:             |     - message: >-                   |
+      |     delete:          |         Invalid payload. Membership |
+      |       - <member-2>   |         "<member-2>" is managed by  |
+      |                      |         "ext:sync", which alone     |
+      |                      |         changes it.                 |
+      |                      |       extensions:                   |
+      |                      |         code: INVALID_PAYLOAD       |
+      | method: GET          | code: 200                           |+
+      | path: /users/<alice> | body:                               |
+      | query:               |   data:                             |
+      |   fields: roles.role |     roles:                          |
+      |                      |       - role: <board>               |
 
   Scenario: a role the user holds by hand is refused when given again by hand
     Given the rows of directus_roles:

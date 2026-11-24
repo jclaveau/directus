@@ -1,11 +1,16 @@
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
-import { UserIntegrityCheckFlag, type MutationOptions } from '@directus/types';
+import {
+	type Accountability,
+	type MutationOptions,
+	UserIntegrityCheckFlag,
+} from '@directus/types';
 import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Keyv } from 'keyv';
+import { providerMapsRoles } from '../auth/utils/provider-maps-roles.js';
 import { clearSystemCache } from '../cache.js';
 import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
@@ -22,6 +27,8 @@ vi.mock('../../src/database/index', () => {
 });
 
 vi.mock('../permissions/modules/validate-access/validate-access.js');
+
+vi.mock('../auth/utils/provider-maps-roles.js');
 
 vi.mock('../permissions/modules/process-payload/process-payload.js', () => {
 	return {
@@ -254,6 +261,7 @@ describe('Services / RoleMembers', () => {
 				{
 					onRequireUserIntegrityCheck,
 					userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+					writtenMemberUsers: [],
 				},
 			);
 
@@ -274,7 +282,10 @@ describe('Services / RoleMembers', () => {
 
 			expect(updateGroups).toHaveBeenCalledWith(
 				[{ data: { sort: 2 }, keys: ['member-id-6'] }],
-				{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
+				{
+					userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+					writtenMemberUsers: [],
+				},
 			);
 		});
 
@@ -306,6 +317,51 @@ describe('Services / RoleMembers', () => {
 	});
 
 	describe('deleteMany', () => {
+		it.each([
+			[true, oneLine`
+				Membership "member-id-40" is managed by "auth:sso": the next login of
+				user "user-id-40" sets it from that provider's ROLE_MAPPING
+			`],
+			[false, null],
+		])(oneLine`
+			refuses an admin the delete of a provider's membership when the provider
+			maps roles (%s), naming it
+		`, async (mapsRoles, refusalReason) => {
+			vi.mocked(providerMapsRoles).mockReturnValue(mapsRoles);
+
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			tracker.on.select('directus_role_members').response([{
+				id: 'member-id-40',
+				managed_by: 'auth:sso',
+				user: 'user-id-40',
+				role: 'role-id-40',
+			}]);
+
+			const service = new RoleMembersService({
+				knex: database,
+				schema,
+				accountability: { user: 'admin-id', admin: true } as Accountability,
+			});
+
+			const deleteCheck = service['validateKeysToDelete'](
+				['member-id-40'],
+				{},
+				database,
+			);
+
+			if (refusalReason === null) {
+				await expect(deleteCheck).resolves.toBeUndefined();
+			}
+			else {
+				await expect(deleteCheck).rejects
+					.toEqual(new InvalidPayloadError({ reason: refusalReason }));
+			}
+
+			expect(providerMapsRoles).toHaveBeenCalledExactlyOnceWith('sso');
+		});
+
 		it('requests every user integrity check and clears the caches', async () => {
 			const deleteMany = vi.spyOn(ItemsService.prototype, 'deleteMany')
 				.mockResolvedValue(['member-id-7']);
@@ -327,6 +383,7 @@ describe('Services / RoleMembers', () => {
 			expect(deleteMany).toHaveBeenCalledWith(['member-id-7'], {
 				onRequireUserIntegrityCheck,
 				userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+				writtenMemberUsers: [],
 			});
 
 			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);

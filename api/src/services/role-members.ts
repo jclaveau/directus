@@ -8,6 +8,7 @@ import {
 	UserIntegrityCheckFlag,
 } from '@directus/types';
 import type { Knex } from 'knex';
+import { providerMapsRoles } from '../auth/utils/provider-maps-roles.js';
 import {
 	announceMembershipsChangedAfterCommit,
 	clearPermissionsCacheAfterCommit,
@@ -47,6 +48,13 @@ function managedMembershipReason({
 
 	return `Membership ${JSON.stringify(id)} is managed by`
 		+ ` ${JSON.stringify(managed_by)}, which alone changes it`;
+}
+
+// No login replaces the memberships of a provider mapping no role: an admin
+// deletes them.
+function isRetiredProviderManager(managedBy: string): boolean {
+	return managedBy.startsWith('auth:')
+		&& !providerMapsRoles(managedBy.slice('auth:'.length));
 }
 
 /**
@@ -195,7 +203,11 @@ export class RoleMembersService extends ItemsService {
 			return;
 		}
 
-		const [managedMembership] = await this.readManagedMemberships(keys, trx);
+		const managedMemberships = await this.readManagedMemberships(keys, trx);
+
+		const managedMembership = managedMemberships.find(({ managed_by }) => {
+			return !isRetiredProviderManager(managed_by);
+		});
 
 		if (managedMembership) {
 			throw new ManagedMembershipChangeError(managedMembership);
