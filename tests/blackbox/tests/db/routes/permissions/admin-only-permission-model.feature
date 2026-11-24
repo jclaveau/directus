@@ -182,19 +182,37 @@ Feature: Only an admin or code writes who may do what
       | 1       | directus_policies    | 1      | 0      | 0      | 0      |
       | 1       | directus_roles       | 1      | 0      | 0      | 0      |
       | 1       | directus_users       | 1      | 0      | 0      | 0      |
-      | 2       | directus_users       | 0      | 0      | 0      | 0      |
-      | 3       | directus_users       | 0      | 0      | 0      | 0      |
-      | 4       | directus_users       | 0      | 0      | 0      | 0      |
-      | 5       | directus_users       | 0      | 0      | 0      | 0      |
-      | 6       | directus_users       | 0      | 0      | 0      | 0      |
-      | 7       | directus_users       | 0      | 0      | 0      | 0      |
-      | 8       | directus_users       | 0      | 0      | 0      | 0      |
-      | 9       | directus_users       | 0      | 0      | 0      | 0      |
-      | 10      | directus_users       | 0      | 0      | 0      | 0      |
-      | 11      | directus_users       | 0      | 0      | 0      | 0      |
-      | 12      | directus_users       | 0      | 0      | 0      | 0      |
-      | 13      | directus_users       | 0      | 0      | 0      | 0      |
-      | 14      | directus_users       | 0      | 0      | 0      | 0      |
+      | 2       | directus_access      | 1      | 0      | 0      | 0      |
+      | 2       | directus_permissions | 3      | 0      | 0      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 3       | directus_access      | 1      | 0      | 0      | 0      |
+      | 3       | directus_permissions | 2      | 0      | 0      | 0      |
+      | 3       | directus_users       | 1      | 0      | 0      | 0      |
+      | 4       | directus_permissions | 1      | 0      | 0      | 0      |
+      | 4       | directus_users       | 1      | 0      | 0      | 0      |
+      | 5       | directus_permissions | 2      | 0      | 0      | 0      |
+      | 5       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 5       | directus_users       | 1      | 0      | 0      | 0      |
+      | 6       | directus_permissions | 1      | 0      | 0      | 0      |
+      | 6       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 6       | directus_users       | 1      | 0      | 0      | 0      |
+      | 7       | directus_permissions | 1      | 0      | 0      | 0      |
+      | 7       | directus_users       | 1      | 0      | 0      | 0      |
+      | 8       | directus_permissions | 4      | 0      | 0      | 0      |
+      | 8       | directus_users       | 1      | 0      | 0      | 0      |
+      | 9       | directus_permissions | 3      | 0      | 0      | 0      |
+      | 9       | directus_users       | 1      | 0      | 0      | 0      |
+      | 10      | directus_permissions | 1      | 0      | 0      | 0      |
+      | 10      | directus_users       | 1      | 0      | 0      | 0      |
+      | 11      | directus_permissions | 2      | 0      | 0      | 0      |
+      | 11      | directus_roles       | 2      | 0      | 0      | 0      |
+      | 11      | directus_users       | 1      | 0      | 0      | 0      |
+      | 12      | directus_access      | 1      | 0      | 0      | 0      |
+      | 12      | directus_roles       | 1      | 0      | 0      | 0      |
+      | 12      | directus_users       | 1      | 0      | 0      | 0      |
+      | 13      | directus_users       | 2      | 0      | 0      | 0      |
+      | 14      | directus_permissions | 2      | 0      | 0      | 0      |
+      | 14      | directus_users       | 2      | 0      | 0      | 0      |
 
   Scenario: a non-admin writes the model's other fields, an admin all of it
     Given the rows of directus_policies:
@@ -273,20 +291,61 @@ Feature: Only an admin or code writes who may do what
       | payload:                        |   data:                           |
       |   role: <target-role>           |     role: <target-role>           |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 5      | 0      | 0      | 0      |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 1       | directus_permissions | 7      | 0      | 0      | 0      |
-      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
-      | 1       | directus_roles       | 6      | 0      | 1      | 0      |
-      | 1       | directus_users       | 3      | 0      | 0      | 0      |
-      | 2       | directus_users       | 0      | 0      | 0      | 0      |
-      | 3       | directus_users       | 0      | 0      | 0      | 0      |
-      | 4       | directus_users       | 0      | 0      | 0      | 0      |
-      | 5       | directus_users       | 0      | 0      | 0      | 0      |
-      | 6       | directus_users       | 0      | 0      | 0      | 0      |
-      | 7       | directus_users       | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete | with |
+      | 1       | directus_access      | 5      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_permissions | 7      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_roles       | 6      | 0      | 1      | 0      | 0    |
+      | 1       | directus_users       | 3      | 0      | 0      | 0      | 0    |
+      | 2       | directus_access      | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_permissions | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_roles       | 2      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users       | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_access      | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 3       | directus_permissions | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 3       | directus_users       | 3      | 1      | 0      | 0      | 0    |
+      | 4       | directus_access      | 2      | 0      | 0      | 0      | 0    |
+      | 4       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 4       | directus_permissions | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 4       | directus_users       | 4      | 0      | 1      | 0      | 0    |
+      | 5       | directus_access      | 3      | 0      | 0      | 0      | 0    |
+      | 5       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 5       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 5       | directus_roles       | 6      | 0      | 1      | 0      | 0    |
+      | 5       | directus_users       | 4      | 0      | 0      | 0      | 0    |
+      | 6       | directus_access      | 3      | 1      | 0      | 0      | 0    |
+      | 6       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 6       | directus_collections | 1      | 0      | 0      | 0      | 0    |
+      | 6       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
+      | 6       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
+      | 6       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 6       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
+      | 6       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 6       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
+      | 6       | information_schema   | 1      | 0      | 0      | 0      | 0    |
+      | 6       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
+      | 6       | pg_index             | 2      | 0      | 0      | 0      | 0    |
+      | 6       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
+      | 7       | directus_access      | 5      | 0      | 0      | 0      | 0    |
+      | 7       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 7       | directus_collections | 1      | 0      | 0      | 0      | 0    |
+      | 7       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
+      | 7       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
+      | 7       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 7       | directus_roles       | 2      | 0      | 0      | 0      | 0    |
+      | 7       | directus_users       | 4      | 0      | 1      | 0      | 0    |
+      | 7       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
+      | 7       | information_schema   | 1      | 0      | 0      | 0      | 0    |
+      | 7       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
+      | 7       | pg_index             | 2      | 0      | 0      | 0      | 0    |
+      | 7       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a non-admin invites into a role, never into an admin one
     Given the rows of directus_policies:
@@ -383,9 +442,17 @@ Feature: Only an admin or code writes who may do what
       | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
       | 1       | pg_index             | 2      | 0      | 0      | 0      | 0    |
       | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_users       | 0      | 0      | 0      | 0      | 0    |
-      | 5       | directus_users       | 0      | 0      | 0      | 0      | 0    |
-      | 6       | directus_users       | 0      | 0      | 0      | 0      | 0    |
+      | 3       | directus_access      | 5      | 0      | 0      | 0      | 0    |
+      | 3       | directus_permissions | 3      | 0      | 0      | 0      | 0    |
+      | 3       | directus_policies    | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_roles       | 3      | 0      | 0      | 0      | 0    |
+      | 3       | directus_users       | 4      | 0      | 1      | 0      | 0    |
+      | 5       | directus_access      | 3      | 0      | 0      | 0      | 0    |
+      | 5       | directus_roles       | 2      | 0      | 0      | 0      | 0    |
+      | 5       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 6       | directus_access      | 1      | 0      | 0      | 0      | 0    |
+      | 6       | directus_roles       | 2      | 0      | 0      | 0      | 0    |
+      | 6       | directus_users       | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a role a user belongs to stays, an empty one goes, by a non-admin too
     Given the rows of directus_policies:
@@ -438,6 +505,12 @@ Feature: Only an admin or code writes who may do what
       |   fields: status,role             |     status: active                 |
       |                                   |     role: <held-role>              |
     And on postgres the requests ran these statements:
-      | request | table          | select | insert | update | delete |
-      | 1       | directus_users | 2      | 0      | 0      | 0      |
-      | 2       | directus_users | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_users       | 2      | 0      | 0      | 0      |
+      | 2       | directus_access      | 7      | 0      | 0      | 1      |
+      | 2       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 2       | directus_permissions | 3      | 0      | 0      | 0      |
+      | 2       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 2       | directus_presets     | 1      | 0      | 0      | 0      |
+      | 2       | directus_roles       | 6      | 0      | 1      | 1      |
+      | 2       | directus_users       | 5      | 0      | 0      | 0      |
