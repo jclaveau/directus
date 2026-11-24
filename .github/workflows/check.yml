@@ -140,3 +140,14 @@ jobs:
             # Upload to codecov with folder name as flag
             ./codecov upload-coverage -f "$coverage_file" -F "$folder_name" -Z --disable-search
           done
+
+      # The blackbox branch audit (blackbox-pr.yml) checks the lines its unit-only list
+      # names are run by these tests.
+      - name: Upload api unit coverage
+        if: always() && matrix.shard == 'api'
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-unit-coverage
+          path: api/coverage/coverage-final.json
+          if-no-files-found: warn
+          retention-days: 14

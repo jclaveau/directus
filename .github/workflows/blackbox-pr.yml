@@ -102,9 +102,13 @@ jobs:
     needs: blackbox-tests
     if: always() && needs.blackbox-tests.result != 'skipped' && needs.blackbox-tests.result != 'cancelled'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read # the api unit coverage is an artifact of the Check run
     steps:
-      # The shards built the merge commit, so its first parent is the base the PR adds to.
+      # The shards built the merge commit: its first parent is the base the PR adds
+      # to, its second the PR head, the commit the Check run tested.
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
@@ -116,11 +120,33 @@ jobs:
           pattern: blackbox-coverage-*
           path: coverage-shards
 
+      - name: Download api unit coverage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head_sha=$(git rev-parse HEAD^2)
+          run_id=$(gh run list -R "$GITHUB_REPOSITORY" --workflow check.yml \
+            --commit "$head_sha" --event push --limit 1 \
+            --json databaseId --jq '.[0].databaseId')
+
+          if [ -z "$run_id" ]; then
+            echo "No Check run for the PR head $head_sha." >&2
+            exit 1
+          fi
+
+          gh run watch "$run_id" -R "$GITHUB_REPOSITORY" --interval 30 > /dev/null
+          gh run download "$run_id" -R "$GITHUB_REPOSITORY" -n api-unit-coverage \
+            -D unit-coverage
+
       - name: Audit added branches
         run: |
-          node tests/blackbox/branch-audit.mjs coverage-shards HEAD^1 HEAD \
-            coverage-shards/branch-audit.md
+          status=0
+          node tests/blackbox/branch-audit/branch-audit.mjs \
+            --blackbox coverage-shards --base HEAD^1 --head HEAD \
+            --unit unit-coverage --unit-head HEAD^2 \
+            --report coverage-shards/branch-audit.md || status=$?
           cat coverage-shards/branch-audit.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
       - name: Upload audit
         if: always()
