@@ -1,6 +1,6 @@
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
-import { UserIntegrityCheckFlag } from '@directus/types';
+import { UserIntegrityCheckFlag, type MutationOptions } from '@directus/types';
 import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
@@ -409,10 +409,56 @@ describe('Services / RoleMembers', () => {
 			await service['onKeyRowsWritten'](
 				[{ user: 'user-id-18' }, { user: 'user-id-19' }],
 				database,
+				{},
 			);
 
 			expect(announceMembershipsChanged)
 				.toHaveBeenCalledExactlyOnceWith(['user-id-18', 'user-id-19']);
+		});
+
+		it.each([
+			['update', (service: RoleMembersService) => {
+				return service.updateOne('6f1c2a4e-0000-4000-8000-000000000020', {
+					sort: 2,
+				});
+			}],
+			['delete', (service: RoleMembersService) => {
+				return service.deleteOne('6f1c2a4e-0000-4000-8000-000000000020');
+			}],
+		])(oneLine`
+			announces the users of a membership %s once the permissions cache
+			is cleared
+		`, async (_write, writeMembership) => {
+			const writeRows = async function (
+				this: RoleMembersService,
+				_input: unknown,
+				opts: MutationOptions,
+			) {
+				await this['onKeyRowsWritten']([{ user: 'user-id-20' }], this.knex, opts);
+
+				return ['6f1c2a4e-0000-4000-8000-000000000020'];
+			};
+
+			vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockImplementation(writeRows);
+
+			vi.spyOn(ItemsService.prototype, 'deleteMany')
+				.mockImplementation(writeRows);
+
+			const database = knex.default({ client: MockClient });
+
+			await writeMembership(new RoleMembersService({ knex: database, schema }));
+
+			expect(announceMembershipsChanged)
+				.toHaveBeenCalledExactlyOnceWith(['user-id-20']);
+
+			expect(vi.mocked(clearPermissionsCache).mock.invocationCallOrder)
+				.toEqual([expect.any(Number)]);
+
+			expect(vi.mocked(clearPermissionsCache).mock.invocationCallOrder[0])
+				.toBeLessThan(
+					vi.mocked(announceMembershipsChanged).mock.invocationCallOrder[0]!,
+				);
 		});
 	});
 

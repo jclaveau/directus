@@ -2256,6 +2256,7 @@ implements AbstractService<Item> {
 	protected async onKeyRowsWritten(
 		_writtenRows: Item[],
 		_trx: Knex,
+		_opts: MutationOptions,
 	): Promise<void> {}
 
 	// The rows' `writtenRowColumns` where the statement can return them.
@@ -3532,7 +3533,7 @@ implements AbstractService<Item> {
 				}
 
 				if (writtenRows !== null) {
-					await this.onKeyRowsWritten(writtenRows, trx);
+					await this.onKeyRowsWritten(writtenRows, trx, opts);
 				}
 			}
 
@@ -4960,8 +4961,9 @@ implements AbstractService<Item> {
 	private async deleteKeyRows(
 		keys: PrimaryKey[],
 		trx: Knex,
-		keysFromQuery: boolean,
+		opts: MutationOptions,
 	): Promise<void> {
+		const keysFromQuery = opts.keysFromQuery === true;
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 
 		if (this.accountability?.admin !== true) {
@@ -4970,7 +4972,7 @@ implements AbstractService<Item> {
 			);
 
 			if (writtenRows !== null) {
-				await this.onKeyRowsWritten(writtenRows, trx);
+				await this.onKeyRowsWritten(writtenRows, trx, opts);
 			}
 
 			return;
@@ -4996,7 +4998,7 @@ implements AbstractService<Item> {
 			await savepoint.commit();
 
 			if (deletedRows !== null) {
-				await this.onKeyRowsWritten(deletedRows, trx);
+				await this.onKeyRowsWritten(deletedRows, trx, opts);
 			}
 
 			return;
@@ -5012,7 +5014,7 @@ implements AbstractService<Item> {
 			await savepoint.commit();
 
 			if (deletedRows !== null) {
-				await this.onKeyRowsWritten(deletedRows, trx);
+				await this.onKeyRowsWritten(deletedRows, trx, opts);
 			}
 
 			return;
@@ -5171,7 +5173,7 @@ implements AbstractService<Item> {
 			await this.validateKeysToDelete(keys, opts, trx);
 
 			try {
-				await this.deleteKeyRows(keys, trx, opts.keysFromQuery === true);
+				await this.deleteKeyRows(keys, trx, opts);
 			}
 			catch (err: any) {
 				if (isDirectusError(err, ErrorCode.ItemNotFound)) {

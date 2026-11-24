@@ -18,7 +18,9 @@ import jwt from 'jsonwebtoken';
 import type { Knex } from 'knex';
 import type { StringValue } from 'ms';
 import { performance } from 'node:perf_hooks';
-import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
+import {
+	clearPermissionsCacheAfterCommit,
+} from '../utils/clear-caches-after-commit.js';
 import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
@@ -387,7 +389,7 @@ export class UsersService extends ItemsService {
 
 	protected override async applyUpdateSideEffects(
 		groups: UpdateGroup<Item>[],
-		opts: MutationOptions,
+		_opts: MutationOptions,
 	): Promise<void> {
 		for (const { data, keys } of groups) {
 			if (data['status'] !== undefined && data['status'] !== 'active') {
@@ -396,11 +398,6 @@ export class UsersService extends ItemsService {
 			else if (data['password'] !== undefined || data['email'] !== undefined) {
 				await this.clearUserSessions(keys, this.accountability?.session);
 			}
-		}
-
-		// Only clear the caches if the memberships have been updated
-		if (groups.some(({ data }) => 'roles' in data)) {
-			await this.clearCaches(opts);
 		}
 	}
 
@@ -473,6 +470,9 @@ export class UsersService extends ItemsService {
 				}),
 			});
 
+			// The permissions cached for a deleted user's memberships, which the
+			// database's cascade removes without the memberships' service.
+			await clearPermissionsCacheAfterCommit(trx);
 		}, opts.mutationTracker.snapshot());
 
 		const emitting = Promise.all(heldActionEvents.map((actionEvent) => {
@@ -951,9 +951,5 @@ export class UsersService extends ItemsService {
 		});
 
 		await service.updateOne(user.id, { password, status: 'active' }, opts);
-	}
-
-	private async clearCaches(opts?: MutationOptions) {
-		await clearCachesAfterCommit(this.knex, this.cache, opts);
 	}
 }

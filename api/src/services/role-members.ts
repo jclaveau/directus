@@ -137,15 +137,29 @@ export class RoleMembersService extends ItemsService {
 	}
 
 	// The users of the memberships an update or a delete wrote, off the write
-	// statement's own RETURNING.
+	// statement's own RETURNING, announced once the caches are cleared.
 	protected override async onKeyRowsWritten(
 		writtenRows: Item[],
 		trx: Knex,
+		opts: MutationOptions,
 	): Promise<void> {
-		await announceMembershipsChangedAfterCommit(
-			trx,
-			writtenRows.map(({ user }) => user),
-		);
+		const memberUsers = writtenRows.map(({ user }) => user);
+
+		if (opts.writtenMemberUsers) {
+			opts.writtenMemberUsers.push(...memberUsers);
+
+			return;
+		}
+
+		await announceMembershipsChangedAfterCommit(trx, memberUsers);
+	}
+
+	private async clearCachesThenAnnounce(
+		memberUsers: string[],
+		opts: MutationOptions,
+	): Promise<void> {
+		await this.clearCaches(opts);
+		await announceMembershipsChangedAfterCommit(this.knex, memberUsers);
 	}
 
 	protected override async validateRowsToCreate(
@@ -311,9 +325,13 @@ export class RoleMembersService extends ItemsService {
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
+		const memberUsers: string[] = [];
+
+		opts.writtenMemberUsers = memberUsers;
+
 		const result = await super.updateGroups(groups, opts);
 
-		await this.clearCaches(opts);
+		await this.clearCachesThenAnnounce(memberUsers, opts);
 
 		return result;
 	}
@@ -327,9 +345,13 @@ export class RoleMembersService extends ItemsService {
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
+		const memberUsers: string[] = [];
+
+		opts.writtenMemberUsers = memberUsers;
+
 		const result = await super.deleteMany(keys, opts);
 
-		await this.clearCaches(opts);
+		await this.clearCachesThenAnnounce(memberUsers, opts);
 
 		return result;
 	}

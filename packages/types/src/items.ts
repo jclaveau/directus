@@ -211,6 +211,12 @@ export type MutationOptions = {
 	createsNewUserMemberships?: boolean | undefined;
 
 	/**
+	 * Filled with the users of the memberships an update or a delete wrote,
+	 * whose sockets are announced once the caches they read are cleared.
+	 */
+	writtenMemberUsers?: string[] | undefined;
+
+	/**
 	 * An update refuses with a 404 a key no row holds, told off the UPDATE's
 	 * count: the filter hooks run before it, and the rollback undoes what they
 	 * wrote through the transaction. On a transaction the caller passed, that

@@ -24,7 +24,6 @@ import {
 	flushResponseCacheAfterCommit,
 } from '../utils/clear-caches-after-commit.js';
 import { verifyJWT } from '../utils/jwt.js';
-import { transaction } from '../utils/transaction.js';
 import { withMeta } from '../utils/read-meta.js';
 import { ItemsService, MailService, UsersService } from './index.js';
 import { SettingsService } from './settings.js';
@@ -341,11 +340,12 @@ describe('Integration Tests', () => {
 				expect(clearUserSessionsSpy).not.toBeCalled();
 			});
 
-			it('should clear caches if memberships are changed', async () => {
+			it(oneLine`
+				leaves the caches to the memberships' service when the memberships
+				change
+			`, async () => {
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
-
-				const clearCacheSpy = vi.spyOn(UsersService.prototype as any, 'clearCaches');
 
 				await service.updateMany(
 					['8e2b4c10-5d3a-4f6e-9a7b-000000000007'],
@@ -353,37 +353,13 @@ describe('Integration Tests', () => {
 					{ onRequireUserIntegrityCheck: vi.fn() },
 				);
 
-				expect(clearCacheSpy).toHaveBeenCalled();
+				expect(clearSystemCache).not.toHaveBeenCalled();
 			});
 
-			it('clears the caches once the parent transaction has committed', async () => {
+			it('checks every integrity when a users.update hook sets roles', async () => {
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
 
-				const transactionStates: string[][] = [];
-
-				vi.mocked(clearSystemCache).mockImplementationOnce(async () => {
-					transactionStates.push(
-						tracker.history.transactions.map((trx) => trx.state),
-					);
-				});
-
-				await transaction(db, async (trx) => {
-					await new UsersService({ knex: trx, schema }).updateMany(
-						['8e2b4c10-5d3a-4f6e-9a7b-000000000051'],
-						{ roles: [{ role: testRoleId }] },
-						{ onRequireUserIntegrityCheck: vi.fn() },
-					);
-				});
-
-				expect(transactionStates).toEqual([['committed']]);
-			});
-
-			it('clears the caches when a users.update hook sets roles', async () => {
-				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
-				tracker.on.update('directus_users').response(1);
-
-				const clearCacheSpy = vi.spyOn(UsersService.prototype as any, 'clearCaches');
 				const onRequireUserIntegrityCheck = vi.fn();
 
 				const giveRole = () => {
@@ -409,7 +385,7 @@ describe('Integration Tests', () => {
 				expect(onRequireUserIntegrityCheck)
 					.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
 
-				expect(clearCacheSpy).toHaveBeenCalled();
+				expect(clearSystemCache).not.toHaveBeenCalled();
 			});
 
 			it('logs out the users a users.update hook suspends', async () => {
@@ -718,6 +694,32 @@ describe('Integration Tests', () => {
 
 				expect(validateRemainingAdminUsers).toHaveBeenCalled();
 				expect(clearUserSessionsSpy).toBeCalled();
+			});
+
+			it(oneLine`
+				clears the permissions cache once the delete's transaction settles,
+				the memberships cascading with the user
+			`, async () => {
+				tracker.on.delete('directus_role_members').response(0);
+
+				const getKeysByQuerySpy = vi
+					.spyOn(ItemsService.prototype, 'getKeysByQuery')
+					.mockResolvedValue([]);
+
+				onTestFinished(() => {
+					getKeysByQuerySpy.mockRestore();
+				});
+
+				const clearedThrough: boolean[] = [];
+
+				vi.mocked(clearPermissionsCacheAfterCommit)
+					.mockImplementationOnce(async (knex) => {
+						clearedThrough.push(knex.isTransaction === true);
+					});
+
+				await service.deleteMany(['user-id-16']);
+
+				expect(clearedThrough).toEqual([true]);
 			});
 
 			it(oneLine`
