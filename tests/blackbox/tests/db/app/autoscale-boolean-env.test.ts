@@ -36,7 +36,8 @@ type Run = { code: number | null; output: string };
 
 /** What the refusal says, which is what a deployment has to read to fix it. */
 function refusal(key: string): string {
-	return `"${key}" Environment Variable is "${REFUSED_SPELLING}"`;
+	return `"${key}" is "${REFUSED_SPELLING}", which is not a boolean:`
+		+ ' use true, false, 1 or 0.';
 }
 
 /**
@@ -117,6 +118,22 @@ describe.each(vendors)('%s', (vendor) => {
 			// until it is stopped: a check anywhere later than its first
 			// statement would have had to outlive a connection, and would
 			// leave the lines that connection logs behind it.
+			expect(run.output).not.toContain('[autoscale]');
+		}, 120_000);
+
+		// Read as NaN, a threshold satisfies neither comparison: the pool
+		// would stop scaling both ways and log nothing about why.
+		it('the autoscaler, on a number that is not one', async () => {
+			const run = await runToEnd(vendor, ['autoscale'], {
+				PM2_HOME: mkdtempSync(join(tmpdir(), 'bb-number-env-')),
+				PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: 'forty',
+			});
+
+			expect(run.code, run.output).toBe(1);
+
+			expect(run.output).toContain('"PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD"'
+				+ ' is "forty", which is not a number.');
+
 			expect(run.output).not.toContain('[autoscale]');
 		}, 120_000);
 	});
