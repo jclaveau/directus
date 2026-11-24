@@ -24,6 +24,18 @@ vi.mock('./config.js', async (importOriginal) => {
 	return {
 		...(await importOriginal<typeof import('./config.js')>()),
 		scopedCachePurgeEnabled: () => purgeEnabled,
+		scopedCacheMaxOnDeleteRows: () => maxOnDeleteRows,
+	};
+});
+
+vi.mock('../database/helpers/index.js', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('../database/helpers/index.js')>()),
+		getHelpers: () => {
+			return {
+				capabilities: { supportsRowLocks: () => rowLocksSupported },
+			};
+		},
 	};
 });
 
@@ -36,11 +48,15 @@ vi.mock('../permissions/lib/fetch-policies.js', () => {
 });
 
 let purgeEnabled = true;
+let maxOnDeleteRows = 1000;
+let rowLocksSupported = false;
 let db: knex.Knex;
 let tracker: Tracker;
 
 beforeEach(() => {
 	purgeEnabled = true;
+	maxOnDeleteRows = 1000;
+	rowLocksSupported = false;
 	db = knex.default({ client: MockClient });
 	tracker = createTracker(db);
 });
@@ -864,39 +880,343 @@ describe('purge', () => {
 	});
 });
 
-describe('selfRelationSurvivorKeys', () => {
+describe('rowsChangedByOnDelete', () => {
+	const taskSchema = new SchemaBuilder()
+		.collection('task', (c) => {
+			c.field('id').id();
+			c.field('parent').integer();
+		})
+		.collection('comment', (c) => {
+			c.field('id').id();
+			c.field('task').integer();
+			c.field('reply_to').integer();
+		})
+		.collection('reaction', (c) => {
+			c.field('id').id();
+			c.field('comment').integer();
+		})
+		.build();
+
 	// Past 32767 deleted keys, one bind per key would put the statement over
-	// Postgres' 65535 bind parameters and fail the delete (#645).
-	it('binds each key list as one array on Postgres', async () => {
+	// Postgres' 65535 bind parameters and fail the delete (#645). The rows read
+	// are locked, so no child joins a deleted parent before the delete.
+	it(oneLine`
+		names the rows a SET NULL self-relation rewrites, each key list bound as
+		one array on Postgres
+	`, async () => {
+		rowLocksSupported = true;
+
 		const pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
 		const pgTracker = createTracker(pgDatabase);
 
-		const nodeSchema = new SchemaBuilder()
-			.collection('node', (c) => {
-				c.field('id').id();
-				c.field('parent').m2o('node');
-			})
-			.build();
-
-		nodeSchema.relations[0]!.schema = { on_delete: 'SET NULL' } as any;
-
-		pgTracker.on.select('node').response([{ id: 40001 }]);
+		pgTracker.on.select('task').response([{ id: 40001 }]);
 
 		const deletedKeys = Array.from({ length: 40000 }, (_, index) => index + 1);
 
-		const scopedCache =
-			new ItemScopedCacheService('node', nodeSchema, pgDatabase, null, null);
-
-		expect(await scopedCache.selfRelationSurvivorKeys(deletedKeys))
-		.toEqual([40001]);
-
-		expect(pgTracker.history.select)
-		.toMatchObject([
+		const scopedCache = new ItemScopedCacheService(
+			'task',
 			{
-				sql: 'select "id" from "node"'
-					+ ' where ("parent" = any($1)) and "id" <> all($2)',
-				bindings: [deletedKeys, deletedKeys],
+				...taskSchema,
+				relations: [{
+					collection: 'task',
+					field: 'parent',
+					related_collection: 'task',
+					schema: { on_delete: 'SET NULL', foreign_key_column: 'id' },
+				}],
+			} as any,
+			pgDatabase,
+			null,
+			null,
+		);
+
+		expect(await scopedCache.rowsChangedByOnDelete(deletedKeys)).toEqual({
+			removedKeys: new Map(),
+			rewrittenKeys: new Map([['task', [40001]]]),
+		});
+
+		expect(pgTracker.history.select).toMatchObject([
+			{
+				sql: 'select "id" from "task" where "id" = any($1) for update',
+				bindings: [deletedKeys],
+			},
+			{
+				sql: 'select "id" from "task" where "parent" = any($1)'
+					+ ' limit $2 for update',
+				bindings: [deletedKeys, 1001],
 			},
 		]);
+	});
+
+	it(oneLine`
+		walks a cascade level by level, and names what a removed row's SET NULL
+		rewrites in another collection
+	`, async () => {
+		tracker.on.select('from "comment" where "task"').response([
+			{ id: 8 },
+			{ id: 9 },
+		]);
+
+		tracker.on.select('from "reaction"').response([{ id: 40 }]);
+		tracker.on.select('from "task" where "parent"').response([{ id: 6 }]);
+
+		const scopedCache = new ItemScopedCacheService(
+			'task',
+			{
+				...taskSchema,
+				relations: [
+					{
+						collection: 'comment',
+						field: 'task',
+						related_collection: 'task',
+						schema: { on_delete: 'CASCADE', foreign_key_column: 'id' },
+					},
+					{
+						collection: 'reaction',
+						field: 'comment',
+						related_collection: 'comment',
+						schema: { on_delete: 'CASCADE', foreign_key_column: 'id' },
+					},
+					{
+						collection: 'task',
+						field: 'parent',
+						related_collection: 'task',
+						schema: { on_delete: 'SET NULL', foreign_key_column: 'id' },
+					},
+				],
+			} as any,
+			db,
+			null,
+			null,
+		);
+
+		expect(await scopedCache.rowsChangedByOnDelete([5])).toEqual({
+			removedKeys: new Map([['comment', [8, 9]], ['reaction', [40]]]),
+			rewrittenKeys: new Map([['task', [6]]]),
+		});
+
+		expect(tracker.history.select).toMatchObject([
+			{
+				sql: 'select "id" from "comment" where "task" in (?) limit ?',
+				bindings: [5, 1001],
+			},
+			{
+				sql: 'select "id" from "task" where "parent" in (?) limit ?',
+				bindings: [5, 999],
+			},
+			{
+				sql: 'select "id" from "reaction" where "comment" in (?, ?) limit ?',
+				bindings: [8, 9, 998],
+			},
+		]);
+	});
+
+	it('names each row of a cascade cycle once, and ends', async () => {
+		tracker.on.select('from "comment"').responseOnce([{ id: 8 }]);
+		tracker.on.select('from "task"').responseOnce([{ id: 5 }, { id: 6 }]);
+		tracker.on.select('from "comment"').responseOnce([{ id: 8 }, { id: 9 }]);
+		tracker.on.select('from "task"').responseOnce([]);
+
+		const scopedCache = new ItemScopedCacheService(
+			'task',
+			{
+				...taskSchema,
+				relations: [
+					{
+						collection: 'comment',
+						field: 'task',
+						related_collection: 'task',
+						schema: { on_delete: 'CASCADE', foreign_key_column: 'id' },
+					},
+					{
+						collection: 'task',
+						field: 'parent',
+						related_collection: 'comment',
+						schema: { on_delete: 'CASCADE', foreign_key_column: 'id' },
+					},
+				],
+			} as any,
+			db,
+			null,
+			null,
+		);
+
+		expect(await scopedCache.rowsChangedByOnDelete([5])).toEqual({
+			removedKeys: new Map([['comment', [8, 9]], ['task', [6]]]),
+			rewrittenKeys: new Map(),
+		});
+
+		expect(tracker.history.select).toMatchObject([
+			{ bindings: [5, 1001] },
+			{ bindings: [8, 1000] },
+			{ bindings: [6, 999] },
+			{ bindings: [9, 998] },
+		]);
+	});
+
+	it(oneLine`
+		names a row a cascade removes and a SET NULL rewrites as removed
+	`, async () => {
+		tracker.on.select('from "comment" where "task"').response([
+			{ id: 8 },
+			{ id: 9 },
+		]);
+
+		tracker.on.select('from "comment" where "reply_to"').response([{ id: 9 }]);
+
+		const scopedCache = new ItemScopedCacheService(
+			'task',
+			{
+				...taskSchema,
+				relations: [
+					{
+						collection: 'comment',
+						field: 'task',
+						related_collection: 'task',
+						schema: { on_delete: 'CASCADE', foreign_key_column: 'id' },
+					},
+					{
+						collection: 'comment',
+						field: 'reply_to',
+						related_collection: 'comment',
+						schema: { on_delete: 'SET NULL', foreign_key_column: 'id' },
+					},
+				],
+			} as any,
+			db,
+			null,
+			null,
+		);
+
+		expect(await scopedCache.rowsChangedByOnDelete([5])).toEqual({
+			removedKeys: new Map([['comment', [8, 9]]]),
+			rewrittenKeys: new Map(),
+		});
+	});
+
+	// RESTRICT and NO ACTION refuse the delete while a child exists, and a
+	// relation with no foreign key has no rule the database applies.
+	it.each([
+		{ foreignKey: { on_delete: 'RESTRICT', foreign_key_column: 'id' } },
+		{ foreignKey: { on_delete: 'NO ACTION', foreign_key_column: 'id' } },
+		{ foreignKey: { on_delete: null, foreign_key_column: 'id' } },
+		{ foreignKey: null },
+	])('reads nothing for the foreign key $foreignKey', async ({ foreignKey }) => {
+		rowLocksSupported = true;
+
+		const scopedCache = new ItemScopedCacheService(
+			'task',
+			{
+				...taskSchema,
+				relations: [{
+					collection: 'comment',
+					field: 'task',
+					related_collection: 'task',
+					schema: foreignKey,
+				}],
+			} as any,
+			db,
+			null,
+			null,
+		);
+
+		expect(await scopedCache.rowsChangedByOnDelete([5])).toEqual({
+			removedKeys: new Map(),
+			rewrittenKeys: new Map(),
+		});
+
+		expect(tracker.history.all).toEqual([]);
+	});
+
+	it(oneLine`
+		names up to CACHE_SCOPED_MAX_ON_DELETE_ROWS rows, and none past it
+	`, async () => {
+		maxOnDeleteRows = 2;
+
+		tracker.on.select('from "comment"').responseOnce([{ id: 8 }, { id: 9 }]);
+
+		tracker.on.select('from "comment"').responseOnce([
+			{ id: 8 },
+			{ id: 9 },
+			{ id: 10 },
+		]);
+
+		const scopedCache = new ItemScopedCacheService(
+			'task',
+			{
+				...taskSchema,
+				relations: [{
+					collection: 'comment',
+					field: 'task',
+					related_collection: 'task',
+					schema: { on_delete: 'CASCADE', foreign_key_column: 'id' },
+				}],
+			} as any,
+			db,
+			null,
+			null,
+		);
+
+		expect(await scopedCache.rowsChangedByOnDelete([5])).toEqual({
+			removedKeys: new Map([['comment', [8, 9]]]),
+			rewrittenKeys: new Map(),
+		});
+
+		expect(await scopedCache.rowsChangedByOnDelete([5])).toBe(null);
+
+		expect(tracker.history.select).toMatchObject([
+			{ bindings: [5, 3] },
+			{ bindings: [5, 3] },
+		]);
+	});
+
+	it(oneLine`
+		names nothing for a foreign key naming a column other than its parent's
+		primary key
+	`, async () => {
+		const scopedCache = new ItemScopedCacheService(
+			'task',
+			{
+				...taskSchema,
+				relations: [{
+					collection: 'comment',
+					field: 'task',
+					related_collection: 'task',
+					schema: { on_delete: 'CASCADE', foreign_key_column: 'code' },
+				}],
+			} as any,
+			db,
+			null,
+			null,
+		);
+
+		expect(await scopedCache.rowsChangedByOnDelete([5])).toBe(null);
+		expect(tracker.history.all).toEqual([]);
+	});
+
+	it('reads nothing while the scoped purge is off', async () => {
+		purgeEnabled = false;
+
+		const scopedCache = new ItemScopedCacheService(
+			'task',
+			{
+				...taskSchema,
+				relations: [{
+					collection: 'comment',
+					field: 'task',
+					related_collection: 'task',
+					schema: { on_delete: 'CASCADE', foreign_key_column: 'id' },
+				}],
+			} as any,
+			db,
+			null,
+			null,
+		);
+
+		expect(await scopedCache.rowsChangedByOnDelete([5])).toEqual({
+			removedKeys: new Map(),
+			rewrittenKeys: new Map(),
+		});
+
+		expect(tracker.history.all).toEqual([]);
 	});
 });

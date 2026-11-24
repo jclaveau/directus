@@ -161,37 +161,32 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                               |   x-cache-status: HIT |
       |   fields: label                      |                       |
     Then these requests get these responses:
-      | request                              | response                          |
-      | method: DELETE                       | code: 204                         |+
-      | path: /users/<inviter>               | headers:                          |
-      |                                      |   x-scoped-cache-purged-tags:     |
-      |                                      |     - directus_users              |
-      |                                      |     - directus_users:id=<inviter> |
-      |                                      |     - directus_presets            |
-      |                                      |     - directus_sessions           |
-      |                                      |     - directus_dashboards         |
-      |                                      |     - directus_panels             |
-      |                                      |     - directus_notifications      |
-      |                                      |     - directus_shares             |
-      |                                      |     - directus_flows              |
-      |                                      |     - directus_operations         |
-      |                                      |     - directus_versions           |
-      |                                      |     - directus_comments           |
-      |                                      |     - directus_access             |
-      | method: GET                          | code: 200                         |+
-      | path: /items/cache_user_delete_notes | headers:                          |
-      | query:                               |   x-cache-status: HIT             |
-      |   fields: label                      |                                   |
+      | request                              | response                         |
+      | method: DELETE                       | code: 204                        |+
+      | path: /users/<inviter>               | headers:                         |
+      |                                      |   x-scoped-cache-purged-tags: >- |
+      |                                      |     directus_users,              |
+      |                                      |     directus_users:id=<inviter>  |
+      | method: GET                          | code: 200                        |+
+      | path: /items/cache_user_delete_notes | headers:                         |
+      | query:                               |   x-cache-status: HIT            |
+      |   fields: label                      |                                  |
     And on postgres the requests ran these statements:
       | request | table                  | select | insert | update | delete |
-      | 1       | directus_access        | 1      | 0      | 0      | 0      |
+      | 1       | directus_access        | 2      | 0      | 0      | 0      |
       | 1       | directus_activity      | 0      | 1      | 0      | 0      |
-      | 1       | directus_comments      | 1      | 0      | 0      | 0      |
-      | 1       | directus_notifications | 1      | 0      | 0      | 0      |
+      | 1       | directus_comments      | 2      | 0      | 0      | 0      |
+      | 1       | directus_dashboards    | 1      | 0      | 0      | 0      |
+      | 1       | directus_flows         | 1      | 0      | 0      | 0      |
+      | 1       | directus_notifications | 2      | 0      | 0      | 0      |
+      | 1       | directus_operations    | 1      | 0      | 0      | 0      |
+      | 1       | directus_panels        | 1      | 0      | 0      | 0      |
+      | 1       | directus_presets       | 1      | 0      | 0      | 0      |
       | 1       | directus_roles         | 1      | 0      | 0      | 0      |
-      | 1       | directus_sessions      | 0      | 0      | 0      | 1      |
-      | 1       | directus_users         | 2      | 0      | 0      | 1      |
-      | 1       | directus_versions      | 1      | 0      | 0      | 0      |
+      | 1       | directus_sessions      | 1      | 0      | 0      | 1      |
+      | 1       | directus_shares        | 1      | 0      | 0      | 0      |
+      | 1       | directus_users         | 3      | 0      | 0      | 1      |
+      | 1       | directus_versions      | 2      | 0      | 0      | 0      |
       | 2       | directus_users         | 1      | 0      | 0      | 0      |
 
   Scenario: an invitation accepted with its token keeps the cached read

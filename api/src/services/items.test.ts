@@ -2588,9 +2588,9 @@ describe('Integration Tests', () => {
 					'snapshot',
 				);
 
-				const survivorsSpy = vi.spyOn(
+				const onDeleteRowsSpy = vi.spyOn(
 					ItemScopedCacheService.prototype,
-					'selfRelationSurvivorKeys',
+					'rowsChangedByOnDelete',
 				);
 
 				await service.deleteMany(
@@ -2598,12 +2598,23 @@ describe('Integration Tests', () => {
 					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
 				);
 
+				// The rows an ON DELETE rule reaches are read locked, so none joins
+				// the deleted parent before the delete.
 				expect(tracker.history.transactions).toEqual([{
 					id: 0,
 					state: 'committed',
-					queries: [expect.objectContaining({
-						sql: 'delete from "test" where "id" in (?)',
-					})],
+					queries: [
+						expect.objectContaining({
+							sql: 'select "id" from "test" where "id" in (?) for update',
+						}),
+						expect.objectContaining({
+							sql: 'select "id" from "children" where "parent_id" in (?)'
+								+ ' limit ? for update',
+						}),
+						expect.objectContaining({
+							sql: 'delete from "test" where "id" in (?)',
+						}),
+					],
 				}]);
 
 				// The survivors' re-read after the commit is the only one outside it.
@@ -2614,7 +2625,7 @@ describe('Integration Tests', () => {
 					expect.objectContaining({ knex: db }),
 				]);
 
-				expect(survivorsSpy.mock.contexts).toEqual([
+				expect(onDeleteRowsSpy.mock.contexts).toEqual([
 					expect.objectContaining({
 						knex: expect.objectContaining({ isTransaction: true }),
 					}),
@@ -2624,6 +2635,72 @@ describe('Integration Tests', () => {
 					flags: UserIntegrityCheckFlag.All,
 					knex: expect.objectContaining({ isTransaction: true }),
 				});
+			});
+
+			it(oneLine`
+				purges the rows an ON DELETE rule changed in another collection by
+				key, after the commit
+			`, async () => {
+				vi.spyOn(ItemScopedCacheService.prototype, 'rowsChangedByOnDelete')
+					.mockResolvedValue({
+						removedKeys: new Map(),
+						rewrittenKeys: new Map([['children', [7]]]),
+					});
+
+				const purgeSpy = vi.spyOn(ItemScopedCacheService.prototype, 'purge');
+
+				await service.deleteMany([1]);
+
+				expect(purgeSpy.mock.contexts).toMatchObject([
+					{ collection: 'test' },
+					{ collection: 'children', knex: db },
+				]);
+
+				// The child's key pin twice: as it was, and as the rule rewrote it.
+				expect(purgeSpy.mock.calls).toEqual([
+					[
+						[{ collection: 'test', pinnedScope: { id: ['1'] } }],
+						expect.anything(),
+						[],
+						expect.objectContaining({ includeBareFingerprint: true }),
+					],
+					[
+						[
+							{ collection: 'children', pinnedScope: { id: ['7'] } },
+							{ collection: 'children', pinnedScope: { id: ['7'] } },
+						],
+						undefined,
+						[],
+						{
+							rows: {
+								fingerprints: [
+									{ collection: 'children', pinnedScope: { id: ['7'] } },
+									{ collection: 'children', pinnedScope: { id: ['7'] } },
+								],
+								changed: null,
+							},
+						},
+					],
+				]);
+			});
+
+			it(oneLine`
+				purges every collection an ON DELETE rule reaches whole when its rows
+				could not all be named
+			`, async () => {
+				vi.spyOn(ItemScopedCacheService.prototype, 'rowsChangedByOnDelete')
+					.mockResolvedValue(null);
+
+				const purgeSpy = vi.spyOn(ItemScopedCacheService.prototype, 'purge');
+
+				await service.deleteMany([1]);
+
+				expect(purgeSpy).toHaveBeenCalledExactlyOnceWith(
+					[{ collection: 'test', pinnedScope: { id: ['1'] } }],
+					expect.anything(),
+					['children'],
+					expect.objectContaining({ includeBareFingerprint: true }),
+				);
 			});
 
 			it(oneLine`

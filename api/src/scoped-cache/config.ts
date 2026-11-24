@@ -25,6 +25,17 @@ export function scopedCachePurgeEnabled(): boolean {
 }
 
 /**
+ * How many rows a delete's `ON DELETE` rules may reach before its purge stops
+ * naming them one by one: past it, every collection they reach is purged whole.
+ * Each row costs a read of its slices before the delete, so a parent with a
+ * million children would otherwise hold its transaction open for a million.
+ * 0 purges whole whenever a rule reaches a row.
+ */
+export function scopedCacheMaxOnDeleteRows(): number {
+	return env['CACHE_SCOPED_MAX_ON_DELETE_ROWS'] as number;
+}
+
+/**
  * Whether the store the index lives in is configured at all — the question a flush
  * or a recovery asks before it reaches for the index, scoped mode on or off, and
  * whatever `CACHE_STORE` the responses themselves are held in: an index written

@@ -5,7 +5,10 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import createApp from './app.js';
 import { resolvedRateLimiterCharge } from './middleware/rate-limiter-ip.js';
-import { validateChoiceEnv } from './utils/validate-env.js';
+import {
+	validateChoiceEnv,
+	validateCountEnv,
+} from './utils/validate-env.js';
 
 vi.mock('./database', () => ({
 	default: vi.fn(),
@@ -235,6 +238,13 @@ describe('createApp', async () => {
 			'preserveMutationOrder',
 			'disableBatching',
 		]);
+	});
+
+	test('validates CACHE_SCOPED_MAX_ON_DELETE_ROWS at boot', async () => {
+		await createApp();
+
+		expect(validateCountEnv)
+			.toHaveBeenCalledWith(['CACHE_SCOPED_MAX_ON_DELETE_ROWS']);
 	});
 
 	// What a rate-limit token buys is decided by where the limiter is registered, so

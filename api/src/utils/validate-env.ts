@@ -88,6 +88,31 @@ export function validateDurationEnv(keys: string[]): void {
 }
 
 /**
+ * Refuse a count variable that is not a whole number of 0 or more, at boot like
+ * {@link validateDurationEnv}. Read off `useEnv`, so an unset variable takes its
+ * default; TYPE_MAP types it a number, which reads `ten` as NaN.
+ */
+export function validateCountEnv(keys: string[]): void {
+	const env = useEnv();
+	const logger = useLogger();
+
+	for (const key of keys) {
+		const countValue = env[key];
+
+		if (Number.isSafeInteger(countValue) && (countValue as number) >= 0) {
+			continue;
+		}
+
+		logger.error(
+			`"${key}" Environment Variable is ${JSON.stringify(String(countValue))}, `
+				+ 'which is not a whole number of 0 or more.',
+		);
+
+		process.exit(1);
+	}
+}
+
+/**
  * A number of bytes, or of a unit `bytes` knows. Checked before parsing:
  * `bytes` reads what follows the leading digits as nothing, `16k` as 16.
  */
