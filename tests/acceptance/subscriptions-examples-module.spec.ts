@@ -1,4 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 
 // The scenarios of subscriptions-examples-module.feature, one test each, against
 // a preview booted with @scalabus/subscriptions-examples: its fake providers and
@@ -150,7 +151,56 @@ async function subscribePaid(page: Page, planName: string, providerName: string)
 	await pickOutcome(page, providerName, 'paid');
 
 	await expect(page.locator('.examples-line').first())
-		.toHaveText(`${planName} · active`, LINE_TIMEOUT);
+		.toHaveText(new RegExp(`^#\\d+ ${planName} · active$`), LINE_TIMEOUT);
+}
+
+/**
+ * The bundle refuses removing a subscription's last manager and any invoice or
+ * event through the API, so the reset deletes the sample plans' rows in SQL.
+ */
+function deleteExamplesSubscriptions(): void {
+	const examplesSubscriptions = 'SELECT subscriptions.id FROM subscriptions'
+		+ ' JOIN subscription_plans ON subscription_plans.id = subscriptions.plan'
+		+ " WHERE subscription_plans.code IN ('basic', 'team', 'yearly')";
+
+	const deleteStatements = [
+		`UPDATE subscriptions SET continues = NULL`
+		+ ` WHERE continues IN (${examplesSubscriptions})`,
+		...[
+			'subscription_beneficiaries',
+			'subscription_managers',
+			'subscription_events',
+			'subscription_invoices',
+		].map((childTable) => {
+			return `DELETE FROM ${childTable}`
+				+ ` WHERE subscription IN (${examplesSubscriptions})`;
+		}),
+		`DELETE FROM subscriptions WHERE id IN (${examplesSubscriptions})`,
+	];
+
+	for (const dbVariable of ['DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USER']) {
+		if (process.env[dbVariable] === undefined) {
+			throw new Error(
+				`${JSON.stringify(dbVariable)} is unset: the reset needs the database`,
+			);
+		}
+	}
+
+	execFileSync('psql', [
+		'--no-psqlrc',
+		'--set=ON_ERROR_STOP=1',
+		'--single-transaction',
+		...deleteStatements.map((deleteStatement) => `--command=${deleteStatement}`),
+	], {
+		env: {
+			...process.env,
+			PGHOST: process.env['DB_HOST'],
+			PGPORT: process.env['DB_PORT'],
+			PGDATABASE: process.env['DB_DATABASE'],
+			PGUSER: process.env['DB_USER'],
+			PGPASSWORD: process.env['DB_PASSWORD'],
+		},
+	});
 }
 
 async function addBeneficiary(page: Page, beneficiaryEmail: string) {
@@ -161,24 +211,7 @@ async function addBeneficiary(page: Page, beneficiaryEmail: string) {
 }
 
 test.beforeEach(async ({ page }) => {
-	const planFilter = {
-		subscription: { plan: { code: { _in: ['basic', 'team', 'yearly'] } } },
-	};
-
-	await callAdminApi('DELETE', '/items/subscription_beneficiaries', {
-		query: { filter: planFilter, limit: -1 },
-	});
-
-	await callAdminApi('DELETE', '/items/subscription_managers', {
-		query: { filter: planFilter, limit: -1 },
-	});
-
-	await callAdminApi('DELETE', '/items/subscriptions', {
-		query: {
-			filter: { plan: { code: { _in: ['basic', 'team', 'yearly'] } } },
-			limit: -1,
-		},
-	});
+	deleteExamplesSubscriptions();
 
 	await callAdminApi('DELETE', '/users', {
 		query: { filter: { email: { _eq: FRIEND_EMAIL } }, limit: -1 },
@@ -193,9 +226,9 @@ test('the module lists the sample plans at their price', async ({ page }) => {
 	await openModule(page);
 
 	await expect(page.locator('.examples-line')).toHaveText([
-		'Basic 10.00 EUR / month',
-		'Team 25.00 EUR / month',
-		'Yearly 100.00 EUR / year',
+		'Basic 10.00 EUR / month · 1 seat',
+		'Team 25.00 EUR / month · 3 seats',
+		'Yearly 100.00 EUR / year · 1 seat',
 		'You have no subscription',
 	], LINE_TIMEOUT);
 });
@@ -218,7 +251,7 @@ test(
 		await pickOutcome(page, 'Mollie', 'paid');
 
 		await expect(page.locator('.examples-line')).toHaveText([
-			'Basic · active',
+			/^#\d+ Basic · active$/,
 			'10.00 EUR / month',
 			`Renews on ${readTodayPlusMonth()}`,
 			'Beneficiaries: 1 of 1 seat',
@@ -235,7 +268,7 @@ test(
 		await pickOutcome(page, 'Stripe', 'paid');
 
 		await expect(page.locator('.examples-line')).toHaveText([
-			'Team · active',
+			/^#\d+ Team · active$/,
 			'30.00 EUR / month',
 			`Renews on ${readTodayPlusMonth()}`,
 			'Beneficiaries: 1 of 3 seats',
@@ -266,9 +299,9 @@ test(
 		await pickOutcome(page, 'Mollie', 'canceled');
 
 		await expect(page.locator('.examples-line')).toHaveText([
-			'Basic 10.00 EUR / month',
-			'Team 25.00 EUR / month',
-			'Yearly 100.00 EUR / year',
+			'Basic 10.00 EUR / month · 1 seat',
+			'Team 25.00 EUR / month · 3 seats',
+			'Yearly 100.00 EUR / year · 1 seat',
 			'You have no subscription',
 		], LINE_TIMEOUT);
 	},
@@ -282,7 +315,7 @@ test(
 		await addBeneficiary(page, FRIEND_EMAIL);
 
 		await expect(page.locator('.examples-line')).toHaveText([
-			'Team · active',
+			/^#\d+ Team · active$/,
 			'25.00 EUR / month',
 			`Renews on ${readTodayPlusMonth()}`,
 			'Beneficiaries: 2 of 3 seats',
@@ -305,7 +338,7 @@ test('a beneficiary removed frees its seat, its user kept', async ({ page }) => 
 		.click();
 
 	await expect(page.locator('.examples-line')).toHaveText([
-		'Team · active',
+		/^#\d+ Team · active$/,
 		'25.00 EUR / month',
 		`Renews on ${readTodayPlusMonth()}`,
 		'Beneficiaries: 1 of 3 seats',
@@ -333,7 +366,7 @@ test(
 		await page.getByRole('button', { name: 'Cancel', exact: true }).click();
 
 		await expect(page.locator('.examples-line')).toHaveText([
-			'Basic · active',
+			/^#\d+ Basic · active$/,
 			'10.00 EUR / month',
 			`Ends on ${readTodayPlusMonth()}`,
 			'Beneficiaries: 1 of 1 seat',
@@ -369,7 +402,7 @@ test(
 		await openModule(page);
 
 		await expect(page.locator('.examples-line')).toHaveText([
-			'Team · active',
+			/^#\d+ Team · active$/,
 			`Renews on ${readTodayPlusMonth()}`,
 		], LINE_TIMEOUT);
 

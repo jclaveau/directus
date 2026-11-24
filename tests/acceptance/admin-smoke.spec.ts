@@ -27,7 +27,8 @@ test('opens the login page and signs in without a page error', async ({ page }) 
 	await page.fill('input[type="password"]', ADMIN_PASSWORD);
 	await page.getByRole('button', { name: 'Sign In' }).click();
 
-	await page.waitForURL('**/admin/content', { timeout: 20000 });
+	// The content module opens its first collection when there is one.
+	await page.waitForURL('**/admin/content**', { timeout: 20000 });
 
 	expect(pageErrors).toEqual([]);
 });
