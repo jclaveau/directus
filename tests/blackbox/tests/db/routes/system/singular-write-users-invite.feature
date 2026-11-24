@@ -6,9 +6,12 @@ Feature: A user is invited, re-invited and accepts the invitation
     token it mails.
   - A Given states the database rows a scenario starts from, written straight
     into the database. An invited user is the rows `/users/invite` writes: a
-    `directus_users` row with the `invited` status, a `directus_role_members`
-    row per role, `managed_by: invite`, and the `directus_invites` row of
-    each; a `user_created` of null names no inviter.
+    `directus_users` row with the `invited` status and a `directus_invites`
+    row per role, read through the user's `invites` field; a `user_created`
+    of null names no inviter. No membership is written until the user
+    accepts: accepting turns the invites into memberships and deletes them.
+  - Only an admin, or code, invites, and no invite gives a role reaching
+    admin access.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own; met first in a response, it stands for
@@ -20,31 +23,33 @@ Feature: A user is invited, re-invited and accepts the invitation
       | <first-role>  | first-<run>  |
       | <second-role> | second-<run> |
     Then these requests get these responses:
-      | request                            | response                      |
-      | method: POST                       | code: 204                     |+
-      | path: /users/invite                |                               |
-      | payload:                           |                               |
-      |   email: invited-<run>@example.com |                               |
-      |   roles:                           |                               |
-      |     - <first-role>                 |                               |
-      | method: GET                        | code: 200                     |+
-      | path: /users                       | body:                         |
-      | query:                             |   data:                       |
-      |   fields: status,roles.role        |     - status: invited         |
-      |   filter[email][_eq]: >-           |       roles:                  |
-      |     invited-<run>@example.com      |         - role: <first-role>  |
-      | method: POST                       | code: 204                     |+
-      | path: /users/invite                |                               |
-      | payload:                           |                               |
-      |   email: invited-<run>@example.com |                               |
-      |   roles:                           |                               |
-      |     - <second-role>                |                               |
-      | method: GET                        | code: 200                     |+
-      | path: /users                       | body:                         |
-      | query:                             |   data:                       |
-      |   fields: status,roles.role        |     - status: invited         |
-      |   filter[email][_eq]: >-           |       roles:                  |
-      |     invited-<run>@example.com      |         - role: <second-role> |
+      | request                             | response                      |
+      | method: POST                        | code: 204                     |+
+      | path: /users/invite                 |                               |
+      | payload:                            |                               |
+      |   email: invited-<run>@example.com  |                               |
+      |   roles:                            |                               |
+      |     - <first-role>                  |                               |
+      | method: GET                         | code: 200                     |+
+      | path: /users                        | body:                         |
+      | query:                              |   data:                       |
+      |   fields: status,roles,invites.role |     - status: invited         |
+      |   filter[email][_eq]: >-            |       roles: []               |
+      |     invited-<run>@example.com       |       invites:                |
+      |                                     |         - role: <first-role>  |
+      | method: POST                        | code: 204                     |+
+      | path: /users/invite                 |                               |
+      | payload:                            |                               |
+      |   email: invited-<run>@example.com  |                               |
+      |   roles:                            |                               |
+      |     - <second-role>                 |                               |
+      | method: GET                         | code: 200                     |+
+      | path: /users                        | body:                         |
+      | query:                              |   data:                       |
+      |   fields: status,roles,invites.role |     - status: invited         |
+      |   filter[email][_eq]: >-            |       roles: []               |
+      |     invited-<run>@example.com       |       invites:                |
+      |                                     |         - role: <second-role> |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      |
@@ -65,32 +70,31 @@ Feature: A user is invited, re-invited and accepts the invitation
     And the rows of directus_users:
       | id          | email                       | status  |
       | <accepting> | accepting-<run>@example.com | invited |
-    And the rows of directus_role_members:
-      | id           | user        | role           | sort | managed_by |
-      | <membership> | <accepting> | <invitee-role> | 1    | invite     |
     And the rows of directus_invites:
       | id       | user        | role           | user_created |
       | <invite> | <accepting> | <invitee-role> | null         |
     Then these requests get these responses:
-      | request                                | response                     |
-      | method: POST                           | code: 204                    |+
-      | path: /users/invite/accept             |                              |
-      | payload:                               |                              |
-      |   token: !jwt                          |                              |
-      |     email: accepting-<run>@example.com |                              |
-      |     scope: invite                      |                              |
-      |   password: accepted-password          |                              |
-      | method: GET                            | code: 200                    |+
-      | path: /users                           | body:                        |
-      | query:                                 |   data:                      |
-      |   fields: status,password              |     - status: active         |
-      |   filter[email][_eq]: >-               |       password: '**********' |
-      |     accepting-<run>@example.com        |                              |
-      | method: POST                           | code: 200                    |+
-      | path: /auth/login                      |                              |
-      | payload:                               |                              |
-      |   email: accepting-<run>@example.com   |                              |
-      |   password: accepted-password          |                              |
+      | request                                      | response                       |
+      | method: POST                                 | code: 204                      |+
+      | path: /users/invite/accept                   |                                |
+      | payload:                                     |                                |
+      |   token: !jwt                                |                                |
+      |     email: accepting-<run>@example.com       |                                |
+      |     scope: invite                            |                                |
+      |   password: accepted-password                |                                |
+      | method: GET                                  | code: 200                      |+
+      | path: /users                                 | body:                          |
+      | query:                                       |   data:                        |
+      |   fields: status,password,roles.role,invites |     - status: active           |
+      |   filter[email][_eq]: >-                     |       password: '**********'   |
+      |     accepting-<run>@example.com              |       roles:                   |
+      |                                              |         - role: <invitee-role> |
+      |                                              |       invites: []              |
+      | method: POST                                 | code: 200                      |+
+      | path: /auth/login                            |                                |
+      | payload:                                     |                                |
+      |   email: accepting-<run>@example.com         |                                |
+      |   password: accepted-password                |                                |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete | with |
       | 1       | directus_role_members | 0      | 0      | 0      | 0      | 1    |
@@ -168,9 +172,6 @@ Feature: A user is invited, re-invited and accepts the invitation
       | id      | email                   | status  |
       | <again> | again-<run>@example.com | invited |
       | <known> | known-<run>@example.com | active  |
-    And the rows of directus_role_members:
-      | id           | user    | role         | sort | managed_by |
-      | <membership> | <again> | <again-role> | 1    | invite     |
     And the rows of directus_invites:
       | id       | user    | role         | user_created |
       | <invite> | <again> | <again-role> | null         |
@@ -214,8 +215,8 @@ Feature: A user is invited, re-invited and accepts the invitation
       | method: GET                             | code: 200                      |+
       | path: /users                            | body:                          |
       | query:                                  |   data:                        |
-      |   fields: status,roles.role             |     - status: invited          |
-      |   filter[email][_eq]: >-                |       roles:                   |
+      |   fields: status,invites.role           |     - status: invited          |
+      |   filter[email][_eq]: >-                |       invites:                 |
       |     graphql-<run>@example.com           |         - role: <graphql-role> |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
@@ -239,9 +240,6 @@ Feature: A user is invited, re-invited and accepts the invitation
     And the rows of directus_access:
       | id               | user      | policy           |
       | <inviter-access> | <inviter> | <inviter-policy> |
-    And the rows of directus_role_members:
-      | id           | user        | role        | sort | managed_by |
-      | <membership> | <same-user> | <same-role> | 1    | invite     |
     And the rows of directus_invites:
       | id       | user        | role        | user_created |
       | <invite> | <same-user> | <same-role> | <inviter>    |
@@ -257,8 +255,8 @@ Feature: A user is invited, re-invited and accepts the invitation
       | method: GET                     | code: 200                   |+
       | path: /users                    | body:                       |
       | query:                          |   data:                     |
-      |   fields: status,roles.role     |     - status: invited       |
-      |   filter[email][_eq]: >-        |       roles:                |
+      |   fields: status,invites.role   |     - status: invited       |
+      |   filter[email][_eq]: >-        |       invites:              |
       |     same-<run>@example.com      |         - role: <same-role> |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
@@ -274,9 +272,6 @@ Feature: A user is invited, re-invited and accepts the invitation
     And the rows of directus_users:
       | id          | email                   | status  |
       | <same-user> | again-<run>@example.com | invited |
-    And the rows of directus_role_members:
-      | id           | user        | role        | sort | managed_by |
-      | <membership> | <same-user> | <same-role> | 1    | invite     |
     And the rows of directus_invites:
       | id       | user        | role        | user_created | date_created         |
       | <invite> | <same-user> | <same-role> | null         | 2026-01-01T00:00:00Z |
@@ -304,9 +299,11 @@ Feature: A user is invited, re-invited and accepts the invitation
       | method: GET                          | code: 200                          |+
       | path: /users                         | body:                              |
       | query:                               |   data:                            |
-      |   fields: status,roles.role          |     - status: invited              |
-      |   filter[email][_eq]: >-             |       roles:                       |
-      |     again-<run>@example.com          |         - role: <same-role>        |
+      |   fields: status,roles,invites.role  |     - status: invited              |
+      |   filter[email][_eq]: >-             |       roles: []                    |
+      |     again-<run>@example.com          |       invites:                     |
+      |                                      |         - role: <same-role>        |
+      |                                      |         - role: <same-role>        |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
       | 1       | directus_invites      | 1      | 1      | 0      | 0      |
@@ -317,3 +314,66 @@ Feature: A user is invited, re-invited and accepts the invitation
       | 2       | directus_users        | 2      | 0      | 0      | 0      |
       | 3       | directus_role_members | 1      | 0      | 0      | 0      |
       | 3       | directus_users        | 2      | 0      | 0      | 0      |
+
+  Scenario: an invitation to a role reaching admin access is refused
+    Given the rows of directus_policies:
+      | id             | name        | app_access | admin_access |
+      | <admin-policy> | admin-<run> | true       | true         |
+    And the rows of directus_roles:
+      | id            | name         | parent        |
+      | <admin-role>  | admin-<run>  | null          |
+      | <child-role>  | child-<run>  | <admin-role>  |
+      | <plain-role>  | plain-<run>  | null          |
+    And the rows of directus_access:
+      | id       | role         | policy         |
+      | <access> | <admin-role> | <admin-policy> |
+    Then these requests get these responses:
+      | request                           | response                                 |
+      | method: POST                      | code: 400                                |+
+      | path: /users/invite               | body:                                    |
+      | payload:                          |   errors:                                |
+      |   email: child-<run>@example.com  |     - message: >-                        |
+      |   roles:                          |         Invalid payload. Role            |
+      |     - <plain-role>                |         "<child-role>" gives admin       |
+      |     - <child-role>                |         access, which an invite can't    |
+      |                                   |         give: add the membership once    |
+      |                                   |         the user accepted.               |
+      | method: GET                       | code: 200                                |+
+      | path: /users                      | body:                                    |
+      | query:                            |   data: []                               |
+      |   fields: id                      |                                          |
+      |   filter[email][_eq]: >-          |                                          |
+      |     child-<run>@example.com       |                                          |
+
+  Scenario: an invitation from a user who is no admin is refused, whatever their policy
+    Given the rows of directus_policies:
+      | id         | name          | app_access | admin_access |
+      | <p-writer> | inviter-<run> | true       | false        |
+    And the rows of directus_permissions:
+      | policy     | collection       | action | fields |
+      | <p-writer> | directus_users   | create | *      |
+      | <p-writer> | directus_invites | create | *      |
+    And the rows of directus_roles:
+      | id          | name       |
+      | <some-role> | some-<run> |
+    And the rows of directus_users:
+      | id        | email                     | token         |
+      | <inviter> | inviter-<run>@example.com | inviter-<run> |
+    And the rows of directus_access:
+      | id       | user      | policy     |
+      | <access> | <inviter> | <p-writer> |
+    Then these requests get these responses:
+      | request                            | response                             |
+      | as: inviter-<run>                  | code: 403                            |+
+      | method: POST                       | body:                                |
+      | path: /users/invite                |   errors:                            |
+      | payload:                           |     - message: >-                    |
+      |   email: denied-<run>@example.com  |         You don't have permission    |
+      |   roles:                           |         to access this.              |
+      |     - <some-role>                  |                                      |
+      | method: GET                        | code: 200                            |+
+      | path: /users                       | body:                                |
+      | query:                             |   data: []                           |
+      |   fields: id                       |                                      |
+      |   filter[email][_eq]: >-           |                                      |
+      |     denied-<run>@example.com       |                                      |

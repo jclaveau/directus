@@ -1,4 +1,4 @@
-import { InvalidPayloadError } from '@directus/errors';
+import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { oneLine } from '@directus/utils';
@@ -416,6 +416,43 @@ describe('Services / RoleMembers', () => {
 		});
 	});
 
+	describe('a request of a user who is no admin', () => {
+		it.each([
+			['create', (service: RoleMembersService) => {
+				return service.createOne({ role: 'role-id-30', user: 'user-id-30' });
+			}],
+			['update', (service: RoleMembersService) => {
+				return service.updateOne('6f1c2a4e-0000-4000-8000-000000000030', {
+					sort: 2,
+				});
+			}],
+			['delete', (service: RoleMembersService) => {
+				return service.deleteOne('6f1c2a4e-0000-4000-8000-000000000030');
+			}],
+		])('is refused a membership %s, whatever its permissions', async (
+			_write,
+			writeMembership,
+		) => {
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+
+			await expect(writeMembership(new RoleMembersService({
+				accountability: {
+					admin: false,
+					app: true,
+					ip: null,
+					memberRoles: ['role-id-31'],
+					roles: ['role-id-31'],
+					user: 'user-id-31',
+				},
+				knex: database,
+				schema,
+			}))).rejects.toThrow(new ForbiddenError());
+
+			expect(tracker.history.all).toEqual([]);
+		});
+	});
+
 	describe('user', () => {
 		it.each([
 			['a request', {
@@ -528,7 +565,7 @@ describe('Services / RoleMembers', () => {
 				knex: database,
 				schema,
 			}).createOne({
-				managed_by: 'invite',
+				managed_by: 'ext:sync',
 				role: 'role-id-10',
 				user: 'user-id-10',
 			})).rejects.toThrow(new InvalidPayloadError({
@@ -537,12 +574,12 @@ describe('Services / RoleMembers', () => {
 			}));
 		});
 
-		it('lets the invite code, without accountability, set managed_by', async () => {
+		it('lets the code, without accountability, set managed_by', async () => {
 			await expect(new RoleMembersService({
 				knex: knex.default({ client: MockClient }),
 				schema,
 			})['validateRowsToCreate']([{
-				managed_by: 'invite',
+				managed_by: 'ext:sync',
 				role: 'role-id-10',
 				user: 'user-id-10',
 			}])).resolves.toBeUndefined();
@@ -649,7 +686,7 @@ describe('Services / RoleMembers', () => {
 				.select('directus_role_members')
 				.response([{
 					id: '6f1c2a4e-0000-4000-8000-000000000015',
-					managed_by: 'invite',
+					managed_by: 'ext:sync',
 					user: 'user-id-15',
 					role: 'role-id-15',
 				}]);
@@ -692,7 +729,7 @@ describe('Services / RoleMembers', () => {
 				knex: database,
 				schema,
 			}).updateOne('6f1c2a4e-0000-4000-8000-000000000012', {
-				managed_by: 'invite',
+				managed_by: 'ext:sync',
 			})).rejects.toThrow(new InvalidPayloadError({
 				reason: '"managed_by" is set by the code managing the membership,'
 					+ ' not by a request',
@@ -707,7 +744,7 @@ describe('Services / RoleMembers', () => {
 				.select('directus_role_members')
 				.response([{
 					id: '6f1c2a4e-0000-4000-8000-000000000013',
-					managed_by: 'invite',
+					managed_by: 'ext:sync',
 					user: 'user-id-13',
 					role: 'role-id-13',
 				}]);
@@ -727,9 +764,8 @@ describe('Services / RoleMembers', () => {
 				'6f1c2a4e-0000-4000-8000-000000000001',
 				'6f1c2a4e-0000-4000-8000-000000000013',
 			])).rejects.toThrow(new InvalidPayloadError({
-				reason: 'Membership "6f1c2a4e-0000-4000-8000-000000000013" comes from'
-					+ ' the invites of user "user-id-13" to role "role-id-13": delete'
-					+ ' those invites to remove it',
+				reason: 'Membership "6f1c2a4e-0000-4000-8000-000000000013" is managed'
+					+ ' by "ext:sync", which alone changes it',
 			}));
 
 			expect(tracker.history.select).toMatchObject([

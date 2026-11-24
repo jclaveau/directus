@@ -164,7 +164,7 @@ describe('syncProviderMemberships', () => {
 	test('puts the mapped roles after the user\'s others', async () => {
 		userRows = [
 			{ id: 'row-1', role: 'role-hand', managed_by: null, sort: 1 },
-			{ id: 'row-2', role: 'role-press', managed_by: 'invite', sort: 3 },
+			{ id: 'row-2', role: 'role-press', managed_by: 'ext:sync', sort: 3 },
 			{ id: 'row-3', role: 'role-gitlab', managed_by: 'auth:gitlab', sort: null },
 		];
 

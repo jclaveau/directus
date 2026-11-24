@@ -18,19 +18,14 @@ import jwt from 'jsonwebtoken';
 import type { Knex } from 'knex';
 import type { StringValue } from 'ms';
 import { performance } from 'node:perf_hooks';
-import {
-	clearCachesAfterCommit,
-	clearPermissionsCacheAfterCommit,
-	flushResponseCacheAfterCommit,
-	purgeMutatedRowsAfterCommit,
-} from '../utils/clear-caches-after-commit.js';
-import getDatabase, { getDatabaseClient } from '../database/index.js';
+import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
+import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
-import {
-	processPayload,
-} from '../permissions/modules/process-payload/process-payload.js';
+import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+// eslint-disable-next-line max-len
+import { fetchGlobalAccessForRoles } from '../permissions/modules/fetch-global-access/lib/fetch-global-access-for-roles.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
 import { getSecret } from '../utils/get-secret.js';
 import isUrlAllowed from '../utils/is-url-allowed.js';
@@ -62,14 +57,15 @@ class SingleRoleFieldError extends InvalidPayloadError {
 // Bounds the bind parameters of one update and the rows one cache snapshot holds.
 const UNLINK_CHUNK_SIZE = 10_000;
 
-/**
- * `handedMemberships` names the memberships handed over by key, or is `null`
- * when the statement returned no key to name them by.
- */
-type HandedOverMemberships = {
-	doubledCount: number;
-	handedMemberships: { id: PrimaryKey }[] | null;
-};
+class AdminRoleInviteError extends InvalidPayloadError {
+	constructor(invitedRole: string) {
+		super({
+			reason: `Role ${JSON.stringify(invitedRole)} gives admin access,`
+				+ ' which an invite can\'t give: add the membership once the user'
+				+ ' accepted',
+		});
+	}
+}
 
 export class UsersService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
@@ -362,64 +358,7 @@ export class UsersService extends ItemsService {
 			}
 		}
 
-		const leavingInvitedKeys = groups
-			.filter(({ data }) => {
-				return data['status'] !== undefined && data['status'] !== 'invited';
-			})
-			.flatMap(({ keys }) => keys);
-
-		if (leavingInvitedKeys.length === 0) {
-			return await super.updateGroups(groups, opts);
-		}
-
-		opts.mutationTracker ??= this.createMutationTracker();
-
-		// Held until the hand-over commits with the update, as deleteMany does.
-		const heldActionEvents: ActionEventParams[] = [];
-
-		const updatedKeys = await transactionHoldingActions(
-			this.knex,
-			heldActionEvents,
-			async (trx) => {
-				const trxUsersService = new UsersService({
-					knex: trx,
-					schema: this.schema,
-					accountability: this.accountability,
-					nested: this.nested,
-				});
-
-				// The checks above already ran: only ItemsService's update is left.
-				const writtenKeys = await ItemsService.prototype.updateGroups.call(
-					trxUsersService,
-					groups,
-					{
-						...opts,
-						bypassEmitAction: opts.bypassEmitAction ?? ((actionEvent) => {
-							heldActionEvents.push(actionEvent);
-						}),
-					},
-				);
-
-				await trxUsersService.handInvitedRolesToAdmins(leavingInvitedKeys, opts);
-
-				return writtenKeys;
-			},
-			opts.mutationTracker.snapshot(),
-		);
-
-		const emitting = Promise.all(heldActionEvents.map((actionEvent) => {
-			return emitter.emitAction(
-				actionEvent.event,
-				actionEvent.meta,
-				actionEvent.context,
-			);
-		}));
-
-		if (opts.awaitActionHooks !== false) {
-			await emitting;
-		}
-
-		return updatedKeys;
+		return await super.updateGroups(groups, opts);
 	}
 
 	protected override requiredIntegrityChecks(
@@ -534,7 +473,6 @@ export class UsersService extends ItemsService {
 				}),
 			});
 
-			await this.dropMembershipsOfLastInvites(trx, opts);
 		}, opts.mutationTracker.snapshot());
 
 		const emitting = Promise.all(heldActionEvents.map((actionEvent) => {
@@ -555,53 +493,14 @@ export class UsersService extends ItemsService {
 	}
 
 	/**
-	 * An inviter's invites go with them (`on delete cascade`). A user still
-	 * invited loses the `invite` membership of a role left with no invite: an
-	 * invite naming no user, or another inviter's, keeps it. Only invited users
-	 * hold `invite` memberships, leaving `invited` handing them over.
-	 */
-	private async dropMembershipsOfLastInvites(
-		trx: Knex,
-		opts: MutationOptions,
-	): Promise<void> {
-		// TODO(#610): MariaDB refuses an alias on a single-table delete.
-		const droppedCount = await trx('directus_role_members as membership')
-			.where('membership.managed_by', 'invite')
-			.whereNotExists((invites) => {
-				invites
-					.select(1)
-					.from('directus_invites')
-					.where('directus_invites.user', trx.ref('membership.user'))
-					.where('directus_invites.role', trx.ref('membership.role'));
-			})
-			.delete();
-
-		if (droppedCount > 0) {
-			await this.clearMembershipCaches(trx, opts);
-		}
-	}
-
-	// A membership changes no schema: the permissions cache and the response
-	// cache are all it leaves stale, as in RoleMembersService.
-	private async clearMembershipCaches(trx: Knex, opts: MutationOptions) {
-		await clearPermissionsCacheAfterCommit(trx);
-
-		await flushResponseCacheAfterCommit(
-			trx,
-			this.cache,
-			opts,
-			{ permissionsCleared: true },
-		);
-	}
-
-	/**
 	 * An invite is a row of `directus_invites` per user, role and inviter: the
-	 * inviting user, or null from a service naming none (an extension, a flow).
+	 * inviting admin, or null from a service naming none (an extension, a flow).
 	 * A re-invite by the same inviter replaces its own rows; one by another
-	 * inviter adds its own. A role invited holds one `managed_by: invite`
-	 * membership while any invite of it is left (D8 of #746). Both are written
-	 * without accountability, so the inviter's right to create each membership
-	 * is checked first.
+	 * inviter adds its own. No membership is written until the user accepts:
+	 * the roles wait in the invites, changing no permission and no cache.
+	 *
+	 * Inviting gives roles, so only an admin, or code, invites; no invite gives
+	 * a role reaching admin access.
 	 */
 	async inviteUser(
 		email: string | string[],
@@ -609,6 +508,10 @@ export class UsersService extends ItemsService {
 		url: string | null,
 		subject?: string | null,
 	): Promise<void> {
+		if (this.accountability && this.accountability.admin !== true) {
+			throw new ForbiddenError();
+		}
+
 		const opts: MutationOptions = {};
 
 		try {
@@ -620,6 +523,9 @@ export class UsersService extends ItemsService {
 		}
 
 		const invitedRoles = [...new Set(roles)];
+
+		await this.refuseAdminRoleInvites(invitedRoles);
+
 		const emails = toArray(email);
 
 		const mailService = new MailService({
@@ -650,13 +556,11 @@ export class UsersService extends ItemsService {
 					}).createOne({ email, status: 'invited' }, opts)
 					: user.id;
 
-				await this.grantInvitedRoles(
-					trx,
-					invitedUser,
-					invitedRoles,
-					isNewUser,
-					opts.preMutationError,
-				);
+				if (opts.preMutationError) {
+					throw opts.preMutationError;
+				}
+
+				await this.writeInviteRows(trx, invitedUser, invitedRoles, isNewUser);
 			});
 
 			// Send invite for new and already invited users
@@ -682,63 +586,43 @@ export class UsersService extends ItemsService {
 		}
 	}
 
-	/**
-	 * Writes the invites of the inviter to `invitedRoles`, and the memberships
-	 * they hold: one per role while any invite of it is left.
-	 * `preMutationError` is thrown once the inviter may invite to every role,
-	 * so a refused inviter learns nothing from it.
-	 */
-	private async grantInvitedRoles(
+	// A role reaches admin access through its own policies or a parent's.
+	private async refuseAdminRoleInvites(invitedRoles: string[]): Promise<void> {
+		for (const invitedRole of invitedRoles) {
+			const { admin: grantsAdmin } = await fetchGlobalAccessForRoles(
+				{ roles: await fetchRolesTree(invitedRole, this.knex), ip: null },
+				this.knex,
+			);
+
+			if (grantsAdmin) {
+				throw new AdminRoleInviteError(invitedRole);
+			}
+		}
+	}
+
+	// The invites of this inviter become `invitedRoles`; another's stay.
+	private async writeInviteRows(
 		trx: Knex,
 		invitedUser: PrimaryKey,
 		invitedRoles: string[],
 		isNewUser: boolean,
-		preMutationError: unknown,
 	): Promise<void> {
 		const inviter = this.accountability?.user ?? null;
 
-		const memberships: {
-			id: string;
-			role: string;
-			managed_by: string | null;
-			sort: number | null;
-		}[] = isNewUser
+		const inviterInvites: { id: string; role: string }[] = isNewUser
 			? []
 			: await trx
-				.select('id', 'role', 'managed_by', 'sort')
-				.from('directus_role_members')
-				.where({ user: invitedUser });
-
-		if (this.accountability) {
-			for (const role of invitedRoles) {
-				await processPayload(
-					{
-						accountability: this.accountability,
-						action: 'create',
-						collection: 'directus_role_members',
-						payload: { user: invitedUser, role },
-						nested: [],
-					},
-					{ knex: trx, schema: this.schema },
-				);
-			}
-		}
-
-		if (preMutationError) {
-			throw preMutationError;
-		}
-
-		const invites: { id: string; role: string; user_created: string | null }[]
-			= isNewUser
-				? []
-				: await trx
-					.select('id', 'role', 'user_created')
-					.from('directus_invites')
-					.where({ user: invitedUser });
-
-		const inviterInvites = invites.filter(({ user_created }) => {
-			return user_created === inviter;
-		});
+				.select('id', 'role')
+				.from('directus_invites')
+				.where({ user: invitedUser })
+				.where((inviterQuery) => {
+					if (inviter === null) {
+						inviterQuery.whereNull('user_created');
+					}
+					else {
+						inviterQuery.where('user_created', inviter);
+					}
+				});
 
 		const addedRoles = invitedRoles.filter((role) => {
 			return !inviterInvites.some((invite) => invite.role === role);
@@ -748,33 +632,7 @@ export class UsersService extends ItemsService {
 			return !invitedRoles.includes(role);
 		});
 
-		const inviteMemberships = memberships.filter(({ managed_by }) => {
-			return managed_by === 'invite';
-		});
-
-		const membershipRoles = addedRoles.filter((role) => {
-			return !inviteMemberships.some((membership) => membership.role === role);
-		});
-
-		const remainingInviteRoles = [
-			...invites
-				.filter((invite) => !droppedInvites.includes(invite))
-				.map(({ role }) => role),
-			...addedRoles,
-		];
-
-		const strandedMemberships = inviteMemberships.filter(({ role }) => {
-			return !remainingInviteRoles.includes(role);
-		});
-
-		const lastSort = Math.max(0, ...memberships.map(({ sort }) => sort ?? 0));
-
 		const invitesService = new InvitesService({ knex: trx, schema: this.schema });
-
-		const membersService = new RoleMembersService({
-			knex: trx,
-			schema: this.schema,
-		});
 
 		if (addedRoles.length > 0) {
 			await invitesService.createMany(
@@ -785,28 +643,8 @@ export class UsersService extends ItemsService {
 			);
 		}
 
-		if (membershipRoles.length > 0) {
-			await membersService.createMany(
-				membershipRoles.map((role, roleIndex) => {
-					return {
-						user: invitedUser,
-						role,
-						managed_by: 'invite',
-						sort: lastSort + roleIndex + 1,
-					};
-				}),
-				isNewUser
-					? { createsNewUserMemberships: true }
-					: {},
-			);
-		}
-
 		if (droppedInvites.length > 0) {
 			await invitesService.deleteMany(droppedInvites.map(({ id }) => id));
-		}
-
-		if (strandedMemberships.length > 0) {
-			await membersService.deleteMany(strandedMemberships.map(({ id }) => id));
 		}
 	}
 
@@ -827,147 +665,65 @@ export class UsersService extends ItemsService {
 			throw new InvalidPayloadError({ reason: `Email address ${email} hasn't been invited` });
 		}
 
-		const service = new UsersService({
-			knex: this.knex,
-			schema: this.schema,
+		await transaction(this.knex, async (trx) => {
+			await new UsersService({ knex: trx, schema: this.schema })
+				.updateOne(user.id, { password, status: 'active' });
+
+			await this.grantInvitedRoles(trx, user.id);
 		});
-
-		await service.updateOne(user.id, { password, status: 'active' });
 	}
 
 	/**
-	 * Once a user leaves `invited`, the invites are history: the admins own
-	 * the roles they gave. One the user also holds by hand is deleted, the
-	 * unique (user, role, managed_by) refusing a second null row. A user never
-	 * invited holds no `invite` membership, so nothing is written.
-	 *
-	 * Only a deleted membership clears the permissions cache: the role it
-	 * doubled stays, at the hand membership's `sort`, which orders the presets.
-	 * A membership handed over keeps its role and its `sort`.
-	 *
-	 * A deleted membership flushes every response, as a dropped one does: a
-	 * response key holds no role, and the role order decides which preset wins.
-	 * A membership handed over only changes its own `managed_by`: the responses
-	 * that read it are the ones purged.
+	 * The invites of the accepting user become their memberships, written as
+	 * code: one per role, in invite order after the roles already held, but for
+	 * a role the user already holds by hand. The membership write clears the
+	 * permissions and response caches once.
 	 */
-	private async handInvitedRolesToAdmins(
-		leavingUsers: PrimaryKey[],
-		opts: MutationOptions,
-	): Promise<void> {
-		const { doubledCount, handedMemberships } =
-			getDatabaseClient(this.knex) === 'postgres'
-				? await this.handInvitedRolesInOneStatement(leavingUsers)
-				: await this.handInvitedRolesInTwoStatements(leavingUsers);
+	private async grantInvitedRoles(trx: Knex, acceptingUser: PrimaryKey) {
+		const inviteRows: { id: string; role: string }[] = await trx
+			.select('id', 'role')
+			.from('directus_invites')
+			.where({ user: acceptingUser })
+			.orderBy(['date_created', 'id']);
 
-		if (doubledCount > 0) {
-			await clearPermissionsCacheAfterCommit(this.knex);
-
-			await flushResponseCacheAfterCommit(
-				this.knex,
-				this.cache,
-				opts,
-				{ permissionsCleared: true },
-			);
+		if (inviteRows.length === 0) {
+			return;
 		}
-		else if (handedMemberships === null) {
-			await flushResponseCacheAfterCommit(
-				this.knex,
-				this.cache,
-				opts,
-				{ permissionsCleared: false },
-			);
+
+		const heldMemberships: {
+			role: string;
+			managed_by: string | null;
+			sort: number | null;
+		}[] = await trx
+			.select('role', 'managed_by', 'sort')
+			.from('directus_role_members')
+			.where({ user: acceptingUser });
+
+		const handRoles = heldMemberships
+			.filter(({ managed_by }) => managed_by === null)
+			.map(({ role }) => role);
+
+		const grantedRoles = [...new Set(inviteRows.map(({ role }) => role))]
+			.filter((role) => !handRoles.includes(role));
+
+		const lastSort = Math.max(
+			0,
+			...heldMemberships.map(({ sort }) => sort ?? 0),
+		);
+
+		if (grantedRoles.length > 0) {
+			await new RoleMembersService({ knex: trx, schema: this.schema })
+				.createMany(grantedRoles.map((role, roleIndex) => {
+					return {
+						user: acceptingUser,
+						role,
+						sort: lastSort + roleIndex + 1,
+					};
+				}));
 		}
-		else if (handedMemberships.length > 0) {
-			await purgeMutatedRowsAfterCommit(
-				this.knex,
-				this.schema,
-				'directus_role_members',
-				handedMemberships,
-				opts,
-			);
-		}
-	}
 
-	/**
-	 * Both parts read the table as it was, so the update leaves out the rows the
-	 * delete takes: it would otherwise hand them over as a second null row.
-	 */
-	private async handInvitedRolesInOneStatement(
-		leavingUsers: PrimaryKey[],
-	): Promise<HandedOverMemberships> {
-		const writtenMemberships: {
-			id: PrimaryKey;
-			was_doubled: boolean;
-		}[] = await this.knex
-			.with(
-				'doubled',
-				this.doubledInviteMemberships(leavingUsers)
-					.delete(['membership.id', 'membership.user']),
-			)
-			.with(
-				'handed',
-				this.knex('directus_role_members')
-					.whereIn('user', leavingUsers)
-					.where('managed_by', 'invite')
-					.whereNotIn('id', this.knex.select('id').from('doubled'))
-					.update({ managed_by: null }, ['id', 'user']),
-			)
-			.select('id', 'user', this.knex.raw('true as was_doubled'))
-			.from('doubled')
-			.unionAll((handedRows) => {
-				handedRows
-					.select('id', 'user', this.knex.raw('false as was_doubled'))
-					.from('handed');
-			});
-
-		return {
-			doubledCount: writtenMemberships
-				.filter(({ was_doubled }) => was_doubled)
-				.length,
-			handedMemberships: writtenMemberships
-				.filter(({ was_doubled }) => !was_doubled)
-				.map(({ id }) => ({ id })),
-		};
-	}
-
-	/**
-	 * An update returns no rows to purge by: a membership handed over flushes
-	 * every response.
-	 * TODO(#610): a data-modifying CTE is Postgres only.
-	 */
-	private async handInvitedRolesInTwoStatements(
-		leavingUsers: PrimaryKey[],
-	): Promise<HandedOverMemberships> {
-		const doubledCount = await this.doubledInviteMemberships(leavingUsers)
-			.delete();
-
-		const handedCount = await this.knex('directus_role_members')
-			.whereIn('user', leavingUsers)
-			.where('managed_by', 'invite')
-			.update({ managed_by: null });
-
-		return {
-			doubledCount,
-			handedMemberships: handedCount > 0
-				? null
-				: [],
-		};
-	}
-
-	// The `invite` memberships of a role the user also holds by hand.
-	// TODO(#610): MariaDB refuses an alias on a single-table delete.
-	private doubledInviteMemberships(leavingUsers: PrimaryKey[]) {
-		return this.knex('directus_role_members as membership')
-			.whereIn('membership.user', leavingUsers)
-			.where('membership.managed_by', 'invite')
-			.whereExists((handMemberships) => {
-				handMemberships
-					.select(1)
-					.from('directus_role_members as hand_membership')
-					.where('hand_membership.user', this.knex.ref('membership.user'))
-					.where('hand_membership.role', this.knex.ref('membership.role'))
-					.whereNull('hand_membership.managed_by');
-			});
+		await new InvitesService({ knex: trx, schema: this.schema })
+			.deleteMany(inviteRows.map(({ id }) => id));
 	}
 
 	async registerUser(input: RegisterUserInput) {

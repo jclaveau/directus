@@ -1,14 +1,55 @@
-import type { AbstractServiceOptions } from '@directus/types';
+import { ForbiddenError } from '@directus/errors';
+import type {
+	AbstractServiceOptions,
+	Item,
+	MutationOptions,
+	PrimaryKey,
+	UpdateGroup,
+} from '@directus/types';
 import { ItemsService } from './items.js';
 
 /**
  * An invite of a user to a role, one row per inviter: `user_created` is the
- * inviting user, or null from a service naming none (#746, D8). The invite
- * code writes it with the user's `managed_by: invite` memberships, which a
- * write made here does not sync; once the user accepts, the rows are history.
+ * inviting admin, or null from a service naming none (#746). The roles wait
+ * here until the user accepts, which turns them into memberships. An invite
+ * gives a role once accepted, so only an admin's request writes one, whatever
+ * the permissions say.
  */
 export class InvitesService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
 		super('directus_invites', options);
+	}
+
+	private refuseNonAdminWrite(): void {
+		if (this.accountability && this.accountability.admin !== true) {
+			throw new ForbiddenError();
+		}
+	}
+
+	override async createMany(
+		data: Partial<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
+		this.refuseNonAdminWrite();
+
+		return await super.createMany(data, opts);
+	}
+
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
+		this.refuseNonAdminWrite();
+
+		return await super.updateGroups(groups, opts);
+	}
+
+	override async deleteMany(
+		keys: PrimaryKey[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
+		this.refuseNonAdminWrite();
+
+		return await super.deleteMany(keys, opts);
 	}
 }

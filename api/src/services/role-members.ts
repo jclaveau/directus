@@ -1,4 +1,4 @@
-import { InvalidPayloadError } from '@directus/errors';
+import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import {
 	type AbstractServiceOptions,
 	type Item,
@@ -38,14 +38,7 @@ function managedMembershipReason({
 	id,
 	managed_by,
 	user,
-	role,
 }: ManagedMembershipRow): string {
-	if (managed_by === 'invite') {
-		return `Membership ${JSON.stringify(id)} comes from the invites of user`
-			+ ` ${JSON.stringify(user)} to role ${JSON.stringify(role)}: delete`
-			+ ' those invites to remove it';
-	}
-
 	if (managed_by.startsWith('auth:')) {
 		return `Membership ${JSON.stringify(id)} is managed by`
 			+ ` ${JSON.stringify(managed_by)}: the next login of user`
@@ -109,9 +102,12 @@ class MembershipManagedBySetError extends InvalidPayloadError {
  * schema: #754 parks clearing one user's only), and each but a create may
  * leave the instance with no admin.
  *
- * `managed_by` names the code owning a membership, which writes it without
- * accountability: null for one given by hand, `invite` while an invite of a
- * user not yet active holds it, `auth:<provider>` for one an SSO login's
+ * Only an admin's request writes a membership, whatever the permissions
+ * say: a role changes what its user may do. Code writes one without
+ * accountability: an accepted invite, an SSO login, an extension.
+ *
+ * `managed_by` names the code owning a membership: null for one given by
+ * hand or by an accepted invite, `auth:<provider>` for one an SSO login's
  * ROLE_MAPPING sets, and `ext:<extension name>` by convention for one an
  * extension writes (no check enforces that prefix). A request neither sets
  * `managed_by` nor changes or deletes a managed membership; `sort` stays its.
@@ -273,10 +269,18 @@ export class RoleMembersService extends ItemsService {
 		}
 	}
 
+	private refuseNonAdminWrite(): void {
+		if (this.accountability && this.accountability.admin !== true) {
+			throw new ForbiddenError();
+		}
+	}
+
 	override async createMany(
 		data: Partial<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
+		this.refuseNonAdminWrite();
+
 		// A new membership can only add admin or app users.
 		opts.userIntegrityCheckFlags = (opts.userIntegrityCheckFlags
 			?? UserIntegrityCheckFlag.None) | UserIntegrityCheckFlag.UserLimits;
@@ -302,6 +306,8 @@ export class RoleMembersService extends ItemsService {
 		groups: UpdateGroup<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
+		this.refuseNonAdminWrite();
+
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
@@ -316,6 +322,8 @@ export class RoleMembersService extends ItemsService {
 		keys: PrimaryKey[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
+		this.refuseNonAdminWrite();
+
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 

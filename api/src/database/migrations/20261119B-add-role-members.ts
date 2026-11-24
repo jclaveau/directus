@@ -4,15 +4,14 @@ import { randomUUID } from 'node:crypto';
 import { getConfigFromEnv } from '../../utils/get-config-from-env.js';
 
 const INVITES_UNIQUE_INDEX_NAME = 'directus_invites_user_role_user_created_unique';
-const INVITE_MEMBERSHIPS_INDEX_NAME = 'directus_role_members_invite_index';
 
 /**
  * A user holds several roles (#746): `directus_role_members` replaces
  * `directus_users.role`. Each user's role becomes their one membership,
  * managed by `auth:<provider>` for a user of a provider mapping roles, then
- * the column goes. `directus_invites` records who invited a user to
- * which role (D8). `down` puts each user's one membership back in the column,
- * and refuses, changing nothing, while a user holds several roles.
+ * the column goes. `directus_invites` records who invited a user to which
+ * role until they accept. `down` puts each user's one membership back in the
+ * column, and refuses, changing nothing, while a user holds several roles.
  */
 export async function up(knex: Knex): Promise<void> { // bb-unit-only: bb migrates an empty database
 	await knex.schema.createTable('directus_role_members', (table) => {
@@ -35,8 +34,8 @@ export async function up(knex: Knex): Promise<void> { // bb-unit-only: bb migrat
 		table.index(['user']);
 	});
 
-	// One row per user, role and inviter; null for an invite naming no user. An
-	// inviter deleted takes their invites along.
+	// One row per user, role and inviter; null for an invite naming no user, or
+	// whose inviter was deleted: the invite outlives them.
 	await knex.schema.createTable('directus_invites', (table) => {
 		table.uuid('id').primary();
 
@@ -53,37 +52,18 @@ export async function up(knex: Knex): Promise<void> { // bb-unit-only: bb migrat
 		table.uuid('user_created')
 			.references('directus_users.id')
 			.nullable()
-			.onDelete('CASCADE');
+			.onDelete('SET NULL');
 
 		table.timestamp('date_created').defaultTo(knex.fn.now());
 	});
 
-	// TODO(#610): MariaDB indexes no expression, so two invites naming no user
-	// to the same role still pass there.
-	if (String(knex.client.dialect).startsWith('mysql')) { // bb-out-of-scope: #610 MySQL
-		await knex.schema.alterTable('directus_invites', (table) => {
-			table.unique(['user', 'role', 'user_created'], {
-				indexName: INVITES_UNIQUE_INDEX_NAME,
-			});
+	// Each null counts as distinct: an inviter deleted leaves as many invites
+	// naming no user as they made, and code replaces its own before writing.
+	await knex.schema.alterTable('directus_invites', (table) => {
+		table.unique(['user', 'role', 'user_created'], {
+			indexName: INVITES_UNIQUE_INDEX_NAME,
 		});
-	}
-	else {
-		// A plain unique index counts every null as distinct.
-		await knex.raw(
-			`create unique index "${INVITES_UNIQUE_INDEX_NAME}" on "directus_invites"`
-			+ ' ("user", "role", coalesce(cast("user_created" as text), \'\'))',
-		);
-	}
-
-	// A user deleted checks every `invite` membership for an invite left: the
-	// rest of the memberships stay out of that scan.
-	// TODO(#610): MariaDB has no partial index.
-	if (!String(knex.client.dialect).startsWith('mysql')) { // bb-out-of-scope: #610 MySQL
-		await knex.raw(
-			`create index "${INVITE_MEMBERSHIPS_INDEX_NAME}" on "directus_role_members"`
-			+ ' ("user", "role") where "managed_by" = \'invite\'',
-		);
-	}
+	});
 
 	const usersWithRole: {
 		id: string;
@@ -182,10 +162,6 @@ export async function down(knex: Knex): Promise<void> { // bb-unit-only: bb neve
 		await knex('directus_users')
 			.update({ role })
 			.where({ id: user });
-	}
-
-	if (!String(knex.client.dialect).startsWith('mysql')) { // bb-out-of-scope: #610 MySQL
-		await knex.raw(`drop index "${INVITE_MEMBERSHIPS_INDEX_NAME}"`);
 	}
 
 	await knex.schema.dropTable('directus_invites');

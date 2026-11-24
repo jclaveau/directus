@@ -49,6 +49,8 @@ data:
   - many_collection: directus_invites
     many_field: user
     one_collection: directus_users
+    one_field: invites
+    one_deselect_action: delete
 
   - many_collection: directus_invites
     many_field: role

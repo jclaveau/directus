@@ -1,12 +1,13 @@
 Feature: A user's role, status and deletion purge the cache as today
 
   - Pins what a user write purges once the memberships replace the role
-    column (#746), and the statements it runs. A role change, or an invite
-    into another role, sends no purged tags and the next read misses; a
-    re-invite by the same inviter into the same role writes nothing, one by
-    another inviter adds its own invite. A user leaving `invited` purges the
-    invite membership it keeps; an inviter's deletion drops the invite
-    membership left without an invite, and flushes.
+    column (#746), and the statements it runs. A role change sends no purged
+    tags and the next read misses. An invite writes invites only, and keeps
+    the cached read: a re-invite by the same inviter into the same role
+    writes nothing, one by another inviter adds its own invite. Accepting
+    turns the invites into memberships and flushes; a user leaving `invited`
+    by a write of their status keeps their invites pending. An inviter's
+    deletion leaves their invites, naming no user, and flushes.
   - The feature runs against an instance of its own with the response cache
     on, in Redis, and `CACHE_AUTO_PURGE` scoped: a write names the pins it
     purged in `x-scoped-cache-purged-tags`, and a cached read tells a flush by
@@ -14,9 +15,9 @@ Feature: A user's role, status and deletion purge the cache as today
   - A Given states the database rows and the cached reads a scenario starts
     from; the rows are written straight into the database. A user's role is a
     `directus_role_members` row. An invited user is the rows `/users/invite`
-    writes: a `directus_users` row with the `invited` status, a membership
-    `managed_by: invite` per role, and the `directus_invites` row of each; a
-    `user_created` of null names no inviter.
+    writes: a `directus_users` row with the `invited` status and a
+    `directus_invites` row per role; a `user_created` of null names no
+    inviter.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own; met first in a response, it stands for
@@ -113,16 +114,13 @@ Feature: A user's role, status and deletion purge the cache as today
       | 4       | pg_index                | 2      | 0      | 0      | 0      | 0    |
       | 4       | pg_proc                 | 1      | 0      | 0      | 0      | 0    |
 
-  Scenario: an invited user set active keeps their role and the cached read
+  Scenario: an invited user set active keeps their invites and the cached read
     Given the rows of directus_roles:
       | id             | name          |
       | <invitee-role> | invitee-<run> |
     And the rows of directus_users:
       | id        | email                     | status  |
       | <invitee> | invitee-<run>@example.com | invited |
-    And the rows of directus_role_members:
-      | id       | user      | role           | sort | managed_by |
-      | <member> | <invitee> | <invitee-role> | 1    | invite     |
     And the rows of directus_invites:
       | id       | user      | role           | user_created |
       | <invite> | <invitee> | <invitee-role> | null         |
@@ -141,14 +139,13 @@ Feature: A user's role, status and deletion purge the cache as today
       | path: /users/<invitee>                 | headers:                              |
       | payload:                               |   x-scoped-cache-purged-tags: >-      |
       |   status: active                       |     directus_users,                   |
-      |                                        |     directus_users:id=<invitee>,      |
-      |                                        |     directus_role_members,            |
-      |                                        |     directus_role_members:id=<member> |
+      |                                        |     directus_users:id=<invitee>       |
       | method: GET                            | code: 200                             |+
       | path: /users/<invitee>                 | body:                                 |
       | query:                                 |   data:                               |
-      |   fields: status,roles.role            |     status: active                    |
-      |                                        |     roles:                            |
+      |   fields: status,roles,invites.role    |     status: active                    |
+      |                                        |     roles: []                         |
+      |                                        |     invites:                          |
       |                                        |       - role: <invitee-role>          |
       | method: GET                            | code: 200                             |+
       | path: /items/cache_user_activate_notes | headers:                              |
@@ -159,14 +156,15 @@ Feature: A user's role, status and deletion purge the cache as today
       | 1       | directus_access       | 2      | 0      | 0      | 0      | 0    |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
       | 1       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_role_members | 2      | 0      | 0      | 0      | 1    |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_users        | 3      | 0      | 1      | 0      | 0    |
+      | 2       | directus_invites      | 1      | 0      | 0      | 0      | 0    |
       | 2       | directus_permissions  | 1      | 0      | 0      | 0      | 0    |
       | 2       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
       | 2       | directus_users        | 2      | 0      | 0      | 0      | 0    |
       | 3       | directus_users        | 1      | 0      | 0      | 0      | 0    |
 
-  Scenario: a deleted inviter drops the invite membership and the cached read
+  Scenario: a deleted inviter leaves the invite and drops the cached read
     Given the rows of directus_roles:
       | id             | name          |
       | <inviter-role> | inviter-<run> |
@@ -178,7 +176,6 @@ Feature: A user's role, status and deletion purge the cache as today
     And the rows of directus_role_members:
       | id                   | user      | role           | sort | managed_by |
       | <inviter-membership> | <inviter> | <inviter-role> | 1    | null       |
-      | <invitee-membership> | <invitee> | <invitee-role> | 1    | invite     |
     And the rows of directus_invites:
       | id       | user      | role           | user_created |
       | <invite> | <invitee> | <invitee-role> | <inviter>    |
@@ -192,14 +189,20 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                               |   x-cache-status: HIT |
       |   fields: label                      |                       |
     Then these requests get these responses:
-      | request                              | response                           |
-      | method: DELETE                       | code: 204                          |+
-      | path: /users/<inviter>               | headers:                           |
-      |                                      |   x-scoped-cache-purged-tags: null |
-      | method: GET                          | code: 200                          |+
-      | path: /items/cache_user_delete_notes | headers:                           |
-      | query:                               |   x-cache-status: MISS             |
-      |   fields: label                      |                                    |
+      | request                                   | response                           |
+      | method: DELETE                            | code: 204                          |+
+      | path: /users/<inviter>                    | headers:                           |
+      |                                           |   x-scoped-cache-purged-tags: null |
+      | method: GET                               | code: 200                          |+
+      | path: /items/cache_user_delete_notes      | headers:                           |
+      | query:                                    |   x-cache-status: MISS             |
+      |   fields: label                           |                                    |
+      | method: GET                               | code: 200                          |+
+      | path: /users/<invitee>                    | body:                              |
+      | query:                                    |   data:                            |
+      |   fields: invites.id,invites.user_created |     invites:                       |
+      |                                           |       - id: <invite>               |
+      |                                           |         user_created: null         |
     And on postgres the requests ran these statements:
       | request | table                   | select | insert | update | delete |
       | 1       | directus_access         | 1      | 0      | 0      | 0      |
@@ -219,16 +222,13 @@ Feature: A user's role, status and deletion purge the cache as today
       | 2       | directus_roles          | 1      | 0      | 0      | 0      |
       | 2       | directus_users          | 1      | 0      | 0      | 0      |
 
-  Scenario: an invitation accepted with its token keeps the cached read
+  Scenario: an accepted invitation grants its role and drops the cached read
     Given the rows of directus_roles:
       | id             | name          |
       | <invitee-role> | invitee-<run> |
     And the rows of directus_users:
       | id        | email                       | status  |
       | <invitee> | accepting-<run>@example.com | invited |
-    And the rows of directus_role_members:
-      | id       | user      | role           | sort | managed_by |
-      | <member> | <invitee> | <invitee-role> | 1    | invite     |
     And the rows of directus_invites:
       | id       | user      | role           | user_created |
       | <invite> | <invitee> | <invitee-role> | null         |
@@ -242,21 +242,29 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                               |   x-cache-status: HIT |
       |   fields: label                      |                       |
     Then these requests get these responses:
-      | request                                | response                              |
-      | method: POST                           | code: 204                             |+
-      | path: /users/invite/accept             | headers:                              |
-      | payload:                               |   x-scoped-cache-purged-tags: >-      |
-      |   token: !jwt                          |     directus_users,                   |
-      |     email: accepting-<run>@example.com |     directus_users:id=<invitee>,      |
-      |     scope: invite                      |     directus_role_members,            |
-      |   password: accepted-password          |     directus_role_members:id=<member> |
-      | method: GET                            | code: 200                             |+
-      | path: /items/cache_user_accept_notes   | headers:                              |
-      | query:                                 |   x-cache-status: HIT                 |
-      |   fields: label                        |                                       |
+      | request                                | response                     |
+      | method: POST                           | code: 204                    |+
+      | path: /users/invite/accept             |                              |
+      | payload:                               |                              |
+      |   token: !jwt                          |                              |
+      |     email: accepting-<run>@example.com |                              |
+      |     scope: invite                      |                              |
+      |   password: accepted-password          |                              |
+      | method: GET                            | code: 200                    |+
+      | path: /items/cache_user_accept_notes   | headers:                     |
+      | query:                                 |   x-cache-status: MISS       |
+      |   fields: label                        |                              |
+      | method: GET                            | code: 200                    |+
+      | path: /users/<invitee>                 | body:                        |
+      | query:                                 |   data:                      |
+      |   fields: status,roles.role,invites    |     status: active           |
+      |                                        |     roles:                   |
+      |                                        |       - role: <invitee-role> |
+      |                                        |     invites: []              |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete | with |
-      | 1       | directus_role_members | 0      | 0      | 0      | 0      | 1    |
+      | 1       | directus_invites      | 1      | 0      | 0      | 1      | 0    |
+      | 1       | directus_role_members | 1      | 1      | 0      | 0      | 0    |
       | 1       | directus_sessions     | 0      | 0      | 0      | 1      | 0    |
       | 1       | directus_settings     | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_users        | 2      | 0      | 1      | 0      | 0    |
@@ -276,9 +284,6 @@ Feature: A user's role, status and deletion purge the cache as today
     And the rows of directus_access:
       | id               | user      | policy           |
       | <inviter-access> | <inviter> | <inviter-policy> |
-    And the rows of directus_role_members:
-      | id           | user      | role        | sort | managed_by |
-      | <membership> | <invitee> | <same-role> | 1    | invite     |
     And the rows of directus_invites:
       | id       | user      | role        | user_created |
       | <invite> | <invitee> | <same-role> | <inviter>    |
@@ -319,9 +324,6 @@ Feature: A user's role, status and deletion purge the cache as today
     And the rows of directus_users:
       | id        | email                   | status  |
       | <invitee> | again-<run>@example.com | invited |
-    And the rows of directus_role_members:
-      | id           | user      | role        | sort | managed_by |
-      | <membership> | <invitee> | <same-role> | 1    | invite     |
     And the rows of directus_invites:
       | id       | user      | role        | user_created | date_created         |
       | <invite> | <invitee> | <same-role> | null         | 2026-01-01T00:00:00Z |
@@ -364,7 +366,7 @@ Feature: A user's role, status and deletion purge the cache as today
       | 3       | directus_invites      | 1      | 0      | 0      | 0      |
       | 3       | directus_users        | 1      | 0      | 0      | 0      |
 
-  Scenario: a pending invitee invited into a second role drops the cached read
+  Scenario: a pending invitee invited into a second role keeps the cached read
     Given the rows of directus_roles:
       | id            | name         |
       | <first-role>  | first-<run>  |
@@ -372,9 +374,6 @@ Feature: A user's role, status and deletion purge the cache as today
     And the rows of directus_users:
       | id        | email                    | status  |
       | <invitee> | second-<run>@example.com | invited |
-    And the rows of directus_role_members:
-      | id           | user      | role         | sort | managed_by |
-      | <membership> | <invitee> | <first-role> | 1    | invite     |
     And the rows of directus_invites:
       | id       | user      | role         | user_created |
       | <invite> | <invitee> | <first-role> | null         |
@@ -388,35 +387,32 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                               |   x-cache-status: HIT |
       |   fields: label                      |                       |
     Then these requests get these responses:
-      | request                              | response                           |
-      | method: POST                         | code: 204                          |+
-      | path: /users/invite                  | headers:                           |
-      | payload:                             |   x-scoped-cache-purged-tags: null |
-      |   email: second-<run>@example.com    |                                    |
-      |   roles:                             |                                    |
-      |     - <second-role>                  |                                    |
-      | method: GET                          | code: 200                          |+
-      | path: /users/<invitee>               | body:                              |
-      | query:                               |   data:                            |
-      |   fields: status,roles.role          |     status: invited                |
-      |                                      |     roles:                         |
-      |                                      |       - role: <first-role>         |
-      |                                      |       - role: <second-role>        |
-      | method: GET                          | code: 200                          |+
-      | path: /items/cache_user_second_notes | headers:                           |
-      | query:                               |   x-cache-status: MISS             |
-      |   fields: label                      |                                    |
+      | request                              | response                               |
+      | method: POST                         | code: 204                              |+
+      | path: /users/invite                  | headers:                               |
+      | payload:                             |   x-scoped-cache-purged-tags:          |
+      |   email: second-<run>@example.com    |     - directus_invites                 |
+      |   roles:                             |     - directus_invites:id=<new-invite> |
+      |     - <second-role>                  |                                        |
+      | method: GET                          | code: 200                              |+
+      | path: /items/cache_user_second_notes | headers:                               |
+      | query:                               |   x-cache-status: HIT                  |
+      |   fields: label                      |                                        |
+      | method: GET                          | code: 200                              |+
+      | path: /users/<invitee>               | body:                                  |
+      | query:                               |   data:                                |
+      |   fields: status,roles,invites.role  |     status: invited                    |
+      |   deep: >-                           |     roles: []                          |
+      |     {"invites":{"_sort":             |     invites:                           |
+      |     ["date_created"]}}               |                                        |
+      |                                      |       - role: <first-role>             |
+      |                                      |       - role: <second-role>            |
     And on postgres the requests ran these statements:
-      | request | table                   | select | insert | update | delete |
-      | 1       | directus_invites        | 1      | 1      | 0      | 0      |
-      | 1       | directus_role_members   | 1      | 1      | 0      | 0      |
-      | 1       | directus_users          | 2      | 0      | 0      | 0      |
-      | 2       | directus_access         | 4      | 0      | 0      | 0      |
-      | 2       | directus_permissions    | 1      | 0      | 0      | 0      |
-      | 2       | directus_policies       | 1      | 0      | 0      | 0      |
-      | 2       | directus_role_members   | 2      | 0      | 0      | 0      |
-      | 2       | directus_roles          | 1      | 0      | 0      | 0      |
-      | 2       | directus_users          | 2      | 0      | 0      | 0      |
-      | 3       | cache_user_second_notes | 1      | 0      | 0      | 0      |
-      | 3       | directus_permissions    | 1      | 0      | 0      | 0      |
-      | 3       | directus_users          | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_invites      | 1      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 2      | 0      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
+      | 3       | directus_invites      | 1      | 0      | 0      | 0      |
+      | 3       | directus_roles        | 1      | 0      | 0      | 0      |
+      | 3       | directus_users        | 1      | 0      | 0      | 0      |

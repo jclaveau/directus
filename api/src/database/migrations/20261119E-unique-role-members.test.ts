@@ -33,16 +33,16 @@ describe('the migration', () => {
 		tracker.on.select('directus_role_members').response([
 			{ id: 'member-1', user: 'user-1', role: 'role-a', managed_by: null },
 			{ id: 'member-2', user: 'user-1', role: 'role-a', managed_by: null },
-			{ id: 'member-3', user: 'user-1', role: 'role-a', managed_by: 'invite' },
-			{ id: 'member-4', user: 'user-2', role: 'role-b', managed_by: 'invite' },
-			{ id: 'member-5', user: 'user-2', role: 'role-b', managed_by: 'invite' },
+			{ id: 'member-3', user: 'user-1', role: 'role-a', managed_by: 'ext:sync' },
+			{ id: 'member-4', user: 'user-2', role: 'role-b', managed_by: 'ext:sync' },
+			{ id: 'member-5', user: 'user-2', role: 'role-b', managed_by: 'ext:sync' },
 		]);
 
 		await expect(up(db)).rejects.toThrow(new Error(
 			'Cannot make a role held once per manager: directus_role_members rows'
 			+ ' "member-1", "member-2" give user "user-1" the role "role-a" with'
 			+ ' managed_by null; rows "member-4", "member-5" give user "user-2" the'
-			+ ' role "role-b" with managed_by "invite"; delete the extra rows'
+			+ ' role "role-b" with managed_by "ext:sync"; delete the extra rows'
 			+ ' first',
 		));
 

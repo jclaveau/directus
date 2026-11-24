@@ -36,15 +36,15 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       | method: GET                              | code: 200                      |+
       | path: /users                             | body:                          |
       | query:                                   |   data:                        |
-      |   fields: status,roles.role              |     - status: invited          |
-      |   filter[email][_eq]: >-                 |       roles:                   |
+      |   fields: status,invites.role            |     - status: invited          |
+      |   filter[email][_eq]: >-                 |       invites:                 |
       |     allowed-<run>@example.com            |         - role: <invitee-role> |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      |
       | 1       | directus_invites      | 0      | 1      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
-      | 1       | directus_role_members | 0      | 1      | 0      | 0      |
+      | 1       | directus_roles        | 1      | 0      | 0      | 0      |
       | 1       | directus_users        | 3      | 1      | 0      | 0      |
 
   Scenario: an invited user invited again to the same role stays as they were
@@ -80,13 +80,13 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       | method: GET                      | code: 200                   |+
       | path: /users                     | body:                       |
       | query:                           |   data:                     |
-      |   fields: status,roles.role      |     - status: invited       |
-      |   filter[email][_eq]: >-         |       roles:                |
+      |   fields: status,invites.role    |     - status: invited       |
+      |   filter[email][_eq]: >-         |       invites:              |
       |     again-<run>@example.com      |         - role: <same-role> |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
       | 1       | directus_invites      | 1      | 0      | 0      | 0      |
-      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles        | 1      | 0      | 0      | 0      |
       | 1       | directus_users        | 2      | 0      | 0      | 0      |
 
   Scenario: an invitation of an active user leaves the user as they were

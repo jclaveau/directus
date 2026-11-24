@@ -14,15 +14,14 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { getDatabaseClient } from '../database/index.js';
-import {
-	processPayload,
-} from '../permissions/modules/process-payload/process-payload.js';
+import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+// eslint-disable-next-line max-len
+import { fetchGlobalAccessForRoles } from '../permissions/modules/fetch-global-access/lib/fetch-global-access-for-roles.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import {
 	clearPermissionsCacheAfterCommit,
 	flushResponseCacheAfterCommit,
-	purgeMutatedRowsAfterCommit,
 } from '../utils/clear-caches-after-commit.js';
 import { verifyJWT } from '../utils/jwt.js';
 import { transaction } from '../utils/transaction.js';
@@ -58,10 +57,25 @@ vi.mock('@directus/env', () => ({
 
 vi.mock('../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js');
 
-vi.mock('../permissions/modules/process-payload/process-payload.js', () => {
+vi.mock('../permissions/lib/fetch-roles-tree.js', () => {
 	return {
-		processPayload: vi.fn(async ({ payload }) => payload),
+		fetchRolesTree: vi.fn(async (role: string) => [role]),
 	};
+});
+
+vi.mock(
+	'../permissions/modules/fetch-global-access/lib/fetch-global-access-for-roles.js',
+	() => {
+		return {
+			fetchGlobalAccessForRoles: vi.fn(async () => {
+				return { admin: false, app: true };
+			}),
+		};
+	},
+);
+
+vi.mock('../websocket/memberships-changed.js', () => {
+	return { announceMembershipsChanged: vi.fn() };
 });
 
 vi.mock('../cache.js', async (importOriginal) => {
@@ -291,8 +305,6 @@ describe('Integration Tests', () => {
 			});
 
 			it('should request all user integrity checks if status is changed to not "active"', async () => {
-				tracker.on.select('doubled').response([]);
-
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
 
@@ -312,8 +324,6 @@ describe('Integration Tests', () => {
 			});
 
 			it('should request user limit checks if status is changed to "active"', async () => {
-				tracker.on.select('doubled').response([]);
-
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
 
@@ -649,8 +659,6 @@ describe('Integration Tests', () => {
 			});
 
 			it('requests the union of every row\'s integrity checks once', async () => {
-				tracker.on.select('doubled').response([]);
-
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
 
@@ -671,8 +679,6 @@ describe('Integration Tests', () => {
 			});
 
 			it('logs out the users a row suspends', async () => {
-				tracker.on.select('doubled').response([]);
-
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
 
@@ -831,34 +837,6 @@ describe('Integration Tests', () => {
 					[[10_000], { user_updated: null }, { emitEvents: false }],
 				]);
 			});
-
-			it(oneLine`
-				deletes, after the users, every invite membership left with no invite,
-				its last one gone with a deleted inviter
-			`, async () => {
-				const getKeysByQuerySpy = vi
-					.spyOn(ItemsService.prototype, 'getKeysByQuery')
-					.mockResolvedValue([]);
-
-				onTestFinished(() => {
-					getKeysByQuerySpy.mockRestore();
-				});
-
-				tracker.on.delete('directus_role_members').response(1);
-
-				await service.deleteMany(['user-id-31']);
-
-				expect(tracker.history.delete).toMatchObject([{
-					sql: 'delete from "directus_role_members" as "membership"'
-						+ ' where "membership"."managed_by" = ?'
-						+ ' and not exists (select 1 from "directus_invites"'
-						+ ' where "directus_invites"."user" = "membership"."user"'
-						+ ' and "directus_invites"."role" = "membership"."role")',
-					bindings: ['invite'],
-				}]);
-
-				expect(tracker.history.select).toEqual([]);
-			});
 		});
 
 		describe('invite', () => {
@@ -868,7 +846,10 @@ describe('Integration Tests', () => {
 
 			vi.spyOn(UsersService.prototype as any, 'inviteUrl').mockImplementation(() => vi.fn());
 
-			it('should invite new users', async () => {
+			it(oneLine`
+				invites a new user with one invite per role, writing no membership
+				and clearing no cache
+			`, async () => {
 				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
 					.mockResolvedValueOnce(undefined);
 
@@ -884,7 +865,7 @@ describe('Integration Tests', () => {
 					knex: db,
 					schema,
 					accountability: { user: 'inviter-id', admin: true } as Accountability,
-				}).inviteUser('user@example.com', ['invite-role'], null);
+				}).inviteUser('user@example.com', ['invite-role', 'invite-role'], null);
 
 				expect(superCreateOneSpy).toHaveBeenCalledWith(
 					{ email: 'user@example.com', status: 'invited' },
@@ -901,32 +882,24 @@ describe('Integration Tests', () => {
 						}],
 						opts: {},
 					},
-					{
-						collection: 'directus_role_members',
-						rows: [{
-							user: 'user-id-1',
-							role: 'invite-role',
-							managed_by: 'invite',
-							sort: 1,
-						}],
-						opts: {
-							createsNewUserMemberships: true,
-							userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits,
-						},
-					},
 				]);
 
+				expect(fetchGlobalAccessForRoles).toHaveBeenCalledExactlyOnceWith(
+					{ roles: ['invite-role'], ip: null },
+					db,
+				);
+
+				expect(clearPermissionsCacheAfterCommit).not.toHaveBeenCalled();
+				expect(flushResponseCacheAfterCommit).not.toHaveBeenCalled();
 				expect(clearSystemCache).not.toHaveBeenCalled();
 				expect(mailService.send).toBeCalledTimes(1);
 			});
 
-			it('checks the inviter may create each membership', async () => {
-				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
-					.mockResolvedValueOnce(undefined);
-
-				vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue([]);
-
-				await new UsersService({
+			it(oneLine`
+				refuses an invite from a user who is no admin, before the URL off
+				the allow list
+			`, async () => {
+				const promise = new UsersService({
 					knex: db,
 					schema,
 					accountability: {
@@ -937,25 +910,57 @@ describe('Integration Tests', () => {
 						memberRoles: [],
 						roles: ['inviter-role'],
 					},
-				}).inviteUser('user@example.com', ['invite-role'], null);
-
-				expect(processPayload).toHaveBeenCalledWith(
-					{
-						accountability: {
-							user: 'inviter-id',
-							admin: false,
-							app: true,
-							ip: null,
-							memberRoles: [],
-							roles: ['inviter-role'],
-						},
-						action: 'create',
-						collection: 'directus_role_members',
-						payload: { user: 'user-id-1', role: 'invite-role' },
-						nested: [],
-					},
-					{ knex: expect.anything(), schema },
+				}).inviteUser(
+					'user@example.com',
+					['invite-role'],
+					'https://elsewhere.example.com/invite',
 				);
+
+				await expect(promise).rejects.toEqual(new ForbiddenError());
+
+				await expect(promise).rejects.toHaveProperty(
+					'message',
+					'You don\'t have permission to access this.',
+				);
+
+				expect(superCreateOneSpy).not.toBeCalled();
+				expect(tracker.history.all).toEqual([]);
+				expect(mailService.send).not.toBeCalled();
+			});
+
+			it('refuses an invite to a role reaching admin access', async () => {
+				vi.mocked(fetchRolesTree)
+					.mockResolvedValueOnce(['invite-role'])
+					.mockResolvedValueOnce(['admin-child-role', 'admin-role']);
+
+				vi.mocked(fetchGlobalAccessForRoles)
+					.mockResolvedValueOnce({ admin: false, app: true })
+					.mockResolvedValueOnce({ admin: true, app: true });
+
+				const promise = new UsersService({
+					knex: db,
+					schema,
+					accountability: { user: 'inviter-id', admin: true } as Accountability,
+				}).inviteUser(
+					'user@example.com',
+					['invite-role', 'admin-child-role'],
+					null,
+				);
+
+				await expect(promise).rejects.toHaveProperty(
+					'message',
+					'Invalid payload. Role "admin-child-role" gives admin access,'
+					+ ' which an invite can\'t give: add the membership once the user'
+					+ ' accepted.',
+				);
+
+				expect(vi.mocked(fetchGlobalAccessForRoles).mock.calls).toEqual([
+					[{ roles: ['invite-role'], ip: null }, db],
+					[{ roles: ['admin-child-role', 'admin-role'], ip: null }, db],
+				]);
+
+				expect(superCreateOneSpy).not.toBeCalled();
+				expect(mailService.send).not.toBeCalled();
 			});
 
 			it('should re-send invites for invited users', async () => {
@@ -966,7 +971,6 @@ describe('Integration Tests', () => {
 					});
 
 				tracker.on.select('directus_invites').response([]);
-				tracker.on.select('directus_role_members').response([]);
 				vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue([]);
 
 				await new UsersService({
@@ -1001,8 +1005,8 @@ describe('Integration Tests', () => {
 			});
 
 			it(oneLine`
-				replaces the invites of the same inviter on a re-invite, keeping a
-				membership another inviter's invite holds
+				replaces the invites of the same inviter on a re-invite, reading
+				no other inviter's
 			`, async () => {
 				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
 					.mockResolvedValueOnce({
@@ -1011,19 +1015,8 @@ describe('Integration Tests', () => {
 					});
 
 				tracker.on.select('directus_invites').response([
-					{ id: 'invite-id-2', role: 'old-role', user_created: 'inviter-id' },
-					{ id: 'invite-id-3', role: 'shared-role', user_created: 'inviter-id' },
-					{
-						id: 'invite-id-4',
-						role: 'shared-role',
-						user_created: 'other-inviter-id',
-					},
-				]);
-
-				tracker.on.select('directus_role_members').response([
-					{ id: 'member-id-2', role: 'old-role', managed_by: 'invite', sort: 1 },
-					{ id: 'member-id-3', role: 'shared-role', managed_by: 'invite', sort: 2 },
-					{ id: 'member-id-4', role: 'hand-role', managed_by: null, sort: 3 },
+					{ id: 'invite-id-2', role: 'old-role' },
+					{ id: 'invite-id-3', role: 'shared-role' },
 				]);
 
 				const writes: unknown[] = [];
@@ -1044,20 +1037,13 @@ describe('Integration Tests', () => {
 					knex: db,
 					schema,
 					accountability: { user: 'inviter-id', admin: true } as Accountability,
-				}).inviteUser('user@example.com', ['new-role'], null);
+				}).inviteUser('user@example.com', ['shared-role', 'new-role'], null);
 
-				expect(tracker.history.select).toMatchObject([
-					{
-						sql: 'select "id", "role", "managed_by", "sort"'
-							+ ' from "directus_role_members" where "user" = ?',
-						bindings: ['8e2b4c10-5d3a-4f6e-9a7b-000000000017'],
-					},
-					{
-						sql: 'select "id", "role", "user_created" from "directus_invites"'
-							+ ' where "user" = ?',
-						bindings: ['8e2b4c10-5d3a-4f6e-9a7b-000000000017'],
-					},
-				]);
+				expect(tracker.history.select).toMatchObject([{
+					sql: 'select "id", "role" from "directus_invites"'
+						+ ' where "user" = ? and ("user_created" = ?)',
+					bindings: ['8e2b4c10-5d3a-4f6e-9a7b-000000000017', 'inviter-id'],
+				}]);
 
 				expect(writes).toEqual([
 					{
@@ -1070,75 +1056,12 @@ describe('Integration Tests', () => {
 						opts: {},
 					},
 					{
-						collection: 'directus_role_members',
-						rows: [{
-							user: '8e2b4c10-5d3a-4f6e-9a7b-000000000017',
-							role: 'new-role',
-							managed_by: 'invite',
-							sort: 4,
-						}],
-						opts: {
-							userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits,
-						},
-					},
-					{
 						collection: 'directus_invites',
-						keys: ['invite-id-2', 'invite-id-3'],
-					},
-					{
-						collection: 'directus_role_members',
-						keys: ['member-id-2'],
+						keys: ['invite-id-2'],
 					},
 				]);
 
 				expect(mailService.send).toBeCalledTimes(1);
-			});
-
-			it(oneLine`
-				adds the invite of a second inviter to a role, and no second
-				membership
-			`, async () => {
-				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
-					.mockResolvedValueOnce({
-						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000021',
-						status: 'invited',
-					});
-
-				tracker.on.select('directus_invites').response([{
-					id: 'invite-id-1',
-					role: 'invite-role',
-					user_created: 'other-inviter-id',
-				}]);
-
-				tracker.on.select('directus_role_members').response([
-					{ id: 'member-id-1', role: 'invite-role', managed_by: 'invite', sort: 1 },
-				]);
-
-				const writes: unknown[] = [];
-
-				vi.spyOn(ItemsService.prototype, 'createMany')
-					.mockImplementation(async function (this: ItemsService, rows, opts) {
-						writes.push({ collection: this.collection, rows, opts });
-						return [];
-					});
-
-				await new UsersService({
-					knex: db,
-					schema,
-					accountability: { user: 'inviter-id', admin: true } as Accountability,
-				}).inviteUser('user@example.com', ['invite-role'], null);
-
-				expect(writes).toEqual([
-					{
-						collection: 'directus_invites',
-						rows: [{
-							user: '8e2b4c10-5d3a-4f6e-9a7b-000000000021',
-							role: 'invite-role',
-							user_created: 'inviter-id',
-						}],
-						opts: {},
-					},
-				]);
 			});
 
 			it('writes nothing on a re-invite to the same roles', async () => {
@@ -1149,11 +1072,7 @@ describe('Integration Tests', () => {
 					});
 
 				tracker.on.select('directus_invites').response([
-					{ id: 'invite-id-5', role: 'invite-role', user_created: 'inviter-id' },
-				]);
-
-				tracker.on.select('directus_role_members').response([
-					{ id: 'member-id-5', role: 'invite-role', managed_by: 'invite', sort: 1 },
+					{ id: 'invite-id-5', role: 'invite-role' },
 				]);
 
 				const createMany = vi.spyOn(ItemsService.prototype, 'createMany');
@@ -1195,19 +1114,6 @@ describe('Integration Tests', () => {
 						}],
 						opts: {},
 					},
-					{
-						collection: 'directus_role_members',
-						rows: [{
-							user: 'user-id-1',
-							role: 'invite-role',
-							managed_by: 'invite',
-							sort: 1,
-						}],
-						opts: {
-							createsNewUserMemberships: true,
-							userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits,
-						},
-					},
 				]);
 
 				expect(mailService.send).toBeCalledTimes(1);
@@ -1221,12 +1127,7 @@ describe('Integration Tests', () => {
 					});
 
 				tracker.on.select('directus_invites').response([
-					{ id: 'invite-id-6', role: 'old-role', user_created: null },
-					{ id: 'invite-id-7', role: 'old-role', user_created: 'inviter-id' },
-				]);
-
-				tracker.on.select('directus_role_members').response([
-					{ id: 'member-id-6', role: 'old-role', managed_by: 'invite', sort: 1 },
+					{ id: 'invite-id-6', role: 'old-role' },
 				]);
 
 				const writes: unknown[] = [];
@@ -1246,6 +1147,12 @@ describe('Integration Tests', () => {
 				await new UsersService({ knex: db, schema, accountability: null })
 					.inviteUser('user@example.com', ['invite-role'], null);
 
+				expect(tracker.history.select).toMatchObject([{
+					sql: 'select "id", "role" from "directus_invites"'
+						+ ' where "user" = ? and ("user_created" is null)',
+					bindings: ['8e2b4c10-5d3a-4f6e-9a7b-000000000020'],
+				}]);
+
 				expect(writes).toEqual([
 					{
 						collection: 'directus_invites',
@@ -1255,18 +1162,6 @@ describe('Integration Tests', () => {
 							user_created: null,
 						}],
 						opts: {},
-					},
-					{
-						collection: 'directus_role_members',
-						rows: [{
-							user: '8e2b4c10-5d3a-4f6e-9a7b-000000000020',
-							role: 'invite-role',
-							managed_by: 'invite',
-							sort: 2,
-						}],
-						opts: {
-							userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits,
-						},
 					},
 					{
 						collection: 'directus_invites',
@@ -1283,8 +1178,6 @@ describe('Integration Tests', () => {
 							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000019',
 							status: 'invited',
 						});
-
-					tracker.on.select('directus_role_members').response([]);
 
 					const createMany = vi.spyOn(ItemsService.prototype, 'createMany');
 
@@ -1303,58 +1196,6 @@ describe('Integration Tests', () => {
 					expect(mailService.send).not.toBeCalled();
 				},
 			);
-
-			it(oneLine`
-				refuses a re-invite from a user without the permission before
-				the URL off the allow list
-			`, async () => {
-				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
-					.mockResolvedValueOnce({
-						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000023',
-						status: 'invited',
-					});
-
-				tracker.on.select('directus_role_members').response([
-					{ id: 'member-id-8', role: 'invite-role', managed_by: 'invite', sort: 1 },
-				]);
-
-				tracker.on.select('directus_invites').response([
-					{ id: 'invite-id-8', role: 'invite-role', user_created: 'inviter-id' },
-				]);
-
-				vi.mocked(processPayload).mockRejectedValueOnce(new ForbiddenError());
-
-				// clearAllMocks keeps an unused once-value: later tests write users.
-				onTestFinished(() => {
-					vi.mocked(processPayload).mockReset();
-				});
-
-				const promise = new UsersService({
-					knex: db,
-					schema,
-					accountability: {
-						user: 'inviter-id',
-						admin: false,
-						app: true,
-						ip: null,
-						memberRoles: [],
-						roles: ['inviter-role'],
-					},
-				}).inviteUser(
-					'user@example.com',
-					['invite-role'],
-					'https://elsewhere.example.com/invite',
-				);
-
-				await expect(promise).rejects.toEqual(new ForbiddenError());
-
-				await expect(promise).rejects.toHaveProperty(
-					'message',
-					'You don\'t have permission to access this.',
-				);
-
-				expect(mailService.send).not.toBeCalled();
-			});
 
 			it(
 				'refuses inviting an active user to a URL off the allow list',
@@ -1391,8 +1232,9 @@ describe('Integration Tests', () => {
 			});
 
 			it(oneLine`
-				activates the user, whose status write hands the invite memberships to
-				the admins
+				activates the user, then turns its invites into memberships, one per
+				role in invite order after the held ones, but for a role held by hand,
+				and deletes the invites
 			`, async () => {
 				vi.mocked(verifyJWT).mockReturnValue({
 					email: 'user@example.com',
@@ -1401,6 +1243,19 @@ describe('Integration Tests', () => {
 
 				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
 					.mockResolvedValueOnce({ id: 'user-id-21', status: 'invited' });
+
+				tracker.on.select('directus_invites').response([
+					{ id: 'invite-id-21', role: 'role-b' },
+					{ id: 'invite-id-22', role: 'role-a' },
+					{ id: 'invite-id-23', role: 'role-e' },
+					{ id: 'invite-id-24', role: 'role-b' },
+				]);
+
+				tracker.on.select('directus_role_members').response([
+					{ role: 'role-c', managed_by: null, sort: 1 },
+					{ role: 'role-a', managed_by: null, sort: 2 },
+					{ role: 'role-d', managed_by: 'auth:okta', sort: 5 },
+				]);
 
 				const writes: unknown[] = [];
 
@@ -1411,7 +1266,7 @@ describe('Integration Tests', () => {
 							collection: this.collection,
 							keys: [key],
 							data,
-							isTransaction: this.knex.isTransaction,
+							accountability: this.accountability,
 						});
 
 						return key;
@@ -1421,120 +1276,120 @@ describe('Integration Tests', () => {
 					updateUserSpy.mockRestore();
 				});
 
+				vi.spyOn(ItemsService.prototype, 'createMany')
+					.mockImplementation(async function (this: ItemsService, rows) {
+						writes.push({
+							collection: this.collection,
+							rows,
+							accountability: this.accountability,
+						});
+
+						return [];
+					});
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockImplementation(async function (this: ItemsService, keys) {
+						writes.push({
+							collection: this.collection,
+							keys,
+							accountability: this.accountability,
+						});
+
+						return keys;
+					});
+
 				await service.acceptInvite('invite-token', 'new-password');
 
-				expect(writes).toEqual([{
-					collection: 'directus_users',
-					keys: ['user-id-21'],
-					data: { password: 'new-password', status: 'active' },
-					isTransaction: undefined,
-				}]);
-			});
-		});
-
-		describe('hand-over of the invite memberships', () => {
-			it(oneLine`
-				deletes, in one statement, the invite memberships of a user leaving
-				invited whose role the user also holds by hand, and hands the others,
-				but those, to the admins
-			`, async () => {
-				tracker.on.select('doubled').response([]);
-
-				await service.updateBatch([
-					{ id: 'user-id-41', status: 'suspended' },
-					{ id: 'user-id-42', status: 'invited' },
-					{ id: 'user-id-43', first_name: 'Bob' },
+				expect(tracker.history.select).toMatchObject([
+					{
+						sql: 'select "id", "role" from "directus_invites"'
+							+ ' where "user" = ? order by "date_created" asc, "id" asc',
+						bindings: ['user-id-21'],
+					},
+					{
+						sql: 'select "role", "managed_by", "sort"'
+							+ ' from "directus_role_members" where "user" = ?',
+						bindings: ['user-id-21'],
+					},
 				]);
 
-				expect(tracker.history.select).toMatchObject([{
-					sql: 'with "doubled" as (delete from "directus_role_members"'
-						+ ' as "membership" where "membership"."user" in (?)'
-						+ ' and "membership"."managed_by" = ?'
-						+ ' and exists (select 1'
-						+ ' from "directus_role_members" as "hand_membership"'
-						+ ' where "hand_membership"."user" = "membership"."user"'
-						+ ' and "hand_membership"."role" = "membership"."role"'
-						+ ' and "hand_membership"."managed_by" is null)),'
-						+ ' "handed" as (update "directus_role_members"'
-						+ ' set "managed_by" = ? where "user" in (?)'
-						+ ' and "managed_by" = ?'
-						+ ' and "id" not in (select "id" from "doubled"))'
-						+ ' select "id", "user", true as was_doubled from "doubled"'
-						+ ' union all'
-						+ ' select "id", "user", false as was_doubled from "handed"',
-					bindings: ['user-id-41', 'invite', null, 'user-id-41', 'invite'],
-				}]);
-
-				expect(tracker.history.delete).toEqual([]);
-				expect(tracker.history.update).toEqual([]);
-			});
-
-			it(oneLine`
-				clears the permissions cache and flushes the responses once it deletes
-				the invite membership of a role the user also holds by hand
-			`, async () => {
-				tracker.on.select('doubled').response([{
-					id: 'membership-staff-invite',
-					user: 'user-id-41',
-					was_doubled: true,
-				}]);
-
-				await service.updateBatch([{ id: 'user-id-41', status: 'active' }]);
+				expect(writes).toEqual([
+					{
+						collection: 'directus_users',
+						keys: ['user-id-21'],
+						data: { password: 'new-password', status: 'active' },
+						accountability: null,
+					},
+					{
+						collection: 'directus_role_members',
+						rows: [
+							{ user: 'user-id-21', role: 'role-b', sort: 6 },
+							{ user: 'user-id-21', role: 'role-e', sort: 7 },
+						],
+						accountability: null,
+					},
+					{
+						collection: 'directus_invites',
+						keys: [
+							'invite-id-21',
+							'invite-id-22',
+							'invite-id-23',
+							'invite-id-24',
+						],
+						accountability: null,
+					},
+				]);
 
 				expect(clearPermissionsCacheAfterCommit).toHaveBeenCalledTimes(1);
 				expect(flushResponseCacheAfterCommit).toHaveBeenCalledTimes(1);
-				expect(purgeMutatedRowsAfterCommit).not.toHaveBeenCalled();
 			});
 
-			it(oneLine`
-				purges the responses of the memberships it hands over, but flushes no
-				response and keeps the permissions cache, when it deletes none
-			`, async () => {
-				tracker.on.select('doubled').response([
-					{
-						id: 'membership-press-invite',
-						user: 'user-id-41',
-						was_doubled: false,
-					},
-					{
-						id: 'membership-staff-invite',
-						user: 'user-id-41',
-						was_doubled: false,
-					},
-				]);
+			it('activates a user left with no invite, writing no membership', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'user@example.com',
+					scope: 'invite',
+				} as any);
 
-				await service.updateBatch([{ id: 'user-id-41', status: 'active' }]);
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({ id: 'user-id-22', status: 'invited' });
 
-				expect(clearPermissionsCacheAfterCommit).not.toHaveBeenCalled();
-				expect(flushResponseCacheAfterCommit).not.toHaveBeenCalled();
+				tracker.on.select('directus_invites').response([]);
 
-				expect(purgeMutatedRowsAfterCommit).toHaveBeenCalledExactlyOnceWith(
-					expect.anything(),
-					schema,
-					'directus_role_members',
-					[
-						{ id: 'membership-press-invite' },
-						{ id: 'membership-staff-invite' },
-					],
-					expect.anything(),
+				const updateUserSpy = vi.spyOn(UsersService.prototype, 'updateOne')
+					.mockResolvedValue('user-id-22');
+
+				onTestFinished(() => {
+					updateUserSpy.mockRestore();
+				});
+
+				const createMany = vi.spyOn(ItemsService.prototype, 'createMany');
+
+				await service.acceptInvite('invite-token', 'new-password');
+
+				expect(updateUserSpy).toHaveBeenCalledExactlyOnceWith(
+					'user-id-22',
+					{ password: 'new-password', status: 'active' },
 				);
-			});
 
-			it('clears no cache when it writes no membership', async () => {
-				tracker.on.select('doubled').response([]);
-
-				await service.updateBatch([{ id: 'user-id-41', status: 'active' }]);
-
+				expect(createMany).not.toHaveBeenCalled();
 				expect(clearPermissionsCacheAfterCommit).not.toHaveBeenCalled();
-				expect(flushResponseCacheAfterCommit).not.toHaveBeenCalled();
-				expect(purgeMutatedRowsAfterCommit).not.toHaveBeenCalled();
 			});
 
-			it('writes no membership when no row writes a status', async () => {
-				await service.updateBatch([
-					{ id: 'user-id-44', first_name: 'Bob' },
-					{ id: 'user-id-45', status: 'invited' },
-				]);
+			it('refuses a user who is not invited', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'user@example.com',
+					scope: 'invite',
+				} as any);
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({ id: 'user-id-23', status: 'active' });
+
+				await expect(service.acceptInvite('invite-token', 'new-password'))
+					.rejects.toHaveProperty(
+						'message',
+						'Invalid payload. Email address user@example.com hasn\'t been'
+						+ ' invited.',
+					);
 
 				expect(tracker.history.all).toEqual([]);
 			});
@@ -1935,8 +1790,6 @@ describe('Integration Tests', () => {
 
 		describe('verifyRegistration by email', () => {
 			it('activates the unverified user the token names', async () => {
-				tracker.on.select('doubled').response([]);
-
 				vi.mocked(verifyJWT).mockReturnValue({
 					email: 'Ada@Example.com',
 					scope: 'pending-registration',
@@ -2214,8 +2067,6 @@ describe('Integration Tests', () => {
 
 		describe('resetPassword as admin', () => {
 			it('updates as an admin built from the default accountability', async () => {
-				tracker.on.select('doubled').response([]);
-
 				vi.mocked(verifyJWT).mockReturnValue({
 					email: 'ada@example.com',
 					scope: 'password-reset',
@@ -2246,8 +2097,6 @@ describe('Integration Tests', () => {
 			});
 
 			it('updates as an admin built from the caller', async () => {
-				tracker.on.select('doubled').response([]);
-
 				vi.mocked(verifyJWT).mockReturnValue({
 					email: 'ada@example.com',
 					scope: 'password-reset',

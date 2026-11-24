@@ -211,22 +211,6 @@ describe('the migration', () => {
 		);
 	});
 
-	test('up indexes the invite memberships by user and role', async () => {
-		vi.mocked(createInspector).mockReturnValue({
-			foreignKeys: vi.fn().mockResolvedValue([]),
-		} as any);
-
-		tracker.on.select('directus_users').response([]);
-
-		await up(db);
-
-		expect(tracker.history.any.map(({ sql }) => sql)).toContain(
-			'create index "directus_role_members_invite_index"'
-			+ ' on "directus_role_members" ("user", "role")'
-			+ ' where "managed_by" = \'invite\'',
-		);
-	});
-
 	test('up records invites, one per user, role and inviter', async () => {
 		vi.mocked(createInspector).mockReturnValue({
 			foreignKeys: vi.fn().mockResolvedValue([]),
@@ -251,10 +235,10 @@ describe('the migration', () => {
 				'alter table "directus_invites" add constraint'
 				+ ' "directus_invites_user_created_foreign" foreign key'
 				+ ' ("user_created") references "directus_users" ("id")'
-				+ ' on delete CASCADE',
-				'create unique index "directus_invites_user_role_user_created_unique"'
-				+ ' on "directus_invites"'
-				+ ' ("user", "role", coalesce(cast("user_created" as text), \'\'))',
+				+ ' on delete SET NULL',
+				'alter table "directus_invites" add constraint'
+				+ ' "directus_invites_user_role_user_created_unique"'
+				+ ' unique ("user", "role", "user_created")',
 			]),
 		);
 	});
@@ -264,12 +248,10 @@ describe('the migration', () => {
 
 		await down(db);
 
-		expect(tracker.history.any.map(({ sql }) => sql)).toEqual(
-			expect.arrayContaining([
-				'drop index "directus_role_members_invite_index"',
-				'drop table "directus_invites"',
-			]),
-		);
+		expect(tracker.history.any.map(({ sql }) => sql).slice(-2)).toEqual([
+			'drop table "directus_invites"',
+			'drop table "directus_role_members"',
+		]);
 	});
 
 	test('down gives each user the role of its one membership', async () => {

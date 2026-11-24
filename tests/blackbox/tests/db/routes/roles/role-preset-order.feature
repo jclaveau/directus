@@ -7,11 +7,13 @@ Feature: The presets of several member roles apply parents first, then leaves
     another member role counts as a parent (#746).
   - A policy reached through several member roles counts at its last place
     in that order.
-  - A role given by an invite or a login provider goes after the user's
-    other roles: its membership `sort` is one past the user's highest.
+  - A role given by an accepted invite or a login provider goes after the
+    user's other roles: its membership `sort` is one past the user's highest.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own. A response cell states the keys it checks.
+  - `!jwt` signs its claims with the instance's secret, as Directus signs the
+    invitation token it mails.
 
   Scenario: a leaf role's preset beats the parent of another member role
     Given the rows of directus_policies:
@@ -257,10 +259,13 @@ Feature: The presets of several member roles apply parents first, then leaves
       |   email: alice-<run>@example.com           |                        |
       |   roles:                                   |                        |
       |     - <press>                              |                        |
-      | method: PATCH                              | code: 200              |+
-      | path: /users/<alice>                       |                        |
+      | method: POST                               | code: 204              |+
+      | path: /users/invite/accept                 |                        |
       | payload:                                   |                        |
-      |   status: active                           |                        |
+      |   token: !jwt                              |                        |
+      |     email: alice-<run>@example.com         |                        |
+      |     scope: invite                          |                        |
+      |   password: accepted-password              |                        |
       | as: alice-<run>                            | code: 200              |+
       | method: POST                               |                        |
       | path: /items/role_order_notes              |                        |
