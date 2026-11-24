@@ -496,6 +496,10 @@ jobs:
           PREVIEW_MOLLIE_API_KEY: >-
             ${{ env.PREVIEW_REAL_PROVIDERS_READY == 'true'
               && secrets.SUBSCRIPTIONS_MOLLIE_API_KEY || '' }}
+          # Public by design (Stripe.js reads it in the browser); empty → hosted checkout.
+          PREVIEW_STRIPE_PUBLISHABLE_KEY: >-
+            ${{ env.PREVIEW_REAL_PROVIDERS_READY == 'true'
+              && secrets.SUBSCRIPTIONS_STRIPE_PUBLISHABLE_KEY || '' }}
         run: |
           # Not masked on purpose: it shows in the run summary for manual login. On a public
           # repo that summary is world-readable — acceptable here, the instance is a throwaway
