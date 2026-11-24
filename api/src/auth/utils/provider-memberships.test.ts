@@ -1,4 +1,5 @@
 import type { SchemaOverview } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import type { Knex } from 'knex';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { RoleMembersService } from '../../services/role-members.js';
@@ -145,6 +146,9 @@ describe('syncProviderMemberships', () => {
 			select: vi.fn().mockReturnThis(),
 			from: vi.fn().mockReturnThis(),
 			where: vi.fn().mockImplementation(async () => userRows),
+			transaction: vi.fn(async () => knexMock),
+			commit: vi.fn(),
+			rollback: vi.fn(),
 		} as unknown as Knex;
 	});
 
@@ -319,5 +323,61 @@ describe('syncProviderMemberships', () => {
 
 		expect(deleteMany).toHaveBeenCalledWith(['row-1']);
 		expect(createMany).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		takes a conflict with a concurrent login holding the same rows as done
+		work, rolled back to its savepoint
+	`, async () => {
+		const heldOnceError = new Error('held-once index');
+
+		createMany.mockRejectedValueOnce(heldOnceError);
+
+		vi.mocked(knexMock.where)
+			.mockResolvedValueOnce([])
+			.mockResolvedValueOnce([{ role: 'ROLE-A' }]);
+
+		await syncProviderMemberships('user-1', 'github', ['role-a'], {
+			knex: knexMock,
+			schema: {} as SchemaOverview,
+		});
+
+		expect(knexMock.rollback).toHaveBeenCalledOnce();
+		expect(knexMock.commit).not.toHaveBeenCalled();
+
+		expect(vi.mocked(knexMock.where).mock.calls).toEqual([
+			[{ user: 'user-1' }],
+			[{ user: 'user-1', managed_by: 'auth:github' }],
+		]);
+	});
+
+	test('rethrows a failed create leaving a mapped role unheld', async () => {
+		const createError = new Error('user limit reached');
+
+		createMany.mockRejectedValueOnce(createError);
+
+		vi.mocked(knexMock.where)
+			.mockResolvedValueOnce([])
+			.mockResolvedValueOnce([{ role: 'role-a' }]);
+
+		await expect(syncProviderMemberships(
+			'user-1',
+			'github',
+			['role-a', 'role-b'],
+			{ knex: knexMock, schema: {} as SchemaOverview },
+		)).rejects.toBe(createError);
+
+		expect(knexMock.rollback).toHaveBeenCalledOnce();
+	});
+
+	test('commits the savepoint of a create that lands', async () => {
+		await syncProviderMemberships('user-1', 'github', ['role-a'], {
+			knex: knexMock,
+			schema: {} as SchemaOverview,
+		});
+
+		expect(knexMock.transaction).toHaveBeenCalledOnce();
+		expect(knexMock.commit).toHaveBeenCalledOnce();
+		expect(knexMock.rollback).not.toHaveBeenCalled();
 	});
 });

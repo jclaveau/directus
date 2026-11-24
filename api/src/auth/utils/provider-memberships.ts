@@ -157,13 +157,10 @@ export async function syncProviderMemberships(
 	}
 
 	await transaction(context.knex, async (trx) => {
-		const roleMembersService = new RoleMembersService({
-			knex: trx,
-			schema: context.schema,
-		});
-
 		if (missingRoles.length > 0) {
-			await roleMembersService.createMany(
+			await createProviderMemberships(
+				trx,
+				context.schema,
 				providerMemberships(provider, missingRoles, true)
 					.map((membership, position) => {
 						return { ...membership, user, sort: lastSort + position + 1 };
@@ -172,7 +169,60 @@ export async function syncProviderMemberships(
 		}
 
 		if (staleRowIds.length > 0) {
-			await roleMembersService.deleteMany(staleRowIds);
+			await new RoleMembersService({ knex: trx, schema: context.schema })
+				.deleteMany(staleRowIds);
 		}
 	});
+}
+
+/**
+ * `on conflict do nothing` through the service: a concurrent login of the
+ * same user, reading the same rows, inserts the same memberships first, and
+ * this insert then breaks the held-once index. Rolled back to its savepoint,
+ * it is done work when every row is now held; any other failure throws.
+ * login 1 and login 2 both map [role-a] → login 2's insert of
+ * (user-1, role-a, auth:github) conflicts, role-a is held → no error
+ */
+async function createProviderMemberships(
+	trx: Knex,
+	schema: SchemaOverview,
+	membershipRows: Item[],
+): Promise<void> { // bb-out-of-scope: #753 provider roles
+	const savepoint = await trx.transaction();
+
+	try {
+		await new RoleMembersService({ knex: savepoint, schema })
+			.createMany(membershipRows);
+
+		await savepoint.commit();
+	}
+	catch (error) {
+		await savepoint.rollback();
+		await rethrowUnlessEveryRowHeld(error, trx, membershipRows);
+	}
+}
+
+async function rethrowUnlessEveryRowHeld(
+	error: unknown,
+	trx: Knex,
+	membershipRows: Item[],
+): Promise<void> { // bb-unit-only: a race of two logins of the same user
+	const [{ user, managed_by }] = membershipRows as [Item];
+
+	const heldRows: { role: string }[] = await trx
+		.select('role')
+		.from('directus_role_members')
+		.where({ user, managed_by });
+
+	const heldRoleKeys = new Set(
+		heldRows.map(({ role }) => lowerCaseRowKey(role)),
+	);
+
+	const isEveryRowHeld = membershipRows.every(({ role }) => {
+		return heldRoleKeys.has(lowerCaseRowKey(role));
+	});
+
+	if (!isEveryRowHeld) {
+		throw error;
+	}
 }
