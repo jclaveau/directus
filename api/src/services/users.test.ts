@@ -942,6 +942,9 @@ describe('Integration Tests', () => {
 				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
 					.mockResolvedValueOnce(undefined);
 
+				superCreateOneSpy
+					.mockResolvedValueOnce('8e2b4c10-5d3a-4f6e-9a7b-000000000041');
+
 				await inviter.inviteUser('user@example.com', 'invite-role', null);
 
 				expect(superCreateOneSpy).toHaveBeenCalledExactlyOnceWith(
@@ -954,7 +957,10 @@ describe('Integration Tests', () => {
 				});
 
 				expect(superUpdateGroupsSpy).toHaveBeenCalledExactlyOnceWith(
-					[{ data: { role: 'invite-role' }, keys: ['user-id-1'] }],
+					[{
+						data: { role: 'invite-role' },
+						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000041'],
+					}],
 					expect.anything(),
 				);
 
@@ -973,7 +979,7 @@ describe('Integration Tests', () => {
 
 				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
 					.mockResolvedValueOnce({
-						id: 'user-id-3',
+						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000042',
 						status: 'invited',
 						role: 'existing-role',
 					});
@@ -985,7 +991,7 @@ describe('Integration Tests', () => {
 						accountability: { role: 'inviter-role', admin: false },
 						action: 'update',
 						collection: 'directus_users',
-						primaryKeys: ['user-id-3'],
+						primaryKeys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000042'],
 					},
 					expect.anything(),
 				);
@@ -993,7 +999,10 @@ describe('Integration Tests', () => {
 				expect(superCreateOneSpy).not.toHaveBeenCalled();
 
 				expect(superUpdateGroupsSpy).toHaveBeenCalledExactlyOnceWith(
-					[{ data: { role: 'invite-role' }, keys: ['user-id-3'] }],
+					[{
+						data: { role: 'invite-role' },
+						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000042'],
+					}],
 					expect.anything(),
 				);
 

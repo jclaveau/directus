@@ -33,7 +33,8 @@ Feature: A role a user belongs to stays, a deleted one drops its presets
       |                          |     role: <held-role>              |
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
-      | 1       | directus_users | 0      | 0      | 0      | 0      |
+      | 1       | directus_users | 2      | 0      | 0      | 0      |
+      | 2       | directus_users | 0      | 0      | 0      | 0      |
 
   Scenario: a deleted role drops its preset, frees its child
     Given the rows of directus_roles:
@@ -65,5 +66,12 @@ Feature: A role a user belongs to stays, a deleted one drops its presets
       |   fields: id                           |                        |
       |   filter[bookmark][_eq]: deleted-<run> |                        |
     And on postgres the requests ran these statements:
-      | request | table          | select | insert | update | delete |
-      | 1       | directus_users | 0      | 0      | 0      | 0      |
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_access   | 4      | 0      | 0      | 0      |
+      | 1       | directus_activity | 0      | 1      | 0      | 0      |
+      | 1       | directus_presets  | 1      | 0      | 0      | 1      |
+      | 1       | directus_roles    | 4      | 0      | 1      | 1      |
+      | 1       | directus_users    | 5      | 0      | 0      | 0      |
+      | 2       | directus_users    | 0      | 0      | 0      | 0      |
+      | 3       | directus_users    | 0      | 0      | 0      | 0      |
+      | 4       | directus_users    | 0      | 0      | 0      | 0      |
