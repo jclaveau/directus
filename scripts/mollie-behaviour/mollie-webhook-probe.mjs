@@ -1329,20 +1329,13 @@ async function captureStep(componentsTab, stepName) {
 	return frameDescriptions;
 }
 
-// Mollie's documented test Visa, any future expiry; the field kind is read off
-// each input's name, id, placeholder, label and autocomplete.
-const testCardFields = [
-	{ fieldKind: 'cvc', fieldPattern: /cvc|cvv|verification|security|csc/i },
-	{ fieldKind: 'expiry', fieldPattern: /expir|exp-|exp\b|cc-exp|mm/i },
-	{ fieldKind: 'holder', fieldPattern: /holder|cc-name|name/i },
-	{ fieldKind: 'number', fieldPattern: /number|cc-number|card/i },
-];
-
+// Mollie's documented test Visa, any future expiry, keyed by the autocomplete
+// token the card form's inputs carry (run 45300056270 listed them).
 const testCardValues = {
-	cvc: '123',
-	expiry: '12/30',
-	holder: 'Scalabus Probe',
-	number: '4543474002249996',
+	'cc-number': '4543474002249996',
+	'cc-exp': '12/30',
+	'cc-csc': '123',
+	'cc-name': 'Scalabus Probe',
 };
 
 // The payment's way back: Mollie's test status screen inside the tab, in a
@@ -1479,41 +1472,18 @@ async function payThroughComponents(checkoutBrowser, clientAccessToken) {
 		const filledFields = [];
 
 		for (const componentFrame of componentsTab.frames().slice(1)) {
-			const frameInputs = componentFrame.locator('input:visible');
+			for (const [fieldToken, fieldValue] of Object.entries(testCardValues)) {
+				const cardInput = componentFrame
+					.locator(`input[autocomplete="${fieldToken}"]`)
+					.first();
 
-			const inputCount = await frameInputs.count();
-
-			for (let inputIndex = 0; inputIndex < inputCount; inputIndex++) {
-				const frameInput = frameInputs.nth(inputIndex);
-
-				const inputLabel = await frameInput.evaluate((inputField) => {
-					return [
-						inputField.name,
-						inputField.id,
-						inputField.placeholder,
-						inputField.getAttribute('aria-label'),
-						inputField.autocomplete,
-					].join(' ');
-				});
-
-				const matchedField = testCardFields.find((cardField) => {
-					return cardField.fieldPattern.test(inputLabel);
-				});
-
-				if (matchedField === undefined) {
+				if (await cardInput.count() === 0) {
 					continue;
 				}
 
-				await frameInput.click();
-
-				await frameInput.pressSequentially(
-					testCardValues[matchedField.fieldKind],
-					{ delay: 40 },
-				);
-
-				filledFields.push(
-					`${matchedField.fieldKind} <- ${JSON.stringify(inputLabel.trim())}`,
-				);
+				await cardInput.click();
+				await cardInput.pressSequentially(fieldValue, { delay: 40 });
+				filledFields.push(fieldToken);
 			}
 		}
 
