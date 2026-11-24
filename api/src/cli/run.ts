@@ -1,5 +1,6 @@
 import '../entry-guard.js';
 import { useEnv } from '@directus/env';
+import { dumpCoverageAtExit } from '../utils/dump-coverage.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { createCli } from './index.js';
 import { armDeadline } from './utils/arm-deadline.js';
@@ -27,6 +28,10 @@ if (command === 'cache' && subcommand === 'audit') {
 	useEnv()['CACHE_AUTO_FLUSH_ON_DEPLOY'] = false;
 	useEnv()['PRESSURE_LIMITER_ENABLED'] = false;
 }
+
+// A command ends in `process.exit`, past any shutdown hook: a coverage build
+// writes what the command ran there, as the server does on shutdown.
+process.on('exit', dumpCoverageAtExit);
 
 createCli()
 	.then((program) => program.parseAsync(process.argv))
