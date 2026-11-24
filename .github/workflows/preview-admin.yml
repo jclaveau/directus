@@ -386,14 +386,16 @@ jobs:
 
           # A run that ended no longer uses its webhooks, and a cancel or a failed
           # delete can leave them: drop each preview webhook whose run, named in
-          # its label, is over, or that is older than any preview.
+          # its label, is over. Age decides only when that run cannot be read: a
+          # dispatch's timeout_minutes can keep a preview up past 3 h.
           is_webhook_stale() {
-            local label_run=$1 label_epoch=$2
+            local label_run=$1 label_epoch=$2 run_status
             [[ "$label_epoch" =~ ^[0-9]+$ ]] || return 0
-            [ "$label_epoch" -lt "$STALE_BEFORE" ] && return 0
-            [ "$(curl -sS -H "Authorization: Bearer $GH_TOKEN" \
+            run_status=$(curl -sS -H "Authorization: Bearer $GH_TOKEN" \
               "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$label_run" \
-              | jq -r '.status // empty')" = completed ]
+              | jq -r '.status // empty')
+            [ -n "$run_status" ] || { [ "$label_epoch" -lt "$STALE_BEFORE" ]; return; }
+            [ "$run_status" = completed ]
           }
           curl -sS -u "$STRIPE_TEST_KEY:" \
             'https://api.stripe.com/v1/webhook_endpoints?limit=100' \
