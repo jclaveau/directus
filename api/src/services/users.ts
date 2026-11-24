@@ -28,6 +28,9 @@ import { validateRemainingAdminUsers } from '../permissions/modules/validate-rem
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 // eslint-disable-next-line max-len
 import { fetchGlobalAccessForRoles } from '../permissions/modules/fetch-global-access/lib/fetch-global-access-for-roles.js';
+import {
+	processPayload,
+} from '../permissions/modules/process-payload/process-payload.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
 import { getSecret } from '../utils/get-secret.js';
 import isUrlAllowed from '../utils/is-url-allowed.js';
@@ -494,13 +497,14 @@ export class UsersService extends ItemsService {
 
 	/**
 	 * An invite is a row of `directus_invites` per user, role and inviter: the
-	 * inviting admin, or null from a service naming none (an extension, a flow).
+	 * inviter, or null from a service naming none (an extension, a flow).
 	 * A re-invite by the same inviter replaces its own rows; one by another
 	 * inviter adds its own. No membership is written until the user accepts:
 	 * the roles wait in the invites, changing no permission and no cache.
 	 *
-	 * Inviting gives roles, so only an admin, or code, invites; no invite gives
-	 * a role reaching admin access.
+	 * Anyone allowed to create the invite rows invites, admin or not: the
+	 * permissions on `directus_invites` say which roles. No invite gives a role
+	 * reaching admin access.
 	 */
 	async inviteUser(
 		email: string | string[],
@@ -508,10 +512,6 @@ export class UsersService extends ItemsService {
 		url: string | null,
 		subject?: string | null,
 	): Promise<void> {
-		if (this.accountability && this.accountability.admin !== true) {
-			throw new ForbiddenError();
-		}
-
 		const opts: MutationOptions = {};
 
 		try {
@@ -556,6 +556,8 @@ export class UsersService extends ItemsService {
 					}).createOne({ email, status: 'invited' }, opts)
 					: user.id;
 
+				await this.validateInvitePermission(trx, invitedUser, invitedRoles);
+
 				if (opts.preMutationError) {
 					throw opts.preMutationError;
 				}
@@ -583,6 +585,31 @@ export class UsersService extends ItemsService {
 						logger.error(error, `Could not send user invitation mail`);
 					});
 			}
+		}
+	}
+
+	// The rows are written as code, past the guard refusing a non-admin's
+	// direct write: the inviter's permissions are checked here instead.
+	private async validateInvitePermission(
+		trx: Knex,
+		invitedUser: PrimaryKey,
+		invitedRoles: string[],
+	): Promise<void> {
+		if (!this.accountability || this.accountability.admin === true) {
+			return;
+		}
+
+		for (const role of invitedRoles) {
+			await processPayload(
+				{
+					accountability: this.accountability,
+					action: 'create',
+					collection: 'directus_invites',
+					payload: { user: invitedUser, role },
+					nested: [],
+				},
+				{ knex: trx, schema: this.schema },
+			);
 		}
 	}
 

@@ -15,6 +15,9 @@ import { clearSystemCache } from '../cache.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { getDatabaseClient } from '../database/index.js';
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+import {
+	processPayload,
+} from '../permissions/modules/process-payload/process-payload.js';
 // eslint-disable-next-line max-len
 import { fetchGlobalAccessForRoles } from '../permissions/modules/fetch-global-access/lib/fetch-global-access-for-roles.js';
 import emitter from '../emitter.js';
@@ -70,6 +73,17 @@ vi.mock(
 				return { admin: false, app: true };
 			}),
 		};
+	},
+);
+
+vi.mock(
+	'../permissions/modules/process-payload/process-payload.js',
+	async (importOriginal) => {
+		const { processPayload: realProcessPayload } = await importOriginal<
+			typeof import('../permissions/modules/process-payload/process-payload.js')
+		>();
+
+		return { processPayload: vi.fn(realProcessPayload) };
 	},
 );
 
@@ -898,9 +912,87 @@ describe('Integration Tests', () => {
 			});
 
 			it(oneLine`
-				refuses an invite from a user who is no admin, before the URL off
-				the allow list
+				checks a non-admin inviter's permission to create each invite row
 			`, async () => {
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce(undefined);
+
+				vi.mocked(processPayload).mockResolvedValueOnce({})
+					.mockResolvedValueOnce({});
+
+				const createManySpy = vi.spyOn(ItemsService.prototype, 'createMany')
+					.mockResolvedValue([]);
+
+				const inviterAccountability = {
+					user: 'inviter-id',
+					admin: false,
+					app: true,
+					ip: null,
+					memberRoles: [],
+					roles: ['inviter-role'],
+				};
+
+				await new UsersService({
+					knex: db,
+					schema,
+					accountability: inviterAccountability,
+				}).inviteUser(
+					'user@example.com',
+					['first-role', 'second-role', 'first-role'],
+					null,
+				);
+
+				expect(vi.mocked(processPayload).mock.calls).toEqual([
+					[
+						{
+							accountability: inviterAccountability,
+							action: 'create',
+							collection: 'directus_invites',
+							payload: { user: 'user-id-1', role: 'first-role' },
+							nested: [],
+						},
+						{ knex: expect.anything(), schema },
+					],
+					[
+						{
+							accountability: inviterAccountability,
+							action: 'create',
+							collection: 'directus_invites',
+							payload: { user: 'user-id-1', role: 'second-role' },
+							nested: [],
+						},
+						{ knex: expect.anything(), schema },
+					],
+				]);
+
+				expect(createManySpy).toHaveBeenCalledExactlyOnceWith(
+					[
+						{
+							user: 'user-id-1',
+							role: 'first-role',
+							user_created: 'inviter-id',
+						},
+						{
+							user: 'user-id-1',
+							role: 'second-role',
+							user_created: 'inviter-id',
+						},
+					],
+					{},
+				);
+			});
+
+			it(oneLine`
+				refuses an inviter not allowed to create the invite row, before the
+				URL off the allow list
+			`, async () => {
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce(undefined);
+
+				vi.mocked(processPayload).mockRejectedValueOnce(new ForbiddenError());
+
+				const createManySpy = vi.spyOn(ItemsService.prototype, 'createMany');
+
 				const promise = new UsersService({
 					knex: db,
 					schema,
@@ -925,8 +1017,7 @@ describe('Integration Tests', () => {
 					'You don\'t have permission to access this.',
 				);
 
-				expect(superCreateOneSpy).not.toBeCalled();
-				expect(tracker.history.all).toEqual([]);
+				expect(createManySpy).not.toBeCalled();
 				expect(mailService.send).not.toBeCalled();
 			});
 

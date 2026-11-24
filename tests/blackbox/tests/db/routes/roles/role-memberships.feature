@@ -8,8 +8,8 @@ Feature: A user holds several roles, each one a membership
   - A deleted role takes its memberships along, and suspends only the users
     it leaves with no role.
   - A role changes what its user may do: only an admin, or code, writes a
-    membership or an invite. A request of anyone else is refused, whatever
-    the permissions say.
+    membership. A request of anyone else is refused, whatever the permissions
+    say; `/users/invite` writes invites, never a membership.
   - An invitation is a row of `directus_invites` per inviter and role, shown
     by the user's `invites` field; a re-invite by the same inviter replaces
     its rows. No membership is written until the user accepts: accepting
@@ -330,7 +330,6 @@ Feature: A user holds several roles, each one a membership
       | <p-writer> | directus_role_members | create | *      |
       | <p-writer> | directus_role_members | update | *      |
       | <p-writer> | directus_role_members | delete | *      |
-      | <p-writer> | directus_invites      | create | *      |
     And the rows of directus_roles:
       | id      | name        |
       | <staff> | staff-<run> |
@@ -356,13 +355,6 @@ Feature: A user holds several roles, each one a membership
       |   email: new-<run>@example.com     |         You don't have permission     |
       |   roles:                           |         to access this.               |
       |     - role: <staff>                |                                       |
-      | as: writer-<run>                   | code: 403                             |+
-      | method: POST                       | body:                                 |
-      | path: /users/invite                |   errors:                             |
-      | payload:                           |     - message: >-                     |
-      |   email: invited-<run>@example.com |         You don't have permission     |
-      |   roles:                           |         to access this.               |
-      |     - <staff>                      |                                       |
       | method: GET                        | code: 200                             |+
       | path: /users                       | body:                                 |
       | query:                             |   data:                               |

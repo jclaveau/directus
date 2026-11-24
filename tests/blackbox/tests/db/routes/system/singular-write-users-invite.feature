@@ -10,8 +10,8 @@ Feature: A user is invited, re-invited and accepts the invitation
     row per role, read through the user's `invites` field; a `user_created`
     of null names no inviter. No membership is written until the user
     accepts: accepting turns the invites into memberships and deletes them.
-  - Only an admin, or code, invites, and no invite gives a role reaching
-    admin access.
+  - An inviter allowed to create the `directus_invites` rows invites, admin
+    or not, and no invite gives a role reaching admin access.
   - A request authenticates as the admin, unless it names the token it sends
     `as`. `<run>` stands for a value unique to the scenario, and any other
     `<name>` for a uuid of its own; met first in a response, it stands for
@@ -347,14 +347,49 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   filter[email][_eq]: >-          |                                          |
       |     child-<run>@example.com       |                                          |
 
-  Scenario: an invitation from a user who is no admin is refused, whatever their policy
+  Scenario: a user who is no admin invites with their invite permission
+    Given the rows of directus_policies:
+      | id          | name          | app_access | admin_access |
+      | <p-inviter> | inviter-<run> | true       | false        |
+    And the rows of directus_permissions:
+      | policy      | collection       | action | fields |
+      | <p-inviter> | directus_users   | create | *      |
+      | <p-inviter> | directus_invites | create | *      |
+    And the rows of directus_roles:
+      | id          | name       |
+      | <some-role> | some-<run> |
+    And the rows of directus_users:
+      | id        | email                     | token         |
+      | <inviter> | inviter-<run>@example.com | inviter-<run> |
+    And the rows of directus_access:
+      | id       | user      | policy      |
+      | <access> | <inviter> | <p-inviter> |
+    Then these requests get these responses:
+      | request                                 | response                     |
+      | as: inviter-<run>                       | code: 204                    |+
+      | method: POST                            |                              |
+      | path: /users/invite                     |                              |
+      | payload:                                |                              |
+      |   email: invited-<run>@example.com      |                              |
+      |   roles:                                |                              |
+      |     - <some-role>                       |                              |
+      | method: GET                             | code: 200                    |+
+      | path: /users                            | body:                        |
+      | query:                                  |   data:                      |
+      |   fields: status,roles,invites.*        |     - status: invited        |
+      |   filter[email][_eq]: >-                |       roles: []              |
+      |     invited-<run>@example.com           |       invites:               |
+      |                                         |         - role: <some-role>  |
+      |                                         |           user_created: >-   |
+      |                                         |             <inviter>        |
+
+  Scenario: an invitation from a user not allowed to create its invite is refused
     Given the rows of directus_policies:
       | id         | name          | app_access | admin_access |
       | <p-writer> | inviter-<run> | true       | false        |
     And the rows of directus_permissions:
-      | policy     | collection       | action | fields |
-      | <p-writer> | directus_users   | create | *      |
-      | <p-writer> | directus_invites | create | *      |
+      | policy     | collection     | action | fields |
+      | <p-writer> | directus_users | create | *      |
     And the rows of directus_roles:
       | id          | name       |
       | <some-role> | some-<run> |
