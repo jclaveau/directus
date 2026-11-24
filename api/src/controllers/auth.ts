@@ -85,11 +85,11 @@ function getCurrentRefreshToken(req: Request, mode: AuthenticationMode): string 
 	}
 
 	if (mode === 'cookie') {
-		return req.cookies[env['REFRESH_TOKEN_COOKIE_NAME']];
+		return req.cookies[env['REFRESH_TOKEN_COOKIE_NAME'] as string];
 	}
 
 	if (mode === 'session') {
-		const token = req.cookies[env['SESSION_COOKIE_NAME']];
+		const token = req.cookies[env['SESSION_COOKIE_NAME'] as string];
 
 		if (isDirectusJWT(token)) {
 			const payload = verifyAccessJWT(token, getSecret());
@@ -142,7 +142,7 @@ router.post(
 		}
 
 		if (mode === 'session') {
-			res.cookie(env['SESSION_COOKIE_NAME'], accessToken, SESSION_COOKIE_OPTIONS);
+			res.cookie(env['SESSION_COOKIE_NAME'] as string, accessToken, SESSION_COOKIE_OPTIONS);
 		}
 
 		res.locals['payload'] = { data: payload };
@@ -178,12 +178,12 @@ router.post(
 
 		await authenticationService.logout(currentRefreshToken);
 
-		if (req.cookies[env['REFRESH_TOKEN_COOKIE_NAME']]) {
-			res.clearCookie(env['REFRESH_TOKEN_COOKIE_NAME'], REFRESH_COOKIE_OPTIONS);
+		if (req.cookies[env['REFRESH_TOKEN_COOKIE_NAME'] as string]) {
+			res.clearCookie(env['REFRESH_TOKEN_COOKIE_NAME'] as string, REFRESH_COOKIE_OPTIONS);
 		}
 
-		if (req.cookies[env['SESSION_COOKIE_NAME']]) {
-			res.clearCookie(env['SESSION_COOKIE_NAME'], SESSION_COOKIE_OPTIONS);
+		if (req.cookies[env['SESSION_COOKIE_NAME'] as string]) {
+			res.clearCookie(env['SESSION_COOKIE_NAME'] as string, SESSION_COOKIE_OPTIONS);
 		}
 
 		return next();
