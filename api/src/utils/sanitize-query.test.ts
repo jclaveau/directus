@@ -401,6 +401,18 @@ describe('deep', () => {
 
 		expect(sanitizedQuery.deep).toEqual({ deep: { relational_field_a: { _limit: 100, _sort: ['name'] } } });
 	});
+
+	test('refuses "$CURRENT_ROLE" in the filter of a nested level', async () => {
+		const deep = {
+			author: { articles: { _filter: { role: { _eq: '$CURRENT_ROLE' } } } },
+		};
+
+		await expect(sanitizeQuery({ deep }, null as any)).rejects.toMatchObject({
+			message: 'Invalid query. The filter uses "$CURRENT_ROLE": "$CURRENT_ROLE"'
+				+ ' was removed, a user can hold several roles: use'
+				+ ' "$CURRENT_MEMBER_ROLES" with "_in" or "_nin".',
+		});
+	});
 });
 
 describe('alias', () => {
