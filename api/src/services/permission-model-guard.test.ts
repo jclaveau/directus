@@ -84,19 +84,42 @@ describe('the permission model guard', () => {
 			.resolves.toBeUndefined();
 	});
 
+	it('refuses a non-admin creating a role with a parent', async () => {
+		await expect(guardedService(RolesService, nonAdmin)['validateRowsToCreate'](
+			[{ parent: 'role-id-2' }],
+			knex.default({ client: MockClient }),
+		)).rejects.toThrow(new ForbiddenError());
+	});
+
+	it('lets a non-admin create a role with no parent', async () => {
+		await expect(guardedService(RolesService, nonAdmin)['validateRowsToCreate'](
+			[{ name: 'renamed' }, { parent: null }],
+			knex.default({ client: MockClient }),
+		)).resolves.toBeUndefined();
+	});
+
+	it('lets an admin create a role with a parent', async () => {
+		await expect(guardedService(RolesService, admin)['validateRowsToCreate'](
+			[{ parent: 'role-id-2' }],
+			knex.default({ client: MockClient }),
+		)).resolves.toBeUndefined();
+	});
+
+	it('refuses a non-admin creating a user with a role', async () => {
+		await expect(guardedService(UsersService, nonAdmin).createMany([
+			{ email: 'made@example.com' },
+			{ email: 'given@example.com', role: 'role-id-2' },
+		])).rejects.toThrow(new ForbiddenError());
+	});
+
 	describe.each([
 		['roles', RolesService, 'parent'],
 		['users', UsersService, 'role'],
 	])('on %s', (_collectionName, ServiceClass, modelField) => {
 		const database = knex.default({ client: MockClient });
 
-		it(`refuses a non-admin a ${modelField} on create or update`, async () => {
+		it(`refuses a non-admin updating a ${modelField}`, async () => {
 			const service = guardedService(ServiceClass, nonAdmin);
-
-			await expect(service['validateRowsToCreate'](
-				[{ [modelField]: 'role-id-2' }],
-				database,
-			)).rejects.toThrow(new ForbiddenError());
 
 			await expect(service['validateGroupsToUpdate'](
 				[{ keys: ['key-1'], data: { [modelField]: null } }],
@@ -104,13 +127,8 @@ describe('the permission model guard', () => {
 			)).rejects.toThrow(new ForbiddenError());
 		});
 
-		it(`lets a non-admin write rows with no ${modelField}`, async () => {
+		it(`lets a non-admin update rows with no ${modelField}`, async () => {
 			const service = guardedService(ServiceClass, nonAdmin);
-
-			await expect(service['validateRowsToCreate'](
-				[{ name: 'renamed' }, { [modelField]: null }],
-				database,
-			)).resolves.toBeUndefined();
 
 			await expect(service['validateGroupsToUpdate'](
 				[{ keys: ['key-1'], data: { name: 'renamed' } }],
@@ -118,13 +136,8 @@ describe('the permission model guard', () => {
 			)).resolves.toBeUndefined();
 		});
 
-		it(`lets an admin set a ${modelField}`, async () => {
+		it(`lets an admin update a ${modelField}`, async () => {
 			const service = guardedService(ServiceClass, admin);
-
-			await expect(service['validateRowsToCreate'](
-				[{ [modelField]: 'role-id-2' }],
-				database,
-			)).resolves.toBeUndefined();
 
 			await expect(service['validateGroupsToUpdate'](
 				[{ keys: ['key-1'], data: { [modelField]: 'role-id-2' } }],

@@ -229,6 +229,16 @@ export class UsersService extends ItemsService {
 			opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 		}
 
+		// A user created with no role is granted nothing. Checked here: the
+		// ItemsService below never calls this service's hooks.
+		const setsRole = data.some((payload) => {
+			return payload['role'] !== null && payload['role'] !== undefined;
+		});
+
+		if (setsRole) {
+			refusePermissionModelWrite(this.accountability);
+		}
+
 		// Use generic ItemsService to avoid calling `UserService.createOne` to avoid additional work of validating emails,
 		// as this requires one query per email if done in `createOne`
 		const itemsService = new ItemsService(this.collection, {
@@ -321,15 +331,6 @@ export class UsersService extends ItemsService {
 		}
 
 		return await super.updateGroups(groups, opts);
-	}
-
-	// A user created with no role is granted nothing.
-	protected override async validateRowsToCreate(
-		rows: Partial<Item>[],
-	): Promise<void> {
-		if (rows.some((row) => row['role'] !== null && row['role'] !== undefined)) {
-			refusePermissionModelWrite(this.accountability);
-		}
 	}
 
 	protected override async validateGroupsToUpdate(
