@@ -11,6 +11,7 @@ describe('bundle api', () => {
 			'20261113A-show-subscription-collections',
 			'20261121A-add-checkout-columns',
 			'20261122A-create-invites-table',
+			'20261123A-create-invoices-table',
 			'subscriptions-cli',
 			'subscriptions-sync',
 			'subscriptions',
