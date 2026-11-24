@@ -437,7 +437,7 @@ jobs:
             exit 1
           fi
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET"
-          echo "PREVIEW_STRIPE_WEBHOOK_ID=$(jq -r .id <<<"$STRIPE_ANSWER")" >> "$GITHUB_ENV"
+          echo "stripe_webhook_id=$(jq -r .id <<<"$STRIPE_ANSWER")" >> "$GITHUB_OUTPUT"
 
           # Mollie resolves the URL before it takes it, and a fresh tunnel's
           # hostname takes a while to reach every resolver: wait for 1.1.1.1 to
@@ -478,27 +478,28 @@ jobs:
             exit 1
           fi
           echo "::add-mask::$MOLLIE_WEBHOOK_SECRET"
-          echo "PREVIEW_MOLLIE_WEBHOOK_ID=$(jq -r .id <<<"$MOLLIE_ANSWER")" >> "$GITHUB_ENV"
+          echo "mollie_webhook_id=$(jq -r .id <<<"$MOLLIE_ANSWER")" >> "$GITHUB_OUTPUT"
 
           {
             echo "PREVIEW_STRIPE_WEBHOOK_SECRET=$STRIPE_WEBHOOK_SECRET"
             echo "PREVIEW_MOLLIE_WEBHOOK_SECRET=$MOLLIE_WEBHOOK_SECRET"
-            echo "PREVIEW_REAL_PROVIDERS_READY=true"
           } >> "$GITHUB_ENV"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
           echo "real Stripe and Mollie test webhooks created for this tunnel"
 
       - name: Bootstrap + start Directus
         env:
-          # Empty unless the step above made this tunnel's webhooks.
+          # Empty unless the step above made this tunnel's webhooks. A step output,
+          # not a $GITHUB_ENV value: the PR head's install can write the latter.
           PREVIEW_STRIPE_SECRET_KEY: >-
-            ${{ env.PREVIEW_REAL_PROVIDERS_READY == 'true'
+            ${{ steps.real-providers.outputs.ready == 'true'
               && secrets.SUBSCRIPTIONS_STRIPE_SECRET_KEY || '' }}
           PREVIEW_MOLLIE_API_KEY: >-
-            ${{ env.PREVIEW_REAL_PROVIDERS_READY == 'true'
+            ${{ steps.real-providers.outputs.ready == 'true'
               && secrets.SUBSCRIPTIONS_MOLLIE_API_KEY || '' }}
           # Public by design (Stripe.js reads it in the browser); empty → hosted checkout.
           PREVIEW_STRIPE_PUBLISHABLE_KEY: >-
-            ${{ env.PREVIEW_REAL_PROVIDERS_READY == 'true'
+            ${{ steps.real-providers.outputs.ready == 'true'
               && secrets.SUBSCRIPTIONS_STRIPE_PUBLISHABLE_KEY || '' }}
         run: |
           # Not masked on purpose: it shows in the run summary for manual login. On a public
@@ -866,9 +867,12 @@ jobs:
       - name: Delete the preview's real provider webhooks
         if: >-
           always()
-          && (env.PREVIEW_STRIPE_WEBHOOK_ID != '' || env.PREVIEW_MOLLIE_WEBHOOK_ID != '')
+          && (steps.real-providers.outputs.stripe_webhook_id != ''
+            || steps.real-providers.outputs.mollie_webhook_id != '')
         continue-on-error: true
         env:
+          PREVIEW_STRIPE_WEBHOOK_ID: ${{ steps.real-providers.outputs.stripe_webhook_id }}
+          PREVIEW_MOLLIE_WEBHOOK_ID: ${{ steps.real-providers.outputs.mollie_webhook_id }}
           STRIPE_TEST_KEY: ${{ secrets.SUBSCRIPTIONS_STRIPE_SECRET_KEY }}
           MOLLIE_ACCESS_TOKEN: ${{ secrets.MOLLIE_PROBE_ACCESS_TOKEN }}
         run: |
