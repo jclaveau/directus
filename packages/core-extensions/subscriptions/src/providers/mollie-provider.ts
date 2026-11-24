@@ -103,15 +103,19 @@ export function createMollieProvider(
 				{ customerId, subscriptionId },
 			);
 
+			const currentPeriodEnd = await readPeriodEnd(
+				mollieClient,
+				mollieSubscription,
+			);
+
 			return {
 				subscriptionId,
 				customerId,
-				status: NORMALIZED_STATUSES[mollieSubscription.status]
-					?? mollieSubscription.status,
-				currentPeriodEnd: await readPeriodEnd(
-					mollieClient,
-					mollieSubscription,
+				status: normalizeMollieStatus(
+					mollieSubscription.status,
+					currentPeriodEnd,
 				),
+				currentPeriodEnd,
 				cancelAtPeriodEnd: mollieSubscription.status === 'canceled',
 				directusSubscription: readDirectusSubscription(
 					mollieSubscription.metadata,
@@ -330,6 +334,24 @@ export function createMollieProvider(
 			return providerInvoices;
 		},
 	};
+}
+
+/**
+ * Mollie cancels at once, where Stripe cancels at the period end: a canceled
+ * subscription whose paid period runs on reads `active`, as Stripe's does. The
+ * reconcile reads it again past that end, then `canceled`.
+ */
+function normalizeMollieStatus(
+	mollieStatus: string,
+	currentPeriodEnd: Date | null,
+): string {
+	if (mollieStatus === 'canceled'
+		&& currentPeriodEnd !== null
+		&& currentPeriodEnd > new Date()) {
+		return 'active';
+	}
+
+	return NORMALIZED_STATUSES[mollieStatus] ?? mollieStatus;
 }
 
 /** Mollie has no invoice page for a payment: the URLs stay null. */

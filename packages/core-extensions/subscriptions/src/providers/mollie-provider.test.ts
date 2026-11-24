@@ -1,6 +1,6 @@
 import { oneLine } from '@directus/utils';
 import { MollieApiError, type MollieClient } from '@mollie/api-client';
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
 	AbandonedCheckoutError,
 	MissingProviderSubscriptionError,
@@ -165,6 +165,59 @@ describe('verifyWebhook', () => {
 });
 
 describe('fetchSubscription', () => {
+	beforeEach(() => {
+		vi.useFakeTimers({
+			now: new Date('2026-11-20T00:00:00Z'),
+			toFake: ['Date'],
+		});
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	test.each([
+		['2027-02-27T00:00:00Z', 'active'],
+		['2027-02-28T10:00:00Z', 'canceled'],
+	])(
+		'reads a subscription canceled on 2027-02-28 as of %s as %s',
+		async (readAt, storedStatus) => {
+			vi.setSystemTime(new Date(readAt));
+
+			await expect(createMollieProvider({
+				customerSubscriptions: {
+					get: vi.fn().mockResolvedValue({
+						id: 'sub_1',
+						customerId: 'cst_1',
+						status: 'canceled',
+						amount: { currency: 'EUR', value: '10.00' },
+						interval: '1 month',
+						startDate: '2027-02-28',
+						metadata: { directus_subscription: '1' },
+					}),
+				},
+				subscriptionPayments: {
+					iterate: vi.fn().mockReturnValue({
+						find: vi.fn().mockResolvedValue(undefined),
+					}),
+				},
+			} as unknown as MollieClient)
+				.fetchSubscription('cst_1/sub_1')).resolves.toEqual({
+				subscriptionId: 'sub_1',
+				customerId: 'cst_1',
+				status: storedStatus,
+				currentPeriodEnd: new Date('2027-02-28T00:00:00Z'),
+				cancelAtPeriodEnd: true,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			});
+		},
+	);
+
 	test('follows a payment id to its subscription', async () => {
 		const mollieClient = {
 			payments: {
@@ -339,7 +392,7 @@ describe('fetchSubscription', () => {
 			.fetchSubscription('cst_1/sub_1')).resolves.toEqual({
 			subscriptionId: 'sub_1',
 			customerId: 'cst_1',
-			status: 'canceled',
+			status: 'active',
 			currentPeriodEnd: new Date('2027-02-28T10:00:00Z'),
 			cancelAtPeriodEnd: true,
 			directusSubscription: 1,
@@ -579,7 +632,7 @@ describe('fetchSubscription', () => {
 			.fetchSubscription('cst_1/sub_1')).resolves.toEqual({
 			subscriptionId: 'sub_1',
 			customerId: 'cst_1',
-			status: 'canceled',
+			status: 'active',
 			currentPeriodEnd: new Date('2026-12-23T00:00:00Z'),
 			cancelAtPeriodEnd: true,
 			directusSubscription: 1,
