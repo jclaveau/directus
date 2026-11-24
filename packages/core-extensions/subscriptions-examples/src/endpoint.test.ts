@@ -107,6 +107,7 @@ async function listenOnFreePort(listeningServer: http.Server): Promise<number> {
 
 async function startExamples(env: Record<string, unknown>): Promise<void> {
 	const examplesRouter = express.Router();
+
 	const examplesHandler = subscriptionsExamplesEndpoint
 		.config as unknown as EndpointHandler;
 
@@ -418,6 +419,7 @@ describe('subscriptionsExamplesEndpoint', () => {
 describe('subscriptionsExamplesEndpoint without the fake providers', () => {
 	test('registers no route', () => {
 		const examplesRouter = express.Router();
+
 		const examplesHandler = subscriptionsExamplesEndpoint
 			.config as unknown as EndpointHandler;
 
