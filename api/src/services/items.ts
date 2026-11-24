@@ -5196,8 +5196,7 @@ implements AbstractService<Item> {
 				);
 
 				const rewrittenScopedCacheSnapshot = await collectionScopedCache
-					.snapshot(onDeleteSnapshot.rewrittenKeys)
-					.catch(() => null);
+					.snapshot(onDeleteSnapshot.rewrittenKeys);
 
 				await collectionScopedCache.purge(
 					scopedCacheMutatedFingerprints(
