@@ -10,7 +10,8 @@ vi.mock('fs-extra');
 const noop = async () => {};
 
 beforeEach(() => {
-	vi.mocked(useEnv).mockReturnValue({ MIGRATIONS_PATH: '/custom-migrations' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ MIGRATIONS_PATH: '/custom-migrations' });
 
 	vi.mocked(fse.pathExists).mockResolvedValue(true as never);
 

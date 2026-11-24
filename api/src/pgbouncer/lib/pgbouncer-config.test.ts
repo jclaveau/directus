@@ -46,37 +46,40 @@ function registryEnv(overrides: Record<string, unknown> = {}) {
 }
 
 test('The report is served only where it was turned on', () => {
-	vi.mocked(useEnv).mockReturnValue({ PGBOUNCER_REPORT_ENABLED: true });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PGBOUNCER_REPORT_ENABLED: true });
 	expect(pgbouncerReportEnabled()).toBe(true);
 
-	vi.mocked(useEnv).mockReturnValue({ PGBOUNCER_REPORT_ENABLED: false });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PGBOUNCER_REPORT_ENABLED: false });
 	expect(pgbouncerReportEnabled()).toBe(false);
 
 	// Absent is off: a deployment without a pooler gets no page by default.
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 	expect(pgbouncerReportEnabled()).toBe(false);
 });
 
 test('Configured connection names are read and trimmed', () => {
-	vi.mocked(useEnv)
+	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ PGBOUNCER_CONNECTIONS: [' free ', 'premium', ''] });
 
 	expect(pgbouncerConnectionNames()).toEqual(['free', 'premium']);
 
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 	expect(pgbouncerConnectionNames()).toEqual([]);
 });
 
 test('The query timeout falls back when unset or unparseable', () => {
-	vi.mocked(useEnv).mockReturnValue({ PGBOUNCER_QUERY_TIMEOUT: '5s' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PGBOUNCER_QUERY_TIMEOUT: '5s' });
 	expect(pgbouncerQueryTimeoutMs()).toBe(5000);
 
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 	expect(pgbouncerQueryTimeoutMs()).toBe(2000);
 });
 
 test('Connections sharing one pooler fold into a single instance', () => {
-	vi.mocked(useEnv).mockReturnValue(registryEnv());
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(registryEnv());
 
 	const endpoints = resolvePgBouncerEndpoints();
 
@@ -94,7 +97,7 @@ test('Connections sharing one pooler fold into a single instance', () => {
 });
 
 test('Admin credentials default to the connection\'s own', () => {
-	vi.mocked(useEnv).mockReturnValue(registryEnv());
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(registryEnv());
 
 	expect(resolvePgBouncerEndpoints()[0]).toMatchObject({
 		database: 'pgbouncer',
@@ -104,7 +107,7 @@ test('Admin credentials default to the connection\'s own', () => {
 });
 
 test('Admin credentials are overridable per connection', () => {
-	vi.mocked(useEnv).mockReturnValue(registryEnv({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(registryEnv({
 		PGBOUNCER_FREE_ADMIN_USER: 'stats',
 		PGBOUNCER_FREE_ADMIN_PASSWORD: 'stats-secret',
 		PGBOUNCER_FREE_ADMIN_DATABASE: 'admin',
@@ -118,7 +121,7 @@ test('Admin credentials are overridable per connection', () => {
 });
 
 test('Each member of an HA fleet is read as its own instance', () => {
-	vi.mocked(useEnv).mockReturnValue(registryEnv({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(registryEnv({
 		PGBOUNCER_CONNECTIONS: ['free'],
 		PGBOUNCER_FREE_ADMIN_HOSTS: ['pgb1:6432', 'pgb2:7432', 'pgb3'],
 	}));
@@ -137,7 +140,7 @@ test('Each member of an HA fleet is read as its own instance', () => {
 });
 
 test('The base connection can be the one behind the pooler', () => {
-	vi.mocked(useEnv).mockReturnValue(registryEnv({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(registryEnv({
 		DB_HOST: 'pgbouncer',
 		DB_PORT: 6432,
 		PGBOUNCER_CONNECTIONS: ['base'],
@@ -152,13 +155,13 @@ test('The base connection can be the one behind the pooler', () => {
 });
 
 test('An unknown or non-Postgres connection fails at boot', () => {
-	vi.mocked(useEnv)
+	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue(registryEnv({ PGBOUNCER_CONNECTIONS: ['analytics'] }));
 
 	expect(() => assertPgBouncerConnections())
 		.toThrowError(/"analytics", which is not a configured DB connection/);
 
-	vi.mocked(useEnv).mockReturnValue(registryEnv({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(registryEnv({
 		DB_CONNECTIONS: ['free', 'premium', 'reports'],
 		DB_CONNECTION_REPORTS_CLIENT: 'mysql',
 		PGBOUNCER_CONNECTIONS: ['reports'],
@@ -169,13 +172,13 @@ test('An unknown or non-Postgres connection fails at boot', () => {
 });
 
 test('A registry the report covers passes the boot check', () => {
-	vi.mocked(useEnv).mockReturnValue(registryEnv());
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(registryEnv());
 
 	expect(() => assertPgBouncerConnections()).not.toThrow();
 });
 
 test('A request asks for the parts it will show, and nothing else', () => {
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 
 	// The connection lists are the expensive halves, so they are opt-in.
 	expect(requestedPgBouncerDetails(undefined)).toEqual([

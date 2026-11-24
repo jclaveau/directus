@@ -67,7 +67,7 @@ beforeEach(() => {
 
 	mockProjectId = 'test-project-id';
 
-	vi.mocked(useEnv).mockReturnValue(mockEnv);
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(mockEnv);
 	vi.mocked(getDatabase).mockReturnValue(mockDb);
 
 	vi.mocked(getItemCount).mockResolvedValue({});

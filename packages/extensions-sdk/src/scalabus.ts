@@ -4,6 +4,7 @@ export {
 	defineBundleApp,
 	defineDisplay,
 	defineEndpoint,
+	defineEnv,
 	defineHook,
 	defineInterface,
 	defineLayout,
@@ -19,6 +20,9 @@ export type {
 	BundleApiEntry,
 	BundleAppEntry,
 	BundleEntries,
+	ExtensionEnv,
+	ExtensionEnvHelpers,
 	MigrationConfig,
 	MigrationPhase,
+	WithDeclaredEnv,
 } from '@directus/extensions/scalabus';

@@ -153,7 +153,7 @@ export function createSAMLAuthRouter(providerName: string) { // bb-out-of-scope:
 			const { context } = sp.createLogoutRequest(idp, 'redirect', req.body);
 
 			const authService = new AuthenticationService({ accountability: req.accountability, schema: req.schema });
-			const sessionCookieName = env['SESSION_COOKIE_NAME'] as string;
+			const sessionCookieName = env['SESSION_COOKIE_NAME'];
 
 			if (req.cookies[sessionCookieName]) {
 				await authService.logout(req.cookies[sessionCookieName]);

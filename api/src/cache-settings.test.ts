@@ -50,7 +50,7 @@ vi.mock('./processes/lib/shared-settings.js', async (importOriginal) => {
 });
 
 beforeEach(async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: true });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: true });
 	vi.mocked(useLogger).mockReturnValue({ warn: vi.fn(), error: vi.fn() } as never);
 	vi.mocked(readSharedSettings).mockResolvedValue(null);
 
@@ -74,7 +74,7 @@ test('switches serving off over an environment that enables it', async () => {
 });
 
 test('switches serving on over an environment that disables it', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 	vi.mocked(readSharedSettings).mockResolvedValue({ response: true });
 
 	await refreshCacheSettings();
@@ -89,7 +89,7 @@ test.each([
 	[null, { CACHE_ENABLED: true }, true],
 	[null, {}, false],
 ])('reads response from %o over %o as %s', async (stored, env, serving) => {
-	vi.mocked(useEnv).mockReturnValue(env);
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(env);
 	vi.mocked(readSharedSettings).mockResolvedValue(stored);
 
 	await refreshCacheSettings();
@@ -290,7 +290,7 @@ test.each([
 });
 
 test('answers a field from the layer over the fallback', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		CACHE_AUDIT_LIMIT: 250,
 		CACHE_AUDIT_MAX_DURATION: '10m',
 	});
@@ -304,7 +304,7 @@ test('answers a field from the layer over the fallback', async () => {
 });
 
 test('keeps the usable fields of a row written around the guard', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_AUDIT_LIMIT: 250 });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_AUDIT_LIMIT: 250 });
 
 	vi.mocked(readSharedSettings).mockResolvedValue({
 		audit_limit: -1,
@@ -319,7 +319,7 @@ test('keeps the usable fields of a row written around the guard', async () => {
 });
 
 test('resolves every field against the environment', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		CACHE_ENABLED: false,
 		CACHE_VALUE_MAX_SIZE: false,
 		CACHE_STATS_MAX_BYTES: '2gb',
@@ -357,7 +357,7 @@ test('resolves every field against the environment', () => {
 // them: the environment is held to the rule the layer is, and a deployment
 // carrying one fails before it listens.
 test('ends the boot on a variable its rule refuses', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		CACHE_SCOPED_INDEX_SCAN_COUNT: 1000,
 		CACHE_SCOPED_INDEX_TTL_FACTOR: 0.5,
 	});
@@ -375,9 +375,10 @@ test('ends the boot on a variable its rule refuses', () => {
 	);
 });
 
-// TYPE_MAP types the variable a string, so the environment's `false` is "false".
+// Declared a string, so the environment's `false` is "false".
 test('reads a spelled-out false stats budget as no budget, and boots on it', () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_STATS_MAX_BYTES: 'false' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ CACHE_STATS_MAX_BYTES: 'false' });
 
 	const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
 		throw new Error('exited');
@@ -392,7 +393,7 @@ test('reads a spelled-out false stats budget as no budget, and boots on it', () 
 });
 
 test('boots on the variables it is given, and on none of the optional ones', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		CACHE_ENABLED: true,
 		CACHE_VALUE_MAX_SIZE: 1048576,
 		CACHE_SCOPED_INDEX_SCAN_COUNT: 1000,
@@ -447,7 +448,8 @@ test(oneLine`
 });
 
 test('keeps the response tier where the layer switched serving off', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false, CACHE_STORE: 'redis' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ CACHE_ENABLED: false, CACHE_STORE: 'redis' });
 	vi.mocked(readSharedSettings).mockResolvedValue({ response: false });
 
 	await refreshCacheSettings();
@@ -456,7 +458,7 @@ test('keeps the response tier where the layer switched serving off', async () =>
 });
 
 test('holds no response tier where nothing enables it', () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 
 	expect(responseCacheWanted()).toBe(false);
 });
@@ -465,7 +467,8 @@ test(oneLine`
 	holds no response tier on a memory store where neither the environment nor
 	the layer enables it
 `, async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false, CACHE_STORE: 'memory' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ CACHE_ENABLED: false, CACHE_STORE: 'memory' });
 	vi.mocked(readSharedSettings).mockResolvedValue({ response: false });
 
 	await refreshCacheSettings();
@@ -474,7 +477,7 @@ test(oneLine`
 });
 
 test('holds a response tier where only the layer enables it', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 	vi.mocked(readSharedSettings).mockResolvedValue({ response: true });
 
 	await refreshCacheSettings();
@@ -488,7 +491,7 @@ test.each([
 	[{ CACHE_ENABLED: true, CACHE_STORE: 'memory' }, true],
 	[{ CACHE_RESPONSE: false, CACHE_ENABLED: true, CACHE_STORE: 'redis' }, true],
 ])('holds a response tier over %o: %s', (env, wanted) => {
-	vi.mocked(useEnv).mockReturnValue(env);
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(env);
 
 	expect(responseCacheWanted()).toBe(wanted);
 });
@@ -509,7 +512,7 @@ test('leaves the environment in charge when the column is unreadable', async () 
 });
 
 test('clears the response cache before switching it on', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 
 	await flushBeforeEnabling(
 		{ cache_settings: { response: true } },
@@ -521,7 +524,7 @@ test('clears the response cache before switching it on', async () => {
 });
 
 test('answers whether it cleared, so its caller knows to check again', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 
 	await expect(flushBeforeEnabling(
 		{ cache_settings: { response: true } },
@@ -541,7 +544,7 @@ test('answers whether it cleared, so its caller knows to check again', async () 
 });
 
 test('clears it from a document handed over as text', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 
 	await flushBeforeEnabling(
 		{ cache_settings: '{"response":true}' },
@@ -563,7 +566,8 @@ test('clears nothing where the environment enables the cache', async () => {
 });
 
 test('clears nothing where CACHE_RESPONSE enables the cache', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_RESPONSE: true, CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ CACHE_RESPONSE: true, CACHE_ENABLED: false });
 
 	await flushBeforeEnabling(
 		{ cache_settings: { response: true } },
@@ -574,7 +578,8 @@ test('clears nothing where CACHE_RESPONSE enables the cache', async () => {
 });
 
 test('clears where CACHE_RESPONSE disables what CACHE_ENABLED enables', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_RESPONSE: false, CACHE_ENABLED: true });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ CACHE_RESPONSE: false, CACHE_ENABLED: true });
 
 	await flushBeforeEnabling(
 		{ cache_settings: { response: true } },
@@ -585,7 +590,7 @@ test('clears where CACHE_RESPONSE disables what CACHE_ENABLED enables', async ()
 });
 
 test('clears nothing where the layer already enables it', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 	vi.mocked(readSharedSettings).mockResolvedValue({ response: true });
 	await refreshCacheSettings();
 
@@ -598,7 +603,7 @@ test('clears nothing where the layer already enables it', async () => {
 });
 
 test('clears nothing for a write switching the cache off', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 
 	await flushBeforeEnabling(
 		{ cache_settings: { response: false } },
@@ -609,7 +614,7 @@ test('clears nothing for a write switching the cache off', async () => {
 });
 
 test('clears nothing for a write leaving the column alone', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 
 	await flushBeforeEnabling(
 		{ project_name: 'planner' },
@@ -620,7 +625,7 @@ test('clears nothing for a write leaving the column alone', async () => {
 });
 
 test('clears nothing for a write the guard refuses', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 
 	await expect(flushBeforeEnabling(
 		{ cache_settings: { response: true, ttl: '1h' } },
@@ -632,7 +637,7 @@ test('clears nothing for a write the guard refuses', async () => {
 });
 
 test('refuses the write when the clear is refused', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 
 	vi.mocked(clearCacheTargets).mockRejectedValue(
 		new Error('Cache clear refused by response'),
@@ -647,7 +652,7 @@ test('refuses the write when the clear is refused', async () => {
 
 // This node may have missed the write that switched serving off.
 test('clears where the stored row is off though this node reads it on', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 	vi.mocked(readSharedSettings).mockResolvedValue({ response: true });
 	await refreshCacheSettings();
 	vi.mocked(readSharedSettings).mockResolvedValue({ response: false });
@@ -662,7 +667,7 @@ test('clears where the stored row is off though this node reads it on', async ()
 
 // Serving is already on elsewhere, and this node has not heard of it yet.
 test('clears nothing where the stored row is already on', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 	vi.mocked(readSharedSettings).mockResolvedValue({ response: true });
 
 	await flushBeforeEnabling(
@@ -677,7 +682,7 @@ test('clears nothing where the stored row is already on', async () => {
 // after this filter, and switching on without the clear would serve what the
 // period the tier was off left behind.
 test('refuses a switch-on from a caller who is not an admin', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 
 	await expect(flushBeforeEnabling(
 		{ cache_settings: { response: true } },
@@ -692,7 +697,7 @@ test('refuses a switch-on from a caller who is not an admin', async () => {
 // The service clears before it opens the transaction, and the write inside it
 // fires this filter again.
 test('clears nothing for a write that was cleared ahead', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 	const settingsTrx = {} as never;
 	markEnablingFlushed(settingsTrx);
 
@@ -708,7 +713,7 @@ test('clears nothing for a write that was cleared ahead', async () => {
 });
 
 test('clears nothing for a write the guard refuses for another column', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 
 	await expect(flushBeforeEnabling(
 		{
@@ -748,7 +753,7 @@ test('re-reads the layer on the shared-settings floor', async () => {
 });
 
 test('clears ahead of the create as well as the update', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 
 	await initCacheSettings();
 
@@ -776,7 +781,7 @@ test('clears ahead of the create as well as the update', async () => {
 // Flow filters re-register on every flows reload, so they land after this one;
 // registering it to run last lets the clear see what they changed.
 test('clears after every other filter of the write', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 
 	await initCacheSettings();
 
@@ -798,7 +803,7 @@ test('clears after every other filter of the write', async () => {
 });
 
 test('hands the filter the caller the event carries', async () => {
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 
 	await initCacheSettings();
 
@@ -815,7 +820,7 @@ test('hands the filter the caller the event carries', async () => {
 // null, which the next filter receives as its payload.
 test('passes a write an earlier filter cancelled through', async () => {
 	// Serving is off, where a write switching it on clears first.
-	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
 
 	await initCacheSettings();
 

@@ -17,7 +17,8 @@ test('Names the Redis permission cache after the deployment', async () => {
 	const mockRedis = {} as unknown as Redis;
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
 	vi.mocked(useRedis).mockReturnValue(mockRedis);
-	vi.mocked(useEnv).mockReturnValue({ CACHE_NAMESPACE: 'planner-api' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ CACHE_NAMESPACE: 'planner-api' });
 
 	await import('./cache.js');
 
@@ -30,7 +31,8 @@ test('Names the Redis permission cache after the deployment', async () => {
 
 test('Keeps the permission cache local without Redis', async () => {
 	vi.mocked(redisConfigAvailable).mockReturnValue(false);
-	vi.mocked(useEnv).mockReturnValue({ CACHE_NAMESPACE: 'planner-api' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ CACHE_NAMESPACE: 'planner-api' });
 
 	await import('./cache.js');
 
@@ -39,7 +41,8 @@ test('Keeps the permission cache local without Redis', async () => {
 
 test('clearCache forgets the reads still running', async () => {
 	vi.mocked(redisConfigAvailable).mockReturnValue(false);
-	vi.mocked(useEnv).mockReturnValue({ CACHE_NAMESPACE: 'planner-api' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ CACHE_NAMESPACE: 'planner-api' });
 	vi.mocked(defineCache).mockReturnValue(() => ({ clear: vi.fn() }) as any);
 
 	const { clearCache } = await import('./cache.js');

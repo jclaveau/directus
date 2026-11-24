@@ -15,7 +15,7 @@ const ENV_MAX_WORKERS = 4;
 beforeEach(() => {
 	vi.clearAllMocks();
 
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		PM2_AUTOSCALE_MAX_WORKERS: ENV_MAX_WORKERS,
 	});
 });

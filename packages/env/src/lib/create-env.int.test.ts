@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { readConfigurationFromProcess } from '../utils/read-configuration-from-process.js';
-import { createEnv } from './create-env.js';
+import { createEnv, readEnvRawValues } from './create-env.js';
 import { readConfigurationFromFile } from './read-configuration-from-file.js';
 import { isDirectusVariable } from '../utils/is-directus-variable.js';
 import { readFileSync } from 'node:fs';
@@ -247,5 +247,44 @@ test.each([
 		CACHE_ENABLED: expected,
 		DEFAULT: 'test-default',
 		DEFAULT_ARRAY: 'one,two,three',
+	});
+});
+
+test('refuses every declared variable its value does not fit, at once', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		DB_PORT: 'abc',
+		CACHE_STORE: 'memcache',
+		CACHE_ENABLED: 'yes',
+		UNDECLARED_NAME: 'abc',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+
+	expect(() => createEnv()).toThrow(new Error(
+		'"DB_PORT" is "abc", which is not a number.\n'
+			+ '"CACHE_STORE" is "memcache", which is not one of "memory", "redis".\n'
+			+ '"CACHE_ENABLED" is "yes", which is not a boolean:'
+			+ ' use true, false, 1 or 0.',
+	));
+});
+
+test('keeps each value as it was set beside the cast one', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		DB_PORT: '5432',
+		UNDECLARED_NAME: '0123',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+
+	expect(createEnv()).toEqual({
+		DB_PORT: 5432,
+		UNDECLARED_NAME: '0123',
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
+
+	expect(readEnvRawValues()).toEqual({
+		DB_PORT: '5432',
+		UNDECLARED_NAME: '0123',
 	});
 });

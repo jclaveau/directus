@@ -1,266 +1,52 @@
-import { DEFAULT_CHUNK_SIZE } from '@directus/constants';
 import { resolve } from 'node:path';
 import { cwd } from 'node:process';
+import type { EnvDeclarations } from '../types/env-declaration.js';
+import { ENV_DECLARATIONS } from './env-declarations.js';
 
-export const DEFAULTS = {
+/**
+ * Defaults of variables left out of {@link ENV_DECLARATIONS} on purpose,
+ * because a declared type would change what their consumer sees rather than
+ * just how it is parsed:
+ *
+ * - `AUTH_PROVIDERS` — `auth.ts` gates on `!env['AUTH_PROVIDERS']`, and `'array'`
+ *   turns the empty default into `[]`, which is truthy.
+ * - `CACHE_VALUE_MAX_SIZE`, `ROOT_REDIRECT`, `CORS_ORIGIN`, `IP_CUSTOM_HEADER`,
+ *   `FLOWS_ENV_ALLOW_LIST`, `PRESSURE_LIMITER_MAX_MEMORY_RSS`,
+ *   `PRESSURE_LIMITER_MAX_MEMORY_HEAP_USED`, `PRESSURE_LIMITER_RETRY_AFTER` —
+ *   `false` disables them and any other value configures them, which no single
+ *   EnvType covers.
+ * - `IP_TRUST_PROXY` — express reads boolean, number, string or list.
+ * - `CONFIG_PATH` — read straight off `process.env` before any casting runs.
+ */
+export const UNDECLARED_DEFAULTS = {
 	CONFIG_PATH: resolve(cwd(), '.env'),
-
-	HOST: '0.0.0.0',
-	PORT: 8055,
-	PUBLIC_URL: '/',
-	MAX_PAYLOAD_SIZE: '1mb',
-	MAX_RELATIONAL_DEPTH: 10,
-	QUERYSTRING_MAX_PARSE_DEPTH: 10,
-	QUERY_LIMIT_DEFAULT: 100,
-	MAX_BATCH_MUTATION: Infinity,
-	DEFAULT_MUTATION_BATCHING: 'preserveMutationOrder',
-	ROBOTS_TXT: 'User-agent: *\nDisallow: /',
-
-	TEMP_PATH: './node_modules/.directus',
-
-	DB_EXCLUDE_TABLES: 'spatial_ref_sys,sysdiagrams',
-
-	STORAGE_LOCATIONS: 'local',
-	STORAGE_LOCAL_DRIVER: 'local',
-	STORAGE_LOCAL_ROOT: './uploads',
-
-	RATE_LIMITER_ENABLED: false,
-	RATE_LIMITER_POINTS: 50,
-	RATE_LIMITER_DURATION: 1,
-	RATE_LIMITER_STORE: 'memory',
-	RATE_LIMITER_CHARGE: 'cache-misses',
-
-	RATE_LIMITER_GLOBAL_ENABLED: false,
-	RATE_LIMITER_GLOBAL_POINTS: 1000,
-	RATE_LIMITER_GLOBAL_DURATION: 1,
-
-	RATE_LIMITER_REGISTRATION_ENABLED: true,
-	RATE_LIMITER_REGISTRATION_POINTS: 5,
-	RATE_LIMITER_REGISTRATION_DURATION: 60,
-
-	ACCESS_TOKEN_TTL: '15m',
-	EMAIL_VERIFICATION_TOKEN_TTL: '7d',
-
-	REFRESH_TOKEN_TTL: '7d',
-	REFRESH_TOKEN_COOKIE_NAME: 'directus_refresh_token',
-	REFRESH_TOKEN_COOKIE_SECURE: false,
-	REFRESH_TOKEN_COOKIE_SAME_SITE: 'lax',
-
-	SESSION_COOKIE_TTL: '1d',
-	SESSION_COOKIE_NAME: 'directus_session_token',
-	SESSION_COOKIE_SECURE: false,
-	SESSION_COOKIE_SAME_SITE: 'lax',
-	SESSION_REFRESH_GRACE_PERIOD: '10s',
-
-	USER_INVITE_TOKEN_TTL: '7d',
-
-	LOGIN_STALL_TIME: 500,
-	REGISTER_STALL_TIME: 750,
-	SERVER_SHUTDOWN_TIMEOUT: 1000,
-
 	ROOT_REDIRECT: './admin',
-
-	CORS_ENABLED: false,
 	CORS_ORIGIN: false,
-	CORS_METHODS: 'GET,POST,PATCH,DELETE',
-	CORS_ALLOWED_HEADERS: 'Content-Type,Authorization',
-	CORS_EXPOSED_HEADERS: 'Content-Range',
-	CORS_CREDENTIALS: true,
-	CORS_MAX_AGE: 18000,
-
-	CACHE_ENABLED: false,
-	CACHE_COMPRESSION_ENABLED: true,
-	CACHE_KEY_HASH_ENABLED: true,
-	CACHE_STORE: 'memory',
-	CACHE_TTL: '5m',
-	CACHE_NAMESPACE: 'scalabus',
-	CACHE_AUTO_PURGE: false,
-	CACHE_AUTO_PURGE_MODE: 'scoped',
-	CACHE_AUTO_PURGE_IGNORE_LIST: 'directus_activity,directus_presets',
-	CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
-	CACHE_SCOPED_MAX_QUERY_CASES: 16,
-	CACHE_SCOPED_MAX_ON_DELETE_ROWS: 1000,
-	CACHE_SCOPED_INDEX_SCAN_COUNT: 1000,
-	CACHE_SCOPED_INDEX_TTL_FACTOR: 2,
-	CACHE_SCOPED_PURGE_RETRY_INTERVAL: '1m',
-	CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS: 100,
-	CACHE_SCOPED_EPOCH_TTL: '24h',
-	CACHE_SCOPED_INDEX_REAP_SCHEDULE: '0 * * * *',
-	CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '5m',
-	// Default on for the formats a cached endpoint might content-negotiate. Safe
-	// because browsers/SDKs collapse to json (only an explicit text/csv etc. gets
-	// its own bucket). Deliberately NOT xml/html: browsers send them high-q in
-	// Accept, so req.accepts would route ALL browser traffic to that bucket and
-	// split it from api-client json — fragmenting every install, even non-xml ones.
-	CACHE_VARY_CONTENT_TYPES: 'json,csv,yaml',
-	CACHE_VARY_REQUEST_HEADERS: '',
-	// Extra request headers a glob must never fold, on top of the built-in
-	// proxy/CDN/tracing denylist (x-forwarded-*, cf-*, x-envoy-*, …). Add
-	// platform-specific per-request headers here; globs allowed.
-	CACHE_VARY_REQUEST_HEADERS_EXCLUDED: '',
-	CACHE_AUTO_FLUSH_ON_DEPLOY: true,
-	// How long a boot waits on the flush a changed build starts before it listens
-	// with the flush still running. The flush walks the whole response cache, and
-	// every worker of a deployment waits behind the one doing it.
-	CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT: '30s',
-	// How long `directus cache flush` waits before giving up. A command issued
-	// while Redis is unreachable waits on the next reconnect, and the retry policy
-	// spaces those out — the serverless recipe puts them 15 minutes apart — so
-	// without a deadline the deploy step calling it hangs instead of failing.
-	CACHE_FLUSH_TIMEOUT: '30s',
-	CACHE_CONTROL_S_MAXAGE: '0',
-	CACHE_SCHEMA: true,
-	CACHE_SCHEMA_MAX_ITERATIONS: 100,
-	CACHE_SCHEMA_SYNC_TIMEOUT: 10000,
-	CACHE_SCHEMA_FREEZE_ENABLED: false,
 	// Dual-typed: `false` (disabled) or a size string like `8kb` — respond.ts keys off
 	// `!== false`. No single type-map entry fits, so it stays on per-value guessType.
 	CACHE_VALUE_MAX_SIZE: false,
-	// Node's fetch refuses a response past 16kb of headers in total, a batch write
-	// carries one pin per row and answers with both tag headers. `0` or an
-	// unparseable size emits every pin.
-	CACHE_TAGS_HEADER_MAX_SIZE: '4kb',
-	QUERY_AUDIT_LEVEL: 'counts',
-	// Runs are grouped, then bound values and statements dropped past it, largest
-	// entries first:
-	// node's fetch refuses a response past 16kb of headers in total.
-	QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
-	CACHE_SKIP_ALLOWED: false,
-	// Opt-in: the cache page + its telemetry writes are off unless explicitly
-	// enabled (and only work with CACHE_STORE=redis). When on, growth is bounded
-	// by `RETENTION` (cross-dialect daily reap), `MAX_BYTES` (pg-only hard stop)
-	// and `MAX_BUFFER` (Redis-buffer stall guard).
-	CACHE_STATS_ENABLED: false,
-	CACHE_STATS_RETENTION: '30d',
-	CACHE_STATS_DRAIN_SCHEDULE: '*/10 * * * * *', // every ten seconds
-	CACHE_STATS_RETENTION_SCHEDULE: '*/10 * * * *', // every ten minutes
-	CACHE_STATS_MAX_BYTES: '2gb',
-	CACHE_STATS_MAX_BUFFER: 1_000_000,
-	CACHE_STATS_GAP_LOOKBACK: '1h',
-	CACHE_AUDIT_ENABLED: true,
-	// Unscheduled: a run replays every live entry uncached, a dev/preview cost.
-	CACHE_AUDIT_SCHEDULE: '',
-	CACHE_AUDIT_LIMIT: 0,
-	CACHE_AUDIT_MAX_DURATION: '10m',
-	CACHE_AUDIT_IGNORE_PATHS: '',
-	CACHE_AUDIT_RETENTION: '30d',
-
 	AUTH_PROVIDERS: '',
-	AUTH_DISABLE_DEFAULT: false,
-
-	PACKAGE_FILE_LOCATION: '.',
-	EXTENSIONS_MUST_LOAD: false,
-	EXTENSIONS_AUTO_RELOAD: false,
-	EXTENSIONS_AUTO_MIGRATE: false,
-	EXTENSIONS_SANDBOX_MEMORY: 100,
-	EXTENSIONS_SANDBOX_TIMEOUT: 1000,
-	EXTENSIONS_ROLLDOWN: false,
-
-	MIGRATIONS_PATH: './migrations',
-	MIGRATIONS_WAIT_TIMEOUT: '5m',
-	MIGRATIONS_WAIT_INTERVAL: '2s',
-	MIGRATIONS_STATEMENT_TIMEOUT: '0',
-	MIGRATIONS_LOCK_TIMEOUT: '10s',
-	MIGRATIONS_IDLE_IN_TRANSACTION_SESSION_TIMEOUT: '0',
-
-	EMAIL_FROM: 'no-reply@example.com',
-	EMAIL_VERIFY_SETUP: true,
-	EMAIL_TRANSPORT: 'sendmail',
-	EMAIL_SENDMAIL_NEW_LINE: 'unix',
-	EMAIL_SENDMAIL_PATH: '/usr/sbin/sendmail',
-	EMAIL_TEMPLATES_PATH: './templates',
-
-	MARKETPLACE_TRUST: 'sandbox',
-	MARKETPLACE_ENABLED: false,
-
-	OUT_OF_SCOPE_FEATURES_ALLOWED: '',
-
-	TELEMETRY: false,
-	TELEMETRY_URL: 'https://telemetry.directus.io',
-
-	ASSETS_CACHE_TTL: '30d',
-	ASSETS_TRANSFORM_MAX_CONCURRENT: 25,
-	ASSETS_TRANSFORM_IMAGE_MAX_DIMENSION: 6000,
-	ASSETS_TRANSFORM_MAX_OPERATIONS: 5,
-	ASSETS_TRANSFORM_TIMEOUT: '7500ms',
-	ASSETS_INVALID_IMAGE_SENSITIVITY_LEVEL: 'warning',
-
 	IP_TRUST_PROXY: true,
 	IP_CUSTOM_HEADER: false,
-
-	IMPORT_IP_DENY_LIST: ['0.0.0.0', '169.254.169.254'],
-
-	SERVE_APP: true,
-
-	RELATIONAL_BATCH_SIZE: 25000,
-
-	EXPORT_BATCH_SIZE: 5000,
-
-	USERS_ADMIN_ACCESS_LIMIT: Infinity,
-	USERS_APP_ACCESS_LIMIT: Infinity,
-	USERS_API_ACCESS_LIMIT: Infinity,
-
-	FILE_METADATA_ALLOW_LIST: 'ifd0.Make,ifd0.Model,exif.FNumber,exif.ExposureTime,exif.FocalLength,exif.ISOSpeedRatings',
-
-	TUS_ENABLED: false,
-	TUS_CHUNK_SIZE: DEFAULT_CHUNK_SIZE, // 8mb
-	TUS_UPLOAD_EXPIRATION: '10m',
-	TUS_CLEANUP_SCHEDULE: '0 * * * *', // every hour
-
-	RETENTION_ENABLED: false,
-	RETENTION_BATCH: 500,
-	RETENTION_SCHEDULE: '0 0 * * *', // once a day at 12AM
-	ACTIVITY_RETENTION: '90d',
-	REVISIONS_RETENTION: '90d',
-	FLOW_LOGS_RETENTION: '90d',
-
-	GRAPHQL_INTROSPECTION: true,
-	GRAPHQL_SCHEMA_GENERATION_MAX_CONCURRENT: 5,
-	GRAPHQL_QUERY_TOKEN_LIMIT: 5000,
-
-	WEBSOCKETS_ENABLED: false,
-	WEBSOCKETS_REST_ENABLED: true,
-	WEBSOCKETS_REST_AUTH: 'handshake',
-	WEBSOCKETS_REST_AUTH_TIMEOUT: 10,
-	WEBSOCKETS_REST_PATH: '/websocket',
-	WEBSOCKETS_GRAPHQL_ENABLED: false,
-	WEBSOCKETS_GRAPHQL_AUTH: 'handshake',
-	WEBSOCKETS_GRAPHQL_AUTH_TIMEOUT: 10,
-	WEBSOCKETS_GRAPHQL_PATH: '/graphql',
-	WEBSOCKETS_HEARTBEAT_ENABLED: true,
-	WEBSOCKETS_HEARTBEAT_PERIOD: 30,
-	WEBSOCKETS_LOGS_ENABLED: true,
-	WEBSOCKETS_LOGS_PATH: '/websocket/logs',
-
 	FLOWS_ENV_ALLOW_LIST: false,
-	FLOWS_RUN_SCRIPT_MAX_MEMORY: 32,
-	FLOWS_RUN_SCRIPT_TIMEOUT: 10000,
-
-	PRESSURE_LIMITER_ENABLED: true,
-	PRESSURE_LIMITER_SAMPLE_INTERVAL: 250,
-	PRESSURE_LIMITER_MAX_EVENT_LOOP_UTILIZATION: 0.99,
-	PRESSURE_LIMITER_MAX_EVENT_LOOP_DELAY: 500,
 	PRESSURE_LIMITER_MAX_MEMORY_RSS: false,
 	PRESSURE_LIMITER_MAX_MEMORY_HEAP_USED: false,
 	PRESSURE_LIMITER_RETRY_AFTER: false,
-
-	METRICS_ENABLED: false,
-	METRICS_SERVICES: 'database,cache,redis,storage',
-	METRICS_SCHEDULE: '*/1 * * * *',
-
-	SYSTEM_MCP_ENABLED: false,
-	SYSTEM_MCP_TOOLS: 'processes,cache',
-	SYSTEM_MCP_ALLOWED_ORIGINS: '',
-
-	PROCESSES_REPORT_ENABLED: true,
-	PROCESSES_REPORT_DETAILS: 'stats,env',
-	PROCESSES_COLLECT_TIMEOUT: '750ms',
-
-	PGBOUNCER_REPORT_ENABLED: false,
-	PGBOUNCER_CONNECTIONS: '',
-	PGBOUNCER_QUERY_TIMEOUT: '2s',
-
-	FILES_MIME_TYPE_ALLOW_LIST: '*/*',
-
-	ACCEPT_TERMS: false,
 } as const;
+
+type DeclaredDefaults<Declarations extends EnvDeclarations> = {
+	[Name in keyof Declarations as Declarations[Name] extends { default: unknown }
+		? Name
+		: never]: Declarations[Name] extends { default: infer Default }
+		? Default
+		: never;
+};
+
+export const DEFAULTS = {
+	...UNDECLARED_DEFAULTS,
+	...Object.fromEntries(
+		Object.entries(ENV_DECLARATIONS as EnvDeclarations)
+			.filter(([, envDeclaration]) => 'default' in envDeclaration)
+			.map(([name, envDeclaration]) => [name, envDeclaration.default]),
+	) as DeclaredDefaults<typeof ENV_DECLARATIONS>,
+};

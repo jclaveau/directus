@@ -20,7 +20,7 @@ const ASSETS_TRANSFORM_IMAGE_MAX_DIMENSION = 94906265;
 const ASSETS_INVALID_IMAGE_SENSITIVITY_LEVEL = 'error';
 
 beforeAll(() => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		ASSETS_TRANSFORM_IMAGE_MAX_DIMENSION,
 		ASSETS_INVALID_IMAGE_SENSITIVITY_LEVEL,
 	});

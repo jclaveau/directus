@@ -1439,11 +1439,12 @@ test('keeps the rows and the error of an item past the size', () => {
 });
 
 test('is enabled by QUERY_AUDIT_HEADER alone', () => {
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 
 	expect(queryAuditEnabled()).toBe(false);
 
-	vi.mocked(useEnv).mockReturnValue({ QUERY_AUDIT_HEADER: 'X-Query-Audit' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ QUERY_AUDIT_HEADER: 'X-Query-Audit' });
 
 	expect(queryAuditEnabled()).toBe(true);
 });

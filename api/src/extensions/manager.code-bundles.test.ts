@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
 			EXTENSIONS_SANDBOX_MEMORY: 128,
 			EXTENSIONS_SANDBOX_TIMEOUT: 10000,
 		} as Record<string, unknown>,
+		rawValues: {} as Record<string, unknown>,
 		logger: {
 			info: vi.fn(),
 			warn: vi.fn(),
@@ -76,7 +77,14 @@ const mocks = vi.hoisted(() => {
 	};
 });
 
-vi.mock('@directus/env', () => ({ useEnv: () => mocks.env }));
+vi.mock('@directus/env', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('@directus/env')>()),
+		useEnv: () => mocks.env,
+		useEnvRawValues: () => mocks.rawValues,
+	};
+});
+
 vi.mock('../logger/index.js', () => ({ useLogger: () => mocks.logger }));
 vi.mock('../bus/index.js', () => ({ useBus: () => mocks.bus }));
 vi.mock('../flows.js', () => ({ getFlowManager: () => mocks.flows }));
@@ -389,4 +397,169 @@ test('runs the before-schema migrations on a migrating reload', async () => {
 		'Migrations waiting on a schema snapshot: orders:20260212B-fill-orders;'
 			+ ' run "directus database migrate:latest --snapshot <path>"',
 	);
+});
+
+test('casts the variables a code bundle declares, and warns of a typo', async () => {
+	const hookConfig = vi.fn();
+
+	mocks.extensions = {
+		module: new Map([
+			[
+				'subscriptions',
+				{
+					type: 'bundle',
+					name: 'subscriptions',
+					path: '/extensions/subscriptions',
+					entrypoint: { app: 'app.js', api: 'api.js' },
+					entriesFrom: 'code',
+					entries: [],
+				},
+			],
+		]),
+		registry: new Map(),
+	};
+
+	mocks.settings = [
+		{
+			id: 'subscriptions-id',
+			source: 'module',
+			folder: 'subscriptions',
+			bundle: null,
+			enabled: true,
+		},
+		{
+			id: 'trials-id',
+			source: 'module',
+			folder: 'trials',
+			bundle: 'subscriptions-id',
+			enabled: true,
+		},
+	];
+
+	mocks.rawValues = {
+		SUBSCRIPTIONS_CODE: '0123',
+		SUBSCRIPTIONS_TRIAL_DAY: '3',
+	};
+
+	mocks.importCodeBundles.mockResolvedValue({
+		codeBundles: [
+			{
+				source: 'module',
+				folder: 'subscriptions',
+				name: 'subscriptions',
+				apiPath: '/extensions/subscriptions/api.js',
+				entries: [
+					{
+						type: 'hook',
+						name: 'trials',
+						config: hookConfig,
+						env: {
+							prefix: 'SUBSCRIPTIONS_',
+							vars: {
+								SUBSCRIPTIONS_CODE: { type: 'string' },
+								SUBSCRIPTIONS_TRIAL_DAYS: { type: 'number', default: 14 },
+							},
+						},
+					},
+				],
+			},
+		],
+		failures: [],
+	});
+
+	mocks.pathExists.mockResolvedValue(false);
+
+	await new ExtensionManager().initialize({ schedule: false, watch: false });
+
+	expect(mocks.env).toEqual({
+		SERVE_APP: true,
+		TEMP_PATH: '/tmp/directus-test',
+		EXTENSIONS_SANDBOX_MEMORY: 128,
+		EXTENSIONS_SANDBOX_TIMEOUT: 10000,
+		SUBSCRIPTIONS_CODE: '0123',
+		SUBSCRIPTIONS_TRIAL_DAYS: 14,
+	});
+
+	expect(hookConfig).toHaveBeenCalledTimes(1);
+
+	expect(mocks.logger.warn).toHaveBeenCalledWith(
+		'"SUBSCRIPTIONS_TRIAL_DAY" is set but nothing declares it.',
+	);
+});
+
+test('fails the boot on a variable a code bundle misdeclares', async () => {
+	const exitSpy = vi.spyOn(process, 'exit')
+		.mockImplementation(() => undefined as never);
+
+	const hookConfig = vi.fn();
+
+	mocks.extensions = {
+		module: new Map([
+			[
+				'billing',
+				{
+					type: 'bundle',
+					name: 'billing',
+					path: '/extensions/billing',
+					entrypoint: { app: 'app.js', api: 'api.js' },
+					entriesFrom: 'code',
+					entries: [],
+				},
+			],
+		]),
+		registry: new Map(),
+	};
+
+	mocks.settings = [
+		{
+			id: 'billing-id',
+			source: 'module',
+			folder: 'billing',
+			bundle: null,
+			enabled: true,
+		},
+		{
+			id: 'invoices-id',
+			source: 'module',
+			folder: 'invoices',
+			bundle: 'billing-id',
+			enabled: true,
+		},
+	];
+
+	mocks.rawValues = { BILLING_PORT: 'abc' };
+
+	mocks.importCodeBundles.mockResolvedValue({
+		codeBundles: [
+			{
+				source: 'module',
+				folder: 'billing',
+				name: 'billing',
+				apiPath: '/extensions/billing/api.js',
+				entries: [
+					{
+						type: 'hook',
+						name: 'invoices',
+						config: hookConfig,
+						env: {
+							prefix: 'BILLING_',
+							vars: { BILLING_PORT: { type: 'number' } },
+						},
+					},
+				],
+			},
+		],
+		failures: [],
+	});
+
+	mocks.pathExists.mockResolvedValue(false);
+
+	await new ExtensionManager().initialize({ schedule: false, watch: false });
+
+	expect(mocks.logger.error).toHaveBeenCalledWith(new Error(
+		'Extension "billing": "BILLING_PORT" is "abc", which is not a number.',
+	));
+
+	expect(exitSpy).toHaveBeenCalledWith(1);
+	expect(hookConfig).not.toHaveBeenCalled();
 });

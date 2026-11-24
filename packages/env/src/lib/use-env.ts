@@ -1,6 +1,10 @@
 import type { Env } from '../types/env.js';
 import type { EnvSources } from '../types/env-sources.js';
-import { createEnv, readEnvSources } from './create-env.js';
+import {
+	createEnv,
+	readEnvRawValues,
+	readEnvSources,
+} from './create-env.js';
 
 export const _cache: {
 	env: Env | undefined;
@@ -24,4 +28,14 @@ export const useEnvSources = (): EnvSources => {
 	useEnv();
 
 	return readEnvSources();
+};
+
+/**
+ * Each variable as it was set, before any cast, off the same build as
+ * `useEnv`.
+ */
+export const useEnvRawValues = (): Record<string, unknown> => {
+	useEnv();
+
+	return readEnvRawValues();
 };

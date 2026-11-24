@@ -8,7 +8,7 @@ import type { TelemetryReport } from '../types/report.js';
 export const sendReport = async (report: TelemetryReport) => {
 	const env = useEnv();
 
-	const url = new URL('/v1/metrics', env['TELEMETRY_URL'] as string);
+	const url = new URL('/v1/metrics', env['TELEMETRY_URL']);
 
 	const headers: ResponseInit['headers'] = {
 		'Content-Type': 'application/json',

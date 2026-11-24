@@ -357,7 +357,7 @@ export function createMetrics() {
 
 		const storage = await getStorage();
 
-		for (const location of toArray(env['STORAGE_LOCATIONS'] as string)) {
+		for (const location of toArray(env['STORAGE_LOCATIONS'] as string[])) {
 			const disk = storage.location(location);
 
 			const metric = getStorageErrorMetric(location);

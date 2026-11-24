@@ -88,8 +88,8 @@ vi.mock('../../database/index.js', () => {
 });
 
 beforeEach(() => {
-	vi.mocked(useEnv).mockReturnValue({
-		STORAGE_LOCATIONS: 'local,s3',
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
+		STORAGE_LOCATIONS: ['local', 's3'],
 		PUBLIC_URL: 'https://cms.example',
 	});
 
@@ -157,8 +157,8 @@ describe('createTusServer', () => {
 	});
 
 	test('uses absolute locations when PUBLIC_URL is a path', async () => {
-		vi.mocked(useEnv).mockReturnValue({
-			STORAGE_LOCATIONS: 'local',
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
+			STORAGE_LOCATIONS: ['local'],
 			PUBLIC_URL: '/',
 		});
 

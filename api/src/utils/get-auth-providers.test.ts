@@ -65,7 +65,7 @@ const scenarios = [
 describe('get auth providers', () => {
 	for (const scenario of scenarios) {
 		test(scenario.name, () => {
-			vi.mocked(useEnv).mockReturnValue(scenario.input);
+			vi.mocked(useEnv, { partial: true }).mockReturnValue(scenario.input);
 
 			expect(getAuthProviders()).toEqual(scenario.output);
 		});

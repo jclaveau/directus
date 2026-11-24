@@ -127,7 +127,7 @@ export default abstract class SocketController {
 
 		const env = useEnv();
 		const cookies = request.headers.cookie ? cookie.parse(request.headers.cookie) : {};
-		const sessionCookieName = env['SESSION_COOKIE_NAME'] as string;
+		const sessionCookieName = env['SESSION_COOKIE_NAME'];
 
 		const accountabilityOverrides: UpgradeContext['accountabilityOverrides'] = {
 			ip: getIPFromReq(request) ?? null,

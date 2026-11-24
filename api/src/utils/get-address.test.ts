@@ -30,7 +30,7 @@ describe('getAddress', async () => {
 	test('Should return unix socket before server is listening when path is provided', async () => {
 		const server = await createServer();
 
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			UNIX_SOCKET_PATH: serverSocket,
 		});
 
@@ -41,7 +41,7 @@ describe('getAddress', async () => {
 	test('Should return host + port before server is listening when path is undefined', async () => {
 		const server = await createServer();
 
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			PORT: serverPort,
 			HOST: serverHost,
 		});

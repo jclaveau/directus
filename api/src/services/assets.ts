@@ -182,8 +182,8 @@ export class AssetsService {
 			if (
 				!width ||
 				!height ||
-				width > (env['ASSETS_TRANSFORM_IMAGE_MAX_DIMENSION'] as number) ||
-				height > (env['ASSETS_TRANSFORM_IMAGE_MAX_DIMENSION'] as number)
+				width > env['ASSETS_TRANSFORM_IMAGE_MAX_DIMENSION'] ||
+				height > env['ASSETS_TRANSFORM_IMAGE_MAX_DIMENSION']
 			) {
 				logger.warn(`Image is too large to be transformed, or image size couldn't be determined.`);
 				throw new IllegalAssetTransformationError({ invalidTransformations: ['width', 'height'] });
@@ -191,7 +191,7 @@ export class AssetsService {
 
 			const { queue, process } = await getSharpCounters();
 
-			if (queue + process > (env['ASSETS_TRANSFORM_MAX_CONCURRENT'] as number)) {
+			if (queue + process > env['ASSETS_TRANSFORM_MAX_CONCURRENT']) {
 				throw new ServiceUnavailableError({
 					service: 'files',
 					reason: 'Server too busy',

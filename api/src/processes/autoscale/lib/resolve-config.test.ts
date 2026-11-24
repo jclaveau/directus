@@ -45,7 +45,7 @@ async function freshModule() {
 
 	const { useEnv } = await import('@directus/env');
 
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		CACHE_NAMESPACE: 'scalabus',
 		PM2_AUTOSCALE_MAX_WORKERS: 4,
 	});
@@ -380,7 +380,7 @@ test('a write is judged against the floor the environment really set', async () 
 
 	// A floor above its own ceiling, which is what settling would resolve and
 	// what the raised ceiling arriving with this write makes room for.
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		CACHE_NAMESPACE: 'scalabus',
 		PM2_AUTOSCALE_MIN_WORKERS: 10,
 		PM2_AUTOSCALE_MAX_WORKERS: 4,

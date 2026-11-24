@@ -27,7 +27,7 @@ test('opens an empty purged list the rest of the request records into', () => {
 });
 
 test('empties the store of an audited request once its response closed', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -55,7 +55,7 @@ test('empties the store of an audited request once its response closed', () => {
 });
 
 test('keeps the store of a request whose client hung up before its response', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',

@@ -24,7 +24,7 @@ export function shouldSkipCache(req: Request): boolean {
 	const referer = req.get('Referer');
 
 	if (referer) {
-		const adminUrl = new Url(env['PUBLIC_URL'] as string).addPath('admin');
+		const adminUrl = new Url(env['PUBLIC_URL']).addPath('admin');
 
 		if (adminUrl.isRootRelative()) {
 			const refererUrl = new Url(referer);

@@ -31,7 +31,8 @@ async function freshModule(enabled = true) {
 	vi.resetModules();
 
 	const { useEnv } = await import('@directus/env');
-	vi.mocked(useEnv).mockReturnValue({ PM2_AUTOSCALE_DRILL_ENABLED: enabled });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PM2_AUTOSCALE_DRILL_ENABLED: enabled });
 
 	return import('./drill.js');
 }

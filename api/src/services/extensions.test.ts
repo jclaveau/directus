@@ -71,7 +71,7 @@ describe('Services / Extensions / install', () => {
 			schema,
 		});
 
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv, { partial: true }).mockReturnValueOnce({
 			MARKETPLACE_REGISTRY: 'https://registry.example.com',
 		});
 
@@ -113,7 +113,8 @@ describe('Services / Extensions / install', () => {
 			schema,
 		});
 
-		vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_LIMIT: '4' });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ EXTENSIONS_LIMIT: '4' });
 
 		const installation = service.install('extension-id', 'version-1');
 
@@ -143,7 +144,8 @@ describe('Services / Extensions / install', () => {
 			schema,
 		});
 
-		vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_LIMIT: '2' });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ EXTENSIONS_LIMIT: '2' });
 
 		const installation = service.install('extension-id', 'version-1');
 
@@ -175,7 +177,7 @@ describe('Services / Extensions / install', () => {
 			schema,
 		});
 
-		vi.mocked(useEnv).mockReturnValueOnce({});
+		vi.mocked(useEnv, { partial: true }).mockReturnValueOnce({});
 
 		await service.install('extension-id', 'version-1');
 
@@ -215,7 +217,7 @@ describe('Services / Extensions / install', () => {
 			schema,
 		});
 
-		vi.mocked(useEnv).mockReturnValueOnce({});
+		vi.mocked(useEnv, { partial: true }).mockReturnValueOnce({});
 
 		await service.install('extension-id', 'version-1');
 
@@ -270,7 +272,8 @@ describe('Services / Extensions / install', () => {
 			schema,
 		});
 
-		vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_LIMIT: '4' });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ EXTENSIONS_LIMIT: '4' });
 
 		await service.install('extension-id', 'version-1');
 
@@ -418,7 +421,7 @@ describe('Services / Extensions / reinstall', () => {
 			schema,
 		});
 
-		vi.mocked(useEnv).mockReturnValueOnce({});
+		vi.mocked(useEnv, { partial: true }).mockReturnValueOnce({});
 
 		await service.reinstall('extension-id');
 

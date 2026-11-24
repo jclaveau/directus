@@ -5,7 +5,7 @@ import { shouldCheckUserLimits } from './should-check-user-limits.js';
 vi.mock('@directus/env');
 
 beforeEach(() => {
-	vi.mocked(useEnv).mockReturnValue({ abcd: 12345 });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ abcd: 12345 });
 });
 
 afterEach(() => {
@@ -47,7 +47,7 @@ test.each([
 		result: true,
 	},
 ])('Confirms if user limits needs to be checked', ({ env, result }) => {
-	vi.mocked(useEnv).mockReturnValue(env);
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(env);
 
 	expect(shouldCheckUserLimits()).toBe(result);
 });

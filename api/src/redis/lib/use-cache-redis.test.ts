@@ -33,7 +33,8 @@ afterEach(() => {
 
 describe('cacheRedisDatabase', () => {
 	test('is undefined when CACHE_REDIS_DB is unset', () => {
-		vi.mocked(useEnv).mockReturnValue({ REDIS: 'redis://h:6379' });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValue({ REDIS: 'redis://h:6379' });
 
 		expect(cacheRedisDatabase()).toBeUndefined();
 		expect(warn).not.toHaveBeenCalled();
@@ -42,7 +43,7 @@ describe('cacheRedisDatabase', () => {
 	test(oneLine`
 		takes a database apart from the one a REDIS URL without a path selects
 	`, () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379',
 			CACHE_REDIS_DB: 1,
 		});
@@ -51,7 +52,7 @@ describe('cacheRedisDatabase', () => {
 	});
 
 	test('takes a database apart from the one the REDIS URL path selects', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379/2',
 			CACHE_REDIS_DB: 0,
 		});
@@ -60,7 +61,7 @@ describe('cacheRedisDatabase', () => {
 	});
 
 	test('ignores the database the REDIS URL path already selects, and warns', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379/2',
 			CACHE_REDIS_DB: 2,
 		});
@@ -74,7 +75,7 @@ describe('cacheRedisDatabase', () => {
 	});
 
 	test('ignores database 0 when REDIS names no database', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379',
 			CACHE_REDIS_DB: 0,
 		});
@@ -83,21 +84,23 @@ describe('cacheRedisDatabase', () => {
 	});
 
 	test('ignores the database REDIS_DB selects in the host/port form', () => {
-		vi.mocked(useEnv).mockReturnValue({ REDIS_HOST: 'h', CACHE_REDIS_DB: 3 });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValue({ REDIS_HOST: 'h', CACHE_REDIS_DB: 3 });
 		vi.mocked(getConfigFromEnv).mockReturnValue({ host: 'h', db: '3' });
 
 		expect(cacheRedisDatabase()).toBeUndefined();
 	});
 
 	test('takes a database apart from REDIS_DB in the host/port form', () => {
-		vi.mocked(useEnv).mockReturnValue({ REDIS_HOST: 'h', CACHE_REDIS_DB: 1 });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValue({ REDIS_HOST: 'h', CACHE_REDIS_DB: 1 });
 		vi.mocked(getConfigFromEnv).mockReturnValue({ host: 'h' });
 
 		expect(cacheRedisDatabase()).toBe(1);
 	});
 
 	test('reads the database a db query parameter selects, as ioredis does', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379?db=3',
 			CACHE_REDIS_DB: 3,
 		});
@@ -108,7 +111,7 @@ describe('cacheRedisDatabase', () => {
 	test(oneLine`
 		refuses database 0 beside a db query parameter, which node-redis ignores
 	`, () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379?db=3',
 			CACHE_REDIS_DB: 0,
 		});
@@ -117,7 +120,7 @@ describe('cacheRedisDatabase', () => {
 	});
 
 	test('takes a database apart from both readings of a db query parameter', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379?db=3',
 			CACHE_REDIS_DB: 1,
 		});
@@ -126,7 +129,7 @@ describe('cacheRedisDatabase', () => {
 	});
 
 	test('reads the path before a db query parameter, as ioredis does', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379/2?db=3',
 			CACHE_REDIS_DB: 3,
 		});
@@ -135,7 +138,7 @@ describe('cacheRedisDatabase', () => {
 	});
 
 	test('ignores it when the REDIS path is not a database number', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379/abc',
 			CACHE_REDIS_DB: 1,
 		});
@@ -144,7 +147,7 @@ describe('cacheRedisDatabase', () => {
 	});
 
 	test('ignores it when REDIS is a host and port with no scheme', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'h:6379',
 			CACHE_REDIS_DB: 0,
 		});
@@ -153,14 +156,15 @@ describe('cacheRedisDatabase', () => {
 	});
 
 	test('ignores it when REDIS_DB is not a database number', () => {
-		vi.mocked(useEnv).mockReturnValue({ REDIS_HOST: 'h', CACHE_REDIS_DB: 1 });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValue({ REDIS_HOST: 'h', CACHE_REDIS_DB: 1 });
 		vi.mocked(getConfigFromEnv).mockReturnValue({ host: 'h', db: 'x' });
 
 		expect(cacheRedisDatabase()).toBeUndefined();
 	});
 
 	test('ignores it when REDIS is an address whose database cannot be read', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: '/var/run/redis.sock',
 			CACHE_REDIS_DB: 1,
 		});
@@ -170,7 +174,7 @@ describe('cacheRedisDatabase', () => {
 	});
 
 	test('ignores a value that is not a database number, and warns', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379',
 			CACHE_REDIS_DB: -1,
 		});
@@ -183,9 +187,9 @@ describe('cacheRedisDatabase', () => {
 	});
 
 	test('reads the env once', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379',
-			CACHE_REDIS_DB: 'x',
+			CACHE_REDIS_DB: 'x' as unknown as number,
 		});
 
 		cacheRedisDatabase();
@@ -199,7 +203,8 @@ describe('useCacheRedis', () => {
 	test('is the shared client when the cache has no database of its own', () => {
 		const sharedRedis = { name: 'shared' };
 		vi.mocked(useRedis).mockReturnValue(sharedRedis as any);
-		vi.mocked(useEnv).mockReturnValue({ REDIS: 'redis://h:6379' });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValue({ REDIS: 'redis://h:6379' });
 
 		expect(useCacheRedis()).toBe(sharedRedis);
 		expect(createRedis).not.toHaveBeenCalled();
@@ -209,7 +214,7 @@ describe('useCacheRedis', () => {
 		const cacheRedis = { name: 'cache' };
 		vi.mocked(createRedis).mockReturnValue(cacheRedis as any);
 
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379',
 			CACHE_REDIS_DB: 1,
 		});
@@ -234,7 +239,7 @@ describe('flushCacheRedisDatabase', () => {
 
 		vi.mocked(createRedis).mockReturnValue({ multi: () => flushTransaction } as any);
 
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379',
 			CACHE_STORE: 'redis',
 			CACHE_REDIS_DB: 1,
@@ -256,7 +261,7 @@ describe('flushCacheRedisDatabase', () => {
 		const multi = vi.fn();
 		vi.mocked(useRedis).mockReturnValue({ multi } as any);
 
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379',
 			CACHE_STORE: 'redis',
 		});
@@ -269,7 +274,7 @@ describe('flushCacheRedisDatabase', () => {
 		const multi = vi.fn();
 		vi.mocked(createRedis).mockReturnValue({ multi } as any);
 
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379',
 			CACHE_STORE: 'memory',
 			CACHE_REDIS_DB: 1,
@@ -294,7 +299,7 @@ describe('flushCacheRedisDatabase', () => {
 
 		vi.mocked(createRedis).mockReturnValue({ multi: () => flushTransaction } as any);
 
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379',
 			CACHE_STORE: 'redis',
 			CACHE_REDIS_DB: 1,
@@ -322,7 +327,7 @@ describe('flushCacheRedisDatabase', () => {
 
 		vi.mocked(createRedis).mockReturnValue({ multi: () => flushTransaction } as any);
 
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379',
 			CACHE_STORE: 'redis',
 			CACHE_REDIS_DB: 1,

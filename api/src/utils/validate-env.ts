@@ -57,7 +57,7 @@ export function validateDurationEnv(keys: string[]): void {
 /**
  * Refuse a count variable that is not a whole number of 0 or more, at boot like
  * {@link validateDurationEnv}. Read off `useEnv`, so an unset variable takes its
- * default; TYPE_MAP types it a number, which reads `ten` as NaN.
+ * default; declared a number, `ten` fails the boot before it gets here.
  */
 export function validateCountEnv(keys: string[]): void {
 	const env = useEnv();

@@ -24,7 +24,7 @@ export class InstallationManager {
 
 	async install(versionId: string) {
 		const logger = useLogger();
-		const tempDir = join(env['TEMP_PATH'] as string, 'marketplace', versionId);
+		const tempDir = join(env['TEMP_PATH'], 'marketplace', versionId);
 		const tmpStorage = new DriverLocal({ root: tempDir });
 
 		try {

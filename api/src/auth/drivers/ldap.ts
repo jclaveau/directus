@@ -491,7 +491,7 @@ export function createLDAPAuthRouter(provider: string): Router { // bb-out-of-sc
 			}
 
 			if (mode === 'session') {
-				res.cookie(env['SESSION_COOKIE_NAME'] as string, accessToken, SESSION_COOKIE_OPTIONS);
+				res.cookie(env['SESSION_COOKIE_NAME'], accessToken, SESSION_COOKIE_OPTIONS);
 			}
 
 			res.locals['payload'] = { data: payload };

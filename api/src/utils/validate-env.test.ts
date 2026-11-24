@@ -33,7 +33,7 @@ let mockLogger: Logger<never>;
 beforeAll(() => {
 	vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		PRESENT_TEST_VARIABLE: 'true',
 	});
 });
@@ -83,7 +83,8 @@ test.each([
 			+ `"1${'0'.repeat(400)}", which is not a duration of 0 or more.`,
 	},
 ])('refuses the duration $value', ({ value, message }) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ DURATION_TEST_VARIABLE: value });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ DURATION_TEST_VARIABLE: value });
 
 	validateDurationEnv(['DURATION_TEST_VARIABLE']);
 
@@ -92,7 +93,8 @@ test.each([
 });
 
 test.each(['0', '5m', '4.1m'])('takes the duration %j', (value) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ DURATION_TEST_VARIABLE: value });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ DURATION_TEST_VARIABLE: value });
 
 	validateDurationEnv(['DURATION_TEST_VARIABLE']);
 
@@ -137,7 +139,8 @@ test.each([
 			+ 'which is not a size of 0 or more.',
 	},
 ])('refuses the size $value', ({ value, message }) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
 
 	validateBytesEnv(['BYTES_TEST_VARIABLE']);
 
@@ -146,7 +149,8 @@ test.each([
 });
 
 test.each(['0', '8kb', '512', '1.5mb', '8 KB'])('takes the size %j', (value) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
 
 	validateBytesEnv(['BYTES_TEST_VARIABLE']);
 
@@ -155,7 +159,8 @@ test.each(['0', '8kb', '512', '1.5mb', '8 KB'])('takes the size %j', (value) => 
 });
 
 test('refuses a size below the minimum other than 0', () => {
-	vi.mocked(useEnv).mockReturnValueOnce({ BYTES_TEST_VARIABLE: '255' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: '255' });
 
 	validateBytesEnv(['BYTES_TEST_VARIABLE'], 256);
 
@@ -168,7 +173,8 @@ test('refuses a size below the minimum other than 0', () => {
 });
 
 test.each(['0', '256', '1kb'])('takes the size %j past the minimum', (value) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
 
 	validateBytesEnv(['BYTES_TEST_VARIABLE'], 256);
 
@@ -198,7 +204,8 @@ test.each([
 			+ 'which is not a whole number of 0 or more.',
 	},
 ])('refuses the count $value', ({ value, message }) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ COUNT_TEST_VARIABLE: value });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ COUNT_TEST_VARIABLE: value });
 
 	validateCountEnv(['COUNT_TEST_VARIABLE']);
 
@@ -207,7 +214,8 @@ test.each([
 });
 
 test.each([0, 1000])('takes the count %j', (value) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ COUNT_TEST_VARIABLE: value });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ COUNT_TEST_VARIABLE: value });
 
 	validateCountEnv(['COUNT_TEST_VARIABLE']);
 
@@ -216,7 +224,8 @@ test.each([0, 1000])('takes the count %j', (value) => {
 });
 
 test('refuses a choice outside the list', () => {
-	vi.mocked(useEnv).mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'every' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'every' });
 
 	validateChoiceEnv('CHOICE_TEST_VARIABLE', ['counts', 'full']);
 
@@ -229,7 +238,8 @@ test('refuses a choice outside the list', () => {
 });
 
 test('takes a choice from the list', () => {
-	vi.mocked(useEnv).mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'full' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'full' });
 
 	validateChoiceEnv('CHOICE_TEST_VARIABLE', ['counts', 'full']);
 
@@ -239,7 +249,8 @@ test('takes a choice from the list', () => {
 
 // Node throws on every `setHeader` of such a name: every response would fail.
 test('refuses a header name Node cannot write', () => {
-	vi.mocked(useEnv).mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'x query audit' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'x query audit' });
 
 	validateHeaderNameEnv('HEADER_TEST_VARIABLE');
 
@@ -255,7 +266,8 @@ test('refuses a header name Node cannot write', () => {
 test.each(['false', 'true', 'FALSE', '0', '1'])(
 	'refuses a header name that reads as the boolean %j',
 	(value) => {
-		vi.mocked(useEnv).mockReturnValueOnce({ HEADER_TEST_VARIABLE: value });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ HEADER_TEST_VARIABLE: value });
 
 		validateHeaderNameEnv('HEADER_TEST_VARIABLE');
 
@@ -270,7 +282,8 @@ test.each(['false', 'true', 'FALSE', '0', '1'])(
 );
 
 test('takes a header name Node can write', () => {
-	vi.mocked(useEnv).mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'X-Query-Audit' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'X-Query-Audit' });
 
 	validateHeaderNameEnv('HEADER_TEST_VARIABLE');
 
@@ -279,7 +292,8 @@ test('takes a header name Node can write', () => {
 });
 
 test('refuses EXTENSIONS_PATH, which this build does not read', () => {
-	vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_PATH: './extensions' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ EXTENSIONS_PATH: './extensions' });
 
 	validateUnreadEnv();
 
@@ -293,7 +307,8 @@ test('refuses EXTENSIONS_PATH, which this build does not read', () => {
 });
 
 test('passes an environment without EXTENSIONS_PATH', () => {
-	vi.mocked(useEnv).mockReturnValueOnce({ PACKAGE_FILE_LOCATION: '.' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ PACKAGE_FILE_LOCATION: '.' });
 
 	validateUnreadEnv();
 
@@ -357,7 +372,7 @@ describe('validateAutoMigrateEnv', () => {
 	test('refuses it in production', () => {
 		vi.stubEnv('NODE_ENV', 'production');
 
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv, { partial: true }).mockReturnValueOnce({
 			EXTENSIONS_AUTO_MIGRATE: true,
 			EXTENSIONS_AUTO_RELOAD: true,
 		});
@@ -376,7 +391,7 @@ describe('validateAutoMigrateEnv', () => {
 	test('refuses it without EXTENSIONS_AUTO_RELOAD', () => {
 		vi.stubEnv('NODE_ENV', 'development');
 
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv, { partial: true }).mockReturnValueOnce({
 			EXTENSIONS_AUTO_MIGRATE: true,
 			EXTENSIONS_AUTO_RELOAD: false,
 		});
@@ -395,7 +410,7 @@ describe('validateAutoMigrateEnv', () => {
 	test('takes it in development with EXTENSIONS_AUTO_RELOAD', () => {
 		vi.stubEnv('NODE_ENV', 'development');
 
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv, { partial: true }).mockReturnValueOnce({
 			EXTENSIONS_AUTO_MIGRATE: true,
 			EXTENSIONS_AUTO_RELOAD: true,
 		});
@@ -409,7 +424,8 @@ describe('validateAutoMigrateEnv', () => {
 	test('takes it off in production', () => {
 		vi.stubEnv('NODE_ENV', 'production');
 
-		vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_AUTO_MIGRATE: false });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ EXTENSIONS_AUTO_MIGRATE: false });
 
 		validateAutoMigrateEnv();
 
@@ -425,7 +441,8 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 	test('refuses true in production', () => {
 		vi.stubEnv('NODE_ENV', 'production');
-		vi.mocked(useEnv).mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
 
 		validateMarketplaceEnabledEnv();
 
@@ -440,7 +457,8 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 	test('refuses true with NODE_ENV unset', () => {
 		vi.stubEnv('NODE_ENV', '');
-		vi.mocked(useEnv).mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
 
 		validateMarketplaceEnabledEnv();
 
@@ -455,7 +473,8 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 	test('takes false in production', () => {
 		vi.stubEnv('NODE_ENV', 'production');
-		vi.mocked(useEnv).mockReturnValueOnce({ MARKETPLACE_ENABLED: false });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ MARKETPLACE_ENABLED: false });
 
 		validateMarketplaceEnabledEnv();
 
@@ -464,7 +483,8 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 	test('takes true in development', () => {
 		vi.stubEnv('NODE_ENV', 'development');
-		vi.mocked(useEnv).mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
 
 		validateMarketplaceEnabledEnv();
 

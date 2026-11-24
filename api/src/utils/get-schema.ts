@@ -65,7 +65,7 @@ export async function getSchema(
 	const messageKey = 'schemaCache--done';
 	const processId = await lock.increment(lockKey);
 
-	if (processId >= (env['CACHE_SCHEMA_MAX_ITERATIONS'] as number)) {
+	if (processId >= env['CACHE_SCHEMA_MAX_ITERATIONS']) {
 		await lock.delete(lockKey);
 	}
 
@@ -75,7 +75,7 @@ export async function getSchema(
 		logger.trace('Schema cache is prepared in another process, waiting for result.');
 
 		const timeout: Promise<any> = new Promise((_, reject) =>
-			setTimeout(reject, env['CACHE_SCHEMA_SYNC_TIMEOUT'] as number),);
+			setTimeout(reject, env['CACHE_SCHEMA_SYNC_TIMEOUT']),);
 
 		const waitGeneration = getSchemaCacheGeneration();
 

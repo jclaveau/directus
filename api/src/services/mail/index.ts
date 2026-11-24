@@ -72,7 +72,7 @@ export class MailService {
 			? emailOptions.from
 			: {
 					name: defaultTemplateData.projectName,
-					address: (emailOptions.from as string) || (env['EMAIL_FROM'] as string),
+					address: (emailOptions.from as string) || env['EMAIL_FROM'],
 				};
 
 		if (template) {
@@ -128,7 +128,7 @@ export class MailService {
 		};
 
 		function getProjectLogoURL(logoID?: string) {
-			const projectLogoUrl = new Url(env['PUBLIC_URL'] as string);
+			const projectLogoUrl = new Url(env['PUBLIC_URL']);
 
 			if (logoID) {
 				projectLogoUrl.addPath('assets', logoID);

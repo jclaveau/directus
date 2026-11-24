@@ -46,7 +46,7 @@ beforeEach(() => {
 
 	vi.mocked(getConfigFromEnv).mockImplementation((name) => sample.options[name]!);
 
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		STORAGE_LOCATIONS: sample.locations.join(','),
 	});
 });

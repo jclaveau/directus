@@ -1,4 +1,4 @@
-import { useEnv } from '@directus/env';
+import { useEnv, useEnvRawValues } from '@directus/env';
 import { APP_SHARED_DEPS } from '@directus/extensions';
 import { HYBRID_EXTENSION_TYPES } from '@directus/constants';
 import { generateExtensionsEntrypoint } from '@directus/extensions/node';
@@ -38,7 +38,10 @@ import { useBus } from '../bus/index.js';
 import getDatabase, { outstandingMigrations } from '../database/index.js';
 import runMigrations from '../database/migrations/run.js';
 import type { ExtensionMigration } from '../database/migrations/list.js';
-import { readBundleEntries } from '@directus/extensions/scalabus';
+import {
+	type ExtensionEnv,
+	readBundleEntries,
+} from '@directus/extensions/scalabus';
 import { createHash } from 'node:crypto';
 import emitter, { Emitter } from '../emitter.js';
 import { getFlowManager } from '../flows.js';
@@ -53,6 +56,11 @@ import { JobQueue } from '../utils/job-queue.js';
 import { loadIsolatedVm } from '../utils/load-isolated-vm.js';
 import { clone, debounce, isPlainObject } from '../utils/lodash-es-used.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
+import {
+	applyExtensionEnv,
+	type ExtensionEnvDeclarers,
+	findUndeclaredEnv,
+} from './lib/apply-extension-env.js';
 import { getRegistryRootPath } from './lib/get-registry-root-path.js';
 import { getExtensionsSettings } from './lib/get-extensions-settings.js';
 import {
@@ -79,7 +87,7 @@ type ReloadOptions = { forceSync?: boolean; migrate?: boolean };
 
 const defaultOptions: ExtensionManagerOptions = {
 	schedule: true,
-	watch: env['EXTENSIONS_AUTO_RELOAD'] as boolean,
+	watch: env['EXTENSIONS_AUTO_RELOAD'],
 };
 
 export class ExtensionManager {
@@ -139,6 +147,14 @@ export class ExtensionManager {
 	 * Callbacks to be able to unregister extensions
 	 */
 	private unregisterFunctionMap: Map<string, PromiseCallback> = new Map();
+
+	/**
+	 * Which extension declared each extension variable, and the prefixes they
+	 * declared them under
+	 */
+	private envDeclarers: ExtensionEnvDeclarers = new Map();
+
+	private extensionEnvPrefixes: Set<string> = new Set();
 
 	/**
 	 * A local-to-extensions scoped emitter that can be used to fire and listen to custom events
@@ -339,6 +355,18 @@ export class ExtensionManager {
 		}
 
 		await Promise.all([this.registerInternalOperations(), this.registerApiExtensions()]);
+
+		const undeclaredNames = findUndeclaredEnv({
+			rawNames: Object.keys(useEnvRawValues()),
+			envDeclarers: this.envDeclarers,
+			extensionPrefixes: this.extensionEnvPrefixes,
+		});
+
+		for (const undeclaredName of undeclaredNames) {
+			logger.warn(
+				`${JSON.stringify(undeclaredName)} is set but nothing declares it.`,
+			);
+		}
 
 		this.hasLoadedBefore = true;
 
@@ -546,7 +574,7 @@ export class ExtensionManager {
 
 		if (!file) return null;
 
-		const tempDir = join(env['TEMP_PATH'] as string, 'app-extensions');
+		const tempDir = join(env['TEMP_PATH'], 'app-extensions');
 		const tmpStorage = new DriverLocal({ root: tempDir });
 
 		if ((await tmpStorage.exists(file)) === false) return null;
@@ -699,7 +727,7 @@ export class ExtensionManager {
 				plugins: [virtual({ entry: entrypoint }), alias({ entries: internalImports }), nodeResolve({ browser: true })],
 			});
 
-			const tempDir = join(env['TEMP_PATH'] as string, 'app-extensions');
+			const tempDir = join(env['TEMP_PATH'], 'app-extensions');
 
 			const { output } = await bundle.generate({ format: 'es' });
 
@@ -968,6 +996,37 @@ export class ExtensionManager {
 				),
 			);
 
+			const extensionEnvs = new Map<unknown, ExtensionEnv>();
+
+			for (const { env: entryEnv } of bundleEntries) {
+				if (entryEnv) {
+					extensionEnvs.set(entryEnv.vars, entryEnv);
+				}
+			}
+
+			try {
+				applyExtensionEnv({
+					extensionName: bundle.name,
+					extensionEnvs: [...extensionEnvs.values()],
+					envDeclarers: this.envDeclarers,
+					rawValues: useEnvRawValues(),
+					env,
+				});
+			}
+			catch (error) {
+				// A misdeclared variable fails the boot, as core's own do.
+				if (!this.hasLoadedBefore) {
+					useLogger().error(error);
+					process.exit(1);
+				}
+
+				throw error;
+			}
+
+			for (const { prefix } of extensionEnvs.values()) {
+				this.extensionEnvPrefixes.add(prefix);
+			}
+
 			const unregisterFunctions: PromiseCallback[] = [];
 
 			for (const entry of bundleEntries) {
@@ -1165,6 +1224,9 @@ export class ExtensionManager {
 		const unregisterFunctions = Array.from(this.unregisterFunctionMap.values());
 
 		await Promise.all(unregisterFunctions.map((fn) => fn()));
+
+		this.envDeclarers.clear();
+		this.extensionEnvPrefixes.clear();
 	}
 
 	/**

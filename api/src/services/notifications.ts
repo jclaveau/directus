@@ -35,7 +35,7 @@ export class NotificationsService extends ItemsService<Notification> {
 			);
 
 			if (user['email'] && user['email_notifications'] === true) {
-				const manageUserAccountUrl = new Url(env['PUBLIC_URL'] as string)
+				const manageUserAccountUrl = new Url(env['PUBLIC_URL'])
 					.addPath('admin', 'users', user['id'])
 					.toString();
 

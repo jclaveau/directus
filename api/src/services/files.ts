@@ -362,7 +362,7 @@ export class FilesService extends ItemsService<File> {
 
 		const payload = {
 			filename_download: filename,
-			storage: toArray(env['STORAGE_LOCATIONS'] as string)[0]!,
+			storage: toArray(env['STORAGE_LOCATIONS'] as string[])[0]!,
 			type: fileResponse.headers['content-type'] as string,
 			title: formatTitle(filename),
 			...(body || {}),

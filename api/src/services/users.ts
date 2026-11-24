@@ -543,7 +543,7 @@ export class UsersService extends ItemsService {
 			});
 		}
 
-		const STALL_TIME = env['REGISTER_STALL_TIME'] as number;
+		const STALL_TIME = env['REGISTER_STALL_TIME'];
 		const timeStart = performance.now();
 		const serviceOptions: AbstractServiceOptions = { accountability: this.accountability, schema: this.schema };
 		const settingsService = new SettingsService(serviceOptions);
@@ -611,7 +611,7 @@ export class UsersService extends ItemsService {
 			const verificationUrl = (
 				input.verification_url
 					? new Url(input.verification_url)
-					: new Url(env['PUBLIC_URL'] as string).addPath('users', 'register', 'verify-email')
+					: new Url(env['PUBLIC_URL']).addPath('users', 'register', 'verify-email')
 			)
 				.setQuery('token', token)
 				.toString();

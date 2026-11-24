@@ -30,7 +30,7 @@ afterEach(() => {
 // Grab the retryStrategy the constructor was built with for a given env. URL mode passes
 // it as the second argument; discrete-config mode folds it into the single options object.
 function retryStrategyFor(env: Record<string, unknown>): RetryStrategy {
-	vi.mocked(useEnv).mockReturnValue(env);
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(env);
 	createRedis();
 
 	// `Redis`'s constructor is overloaded seven ways, and `ConstructorParameters`
@@ -53,7 +53,7 @@ describe('createRedis', () => {
 	`, () => {
 		const warn = vi.fn();
 		vi.mocked(useLogger).mockReturnValue({ warn } as any);
-		vi.mocked(useEnv).mockReturnValue({ REDIS: 'x' });
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({ REDIS: 'x' });
 
 		const redis = createRedis();
 
@@ -73,7 +73,8 @@ describe('createRedis', () => {
 
 	test('Creates and returns new Redis instance from connection string', () => {
 		const connectionString = 'test-connection-string';
-		vi.mocked(useEnv).mockReturnValue({ REDIS: connectionString });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValue({ REDIS: connectionString });
 
 		const redis = createRedis();
 
@@ -88,7 +89,7 @@ describe('createRedis', () => {
 
 	test('Uses Redis connection object if Redis connection string is missing', () => {
 		const redisHost = 'test-host';
-		vi.mocked(useEnv).mockReturnValue({ REDIS_HOST: redisHost });
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({ REDIS_HOST: redisHost });
 
 		const mockConfig = { host: redisHost };
 		vi.mocked(getConfigFromEnv).mockReturnValue(mockConfig);
@@ -106,7 +107,8 @@ describe('createRedis', () => {
 	});
 
 	test('Selects the given database through the URL', () => {
-		vi.mocked(useEnv).mockReturnValue({ REDIS: 'redis://h:6379/0' });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValue({ REDIS: 'redis://h:6379/0' });
 
 		createRedis(1);
 
@@ -116,7 +118,8 @@ describe('createRedis', () => {
 	});
 
 	test('Selects the given database over REDIS_DB in the object form', () => {
-		vi.mocked(useEnv).mockReturnValue({ REDIS_HOST: 'h', REDIS_DB: '0' });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValue({ REDIS_HOST: 'h', REDIS_DB: '0' });
 		vi.mocked(getConfigFromEnv).mockReturnValue({ host: 'h', db: '0' });
 
 		createRedis(1);

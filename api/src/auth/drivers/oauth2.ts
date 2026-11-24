@@ -56,7 +56,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			throw new InvalidProviderConfigError({ provider: additionalConfig['provider'] });
 		}
 
-		const redirectUrl = new Url(env['PUBLIC_URL'] as string).addPath(
+		const redirectUrl = new Url(env['PUBLIC_URL']).addPath(
 			'auth',
 			'login',
 			additionalConfig['provider'],

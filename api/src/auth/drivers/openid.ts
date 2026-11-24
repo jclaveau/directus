@@ -459,7 +459,7 @@ export function createOpenIDAuthRouter(providerName: string): Router { // bb-out
 				return res.redirect(await provider.generateAuthUrl(codeVerifier, prompt));
 			} catch {
 				return res.redirect(
-					new Url(env['PUBLIC_URL'] as string)
+					new Url(env['PUBLIC_URL'])
 						.addPath('admin', 'login')
 						.setQuery('reason', ErrorCode.ServiceUnavailable)
 						.toString(),
@@ -494,7 +494,7 @@ export function createOpenIDAuthRouter(providerName: string): Router { // bb-out
 				};
 			} catch (e: any) {
 				logger.warn(e, `[OpenID] Couldn't verify OpenID cookie`);
-				const url = new Url(env['PUBLIC_URL'] as string).addPath('admin', 'login');
+				const url = new Url(env['PUBLIC_URL']).addPath('admin', 'login');
 				return res.redirect(`${url.toString()}?reason=${ErrorCode.InvalidCredentials}`);
 			}
 

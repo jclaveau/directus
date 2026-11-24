@@ -8,7 +8,9 @@ import { isDirectusVariable } from '../utils/is-directus-variable.js';
 import { isFileKey } from '../utils/is-file-key.js';
 import { readConfigurationFromProcess } from '../utils/read-configuration-from-process.js';
 import { removeFileSuffix } from '../utils/remove-file-suffix.js';
+import { findEnvDeclaration } from '../utils/find-env-declaration.js';
 import { cast } from './cast.js';
+import { checkDeclaredValue } from './check-declared-value.js';
 import { readConfigurationFromFile } from './read-configuration-from-file.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
 
@@ -67,6 +69,15 @@ let sources: EnvSources = {};
 /** The provenance of the env `createEnv` last built. */
 export const readEnvSources = (): EnvSources => sources;
 
+/**
+ * Each variable as it was set, before any cast: what an extension declaring it
+ * casts from, rather than from what core guessed it to be.
+ */
+let rawValues: Record<string, unknown> = {};
+
+/** The values the env `createEnv` last built was cast from. */
+export const readEnvRawValues = (): Record<string, unknown> => rawValues;
+
 export const createEnv = (): Env => {
 	const baseConfiguration = readConfigurationFromProcess();
 	const fileConfiguration = readConfigurationFromFile(getConfigPath());
@@ -77,9 +88,11 @@ export const createEnv = (): Env => {
 	// which is the common case — hence the keys, not an `in` over a nullable object.
 	const fileKeys = new Set(Object.keys(fileConfiguration ?? {}));
 
-	const output: Env = {};
+	const output: Record<string, unknown> = {};
+	const refusals: string[] = [];
 
 	sources = {};
+	rawValues = {};
 
 	for (const [key, value] of Object.entries(DEFAULTS)) {
 		output[key] = getDefaultType(key) ? cast(value, key) : value;
@@ -118,9 +131,25 @@ export const createEnv = (): Env => {
 			}
 		}
 
+		const envDeclaration = findEnvDeclaration(key);
+
+		const refusal = envDeclaration
+			&& checkDeclaredValue(key, value, envDeclaration);
+
+		if (refusal) {
+			refusals.push(refusal);
+
+			continue;
+		}
+
 		output[key] = cast(readBooleanSpelling(key, value), key);
 		sources[key] = source;
+		rawValues[key] = value;
 	}
 
-	return output;
+	if (refusals.length > 0) {
+		throw new Error(refusals.join('\n'));
+	}
+
+	return output as Env;
 };

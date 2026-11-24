@@ -170,7 +170,7 @@ export class ServerService {
 		const data: HealthData = {
 			status: 'ok',
 			releaseId: version,
-			serviceId: env['PUBLIC_URL'] as string,
+			serviceId: env['PUBLIC_URL'],
 			checks: merge(
 				...(await Promise.all([
 					testDatabase(),
@@ -462,7 +462,7 @@ export class ServerService {
 
 			const checks: Record<string, HealthCheck[]> = {};
 
-			for (const location of toArray(env['STORAGE_LOCATIONS'] as string)) {
+			for (const location of toArray(env['STORAGE_LOCATIONS'] as string[])) {
 				const disk = storage.location(location);
 				const envThresholdKey = `STORAGE_${location}_HEALTHCHECK_THRESHOLD`.toUpperCase();
 

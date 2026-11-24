@@ -11,7 +11,7 @@ export function isLoginRedirectAllowed(redirect: unknown, provider: string): boo
 	if (typeof redirect !== 'string') return false; // invalid type
 
 	const env = useEnv();
-	const publicUrl = env['PUBLIC_URL'] as string;
+	const publicUrl = env['PUBLIC_URL'];
 
 	if (URL.canParse(redirect) === false) {
 		if (redirect.startsWith('//') === false) {

@@ -97,7 +97,7 @@ const BASE_ENV = {
 };
 
 beforeEach(() => {
-	vi.mocked(useEnv).mockReturnValue({ ...BASE_ENV });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ ...BASE_ENV });
 });
 
 afterEach(() => {
@@ -257,7 +257,8 @@ describe('createApp', async () => {
 		};
 
 		test('registers the limiter below the cache by default', async () => {
-			vi.mocked(useEnv).mockReturnValue({ ...BASE_ENV, RATE_LIMITER_ENABLED: true });
+			vi.mocked(useEnv, { partial: true })
+				.mockReturnValue({ ...BASE_ENV, RATE_LIMITER_ENABLED: true });
 			vi.mocked(resolvedRateLimiterCharge).mockReturnValue('cache-misses');
 
 			const names = await middlewareNames();
@@ -271,7 +272,8 @@ describe('createApp', async () => {
 		});
 
 		test('registers the limiter above the cache for every-request', async () => {
-			vi.mocked(useEnv).mockReturnValue({ ...BASE_ENV, RATE_LIMITER_ENABLED: true });
+			vi.mocked(useEnv, { partial: true })
+				.mockReturnValue({ ...BASE_ENV, RATE_LIMITER_ENABLED: true });
 			vi.mocked(resolvedRateLimiterCharge).mockReturnValue('every-request');
 
 			const names = await middlewareNames();

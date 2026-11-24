@@ -76,7 +76,7 @@ beforeEach(() => {
 
 	// A deployment whose connection is not fully declared never reaches one, so
 	// every arm below that expects a read has to declare one here.
-	vi.mocked(useEnv).mockReturnValue({ ...CONNECTION });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ ...CONNECTION });
 });
 
 // The dialect decides which of these are required, and a read is answered
@@ -85,7 +85,7 @@ beforeEach(() => {
 test('reads nothing through a connection missing a variable', async () => {
 	const { DB_HOST: _host, ...incomplete } = CONNECTION;
 
-	vi.mocked(useEnv).mockReturnValue(incomplete);
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(incomplete);
 	await settingsHolding(JSON.stringify({ maxWorkers: 8 }));
 
 	await expect(readSharedSettings(SHARED_SETTINGS_COLUMNS.autoscale))
@@ -112,7 +112,7 @@ test('reads nothing through a connection missing a variable', async () => {
 // question has to be answered before the connection is reached for.
 test('answers nothing where the deployment names no database', async () => {
 	await settingsHolding({ maxWorkers: 8 });
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 
 	await expect(readSharedSettings(SHARED_SETTINGS_COLUMNS.autoscale))
 		.resolves.toBeNull();
@@ -418,7 +418,8 @@ test('re-reads every thirty seconds where nothing says otherwise', () => {
 // A deployment with no Redis has no bus to miss an announcement on, so this
 // floor is the only thing that lands a change there at all.
 test('takes the interval the deployment configured', () => {
-	vi.mocked(useEnv).mockReturnValue({ SHARED_SETTINGS_POLL_SECONDS: 5 });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ SHARED_SETTINGS_POLL_SECONDS: 5 });
 
 	expect(sharedSettingsPollMs()).toBe(5_000);
 });
@@ -426,7 +427,8 @@ test('takes the interval the deployment configured', () => {
 // The floor is read on the scaling tick, so a floor of none is a select every
 // time the pool is sized — and a typo would ask for one just as loudly.
 test.each([0, -5, 'often'])('refuses %o as an interval', (seconds) => {
-	vi.mocked(useEnv).mockReturnValue({ SHARED_SETTINGS_POLL_SECONDS: seconds });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ SHARED_SETTINGS_POLL_SECONDS: seconds });
 
 	expect(sharedSettingsPollMs()).toBe(30_000);
 });

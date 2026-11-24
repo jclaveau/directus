@@ -13,51 +13,54 @@ afterEach(() => {
 });
 
 test('The endpoint is served only where it was turned on', () => {
-	vi.mocked(useEnv).mockReturnValue({ SYSTEM_MCP_ENABLED: true });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ SYSTEM_MCP_ENABLED: true });
 	expect(systemMcpEnabled()).toBe(true);
 
-	vi.mocked(useEnv).mockReturnValue({ SYSTEM_MCP_ENABLED: false });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ SYSTEM_MCP_ENABLED: false });
 	expect(systemMcpEnabled()).toBe(false);
 
 	// Absent is off: a new externally reachable surface opens deliberately.
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 	expect(systemMcpEnabled()).toBe(false);
 });
 
 test('Only the configured subsystems are exposed', () => {
-	vi.mocked(useEnv)
+	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ SYSTEM_MCP_TOOLS: ['processes', 'cache'] });
 
 	expect(systemMcpToolGroups()).toEqual(['processes', 'cache']);
 
-	vi.mocked(useEnv).mockReturnValue({ SYSTEM_MCP_TOOLS: [' processes '] });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ SYSTEM_MCP_TOOLS: [' processes '] });
 	expect(systemMcpToolGroups()).toEqual(['processes']);
 
 	// A name that is not a subsystem is dropped rather than exposed.
-	vi.mocked(useEnv)
+	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ SYSTEM_MCP_TOOLS: ['cache', 'database'] });
 
 	expect(systemMcpToolGroups()).toEqual(['cache']);
 
-	vi.mocked(useEnv).mockReturnValue({ SYSTEM_MCP_TOOLS: [''] });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ SYSTEM_MCP_TOOLS: [''] });
 	expect(systemMcpToolGroups()).toEqual([]);
 
 	// Anything that is not a list at all exposes nothing.
-	vi.mocked(useEnv).mockReturnValue({ SYSTEM_MCP_TOOLS: 'cache' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ SYSTEM_MCP_TOOLS: 'cache' as unknown as unknown[] });
 	expect(systemMcpToolGroups()).toEqual([]);
 
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 	expect(systemMcpToolGroups()).toEqual([]);
 
 	// The audit group needs the node to audit at all.
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		SYSTEM_MCP_TOOLS: ['cache', 'cache_audit'],
 		CACHE_AUDIT_ENABLED: true,
 	});
 
 	expect(systemMcpToolGroups()).toEqual(['cache', 'cache_audit']);
 
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		SYSTEM_MCP_TOOLS: ['cache', 'cache_audit'],
 		CACHE_AUDIT_ENABLED: false,
 	});
@@ -66,7 +69,7 @@ test('Only the configured subsystems are exposed', () => {
 });
 
 test('The cache settings write is a subsystem a deployment can name', () => {
-	vi.mocked(useEnv)
+	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ SYSTEM_MCP_TOOLS: ['cache', 'cache_settings'] });
 
 	expect(systemMcpToolGroups()).toEqual(['cache', 'cache_settings']);
@@ -77,29 +80,32 @@ test('The cache settings write is a subsystem a deployment can name', () => {
 // that sends no Origin is not a browser.
 // https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#security-warning
 test('A caller with no Origin is not a browser, and is allowed', () => {
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 
 	expect(systemMcpAllowsOrigin(undefined)).toBe(true);
 });
 
 // https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#security-warning
 test('No browser origin is allowed until one is named', () => {
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 	expect(systemMcpAllowsOrigin('https://evil.example')).toBe(false);
 
-	vi.mocked(useEnv).mockReturnValue({ SYSTEM_MCP_ALLOWED_ORIGINS: [] });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ SYSTEM_MCP_ALLOWED_ORIGINS: [] });
 	expect(systemMcpAllowsOrigin('https://evil.example')).toBe(false);
 
 	// Not a list at all is not an allowlist.
-	vi.mocked(useEnv)
-		.mockReturnValue({ SYSTEM_MCP_ALLOWED_ORIGINS: 'https://ok.example' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({
+			SYSTEM_MCP_ALLOWED_ORIGINS: 'https://ok.example' as unknown as unknown[],
+		});
 
 	expect(systemMcpAllowsOrigin('https://ok.example')).toBe(false);
 });
 
 // https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#security-warning
 test('A named origin is allowed, and only that one', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		SYSTEM_MCP_ALLOWED_ORIGINS: [
 			' https://ok.example ',
 			'https://two.example',

@@ -62,7 +62,14 @@ vi.mock('chokidar', () => {
 	return { default: { watch: () => watcher } };
 });
 
-vi.mock('@directus/env', () => ({ useEnv: () => mocks.env }));
+vi.mock('@directus/env', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('@directus/env')>()),
+		useEnv: () => mocks.env,
+		useEnvRawValues: () => ({}),
+	};
+});
+
 vi.mock('../logger/index.js', () => ({ useLogger: () => mocks.logger }));
 vi.mock('../bus/index.js', () => ({ useBus: () => mocks.bus }));
 vi.mock('../database/index.js', () => ({ default: () => ({}) }));

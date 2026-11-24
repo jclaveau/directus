@@ -10,7 +10,8 @@ import {
 vi.mock('@directus/env');
 
 beforeEach(() => {
-	vi.mocked(useEnv).mockReturnValue({ MARKETPLACE_ENABLED: false });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ MARKETPLACE_ENABLED: false });
 });
 
 test.each([
@@ -19,7 +20,7 @@ test.each([
 ])(
 	'reads MARKETPLACE_ENABLED $marketplaceEnabled as enabled: $enabled',
 	({ marketplaceEnabled, enabled }) => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			MARKETPLACE_ENABLED: marketplaceEnabled,
 		});
 
@@ -56,7 +57,8 @@ test('names the bare registry path the client asked for', () => {
 });
 
 test('passes a registry route when MARKETPLACE_ENABLED is true', () => {
-	vi.mocked(useEnv).mockReturnValue({ MARKETPLACE_ENABLED: true });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ MARKETPLACE_ENABLED: true });
 	const next = vi.fn();
 
 	refuseExtensionChangeInProduction(

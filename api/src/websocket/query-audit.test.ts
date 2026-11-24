@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 test('adds the statements a message ran to its reply', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -61,7 +61,7 @@ test('adds the statements a message ran to its reply', async () => {
 });
 
 test('keeps the purged list of the message it audits', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -91,7 +91,7 @@ test('keeps the purged list of the message it audits', async () => {
 });
 
 test('sends the reply as is while QUERY_AUDIT_HEADER is unset', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
 	});
@@ -119,7 +119,7 @@ test('sends the reply as is while QUERY_AUDIT_HEADER is unset', async () => {
 });
 
 test('reports statements to a non-admin asking bindings', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -161,7 +161,7 @@ test('reports statements to a non-admin asking bindings', async () => {
 });
 
 test('records no bound value of a non-admin asking bindings', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -195,7 +195,7 @@ test('records no bound value of a non-admin asking bindings', async () => {
 });
 
 test('reports the bound values to an admin asking bindings', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -238,7 +238,7 @@ test('reports the bound values to an admin asking bindings', async () => {
 });
 
 test('adds the audit to its reply alone, never a push or a second', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -272,7 +272,7 @@ test('adds the audit to its reply alone, never a push or a second', async () => 
 });
 
 test('leaves a reply to another client as is', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -302,7 +302,7 @@ test('leaves a reply to another client as is', async () => {
 });
 
 test('does not audit a message without a uid', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -319,7 +319,7 @@ test('does not audit a message without a uid', async () => {
 });
 
 test('refuses a message asking an unknown level', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -351,7 +351,7 @@ test('refuses a message asking an unknown level', async () => {
 });
 
 test('refuses a message asking a number as its query audit', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -383,7 +383,7 @@ test('refuses a message asking a number as its query audit', async () => {
 });
 
 test('refuses a message asking its query audit as an array', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -415,7 +415,7 @@ test('refuses a message asking its query audit as an array', async () => {
 });
 
 test('closes an unreplied message audit on disconnect', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -445,7 +445,7 @@ test('closes an unreplied message audit on disconnect', async () => {
 });
 
 test('closes a message audit once its handler settles without a reply', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -472,7 +472,7 @@ test('closes a message audit once its handler settles without a reply', async ()
 });
 
 test('closes a message audit once its handler throws', async () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',

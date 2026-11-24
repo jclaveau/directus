@@ -11,6 +11,7 @@ import type {
 	Theme,
 } from '@directus/types';
 import type { Knex } from 'knex';
+import type { ExtensionEnv } from './define-env.js';
 
 export const BUNDLE_ENTRIES_FORMAT = 'scalabus/1';
 
@@ -27,18 +28,25 @@ export interface MigrationConfig {
 	phase?: MigrationPhase;
 }
 
-export type HookEntry = { type: 'hook'; name: string; config: HookConfig };
-export type EndpointEntry = {
+/** The variables the extension of an api entry declares, if it declares any. */
+type DeclaringEntry = { env?: ExtensionEnv };
+
+export type HookEntry = DeclaringEntry & {
+	type: 'hook';
+	name: string;
+	config: HookConfig;
+};
+export type EndpointEntry = DeclaringEntry & {
 	type: 'endpoint';
 	name: string;
 	config: EndpointConfig;
 };
-export type OperationApiEntry = {
+export type OperationApiEntry = DeclaringEntry & {
 	type: 'operation';
 	name: string;
 	config: OperationApiConfig;
 };
-export type MigrationEntry = {
+export type MigrationEntry = DeclaringEntry & {
 	type: 'migration';
 	name: string;
 	config: MigrationConfig;
@@ -176,12 +184,33 @@ function refuseRepeatedNames(entries: { name: string }[]): void {
 	}
 }
 
+/**
+ * The api entries of a bundle. Given `{ env, entries }`, every entry that
+ * declares no variables of its own declares `env`'s, so the API checks them
+ * once for the bundle.
+ */
 export function defineBundleApi(
-	entries: BundleApiEntry[],
+	bundleApi: BundleApiEntry[] | { env: ExtensionEnv; entries: BundleApiEntry[] },
 ): BundleEntries<BundleApiEntry> {
-	refuseRepeatedNames(entries);
+	if (Array.isArray(bundleApi)) {
+		refuseRepeatedNames(bundleApi);
 
-	return { format: BUNDLE_ENTRIES_FORMAT, entries };
+		return { format: BUNDLE_ENTRIES_FORMAT, entries: bundleApi };
+	}
+
+	refuseRepeatedNames(bundleApi.entries);
+
+	const bundleEnv: ExtensionEnv = {
+		prefix: bundleApi.env.prefix,
+		vars: bundleApi.env.vars,
+	};
+
+	return {
+		format: BUNDLE_ENTRIES_FORMAT,
+		entries: bundleApi.entries.map((entry) => {
+			return { ...entry, env: entry.env ?? bundleEnv };
+		}),
+	};
 }
 
 export function defineBundleApp(

@@ -38,6 +38,7 @@
 	},
 	"dependencies": {
 		"@directus/constants": "workspace:*",
+		"@directus/env": "workspace:*",
 		"@directus/types": "workspace:*",
 		"@directus/utils": "workspace:*",
 		"@types/express": "catalog:",
