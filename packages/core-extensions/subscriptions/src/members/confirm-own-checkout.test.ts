@@ -42,6 +42,8 @@ beforeEach(async () => {
 			provider: 'mollie',
 			provider_customer_id: 'cst_1',
 			status: 'pending',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
 		},
 		{
 			plan: 1,
@@ -50,6 +52,8 @@ beforeEach(async () => {
 			provider_customer_id: 'cst_2',
 			provider_subscription_id: 'sub_2',
 			status: 'active',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
 		},
 	]);
 });

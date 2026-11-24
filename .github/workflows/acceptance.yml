@@ -100,13 +100,15 @@ jobs:
             preview-extensions/package.json > /tmp/preview-extensions.json
           mv /tmp/preview-extensions.json preview-extensions/package.json
 
+          # The examples' script starts the fake providers under PM2.
+          npm install --global pm2@5
+
           URL=http://localhost:8055
           . scripts/preview-admin/extensions/subscriptions-examples.sh
           grep -q subscriptions-examples preview-extensions/package.json \
             || { echo "subscriptions examples not loaded"; exit 1; }
 
           export PACKAGE_FILE_LOCATION="$PWD/preview-extensions"
-          node directus/cli.js database migrate:latest
           PUBLIC_URL="$URL" node directus/cli.js start > /tmp/directus.log 2>&1 &
 
           for _ in $(seq 1 60); do
