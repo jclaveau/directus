@@ -1,8 +1,8 @@
 name: Acceptance Tests
 
 # Browser acceptance tests for the fork's app (Playwright), covering behaviour jsdom
-# can't drive. Currently the cache page (Settings → Cache) — chart legend layout +
-# persistence, tooltip, the latency chart; more feature specs will live alongside it.
+# can't drive: the cache page (Settings → Cache) — chart legend layout +
+# persistence, tooltip, the latency chart — and the subscriptions examples module.
 # Boots a seeded Directus that serves the admin, generates cache traffic so the charts
 # have data, then runs the suite in tests/acceptance.
 #
@@ -16,6 +16,9 @@ on:
       - 'app/src/modules/settings/routes/cache/**'
       - 'app/src/views/private/components/refresh-sidebar-detail.vue'
       - 'tests/acceptance/**'
+      - 'packages/core-extensions/subscriptions/**'
+      - 'packages/core-extensions/subscriptions-examples/**'
+      - 'scripts/preview-admin/extensions/subscriptions-examples.sh'
       - '.github/workflows/acceptance.yml'
 
 concurrency:
@@ -84,7 +87,27 @@ jobs:
       - name: Bootstrap + start Directus
         run: |
           node directus/cli.js bootstrap
-          node directus/cli.js start > /tmp/directus.log 2>&1 &
+
+          # The subscriptions bundle and its examples, loaded the way
+          # preview-admin.yml loads them: the examples' script starts the fake
+          # Stripe and Mollie and a Mailpit, and exports their env.
+          mkdir -p preview-extensions/node_modules/@scalabus
+          echo '{"name":"preview-extensions","dependencies":{}}' \
+            > preview-extensions/package.json
+          ln -s "$PWD/packages/core-extensions/subscriptions" \
+            preview-extensions/node_modules/@scalabus/subscriptions
+          jq '.dependencies["@scalabus/subscriptions"] = "0.1.0"' \
+            preview-extensions/package.json > /tmp/preview-extensions.json
+          mv /tmp/preview-extensions.json preview-extensions/package.json
+
+          URL=http://localhost:8055
+          . scripts/preview-admin/extensions/subscriptions-examples.sh
+          grep -q subscriptions-examples preview-extensions/package.json \
+            || { echo "subscriptions examples not loaded"; exit 1; }
+
+          export PACKAGE_FILE_LOCATION="$PWD/preview-extensions"
+          node directus/cli.js database migrate:latest
+          PUBLIC_URL="$URL" node directus/cli.js start > /tmp/directus.log 2>&1 &
 
           for _ in $(seq 1 60); do
             curl -sf http://localhost:8055/server/health >/dev/null 2>&1 && break
