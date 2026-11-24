@@ -395,6 +395,14 @@ test(
 
 		expect(acceptResponse.status).toBe(204);
 
+		// The seat's access lands with the next sync, every 10 seconds: signed in
+		// before it, the friend meets the app's "No App Access" page.
+		const friendAccessPath = '/access?fields=policy.name'
+			+ `&filter[user][email][_eq]=${FRIEND_EMAIL}`;
+
+		await expect.poll(() => callAdminApi('GET', friendAccessPath), LINE_TIMEOUT)
+			.toEqual({ data: [{ policy: { name: 'Examples member' } }] });
+
 		await page.context()
 			.clearCookies();
 
