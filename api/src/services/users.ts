@@ -492,9 +492,7 @@ export class UsersService extends ItemsService {
 
 		const inviterIsAdmin = !this.accountability || this.accountability.admin;
 
-		if (!inviterIsAdmin) {
-			await this.refuseAdminRoleInvite(role);
-		}
+		await this.refuseAdminRoleInvite(role);
 
 		const emails = toArray(email);
 
@@ -557,8 +555,8 @@ export class UsersService extends ItemsService {
 
 		if (roleAccess.admin) {
 			throw new InvalidPayloadError({
-				reason: oneLine`Role ${JSON.stringify(role)} grants admin access: only
-					an admin invites into it`,
+				reason: oneLine`Role ${JSON.stringify(role)} grants admin access: an
+					admin is made by an admin, never through an invite`,
 			});
 		}
 	}

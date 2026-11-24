@@ -10,7 +10,15 @@ import {
 import jwt from 'jsonwebtoken';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	onTestFinished,
+	vi,
+} from 'vitest';
 import { clearSystemCache } from '../cache.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import {
@@ -772,6 +780,13 @@ describe('Integration Tests', () => {
 				schema,
 			});
 
+			beforeEach(() => {
+				tracker.on.select('directus_roles')
+					.response({ id: 'invite-role', parent: null });
+
+				tracker.on.select('directus_access').response([]);
+			});
+
 			vi.spyOn(UsersService.prototype as any, 'inviteUrl').mockImplementation(() => vi.fn());
 
 			it('should invite new users', async () => {
@@ -906,17 +921,19 @@ describe('Integration Tests', () => {
 			);
 		});
 
-		describe('invite by a non-admin', () => {
-			const inviter = new UsersService({
-				knex: db,
-				schema,
-				accountability: { role: 'inviter-role', admin: false } as Accountability,
-			});
+		describe('invite into an admin role', () => {
+			it.each([true, false])('refuses it to an inviter with admin %s', async (
+				inviterAdmin,
+			) => {
+				const inviter = new UsersService({
+					knex: db,
+					schema,
+					accountability: {
+						role: 'inviter-role',
+						admin: inviterAdmin,
+					} as Accountability,
+				});
 
-			vi.spyOn(UsersService.prototype as any, 'inviteUrl')
-				.mockImplementation(() => vi.fn());
-
-			it('refuses a role that grants admin access', async () => {
 				tracker.on.select('directus_roles')
 					.response({ id: 'admin-role', parent: null });
 
@@ -926,12 +943,23 @@ describe('Integration Tests', () => {
 
 				await expect(inviter.inviteUser('user@example.com', 'admin-role', null))
 					.rejects.toEqual(new InvalidPayloadError({
-						reason: oneLine`Role "admin-role" grants admin access: only an
-							admin invites into it`,
+						reason: oneLine`Role "admin-role" grants admin access: an admin
+							is made by an admin, never through an invite`,
 					}));
 
 				expect(superCreateOneSpy).not.toHaveBeenCalled();
 			});
+		});
+
+		describe('invite by a non-admin', () => {
+			const inviter = new UsersService({
+				knex: db,
+				schema,
+				accountability: { role: 'inviter-role', admin: false } as Accountability,
+			});
+
+			vi.spyOn(UsersService.prototype as any, 'inviteUrl')
+				.mockImplementation(() => vi.fn());
 
 			it('creates the invited user, then writes its role as code', async () => {
 				tracker.on.select('directus_roles')
@@ -1440,6 +1468,11 @@ describe('Integration Tests', () => {
 
 		describe('mail links', () => {
 			it('invites to an allowed url and logs a mail that fails', async () => {
+				tracker.on.select('directus_roles')
+					.response({ id: 'invite-role', parent: null });
+
+				tracker.on.select('directus_access').response([]);
+
 				vi.spyOn(UsersService.prototype as any, 'inviteUrl')
 					.mockImplementationOnce(usersInviteUrl);
 
@@ -1482,6 +1515,11 @@ describe('Integration Tests', () => {
 			});
 
 			it('invites to the admin app when no url is given', async () => {
+				tracker.on.select('directus_roles')
+					.response({ id: 'invite-role', parent: null });
+
+				tracker.on.select('directus_access').response([]);
+
 				vi.spyOn(UsersService.prototype as any, 'inviteUrl')
 					.mockImplementationOnce(usersInviteUrl);
 

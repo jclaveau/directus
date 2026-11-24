@@ -5,9 +5,9 @@ Feature: Only an admin or code writes who may do what
     write is still refused unless it is an admin's: it could hand its author
     more than they hold (#763). Every other field stays the permissions' call.
   - An invitation is the one way a non-admin hands out a role: code writes
-    the role of the user it invites, who cannot log in before accepting. A
-    role that grants admin access, its own or a parent's, is an admin's to
-    invite into.
+    the role of the user it invites, who cannot log in before accepting. No
+    one invites into a role that grants admin access, its own or a parent's,
+    an admin neither: an admin makes an admin directly.
   - A role a user belongs to is never deleted. An empty role's access rows
     and children's parent are cleaned up by code, whoever deletes the role.
   - A Given states the database rows a scenario starts from, written straight
@@ -347,7 +347,7 @@ Feature: Only an admin or code writes who may do what
       | 7       | pg_index             | 2      | 0      | 0      | 0      | 0    |
       | 7       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
 
-  Scenario: a non-admin invites into a role, never into an admin one
+  Scenario: a non-admin invites into a role, nobody into an admin one
     Given the rows of directus_policies:
       | id               | name          | app_access | admin_access |
       | <inviter-policy> | inviter-<run> | false      | false        |
@@ -403,16 +403,27 @@ Feature: Only an admin or code writes who may do what
       | payload:                           |     - message: >-                         |
       |   email: grabbed-<run>@example.com |         Invalid payload. Role             |
       |   role: <admin-role>               |         "<admin-role>" grants admin       |
-      |                                    |         access: only an admin             |
-      |                                    |         invites into it.                  |
+      |                                    |         access: an admin is made          |
+      |                                    |         by an admin, never through        |
+      |                                    |         an invite.                        |
       | as: inviter-<run>                  | code: 400                                 |+
       | method: POST                       | body:                                     |
       | path: /users/invite                |   errors:                                 |
       | payload:                           |     - message: >-                         |
       |   email: under-<run>@example.com   |         Invalid payload. Role             |
       |   role: <under-admin-role>         |         "<under-admin-role>" grants admin |
-      |                                    |         access: only an admin             |
-      |                                    |         invites into it.                  |
+      |                                    |         access: an admin is made          |
+      |                                    |         by an admin, never through        |
+      |                                    |         an invite.                        |
+      | method: POST                       | code: 400                                 |+
+      | path: /users/invite                | body:                                     |
+      | payload:                           |   errors:                                 |
+      |   email: made-<run>@example.com    |     - message: >-                         |
+      |   role: <admin-role>               |         Invalid payload. Role             |
+      |                                    |         "<admin-role>" grants admin       |
+      |                                    |         access: an admin is made          |
+      |                                    |         by an admin, never through        |
+      |                                    |         an invite.                        |
       | method: GET                        | code: 200                                 |+
       | path: /users                       | body:                                     |
       | query:                             |   data: []                                |
@@ -425,6 +436,12 @@ Feature: Only an admin or code writes who may do what
       |   fields: id                       |                                           |
       |   filter[email][_eq]: >-           |                                           |
       |     under-<run>@example.com        |                                           |
+      | method: GET                        | code: 200                                 |+
+      | path: /users                       | body:                                     |
+      | query:                             |   data: []                                |
+      |   fields: id                       |                                           |
+      |   filter[email][_eq]: >-           |                                           |
+      |     made-<run>@example.com         |                                           |
     And on postgres the requests ran these statements:
       | request | table                | select | insert | update | delete | with |
       | 1       | directus_access      | 5      | 0      | 0      | 0      | 0    |
@@ -453,6 +470,7 @@ Feature: Only an admin or code writes who may do what
       | 6       | directus_access      | 1      | 0      | 0      | 0      | 0    |
       | 6       | directus_roles       | 2      | 0      | 0      | 0      | 0    |
       | 6       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 7       | directus_users       | 0      | 0      | 0      | 0      | 0    |
 
   Scenario: a role a user belongs to stays, an empty one goes, by a non-admin too
     Given the rows of directus_policies:
