@@ -265,3 +265,6 @@ Run 37846335608 (2026-10-08, shard 8, slot "one") and run 42213640914 (2026-11-0
 - **Fix:** `CACHE_SCOPED_INDEX_REAP_SCHEDULE = '0 0 1 1 *'` in the test env, like the other reap-sensitive bb files. **Any bb file that spawns a scoped-cache instance and checks HIT after a fill should pin the schedule off**; the 360k decoys made the pass 8-10 s, so crossing an hour went from negligible to ~0.5%/run.
 - **Deterministic red:** schedule `* * * * * *` → both fill tests MISS×5 (run 41837755574, job 126601122705, `counter moved after 19ms`).
 - **Survey (Check runs 10-09→11-04, 217 failed bb jobs, 8 hits):** 1 revert-proof branch (intended), 6 `expected <900 to be greater than 900` calibration (all before #656's 360k), 1 this one — the only HIT×5 failure, and the only one since #656.
+
+## 2026-11-24 (#758 shard 3): cache-user-role-writes purged tags
+- `routes/users/cache-user-role-writes` "a deleted inviter keeps t…": DELETE /users/<inviter> `x-scoped-cache-purged-tags` got an extra `test_nested_m2o_task`, a collection another spec in the shard left with an FK to `directus_users`. PR #758 touches only subscriptions packages (run 45376962870, job 138385830881). Seen once; a new push reran it.
