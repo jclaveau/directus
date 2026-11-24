@@ -1338,6 +1338,22 @@ const testCardValues = {
 	'cc-name': 'Scalabus Probe',
 };
 
+// A frame the tab navigates away from mid-count holds no status screen yet:
+// the next poll reads the new page.
+async function countPaidRadios(tabFrame, paidRadio) {
+	try {
+		return await tabFrame.locator(paidRadio).count();
+	}
+	catch (countError) {
+		if (/Frame was detached|Execution context was destroyed/
+			.test(String(countError))) {
+			return 0;
+		}
+
+		throw countError;
+	}
+}
+
 // The payment's way back: Mollie's test status screen inside the tab, in a
 // popup or in place of the page, then (or straight) the redirectUrl.
 // eslint-disable-next-line local/no-single-caller-function -- browser plumbing
@@ -1360,7 +1376,7 @@ async function followPaymentOutcome(componentsTab) {
 			for (const tabFrame of contextTab.frames()) {
 				const isPaidChosen = outcomeEvents.includes('chose paid');
 
-				if (isPaidChosen || await tabFrame.locator(paidRadio).count() === 0) {
+				if (isPaidChosen || await countPaidRadios(tabFrame, paidRadio) === 0) {
 					continue;
 				}
 
@@ -1603,7 +1619,21 @@ async function checkCheckoutSession() {
 		body: markedSessionBody,
 	});
 
-	sessionFindings.creationWithMetadata = describeVerdict(sessionCreation);
+	sessionFindings.creationWithMetadataAndWebhook = describeVerdict(
+		sessionCreation,
+	);
+
+	// Mollie refuses a session's webhookUrl: try the metadata alone.
+	if (sessionCreation.mollieAnswer === null) {
+		sessionCreation = await callMollieVerdict('POST', '/sessions', {
+			body: {
+				...sessionBody,
+				metadata: { directus_subscription: sessionMarker },
+			},
+		});
+
+		sessionFindings.creationWithMetadata = describeVerdict(sessionCreation);
+	}
 
 	if (sessionCreation.mollieAnswer === null) {
 		sessionCreation = await callMollieVerdict('POST', '/sessions', {
