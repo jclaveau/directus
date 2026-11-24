@@ -69,6 +69,7 @@ const MOLLIE_OLD_WEBHOOK_SECRET = 'mollie_secret_old';
 const SYNC_POLL = { timeout: 45_000, interval: 500 };
 
 const BUNDLE_TABLES = [
+	'subscription_invoices',
 	'subscription_invites',
 	'subscription_sync_queue',
 	'subscription_events',
@@ -256,6 +257,7 @@ describe.each(vendors)('%s', (vendor) => {
 				'@scalabus/subscriptions:20261107A',
 				'@scalabus/subscriptions:20261121A',
 				'@scalabus/subscriptions:20261122A',
+				'@scalabus/subscriptions:20261123A',
 			])
 			.delete();
 
