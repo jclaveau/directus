@@ -3870,10 +3870,10 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 	describe('a users upsert moving users to another role', () => {
 		beforeEach(() => {
-			vi.mocked(flushResponseCache).mockClear();
+			vi.mocked(flushResponseCache).mockReset();
 		});
 
-		it('flushes the response cache once the upsert commits', async () => {
+		it('flushes per membership deselect, after the commit', async () => {
 			tracker.on.select('directus_users').response([
 				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' },
 				{ id: 'b6d7c3f0-6a2e-4f0b-9a51-2f4a8e1c0d22' },
@@ -3893,7 +3893,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			const transactionStates: string[][] = [];
 
-			vi.mocked(flushResponseCache).mockImplementationOnce(async () => {
+			vi.mocked(flushResponseCache).mockImplementation(async () => {
 				transactionStates.push(
 					tracker.history.transactions.map((trx) => trx.state),
 				);
@@ -3935,18 +3935,27 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				},
 			]);
 
-			expect(flushResponseCache).toHaveBeenCalledExactlyOnceWith(
-				{
-					clear: expect.any(Function),
-					delete: expect.any(Function),
-				},
-				{ permissionsCleared: true },
-			);
+			expect(vi.mocked(flushResponseCache).mock.calls).toEqual([
+				[
+					{
+						clear: expect.any(Function),
+						delete: expect.any(Function),
+					},
+					{ permissionsCleared: true },
+				],
+				[
+					{
+						clear: expect.any(Function),
+						delete: expect.any(Function),
+					},
+					{ permissionsCleared: true },
+				],
+			]);
 
-			expect(transactionStates).toEqual([['committed']]);
+			expect(transactionStates).toEqual([['committed'], ['committed']]);
 		});
 
-		it('hands the flush to a caller that opted out', async () => {
+		it('flushes the membership deselect past a caller that opted out', async () => {
 			tracker.on.select('directus_users').response([
 				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' },
 			]);
@@ -4000,11 +4009,13 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				{ autoPurgeCache: false, onResponseCacheFlushDeferred },
 			);
 
-			expect(flushResponseCache).not.toHaveBeenCalled();
-
-			expect(onResponseCacheFlushDeferred).toHaveBeenCalledExactlyOnceWith({
-				permissionsCleared: true,
-			});
+			expect(flushResponseCache).toHaveBeenCalledExactlyOnceWith(
+				{
+					clear: expect.any(Function),
+					delete: expect.any(Function),
+				},
+				{ permissionsCleared: true },
+			);
 		});
 
 		it('logs a flush that fails once the upsert committed', async () => {
@@ -4064,8 +4075,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			expect(useLogger().error).toHaveBeenCalledWith(
 				flushFailure,
-				oneLine`[cache] the response-cache flush a batch held until its
-					transaction settled failed: Error: connect ECONNREFUSED 127.0.0.1:6379`,
+				oneLine`[transaction] a task queued after commit failed: Error: connect
+					ECONNREFUSED 127.0.0.1:6379`,
 			);
 		});
 	});
