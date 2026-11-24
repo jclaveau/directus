@@ -5,7 +5,7 @@ import { providerMapsRoles } from './provider-maps-roles.js';
 vi.mock('../../utils/get-config-from-env.js');
 
 afterEach(() => {
-	vi.restoreAllMocks();
+	vi.mocked(getConfigFromEnv).mockReset();
 });
 
 test.each([

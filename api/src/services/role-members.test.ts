@@ -327,7 +327,9 @@ describe('Services / RoleMembers', () => {
 			refuses an admin the delete of a provider's membership when the provider
 			maps roles (%s), naming it
 		`, async (mapsRoles, refusalReason) => {
-			vi.mocked(providerMapsRoles).mockReturnValue(mapsRoles);
+			vi.mocked(providerMapsRoles)
+				.mockReset()
+				.mockReturnValue(mapsRoles);
 
 			const database = knex.default({ client: MockClient });
 			const tracker = createTracker(database);

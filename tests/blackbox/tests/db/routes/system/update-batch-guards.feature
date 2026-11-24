@@ -376,6 +376,7 @@ Feature: A batch update of a system collection is checked as a single update is
       | request | table                 | select | insert | update | delete |
       | 1       | directus_access       | 2      | 0      | 0      | 0      |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_invites      | 2      | 0      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
       | 1       | directus_role_members | 2      | 0      | 0      | 0      |
       | 1       | directus_sessions     | 0      | 0      | 0      | 2      |

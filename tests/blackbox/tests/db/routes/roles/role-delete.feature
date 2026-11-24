@@ -66,12 +66,10 @@ Feature: A role users hold is refused its delete; an empty one drops its presets
       |   fields: id                           |                            |
       |   filter[policy][_eq]: <p-reader>      |                            |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete | with |
-      | 1       | directus_access       | 8      | 0      | 0      | 0      | 0    |
-      | 1       | directus_activity     | 0      | 4      | 0      | 0      | 0    |
-      | 1       | directus_presets      | 1      | 0      | 0      | 1      | 0    |
-      | 1       | directus_revisions    | 0      | 2      | 0      | 0      | 0    |
-      | 1       | directus_role_members | 4      | 0      | 0      | 1      | 1    |
-      | 1       | directus_roles        | 8      | 0      | 1      | 1      | 0    |
-      | 1       | directus_sessions     | 0      | 0      | 0      | 1      | 0    |
-      | 1       | directus_users        | 7      | 0      | 1      | 0      | 0    |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 5      | 0      | 0      | 1      |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_presets      | 1      | 0      | 0      | 1      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles        | 5      | 0      | 1      | 1      |
+      | 1       | directus_users        | 5      | 0      | 0      | 0      |

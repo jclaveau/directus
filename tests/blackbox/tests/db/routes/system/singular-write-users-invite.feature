@@ -51,17 +51,17 @@ Feature: A user is invited, re-invited and accepts the invitation
       |     invited-<run>@example.com       |       invites:                |
       |                                     |         - role: <second-role> |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete |
-      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
-      | 1       | directus_invites      | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
-      | 1       | directus_role_members | 0      | 1      | 0      | 0      |
-      | 1       | directus_users        | 3      | 1      | 0      | 0      |
-      | 3       | directus_access       | 1      | 0      | 0      | 0      |
-      | 3       | directus_invites      | 1      | 1      | 0      | 1      |
-      | 3       | directus_role_members | 1      | 1      | 0      | 1      |
-      | 3       | directus_roles        | 1      | 0      | 0      | 0      |
-      | 3       | directus_users        | 3      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_access    | 1      | 0      | 0      | 0      |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_invites   | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_roles     | 1      | 0      | 0      | 0      |
+      | 1       | directus_users     | 3      | 1      | 0      | 0      |
+      | 3       | directus_access    | 1      | 0      | 0      | 0      |
+      | 3       | directus_invites   | 1      | 1      | 0      | 1      |
+      | 3       | directus_roles     | 1      | 0      | 0      | 0      |
+      | 3       | directus_users     | 2      | 0      | 0      | 0      |
 
   Scenario: an invitation accepted with its token activates the user
     Given the rows of directus_roles:
@@ -96,18 +96,19 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   email: accepting-<run>@example.com         |                                |
       |   password: accepted-password                |                                |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete | with |
-      | 1       | directus_role_members | 0      | 0      | 0      | 0      | 1    |
-      | 1       | directus_sessions     | 0      | 0      | 0      | 1      | 0    |
-      | 1       | directus_settings     | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_users        | 2      | 0      | 1      | 0      | 0    |
-      | 3       | directus_access       | 2      | 0      | 0      | 0      | 0    |
-      | 3       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
-      | 3       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_sessions     | 0      | 1      | 0      | 1      | 0    |
-      | 3       | directus_settings     | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_users        | 3      | 0      | 1      | 0      | 0    |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_invites      | 1      | 0      | 0      | 1      |
+      | 1       | directus_role_members | 1      | 1      | 0      | 0      |
+      | 1       | directus_sessions     | 0      | 0      | 0      | 1      |
+      | 1       | directus_settings     | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 2      | 0      | 1      | 0      |
+      | 3       | directus_access       | 2      | 0      | 0      | 0      |
+      | 3       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 3       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 3       | directus_roles        | 1      | 0      | 0      | 0      |
+      | 3       | directus_sessions     | 0      | 1      | 0      | 1      |
+      | 3       | directus_settings     | 1      | 0      | 0      | 0      |
+      | 3       | directus_users        | 3      | 0      | 1      | 0      |
 
   Scenario: an invitation token is refused for another scope or a user not invited
     Given the rows of directus_users:
@@ -161,8 +162,10 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   filter[email][_eq]: >-           |                                         |
       |     refused-<run>@example.com      |                                         |
     And on postgres the requests ran these statements:
-      | request | table          | select | insert | update | delete |
-      | 1       | directus_users | 3      | 0      | 0      | 0      |
+      | request | table           | select | insert | update | delete |
+      | 1       | directus_access | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles  | 1      | 0      | 0      | 0      |
+      | 1       | directus_users  | 3      | 0      | 0      | 0      |
 
   Scenario: a user invited again to a URL off the allow list is refused
     Given the rows of directus_roles:
@@ -194,10 +197,11 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   invite_url: >-                  |         can't be used to invite users.  |
       |     https://elsewhere.test/accept |                                         |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete |
-      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
-      | 1       | directus_users        | 2      | 0      | 0      | 0      |
-      | 2       | directus_users        | 2      | 0      | 0      | 0      |
+      | request | table           | select | insert | update | delete |
+      | 1       | directus_access | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles  | 1      | 0      | 0      | 0      |
+      | 1       | directus_users  | 2      | 0      | 0      | 0      |
+      | 2       | directus_users  | 2      | 0      | 0      | 0      |
 
   Scenario: graphql invites a user into the one role it names
     Given the rows of directus_roles:
@@ -219,12 +223,13 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   filter[email][_eq]: >-                |       invites:                 |
       |     graphql-<run>@example.com           |         - role: <graphql-role> |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete |
-      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
-      | 1       | directus_invites      | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
-      | 1       | directus_role_members | 0      | 1      | 0      | 0      |
-      | 1       | directus_users        | 3      | 1      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_access    | 1      | 0      | 0      | 0      |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_invites   | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_roles     | 1      | 0      | 0      | 0      |
+      | 1       | directus_users     | 3      | 1      | 0      | 0      |
 
   Scenario: a user invited again into the same role keeps their invitation
     Given the rows of directus_policies:
@@ -260,9 +265,10 @@ Feature: A user is invited, re-invited and accepts the invitation
       |     same-<run>@example.com      |         - role: <same-role> |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
-      | 1       | directus_access       | 2      | 0      | 0      | 0      |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      |
       | 1       | directus_invites      | 1      | 0      | 0      | 0      |
-      | 1       | directus_role_members | 2      | 0      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles        | 1      | 0      | 0      | 0      |
       | 1       | directus_users        | 2      | 0      | 0      | 0      |
 
   Scenario: a user invited again by another inviter keeps both invitations
@@ -308,12 +314,14 @@ Feature: A user is invited, re-invited and accepts the invitation
       |                                      |           role: <same-role>        |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 1      | 0      | 0      | 0      |
       | 1       | directus_invites      | 1      | 1      | 0      | 0      |
-      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles        | 1      | 0      | 0      | 0      |
       | 1       | directus_users        | 2      | 0      | 0      | 0      |
       | 2       | directus_invites      | 1      | 0      | 0      | 0      |
       | 2       | directus_roles        | 1      | 0      | 0      | 0      |
       | 2       | directus_users        | 2      | 0      | 0      | 0      |
+      | 3       | directus_invites      | 1      | 0      | 0      | 0      |
       | 3       | directus_role_members | 1      | 0      | 0      | 0      |
       | 3       | directus_users        | 2      | 0      | 0      | 0      |
 
@@ -406,8 +414,9 @@ Feature: A user is invited, re-invited and accepts the invitation
       | path: /users/invite                |   errors:                            |
       | payload:                           |     - message: >-                    |
       |   email: denied-<run>@example.com  |         You don't have permission    |
-      |   roles:                           |         to access this.              |
-      |     - <some-role>                  |                                      |
+      |   roles:                           |         to "create" from collection  |
+      |     - <some-role>                  |         "directus_invites" or it     |
+      |                                    |         does not exist.              |
       | method: GET                        | code: 200                            |+
       | path: /users                       | body:                                |
       | query:                             |   data: []                           |

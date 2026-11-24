@@ -3879,7 +3879,16 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				{ id: 'b6d7c3f0-6a2e-4f0b-9a51-2f4a8e1c0d22' },
 			]);
 
-			tracker.on.select('directus_role_members').response([]);
+			tracker.on.select('directus_role_members').response([{
+				id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d',
+				user: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+			}]);
+
+			tracker.on.delete('directus_role_members').response([{
+				id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d',
+				user: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+			}]);
+
 			tracker.on.update('directus_users').response(1);
 
 			const transactionStates: string[][] = [];
@@ -3942,7 +3951,16 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' },
 			]);
 
-			tracker.on.select('directus_role_members').response([]);
+			tracker.on.select('directus_role_members').response([{
+				id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d',
+				user: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+			}]);
+
+			tracker.on.delete('directus_role_members').response([{
+				id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d',
+				user: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+			}]);
+
 			tracker.on.update('directus_users').response(1);
 
 			const onResponseCacheFlushDeferred = vi.fn();
@@ -3994,7 +4012,16 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' },
 			]);
 
-			tracker.on.select('directus_role_members').response([]);
+			tracker.on.select('directus_role_members').response([{
+				id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d',
+				user: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+			}]);
+
+			tracker.on.delete('directus_role_members').response([{
+				id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d',
+				user: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+			}]);
+
 			tracker.on.update('directus_users').response(1);
 
 			const flushFailure = new Error('connect ECONNREFUSED 127.0.0.1:6379');

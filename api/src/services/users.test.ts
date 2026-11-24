@@ -1739,8 +1739,6 @@ describe('Integration Tests', () => {
 
 		describe('user sessions', () => {
 			it('deletes every session of the deleted users', async () => {
-				tracker.on.delete('directus_role_members').response(0);
-
 				clearUserSessionsSpy.mockImplementationOnce(usersClearUserSessions);
 				tracker.on.select('directus_comments').response([]);
 				tracker.on.select('directus_notifications').response([]);
@@ -1749,7 +1747,9 @@ describe('Integration Tests', () => {
 
 				await service.deleteMany(['user-id-41']);
 
-				expect(tracker.history.delete[1]?.bindings)
+				expect(tracker.history.delete).toHaveLength(1);
+
+				expect(tracker.history.delete[0]?.bindings)
 					.toStrictEqual(['user-id-41']);
 			});
 

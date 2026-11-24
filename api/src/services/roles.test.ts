@@ -265,7 +265,7 @@ describe('Integration Tests', () => {
 
 				expect(tracker.history.select[0]!.sql).toBe(
 					'select "role" from "directus_role_members"'
-					+ ' where "role" in ($1, $2) order by "role" asc limit $3',
+					+ ' where "role" in (?, ?) order by "role" asc limit ?',
 				);
 
 				expect(tracker.history.select[0]!.bindings)

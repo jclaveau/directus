@@ -356,6 +356,7 @@ Feature: A read runs the statements its query needs, and no more
     And on postgres the requests ran these statements:
     | request | table                 | select | insert | update | delete | show | with |
     | 1       | directus_access       | 1      | 0      | 0      | 0      | 0    | 0    |
+    | 1       | directus_invites      | 1      | 0      | 0      | 0      | 0    | 0    |
     | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    | 0    |
     | 1       | directus_users        | 2      | 0      | 0      | 0      | 0    | 0    |
     | 2       | directus_files        | 1      | 0      | 0      | 0      | 0    | 0    |

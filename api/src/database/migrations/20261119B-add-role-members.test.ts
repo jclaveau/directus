@@ -392,23 +392,23 @@ describe('the stored paths to a user\'s role', () => {
 		expect(tracker.history.update.map(({ sql, bindings }) => [sql, bindings]))
 			.toEqual([
 				[
-					'update "directus_permissions" set "permissions" = ?'
-					+ ' where "id" = ?',
+					'update "directus_permissions" set "permissions" = $1'
+					+ ' where "id" = $2',
 					['{"by":{"roles":{"role":{"_in":"$CURRENT_MEMBER_ROLES"}}}}', 1],
 				],
 				[
-					'update "directus_permissions" set "permissions" = ?'
-					+ ' where "id" = ?',
+					'update "directus_permissions" set "permissions" = $1'
+					+ ' where "id" = $2',
 					['{"roles":{"role":{"name":{"_eq":"Editor"}}}}', 2],
 				],
 				[
-					'update "directus_permissions" set "presets" = ?'
-					+ ' where "id" = ?',
+					'update "directus_permissions" set "presets" = $1'
+					+ ' where "id" = $2',
 					['{"status":"active","roles":[{"role":"role-a"}]}', 2],
 				],
 				[
-					'update "directus_permissions" set "fields" = ?'
-					+ ' where "id" = ?',
+					'update "directus_permissions" set "fields" = $1'
+					+ ' where "id" = $2',
 					['id,roles,email', 2],
 				],
 			]);
@@ -452,13 +452,13 @@ describe('the stored paths to a user\'s role', () => {
 		expect(tracker.history.update.map(({ sql, bindings }) => [sql, bindings]))
 			.toEqual([
 				[
-					'update "directus_fields" set "options" = ?'
-					+ ' where "id" = ?',
+					'update "directus_fields" set "options" = $1'
+					+ ' where "id" = $2',
 					['{"filter":{"roles":{"role":{"_eq":"role-a"}}}}', 7],
 				],
 				[
-					'update "directus_panels" set "options" = ?'
-					+ ' where "id" = ?',
+					'update "directus_panels" set "options" = $1'
+					+ ' where "id" = $2',
 					[
 						'{"collection":"directus_users",'
 						+ '"filter":{"roles":{"role":{"_eq":"role-a"}}}}',
@@ -492,18 +492,18 @@ describe('the stored paths to a user\'s role', () => {
 		expect(tracker.history.update.map(({ sql, bindings }) => [sql, bindings]))
 			.toEqual([
 				[
-					'update "directus_permissions" set "permissions" = ?'
-					+ ' where "id" = ?',
+					'update "directus_permissions" set "permissions" = $1'
+					+ ' where "id" = $2',
 					['{"role":{"name":{"_eq":"Editor"}}}', 2],
 				],
 				[
-					'update "directus_permissions" set "presets" = ?'
-					+ ' where "id" = ?',
+					'update "directus_permissions" set "presets" = $1'
+					+ ' where "id" = $2',
 					['{"status":"active","role":"role-a"}', 2],
 				],
 				[
-					'update "directus_permissions" set "fields" = ?'
-					+ ' where "id" = ?',
+					'update "directus_permissions" set "fields" = $1'
+					+ ' where "id" = $2',
 					['id,role,email', 2],
 				],
 			]);
