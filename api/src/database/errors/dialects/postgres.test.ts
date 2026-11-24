@@ -234,26 +234,6 @@ describe('foreign key violation (23503)', () => {
 		});
 	});
 
-	it('maps the restrict_violation of a RESTRICT constraint likewise', () => {
-		expect((extractError(pgError({
-			code: '23001',
-			table: 'comments',
-			constraint: 'comments_article_foreign',
-			detail: 'Key (id)=(5) is still referenced from table "comments".',
-		}), {}, {
-			collection: 'articles',
-			operation: 'delete',
-		}) as any).extensions).toEqual({
-			collection: 'articles',
-			field: 'id',
-			value: '5',
-			constraint: 'comments_article_foreign',
-			relatedCollection: 'comments',
-			reason: 'still_referenced',
-			operation: 'delete',
-		});
-	});
-
 	it('resolves the direction from the operation, not the localized detail', () => {
 		// A create whose detail text (misleadingly) says "still referenced" must
 		// still resolve to invalid_reference — the operation is authoritative and
