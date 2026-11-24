@@ -67,7 +67,6 @@ defineSpawnedWriteFeature(
 			REDIS_PORT: '6108',
 			CACHE_NAMESPACE: 'directus-cache-on-delete-rules',
 			CACHE_SCOPED_MAX_ON_DELETE_ROWS: '2',
-			NODE_ENV: 'development',
 		},
 		// Created through the feature's own instance, so its schema holds them.
 		async beforeFeature(vendor, instanceUrl) {

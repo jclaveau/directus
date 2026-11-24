@@ -189,7 +189,6 @@ Feature: A delete purges by key the rows its ON DELETE rules change
       |                                    |     - extensions:                  |
       |                                    |         code: INVALID_FOREIGN_KEY  |
       |                                    |         reason: still_referenced   |
-      |                                    |         stack: diag                |
       | method: GET                        | code: 200                          |+
       | path: /items/on_delete_lock        | headers:                           |
       | query:                             |   x-cache-status: HIT              |
