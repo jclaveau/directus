@@ -6,6 +6,7 @@ import { cancelOwnSubscription } from './cancel/cancel-own-subscription.js';
 import { resumeOwnSubscription } from './cancel/resume-own-subscription.js';
 import { subscriptionsEndpoint } from './endpoint.js';
 import { addOwnBeneficiary } from './members/add-own-beneficiary.js';
+import { confirmOwnCheckout } from './members/confirm-own-checkout.js';
 import { createCheckout } from './members/create-checkout.js';
 import { listOwnInvoices } from './members/list-own-invoices.js';
 import { listOwnSubscriptions } from './members/list-own-subscriptions.js';
@@ -15,6 +16,7 @@ import { receiveWebhook } from './webhook/receive-webhook.js';
 vi.mock('./cancel/cancel-own-subscription.js');
 vi.mock('./cancel/resume-own-subscription.js');
 vi.mock('./members/add-own-beneficiary.js');
+vi.mock('./members/confirm-own-checkout.js');
 vi.mock('./members/create-checkout.js');
 vi.mock('./members/list-own-invoices.js');
 vi.mock('./members/list-own-subscriptions.js');
@@ -627,6 +629,7 @@ describe('subscriptionsEndpoint', () => {
 					SUBSCRIPTIONS_CHECKOUT_URL_ALLOW_LIST: ['https://shop.example.com/ok'],
 				},
 				database: 'database',
+				logger: 'logger',
 			},
 		);
 
@@ -659,6 +662,58 @@ describe('subscriptionsEndpoint', () => {
 			checkoutUrlAllowList: [new URL('https://shop.example.com/ok')],
 			userId: 'user-1',
 			requestBody: { plan: 'pro', provider: 'stripe' },
+			logger: 'logger',
+		});
+	});
+
+	test('confirms the requesting user\'s checkout', async () => {
+		vi.mocked(confirmOwnCheckout).mockResolvedValue({
+			subscription: 5,
+			status: 'pending',
+			sync_queued: true,
+		});
+
+		const expressApp = express();
+		const subscriptionsRouter = express.Router();
+
+		expressApp.use((request, _response, next) => {
+			Object.assign(request, { accountability: { user: 'user-1' } });
+			next();
+		});
+
+		expressApp.use(express.json());
+		expressApp.use('/subscriptions', subscriptionsRouter);
+
+		(subscriptionsEndpoint.config as (...args: unknown[]) => void)(
+			subscriptionsRouter,
+			{ env: {}, database: 'database' },
+		);
+
+		const httpServer = expressApp.listen(0);
+		const { port } = httpServer.address() as AddressInfo;
+
+		const confirmResponse = await fetch(
+			`http://127.0.0.1:${port}/subscriptions/checkout/confirm`,
+			{
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: '{"subscription":5}',
+			},
+		);
+
+		httpServer.close();
+
+		expect(confirmResponse.status).toBe(200);
+
+		expect(await confirmResponse.json()).toEqual({
+			data: { subscription: 5, status: 'pending', sync_queued: true },
+		});
+
+		expect(confirmOwnCheckout).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			userId: 'user-1',
+			subscriptionId: 5,
 		});
 	});
 

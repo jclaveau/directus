@@ -249,6 +249,33 @@ describe('createCheckout', () => {
 		});
 	});
 
+	test('stores the customer the checkout\'s payment is listed under', async () => {
+		await createCheckout({
+			database,
+			enabledProviders: new Map([
+				['mollie', {
+					createCheckout: vi.fn().mockResolvedValue({
+						providerCustomerId: 'cst_5',
+						clientToken: 'session_token_5',
+						publishableKey: null,
+					}),
+				} as unknown as SubscriptionProvider],
+			]),
+			checkoutUrlAllowList: [new URL('https://shop.example.com/ok')],
+			userId: 'user-1',
+			logger: { warn: vi.fn() },
+			requestBody: {
+				plan: 'pro',
+				provider: 'mollie',
+				redirect_url: 'https://shop.example.com/ok',
+			},
+		});
+
+		expect(await database('subscriptions')
+			.select('id', 'status', 'provider_customer_id'))
+			.toEqual([{ id: 1, status: 'pending', provider_customer_id: 'cst_5' }]);
+	});
+
 	test('logs why the provider refused the in-page form', async () => {
 		const checkoutLogger = { warn: vi.fn() };
 

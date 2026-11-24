@@ -80,6 +80,13 @@ export async function createCheckout({
 
 	const checkoutPage = await subscriptionProvider.createCheckout(checkoutStart);
 
+	// The confirm and the reconcile find the payment among this customer's.
+	if (checkoutPage.providerCustomerId !== undefined) {
+		await database('subscriptions')
+			.where('id', checkoutStart.directusSubscription)
+			.update({ provider_customer_id: checkoutPage.providerCustomerId });
+	}
+
 	if ('clientToken' in checkoutPage) {
 		return {
 			subscription: checkoutStart.directusSubscription,

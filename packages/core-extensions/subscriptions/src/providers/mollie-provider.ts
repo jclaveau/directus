@@ -243,6 +243,7 @@ export function createMollieProvider(
 			if (createMollieSession !== null) {
 				try {
 					return {
+						providerCustomerId: mollieCustomer.id,
 						clientToken: await createMollieSession({
 							amount,
 							description: paymentDescription,
@@ -279,7 +280,25 @@ export function createMollieProvider(
 				);
 			}
 
-			return { url: checkoutUrl, inPageRefusal };
+			return {
+				providerCustomerId: mollieCustomer.id,
+				url: checkoutUrl,
+				inPageRefusal,
+			};
+		},
+
+		async findCheckoutPayment({ customerId, directusSubscription }) {
+			for await (const customerPayment of mollieClient.customerPayments
+				.iterate({ customerId })) {
+				if (customerPayment.sequenceType === SequenceType.first
+					&& customerPayment.status === 'paid'
+					&& readDirectusSubscription(customerPayment.metadata)
+					=== directusSubscription) {
+					return customerPayment.id;
+				}
+			}
+
+			return null;
 		},
 
 		/**

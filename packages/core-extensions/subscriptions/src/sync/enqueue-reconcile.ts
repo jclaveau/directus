@@ -1,11 +1,16 @@
 import type { Knex } from 'knex';
 import { TERMINAL_STATUSES } from '../constants.js';
+import { readThrownMessage } from '../providers/read-thrown-message.js';
 import type { SubscriptionProviders } from '../providers/types.js';
 import {
 	enqueueSync,
 	MAX_SYNC_ATTEMPTS,
 	PARKED_RETRY_DELAY_MS,
 } from '../queue/sync-queue.js';
+import { enqueueCheckoutPayment } from './enqueue-checkout-payment.js';
+
+/** A checkout's payment pending longer than this is not looked for anymore. */
+const PENDING_CHECKOUT_SEARCH_MS = 30 * 86_400_000;
 
 /**
  * Re-syncs every subscription a provider may still change, and every one
@@ -79,6 +84,54 @@ export async function enqueueReconcile(
 		});
 
 		enqueuedCount++;
+	}
+
+	// A checkout left before its return page: its payment may be paid all the same.
+	const pendingCheckouts = await database('subscriptions')
+		.select('id', 'provider', 'provider_customer_id')
+		.where('status', 'pending')
+		.whereNull('provider_subscription_id')
+		.whereNotNull('provider_customer_id')
+		.where(
+			'date_updated',
+			'>',
+			new Date(Date.now() - PENDING_CHECKOUT_SEARCH_MS),
+		)
+		.orderBy('id');
+
+	const searchFailures: string[] = [];
+
+	for (const pendingCheckout of pendingCheckouts) {
+		const checkoutProvider = enabledProviders.get(pendingCheckout.provider);
+
+		if (checkoutProvider === undefined) {
+			disabledProviders.add(pendingCheckout.provider);
+			continue;
+		}
+
+		// One provider failing still queues the checkouts after it.
+		try {
+			if (await enqueueCheckoutPayment(
+				database,
+				checkoutProvider,
+				pendingCheckout,
+			)) {
+				enqueuedCount++;
+			}
+		}
+		catch (searchError) {
+			searchFailures.push(
+				`subscription ${JSON.stringify(pendingCheckout.id)}:`
+				+ ` ${JSON.stringify(readThrownMessage(searchError))}`,
+			);
+		}
+	}
+
+	if (searchFailures.length > 0) {
+		throw new Error(
+			`Payments of pending checkouts were not searched:`
+			+ ` ${searchFailures.join(', ')}`,
+		);
 	}
 
 	if (disabledProviders.size > 0) {
