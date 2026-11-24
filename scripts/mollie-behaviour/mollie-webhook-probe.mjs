@@ -22,9 +22,9 @@
 // on a tunnel page in headless Chromium, picks Credit card, fills Mollie's
 // test card in its frames, presses Pay and follows any test status screen or
 // redirect (a screenshot per step in the output directory), then reads the
-// session's payment, lists the customer's mandates and tries a subscription. It writes what Mollie
-// answered to checkout-session.json; no baseline yet, so it fails only when a
-// call it relies on throws.
+// session's payment, lists the customer's mandates and tries a subscription.
+// It writes what Mollie answered to checkout-session.json; no baseline yet, so
+// it fails only when a call it relies on throws.
 //
 // `--mode rotation-check` does none of that: it points an existing next-gen
 // webhook (made by hand in the dashboard, whose secret only creation returns)
