@@ -1,13 +1,16 @@
 import {
 	defineFeature,
 	loadFeature,
+	messageOfDocString,
 	type StepFunctions,
 } from '@common/cucumber';
 import {
 	bindCaptures,
 	captureNamesOf,
 	markedCaptures,
+	refuseLoneCaptures,
 } from '@common/response-captures';
+import { parseFeature } from 'jest-cucumber';
 import { load as loadYaml } from 'js-yaml';
 import { describe, expect } from 'vitest';
 
@@ -42,5 +45,39 @@ describe('response captures', () => {
 			'a matching response holding no uuid at the spot fails on its capture',
 			steps,
 		);
+
+		let featureText = '';
+
+		const featureSteps = ({ given }: StepFunctions) => {
+			given('a feature holding this scenario:', (docString: string) => {
+				featureText = docString;
+			});
+		};
+
+		scenario(
+			'a capture met nowhere else in its scenario is refused, naming it',
+			(stepFunctions) => {
+				featureSteps(stepFunctions);
+
+				stepFunctions.then(
+					'loading it fails with the message:',
+					(docString: string) => {
+						expect(() => {
+							refuseLoneCaptures(parseFeature(featureText).scenarios);
+						}).toThrowError(new Error(messageOfDocString(docString)));
+					},
+				);
+			},
+		);
+
+		scenario('a capture a later request reuses loads', (stepFunctions) => {
+			featureSteps(stepFunctions);
+
+			stepFunctions.then('loading it passes', () => {
+				expect(() => {
+					refuseLoneCaptures(parseFeature(featureText).scenarios);
+				}).not.toThrow();
+			});
+		});
 	});
 });

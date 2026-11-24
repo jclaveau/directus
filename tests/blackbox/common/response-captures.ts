@@ -43,6 +43,61 @@ export function captureNamesOf(
 	return [...new Set(captureNames.map(([, name]) => name!))];
 }
 
+interface ScenarioSteps {
+	title: string;
+	steps: { stepText: string; stepArgument: unknown }[];
+}
+
+/**
+ * A capture binds any uuid at its spot: met nowhere else in its scenario, it
+ * checks nothing, and is most often a key's name misspelt.
+ *
+ * ```
+ * keys: { editor-role }    response cell: role: <editor_role>
+ * → Placeholder "<editor_role>" in a response of "…" is met nowhere else
+ * ```
+ */
+export function refuseLoneCaptures(scenarios: ScenarioSteps[]) {
+	for (const { title, steps } of scenarios) {
+		const scenarioText = steps
+			.flatMap(({ stepText, stepArgument }) => {
+				return Array.isArray(stepArgument)
+					? [stepText, ...stepArgument.flatMap(Object.values)]
+					: [stepText, String(stepArgument)];
+			})
+			.join('\n');
+
+		const responseCells = steps.flatMap(({ stepArgument }) => {
+			return Array.isArray(stepArgument)
+				? stepArgument.map((tableRow) => tableRow?.response)
+				: [];
+		});
+
+		for (const responseCell of responseCells) {
+			if (typeof responseCell !== 'string') {
+				continue;
+			}
+
+			for (const [, name] of responseCell.matchAll(/<([\w-]+)>/g)) {
+				// A request names a key it remembers bare, not as `<name>`.
+				const nameUses = scenarioText.match(new RegExp(
+					`<${name}(:upper)?>|remember(_session)?: ${name}$`
+					+ `|remember_headers:(\\n +[\\w-]+: .*)*\\n +${name}:`,
+					'gm',
+				));
+
+				if (name !== 'run' && nameUses!.length === 1) {
+					throw new Error(
+						`Placeholder ${JSON.stringify(`<${name}>`)} in a response of`
+						+ ` ${JSON.stringify(title)} is met nowhere else in it: a`
+						+ ' capture nothing reuses checks nothing',
+					);
+				}
+			}
+		}
+	}
+}
+
 // Each capture is spelled as a marker the key substitution leaves alone.
 export function markedCaptures(responseText: string, captureNames: string[]) {
 	return responseText.replaceAll(/<([\w-]+)>/g, (placeholder, name: string) => {

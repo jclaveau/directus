@@ -401,12 +401,13 @@ Feature: A user's role, status and deletion purge the cache as today
       | method: GET                          | code: 200                              |+
       | path: /users/<invitee>               | body:                                  |
       | query:                               |   data:                                |
-      |   fields: status,roles,invites.role  |     status: invited                    |
+      |   fields: status,roles,invites.*     |     status: invited                    |
       |   deep: >-                           |     roles: []                          |
       |     {"invites":{"_sort":             |     invites:                           |
-      |     ["date_created"]}}               |                                        |
-      |                                      |       - role: <first-role>             |
-      |                                      |       - role: <second-role>            |
+      |     ["date_created"]}}               |       - id: <invite>                   |
+      |                                      |         role: <first-role>             |
+      |                                      |       - id: <new-invite>               |
+      |                                      |         role: <second-role>            |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
       | 1       | directus_invites      | 1      | 1      | 0      | 0      |

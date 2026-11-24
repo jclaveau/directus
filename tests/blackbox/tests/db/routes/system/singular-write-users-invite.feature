@@ -299,11 +299,13 @@ Feature: A user is invited, re-invited and accepts the invitation
       | method: GET                          | code: 200                          |+
       | path: /users                         | body:                              |
       | query:                               |   data:                            |
-      |   fields: status,roles,invites.role  |     - status: invited              |
+      |   fields: status,roles,invites.*     |     - status: invited              |
       |   filter[email][_eq]: >-             |       roles: []                    |
       |     again-<run>@example.com          |       invites:                     |
-      |                                      |         - role: <same-role>        |
-      |                                      |         - role: <same-role>        |
+      |   deep: >-                           |         - id: <invite>             |
+      |     {"invites":{"_sort":             |           role: <same-role>        |
+      |     ["date_created"]}}               |         - id: <new-invite>         |
+      |                                      |           role: <same-role>        |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
       | 1       | directus_invites      | 1      | 1      | 0      | 0      |
