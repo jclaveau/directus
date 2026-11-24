@@ -73,6 +73,7 @@ describe('the migration', () => {
 				id: 1,
 				report_error_url: 'https://bugs.example.com/new?role={{roles[0].name}}',
 			},
+			{ id: 2, report_error_url: 'https://bugs.example.com/new' },
 		]);
 
 		tracker.on.update('directus_settings').response(1);

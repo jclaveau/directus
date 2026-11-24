@@ -3,6 +3,7 @@ import { createTracker, MockClient, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, test } from 'vitest';
 import {
 	down,
+	findCurrentRole,
 	restoreCurrentRole,
 	rewriteCurrentRole,
 	up,
@@ -36,6 +37,10 @@ describe('rewriteCurrentRole', () => {
 			{ role: { _in: ['$CURRENT_ROLE'] } },
 			{ role: { _in: ['$CURRENT_ROLE'] } },
 		],
+		[
+			{ role: { _eq: '$CURRENT_ROLE' }, status: { _eq: 'draft' } },
+			{ role: { _in: '$CURRENT_MEMBER_ROLES' }, status: { _eq: 'draft' } },
+		],
 	])('%j → %j', (stored, rewritten) => {
 		expect(rewriteCurrentRole(stored)).toEqual(rewritten);
 	});
@@ -52,6 +57,18 @@ test('restoreCurrentRole undoes the rewrite', () => {
 			{ role: { _eq: '$CURRENT_ROLE' } },
 			{ owner: { _neq: '$CURRENT_ROLE' } },
 		],
+	});
+});
+
+describe('findCurrentRole', () => {
+	test.each([
+		[
+			{ _and: [{ rank: { _gt: 2 } }, { role: { _eq: '$CURRENT_ROLE.name' } }] },
+			'$CURRENT_ROLE.name',
+		],
+		[{ archived: { _null: true } }, null],
+	])('%j → %j', (stored, removedVariable) => {
+		expect(findCurrentRole(stored)).toEqual(removedVariable);
 	});
 });
 
@@ -88,6 +105,24 @@ describe('the migration', () => {
 		expect(tracker.history.update.map(({ bindings }) => bindings)).toEqual([
 			['{"role":{"_in":"$CURRENT_MEMBER_ROLES"}}', 7],
 		]);
+	});
+
+	test('up writes nothing for values without $CURRENT_ROLE', async () => {
+		tracker.on.select('directus_permissions').response([
+			{
+				id: 8,
+				permissions: '{"status":{"_eq":"draft"}}',
+				validation: 'not json',
+				presets: null,
+			},
+		]);
+
+		tracker.on.select(/directus_(presets|fields|operations|panels)/)
+			.response([]);
+
+		await up(db);
+
+		expect(tracker.history.update).toEqual([]);
 	});
 
 	test('up refuses, naming every value it cannot rewrite', async () => {

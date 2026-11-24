@@ -188,6 +188,59 @@ describe('the migration', () => {
 		expect(tracker.history.all).toHaveLength(1);
 	});
 
+	test('up drops an unnamed role foreign key under its default name', async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			foreignKeys: vi.fn().mockResolvedValue([
+				{ column: 'made_by_role', constraint_name: null },
+			]),
+		} as any);
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 3,
+				collection: 'articles',
+				field: 'made_by_role',
+				special: 'role-created',
+			},
+		]);
+
+		await up(db);
+
+		expect(tracker.history.all.map(({ sql }) => sql)).toContain(
+			'alter table "articles" drop constraint "articles_made_by_role_foreign"',
+		);
+	});
+
+	test('down keeps the specials other than the roles stamp', async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			primary: vi.fn().mockResolvedValue('id'),
+		} as any);
+
+		tracker.on.select('articles').response([]);
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 3,
+				collection: 'articles',
+				field: 'made_by_role',
+				special: 'roles-created,cast-json,conceal',
+			},
+		]);
+
+		await down(db);
+
+		expect(tracker.history.update.map(({ bindings }) => bindings)).toEqual([
+			[
+				'role-created,conceal',
+				'select-dropdown-m2o',
+				null,
+				'related-values',
+				null,
+				3,
+			],
+		]);
+	});
+
 	test('down turns each list of one role back into its uuid', async () => {
 		vi.mocked(createInspector).mockReturnValue({
 			primary: vi.fn().mockResolvedValue('id'),
