@@ -39,6 +39,7 @@ test(`Returns false if deny list is empty`, async () => {
 test(`Returns false if IP is not in deny list`, async () => {
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ IMPORT_IP_DENY_LIST: [sample.ip] });
+
 	vi.mocked(ipInNetworks).mockReturnValue(false);
 
 	const result = isDeniedIp(sample.ip);
@@ -49,6 +50,7 @@ test(`Returns false if IP is not in deny list`, async () => {
 test(`Returns true if IP is in deny list`, async () => {
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ IMPORT_IP_DENY_LIST: [sample.ip] });
+
 	vi.mocked(ipInNetworks).mockReturnValue(true);
 
 	const result = isDeniedIp(sample.ip);

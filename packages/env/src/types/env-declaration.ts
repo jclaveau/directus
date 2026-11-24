@@ -32,7 +32,8 @@ export type DeclaredValue<Declaration extends EnvDeclaration> =
  * always set, one without may be `undefined`.
  */
 export type DeclaredEnv<Declarations extends EnvDeclarations> = {
-	[Name in keyof Declarations]: Declarations[Name] extends { default: unknown }
-		? DeclaredValue<Declarations[Name]>
-		: DeclaredValue<Declarations[Name]> | undefined;
+	-readonly [Name in keyof Declarations]:
+		Declarations[Name] extends { default: unknown }
+			? DeclaredValue<Declarations[Name]>
+			: DeclaredValue<Declarations[Name]> | undefined;
 };

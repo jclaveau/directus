@@ -450,6 +450,7 @@ test(oneLine`
 test('keeps the response tier where the layer switched serving off', async () => {
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ CACHE_ENABLED: false, CACHE_STORE: 'redis' });
+
 	vi.mocked(readSharedSettings).mockResolvedValue({ response: false });
 
 	await refreshCacheSettings();
@@ -469,6 +470,7 @@ test(oneLine`
 `, async () => {
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ CACHE_ENABLED: false, CACHE_STORE: 'memory' });
+
 	vi.mocked(readSharedSettings).mockResolvedValue({ response: false });
 
 	await refreshCacheSettings();
@@ -490,7 +492,7 @@ test.each([
 	[{ CACHE_RESPONSE: false, CACHE_ENABLED: true, CACHE_STORE: 'memory' }, false],
 	[{ CACHE_ENABLED: true, CACHE_STORE: 'memory' }, true],
 	[{ CACHE_RESPONSE: false, CACHE_ENABLED: true, CACHE_STORE: 'redis' }, true],
-])('holds a response tier over %o: %s', (env, wanted) => {
+] as const)('holds a response tier over %o: %s', (env, wanted) => {
 	vi.mocked(useEnv, { partial: true }).mockReturnValue(env);
 
 	expect(responseCacheWanted()).toBe(wanted);

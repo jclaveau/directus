@@ -14,6 +14,7 @@ let mockBus: BusLocal | BusRedis;
 beforeEach(() => {
 	mockBus = {} as unknown as BusLocal;
 	vi.mocked(createBus).mockReturnValue(mockBus);
+
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ CACHE_NAMESPACE: 'scalabus' });
 });
@@ -50,6 +51,7 @@ test('Creates Redis based bus if Redis configuration is available', () => {
 test('Names the Redis bus after the deployment the cache namespace names', () => {
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
 	vi.mocked(useRedis).mockReturnValue({} as unknown as Redis);
+
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ CACHE_NAMESPACE: 'planner-api' });
 

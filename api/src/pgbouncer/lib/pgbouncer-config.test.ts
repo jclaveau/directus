@@ -48,10 +48,12 @@ function registryEnv(overrides: Record<string, unknown> = {}) {
 test('The report is served only where it was turned on', () => {
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ PGBOUNCER_REPORT_ENABLED: true });
+
 	expect(pgbouncerReportEnabled()).toBe(true);
 
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ PGBOUNCER_REPORT_ENABLED: false });
+
 	expect(pgbouncerReportEnabled()).toBe(false);
 
 	// Absent is off: a deployment without a pooler gets no page by default.
@@ -72,6 +74,7 @@ test('Configured connection names are read and trimmed', () => {
 test('The query timeout falls back when unset or unparseable', () => {
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ PGBOUNCER_QUERY_TIMEOUT: '5s' });
+
 	expect(pgbouncerQueryTimeoutMs()).toBe(5000);
 
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({});

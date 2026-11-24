@@ -73,6 +73,7 @@ describe('createRedis', () => {
 
 	test('Creates and returns new Redis instance from connection string', () => {
 		const connectionString = 'test-connection-string';
+
 		vi.mocked(useEnv, { partial: true })
 			.mockReturnValue({ REDIS: connectionString });
 
@@ -120,6 +121,7 @@ describe('createRedis', () => {
 	test('Selects the given database over REDIS_DB in the object form', () => {
 		vi.mocked(useEnv, { partial: true })
 			.mockReturnValue({ REDIS_HOST: 'h', REDIS_DB: '0' });
+
 		vi.mocked(getConfigFromEnv).mockReturnValue({ host: 'h', db: '0' });
 
 		createRedis(1);

@@ -42,7 +42,7 @@ describe('getAddress', async () => {
 		const server = await createServer();
 
 		vi.mocked(useEnv, { partial: true }).mockReturnValue({
-			PORT: serverPort,
+			PORT: String(serverPort),
 			HOST: serverHost,
 		});
 

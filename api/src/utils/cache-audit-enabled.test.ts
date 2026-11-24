@@ -11,10 +11,12 @@ afterEach(() => {
 test('is on only when CACHE_AUDIT_ENABLED is the boolean true', () => {
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ CACHE_AUDIT_ENABLED: true });
+
 	expect(cacheAuditEnabled()).toBe(true);
 
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ CACHE_AUDIT_ENABLED: false });
+
 	expect(cacheAuditEnabled()).toBe(false);
 
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({});

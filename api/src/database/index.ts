@@ -372,7 +372,7 @@ async function validateDatabaseCharset(database?: Knex): Promise<void> {
 
 		const columns = await helpers.schema.getColumnsWithInvalidCollation(env['DB_DATABASE'] as string, collation);
 
-		const excludedTables: string[] = toArray(env['DB_EXCLUDE_TABLES']);
+		const excludedTables: string[] = toArray(env['DB_EXCLUDE_TABLES']) as string[];
 
 		let inconsistencies = '';
 

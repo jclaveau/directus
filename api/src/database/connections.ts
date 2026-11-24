@@ -27,7 +27,7 @@ export function getBaseConnectionName(): string {
  * at runtime).
  */
 export function getExtraConnectionNames(): string[] {
-	const value = useEnv()['DB_CONNECTIONS'];
+	const value: unknown = useEnv()['DB_CONNECTIONS'];
 
 	if (Array.isArray(value)) {
 		return value.map(String).filter(Boolean);

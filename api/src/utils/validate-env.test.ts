@@ -441,6 +441,7 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 	test('refuses true in production', () => {
 		vi.stubEnv('NODE_ENV', 'production');
+
 		vi.mocked(useEnv, { partial: true })
 			.mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
 
@@ -457,6 +458,7 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 	test('refuses true with NODE_ENV unset', () => {
 		vi.stubEnv('NODE_ENV', '');
+
 		vi.mocked(useEnv, { partial: true })
 			.mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
 
@@ -473,6 +475,7 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 	test('takes false in production', () => {
 		vi.stubEnv('NODE_ENV', 'production');
+
 		vi.mocked(useEnv, { partial: true })
 			.mockReturnValueOnce({ MARKETPLACE_ENABLED: false });
 
@@ -483,6 +486,7 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 	test('takes true in development', () => {
 		vi.stubEnv('NODE_ENV', 'development');
+
 		vi.mocked(useEnv, { partial: true })
 			.mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
 

@@ -428,7 +428,7 @@ test('takes the interval the deployment configured', () => {
 // time the pool is sized — and a typo would ask for one just as loudly.
 test.each([0, -5, 'often'])('refuses %o as an interval', (seconds) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValue({ SHARED_SETTINGS_POLL_SECONDS: seconds });
+		.mockReturnValue({ SHARED_SETTINGS_POLL_SECONDS: seconds as number });
 
 	expect(sharedSettingsPollMs()).toBe(30_000);
 });

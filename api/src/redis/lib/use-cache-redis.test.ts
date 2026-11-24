@@ -86,6 +86,7 @@ describe('cacheRedisDatabase', () => {
 	test('ignores the database REDIS_DB selects in the host/port form', () => {
 		vi.mocked(useEnv, { partial: true })
 			.mockReturnValue({ REDIS_HOST: 'h', CACHE_REDIS_DB: 3 });
+
 		vi.mocked(getConfigFromEnv).mockReturnValue({ host: 'h', db: '3' });
 
 		expect(cacheRedisDatabase()).toBeUndefined();
@@ -94,6 +95,7 @@ describe('cacheRedisDatabase', () => {
 	test('takes a database apart from REDIS_DB in the host/port form', () => {
 		vi.mocked(useEnv, { partial: true })
 			.mockReturnValue({ REDIS_HOST: 'h', CACHE_REDIS_DB: 1 });
+
 		vi.mocked(getConfigFromEnv).mockReturnValue({ host: 'h' });
 
 		expect(cacheRedisDatabase()).toBe(1);
@@ -158,6 +160,7 @@ describe('cacheRedisDatabase', () => {
 	test('ignores it when REDIS_DB is not a database number', () => {
 		vi.mocked(useEnv, { partial: true })
 			.mockReturnValue({ REDIS_HOST: 'h', CACHE_REDIS_DB: 1 });
+
 		vi.mocked(getConfigFromEnv).mockReturnValue({ host: 'h', db: 'x' });
 
 		expect(cacheRedisDatabase()).toBeUndefined();
@@ -203,6 +206,7 @@ describe('useCacheRedis', () => {
 	test('is the shared client when the cache has no database of its own', () => {
 		const sharedRedis = { name: 'shared' };
 		vi.mocked(useRedis).mockReturnValue(sharedRedis as any);
+
 		vi.mocked(useEnv, { partial: true })
 			.mockReturnValue({ REDIS: 'redis://h:6379' });
 

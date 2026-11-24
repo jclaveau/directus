@@ -59,6 +59,7 @@ test('names the bare registry path the client asked for', () => {
 test('passes a registry route when MARKETPLACE_ENABLED is true', () => {
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ MARKETPLACE_ENABLED: true });
+
 	const next = vi.fn();
 
 	refuseExtensionChangeInProduction(

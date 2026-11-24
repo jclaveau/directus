@@ -86,9 +86,9 @@ vi.mock('./middleware/cache.js', () => {
 
 const BASE_ENV = {
 	SECRET: 'abcdef',
-	SERVE_APP: 'true',
+	SERVE_APP: true,
 	PUBLIC_URL: 'http://localhost:8055/directus',
-	TELEMETRY: 'false',
+	TELEMETRY: false,
 	LOG_STYLE: 'raw',
 	STORAGE_LOCATIONS: ['local'],
 	ROBOTS_TXT: 'User-agent: *\nDisallow: /',
@@ -259,6 +259,7 @@ describe('createApp', async () => {
 		test('registers the limiter below the cache by default', async () => {
 			vi.mocked(useEnv, { partial: true })
 				.mockReturnValue({ ...BASE_ENV, RATE_LIMITER_ENABLED: true });
+
 			vi.mocked(resolvedRateLimiterCharge).mockReturnValue('cache-misses');
 
 			const names = await middlewareNames();
@@ -274,6 +275,7 @@ describe('createApp', async () => {
 		test('registers the limiter above the cache for every-request', async () => {
 			vi.mocked(useEnv, { partial: true })
 				.mockReturnValue({ ...BASE_ENV, RATE_LIMITER_ENABLED: true });
+
 			vi.mocked(resolvedRateLimiterCharge).mockReturnValue('every-request');
 
 			const names = await middlewareNames();

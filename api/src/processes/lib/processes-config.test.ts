@@ -28,10 +28,12 @@ afterEach(() => {
 test('The report is served only where it was turned on', () => {
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ PROCESSES_REPORT_ENABLED: true });
+
 	expect(processesReportEnabled()).toBe(true);
 
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ PROCESSES_REPORT_ENABLED: false });
+
 	expect(processesReportEnabled()).toBe(false);
 
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
@@ -41,10 +43,12 @@ test('The report is served only where it was turned on', () => {
 test('Only the halves this node is configured to report are reported', () => {
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'env'] });
+
 	expect(reportedProcessDetails()).toEqual(['stats', 'env']);
 
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ PROCESSES_REPORT_DETAILS: [' stats '] });
+
 	expect(reportedProcessDetails()).toEqual(['stats']);
 
 	// A name that is not a half is dropped rather than reported back.
@@ -55,6 +59,7 @@ test('Only the halves this node is configured to report are reported', () => {
 
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ PROCESSES_REPORT_DETAILS: [''] });
+
 	expect(reportedProcessDetails()).toEqual([]);
 
 	// Anything that is not a list at all reports nothing.
@@ -62,6 +67,7 @@ test('Only the halves this node is configured to report are reported', () => {
 		.mockReturnValue({
 			PROCESSES_REPORT_DETAILS: 'stats' as unknown as unknown[],
 		});
+
 	expect(reportedProcessDetails()).toEqual([]);
 
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
@@ -71,6 +77,7 @@ test('Only the halves this node is configured to report are reported', () => {
 test('The service is named by configuration first', () => {
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ PROCESSES_SERVICE_NAME: '  api  ' });
+
 	expect(processesServiceName()).toBe('api');
 });
 
@@ -100,6 +107,7 @@ test('The replica is the platform id, else the host it runs on', () => {
 test('The collection window is a duration, and 750ms by default', () => {
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ PROCESSES_COLLECT_TIMEOUT: '3s' });
+
 	expect(processesCollectTimeoutMs()).toBe(3000);
 
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({});

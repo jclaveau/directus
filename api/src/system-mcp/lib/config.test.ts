@@ -18,6 +18,7 @@ test('The endpoint is served only where it was turned on', () => {
 
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ SYSTEM_MCP_ENABLED: false });
+
 	expect(systemMcpEnabled()).toBe(false);
 
 	// Absent is off: a new externally reachable surface opens deliberately.
@@ -33,6 +34,7 @@ test('Only the configured subsystems are exposed', () => {
 
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ SYSTEM_MCP_TOOLS: [' processes '] });
+
 	expect(systemMcpToolGroups()).toEqual(['processes']);
 
 	// A name that is not a subsystem is dropped rather than exposed.
@@ -47,6 +49,7 @@ test('Only the configured subsystems are exposed', () => {
 	// Anything that is not a list at all exposes nothing.
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ SYSTEM_MCP_TOOLS: 'cache' as unknown as unknown[] });
+
 	expect(systemMcpToolGroups()).toEqual([]);
 
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
@@ -92,6 +95,7 @@ test('No browser origin is allowed until one is named', () => {
 
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ SYSTEM_MCP_ALLOWED_ORIGINS: [] });
+
 	expect(systemMcpAllowsOrigin('https://evil.example')).toBe(false);
 
 	// Not a list at all is not an allowlist.

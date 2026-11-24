@@ -14,6 +14,7 @@ let mockLock: KvLocal | KvRedis;
 beforeEach(() => {
 	mockLock = {} as unknown as KvLocal;
 	vi.mocked(createKv).mockReturnValue(mockLock);
+
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ CACHE_NAMESPACE: 'scalabus' });
 });
@@ -50,6 +51,7 @@ test('Creates Redis based lock if Redis configuration is available', () => {
 test('Names the Redis lock after the deployment the cache namespace names', () => {
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
 	vi.mocked(useRedis).mockReturnValue({} as unknown as Redis);
+
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ CACHE_NAMESPACE: 'planner-api' });
 
