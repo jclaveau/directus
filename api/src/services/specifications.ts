@@ -110,7 +110,10 @@ class OASSpecsService implements SpecificationSubService {
 		});
 
 		const isDefaultPublicUrl = env['PUBLIC_URL'] === '/';
-		const url = isDefaultPublicUrl && host ? host : (env['PUBLIC_URL'] as string);
+
+		const url = isDefaultPublicUrl && host
+			? host
+			: env['PUBLIC_URL'];
 
 		const hashedVersion = hash({
 			now: new Date().toISOString(),

@@ -123,7 +123,8 @@ export async function createServer(): Promise<http.Server> {
 
 	const terminusOptions: TerminusOptions = {
 		timeout:
-			(env['SERVER_SHUTDOWN_TIMEOUT'] as number) >= 0 && (env['SERVER_SHUTDOWN_TIMEOUT'] as number) < Infinity
+			env['SERVER_SHUTDOWN_TIMEOUT'] >= 0
+			&& env['SERVER_SHUTDOWN_TIMEOUT'] < Infinity
 				? env['SERVER_SHUTDOWN_TIMEOUT']
 				: 1000,
 		signals: ['SIGINT', 'SIGTERM', 'SIGHUP'],

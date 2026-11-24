@@ -487,7 +487,11 @@ export function createLDAPAuthRouter(provider: string): Router { // bb-out-of-sc
 			}
 
 			if (mode === 'cookie') {
-				res.cookie(env['REFRESH_TOKEN_COOKIE_NAME'] as string, refreshToken, REFRESH_COOKIE_OPTIONS);
+				res.cookie(
+					env['REFRESH_TOKEN_COOKIE_NAME'],
+					refreshToken,
+					REFRESH_COOKIE_OPTIONS,
+				);
 			}
 
 			if (mode === 'session') {

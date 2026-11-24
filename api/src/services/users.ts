@@ -165,7 +165,9 @@ export class UsersService extends ItemsService {
 			issuer: 'directus',
 		});
 
-		return (url ? new Url(url) : new Url(env['PUBLIC_URL'] as string).addPath('admin', 'accept-invite'))
+		return (url
+			? new Url(url)
+			: new Url(env['PUBLIC_URL']).addPath('admin', 'accept-invite'))
 			.setQuery('token', token)
 			.toString();
 	}
@@ -686,7 +688,9 @@ export class UsersService extends ItemsService {
 		const payload = { email: user.email, scope: 'password-reset', hash: getSimpleHash('' + user.password) };
 		const token = jwt.sign(payload, getSecret(), { expiresIn: '1d', issuer: 'directus' });
 
-		const acceptUrl = (url ? new Url(url) : new Url(env['PUBLIC_URL'] as string).addPath('admin', 'reset-password'))
+		const acceptUrl = (url
+			? new Url(url)
+			: new Url(env['PUBLIC_URL']).addPath('admin', 'reset-password'))
 			.setQuery('token', token)
 			.toString();
 

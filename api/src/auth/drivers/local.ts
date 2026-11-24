@@ -100,7 +100,12 @@ export function createLocalAuthRouter(provider: string): Router {
 			}
 
 			if (mode === 'cookie') {
-				res.cookie(env['REFRESH_TOKEN_COOKIE_NAME'] as string, refreshToken, REFRESH_COOKIE_OPTIONS);
+				res.cookie(
+					env['REFRESH_TOKEN_COOKIE_NAME'],
+					refreshToken,
+					REFRESH_COOKIE_OPTIONS,
+				);
+
 				payload.access_token = accessToken;
 			}
 

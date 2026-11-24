@@ -467,9 +467,17 @@ export function createOAuth2AuthRouter(providerName: string): Router { // bb-out
 
 			if (redirect) {
 				if (authMode === 'session') {
-					res.cookie(env['SESSION_COOKIE_NAME'] as string, accessToken, SESSION_COOKIE_OPTIONS);
+					res.cookie(
+						env['SESSION_COOKIE_NAME'],
+						accessToken,
+						SESSION_COOKIE_OPTIONS,
+					);
 				} else {
-					res.cookie(env['REFRESH_TOKEN_COOKIE_NAME'] as string, refreshToken, REFRESH_COOKIE_OPTIONS);
+					res.cookie(
+						env['REFRESH_TOKEN_COOKIE_NAME'],
+						refreshToken,
+						REFRESH_COOKIE_OPTIONS,
+					);
 				}
 
 				return res.redirect(redirect);

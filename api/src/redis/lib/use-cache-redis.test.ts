@@ -192,7 +192,7 @@ describe('cacheRedisDatabase', () => {
 	test('reads the env once', () => {
 		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			REDIS: 'redis://h:6379',
-			CACHE_REDIS_DB: 'x' as unknown as number,
+			CACHE_REDIS_DB: -1,
 		});
 
 		cacheRedisDatabase();

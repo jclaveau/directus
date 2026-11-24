@@ -11,7 +11,9 @@ export const getExtensions = async () => {
 	);
 
 	/** Extensions that are listed as dependencies in the root package.json */
-	const moduleExtensions = await resolveModuleExtensions(env['PACKAGE_FILE_LOCATION'] as string);
+	const moduleExtensions = await resolveModuleExtensions(
+		env['PACKAGE_FILE_LOCATION'],
+	);
 
 	return { registry: registryExtensions, module: moduleExtensions };
 };

@@ -386,7 +386,10 @@ export class ExportService {
 				for (let batch = 0; batch < batchesRequired; batch++) {
 					let limit = env['EXPORT_BATCH_SIZE'];
 
-					if (requestedLimit > 0 && (env['EXPORT_BATCH_SIZE'] as number) > requestedLimit - readCount) {
+					if (
+						requestedLimit > 0
+						&& env['EXPORT_BATCH_SIZE'] > requestedLimit - readCount
+					) {
 						limit = requestedLimit - readCount;
 					}
 
@@ -468,7 +471,9 @@ export class ExportService {
 					fields: ['first_name', 'last_name', 'email'],
 				});
 
-				const href = new Url(env['PUBLIC_URL'] as string).addPath('admin', 'files', savedFile).toString();
+				const href = new Url(env['PUBLIC_URL'])
+					.addPath('admin', 'files', savedFile)
+					.toString();
 
 				const message = `
 Hello ${userName(user)},

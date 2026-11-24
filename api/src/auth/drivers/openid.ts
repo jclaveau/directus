@@ -67,7 +67,8 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			throw new InvalidProviderConfigError({ provider });
 		}
 
-		const redirectUrl = new Url(env['PUBLIC_URL'] as string).addPath('auth', 'login', provider, 'callback');
+		const redirectUrl = new Url(env['PUBLIC_URL'])
+			.addPath('auth', 'login', provider, 'callback');
 
 		this.redirectUrl = redirectUrl.toString();
 		this.usersService = new UsersService({ knex: this.knex, schema: this.schema });
@@ -558,9 +559,17 @@ export function createOpenIDAuthRouter(providerName: string): Router { // bb-out
 
 			if (redirect) {
 				if (authMode === 'session') {
-					res.cookie(env['SESSION_COOKIE_NAME'] as string, accessToken, SESSION_COOKIE_OPTIONS);
+					res.cookie(
+						env['SESSION_COOKIE_NAME'],
+						accessToken,
+						SESSION_COOKIE_OPTIONS,
+					);
 				} else {
-					res.cookie(env['REFRESH_TOKEN_COOKIE_NAME'] as string, refreshToken, REFRESH_COOKIE_OPTIONS);
+					res.cookie(
+						env['REFRESH_TOKEN_COOKIE_NAME'],
+						refreshToken,
+						REFRESH_COOKIE_OPTIONS,
+					);
 				}
 
 				return res.redirect(redirect);

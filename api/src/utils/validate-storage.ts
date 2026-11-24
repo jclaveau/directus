@@ -29,7 +29,11 @@ export async function validateStorage(): Promise<void> {
 		try {
 			await access(env['STORAGE_LOCAL_ROOT'], constants.R_OK | constants.W_OK);
 		} catch {
-			logger.warn(`Upload directory (${path.resolve(env['STORAGE_LOCAL_ROOT'] as string)}) is not read/writeable!`);
+			const uploadDirectory = path.resolve(env['STORAGE_LOCAL_ROOT']);
+
+			logger.warn(
+				`Upload directory (${uploadDirectory}) is not read/writeable!`,
+			);
 		}
 	}
 }

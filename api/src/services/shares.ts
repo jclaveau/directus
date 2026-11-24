@@ -292,7 +292,9 @@ Hello!
 
 ${userName(userInfo)} has invited you to view an item in ${share['collection']}.
 
-[Open](${new Url(env['PUBLIC_URL'] as string).addPath('admin', 'shared', payload.share).toString()})
+[Open](${new Url(env['PUBLIC_URL'])
+	.addPath('admin', 'shared', payload.share)
+	.toString()})
 `;
 
 		for (const email of payload.emails) {
