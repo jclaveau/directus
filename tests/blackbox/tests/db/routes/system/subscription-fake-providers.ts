@@ -520,6 +520,23 @@ export async function startFakeProviders() {
 			);
 		}
 
+		// The invoices the bundle copies on each sync: none in these scenarios.
+		if (/^\/v2\/customers\/\w+\/payments$/.test(requestPath)) {
+			return answerMollieList('payments', []);
+		}
+
+		if (requestPath === '/v1/invoices') {
+			return {
+				code: 200,
+				body: {
+					object: 'list',
+					data: [],
+					has_more: false,
+					url: '/v1/invoices',
+				},
+			};
+		}
+
 		const stripeMatch = /^\/v1\/subscriptions\/(\w+)$/.exec(requestPath);
 
 		return stripeMatch === null
