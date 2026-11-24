@@ -188,22 +188,22 @@ Feature: A user's role, status and deletion purge the cache as today
       | request                                   | response                          |
       | method: DELETE                            | code: 204                         |+
       | path: /users/<inviter>                    | headers:                          |
-      |                                           |   x-scoped-cache-purged-tags: >-  |
-      |                                           |     directus_users,               |
-      |                                           |     directus_users:id=<inviter>,  |
-      |                                           |     directus_presets,             |
-      |                                           |     directus_sessions,            |
-      |                                           |     directus_dashboards,          |
-      |                                           |     directus_panels,              |
-      |                                           |     directus_notifications,       |
-      |                                           |     directus_shares,              |
-      |                                           |     directus_flows,               |
-      |                                           |     directus_operations,          |
-      |                                           |     directus_versions,            |
-      |                                           |     directus_comments,            |
-      |                                           |     directus_access,              |
-      |                                           |     directus_role_members,        |
-      |                                           |     directus_invites              |
+      |                                           |   x-scoped-cache-purged-tags:     |
+      |                                           |     - directus_users              |
+      |                                           |     - directus_users:id=<inviter> |
+      |                                           |     - directus_presets            |
+      |                                           |     - directus_sessions           |
+      |                                           |     - directus_dashboards         |
+      |                                           |     - directus_panels             |
+      |                                           |     - directus_notifications      |
+      |                                           |     - directus_shares             |
+      |                                           |     - directus_flows              |
+      |                                           |     - directus_operations         |
+      |                                           |     - directus_versions           |
+      |                                           |     - directus_comments           |
+      |                                           |     - directus_access             |
+      |                                           |     - directus_role_members       |
+      |                                           |     - directus_invites            |
       | method: GET                               | code: 200                         |+
       | path: /items/cache_user_delete_notes      | headers:                          |
       | query:                                    |   x-cache-status: HIT             |
