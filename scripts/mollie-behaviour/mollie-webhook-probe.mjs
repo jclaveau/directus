@@ -19,9 +19,10 @@
 // Checkout Sessions API (beta) behind Mollie Components can start a
 // subscription's first payment in test mode. It creates a customer and a
 // `sequenceType: first` session, reads it back, mounts the Methods Component
-// on a tunnel page in headless Chromium (screenshot in the output directory),
-// pays through any test checkout link the session carries, then lists the
-// customer's mandates and tries a subscription on them. It writes what Mollie
+// on a tunnel page in headless Chromium, picks Credit card, fills Mollie's
+// test card in its frames, presses Pay and follows any test status screen or
+// redirect (a screenshot per step in the output directory), then reads the
+// session's payment, lists the customer's mandates and tries a subscription. It writes what Mollie
 // answered to checkout-session.json; no baseline yet, so it fails only when a
 // call it relies on throws.
 //
@@ -1280,10 +1281,133 @@ function describeVerdict(mollieVerdict) {
 	};
 }
 
-// Mounts the Methods Component on a tunnel page: does it render in test mode,
-// and what does it show?
+// A screenshot, then what each Mollie frame of the tab shows: its text and
+// its inputs, so a run that cannot fill the card form still says what the form
+// looked like.
+async function captureStep(componentsTab, stepName) {
+	await componentsTab.screenshot({
+		path: join(outputDirectory, `components-${stepName}.png`),
+		fullPage: true,
+	});
+
+	const frameDescriptions = [];
+
+	for (const componentFrame of componentsTab.frames().slice(1)) {
+		const frameContent = await componentFrame
+			.evaluate(() => {
+				return {
+					text: document.body?.innerText ?? '',
+					inputs: [...document.querySelectorAll('input, button')]
+						.map((formField) => {
+							return [
+								formField.tagName.toLowerCase(),
+								formField.type,
+								formField.name,
+								formField.id,
+								formField.placeholder,
+								formField.getAttribute('aria-label'),
+								formField.autocomplete,
+							]
+								.filter(Boolean)
+								.join(' ');
+						}),
+				};
+			})
+			.catch((frameError) => {
+				return { text: `unreadable: ${String(frameError)}`, inputs: [] };
+			});
+
+		frameDescriptions.push({
+			host: new URL(componentFrame.url()).host,
+			text: redactSecrets(frameContent.text)
+				.replace(/\s+/g, ' ')
+				.slice(0, 300),
+			inputs: frameContent.inputs.map((inputText) => redactSecrets(inputText)),
+		});
+	}
+
+	return frameDescriptions;
+}
+
+// Mollie's documented test Visa, any future expiry; the field kind is read off
+// each input's name, id, placeholder, label and autocomplete.
+const testCardFields = [
+	{ fieldKind: 'cvc', fieldPattern: /cvc|cvv|verification|security|csc/i },
+	{ fieldKind: 'expiry', fieldPattern: /expir|exp-|exp\b|cc-exp|mm/i },
+	{ fieldKind: 'holder', fieldPattern: /holder|cc-name|name/i },
+	{ fieldKind: 'number', fieldPattern: /number|cc-number|card/i },
+];
+
+const testCardValues = {
+	cvc: '123',
+	expiry: '12/30',
+	holder: 'Scalabus Probe',
+	number: '4543474002249996',
+};
+
+// The payment's way back: Mollie's test status screen inside the tab, in a
+// popup or in place of the page, then (or straight) the redirectUrl.
 // eslint-disable-next-line local/no-single-caller-function -- browser plumbing
-async function mountMethodsComponent(checkoutBrowser, clientAccessToken) {
+async function followPaymentOutcome(componentsTab) {
+	const paidRadio = 'input[name="final_state"][value="paid"]';
+	const outcomeEvents = [];
+
+	for (let pollNumber = 0; pollNumber < 30; pollNumber++) {
+		for (const contextTab of componentsTab.context().pages()) {
+			if (contextTab.url().startsWith(`${tunnelUrl}/return`)) {
+				outcomeEvents.push(`redirected to redirectUrl in the ${
+					contextTab === componentsTab
+						? 'same tab'
+						: 'popup'
+				}`);
+
+				return outcomeEvents;
+			}
+
+			for (const tabFrame of contextTab.frames()) {
+				const isPaidChosen = outcomeEvents.includes('chose paid');
+
+				if (isPaidChosen || await tabFrame.locator(paidRadio).count() === 0) {
+					continue;
+				}
+
+				outcomeEvents.push(
+					`test status screen on ${new URL(tabFrame.url()).host}`,
+				);
+
+				if (contextTab !== componentsTab) {
+					outcomeEvents.push('in a popup');
+				}
+				else if (tabFrame === contextTab.mainFrame()) {
+					outcomeEvents.push('in the tab, in place of the page');
+				}
+				else {
+					outcomeEvents.push('in an iframe of the tab');
+				}
+
+				await captureStep(contextTab, '5-status-screen');
+				await tabFrame.check(paidRadio);
+				await tabFrame.click('button[name="submit"]');
+				outcomeEvents.push('chose paid');
+			}
+		}
+
+		await waitSeconds(2);
+	}
+
+	outcomeEvents.push(
+		'no redirect within 60 s, the tab is on'
+		+ ` ${JSON.stringify(new URL(componentsTab.url()).host)}`,
+	);
+
+	return outcomeEvents;
+}
+
+// Mounts the Methods Component on a tunnel page, picks Credit card, fills the
+// card form inside Mollie's frames and presses Pay: every step records what it
+// saw, or the exact error, rather than ending the run.
+// eslint-disable-next-line local/no-single-caller-function -- browser plumbing
+async function payThroughComponents(checkoutBrowser, clientAccessToken) {
 	componentsPage = `<!doctype html>
 <html><head><meta charset="utf-8">
 <script src="https://js.mollie.com/v2/mollie.js"></script></head>
@@ -1305,6 +1429,7 @@ async function mountMethodsComponent(checkoutBrowser, clientAccessToken) {
 
 	const componentsTab = await checkoutBrowser.newPage();
 	const consoleErrors = [];
+	const componentSteps = {};
 
 	componentsTab.on('console', (consoleMessage) => {
 		if (consoleMessage.type() === 'error') {
@@ -1312,38 +1437,115 @@ async function mountMethodsComponent(checkoutBrowser, clientAccessToken) {
 		}
 	});
 
-	await componentsTab.goto(`${tunnelUrl}/components`, { waitUntil: 'load' });
-	await waitSeconds(10);
+	const runStep = async (stepName, stepAction) => {
+		try {
+			componentSteps[stepName] = { outcome: await stepAction() };
+		}
+		catch (stepError) {
+			componentSteps[stepName] = {
+				failure: redactSecrets(JSON.stringify(String(stepError))),
+			};
+		}
 
-	await componentsTab.screenshot({
-		path: join(outputDirectory, 'methods-component.png'),
-		fullPage: true,
+		componentSteps[stepName].frames = await captureStep(
+			componentsTab,
+			stepName,
+		).catch((captureError) => `capture failed: ${String(captureError)}`);
+
+		return componentSteps[stepName].failure === undefined;
+	};
+
+	const isMounted = await runStep('1-mount', async () => {
+		await componentsTab.goto(`${tunnelUrl}/components`, { waitUntil: 'load' });
+		await waitSeconds(10);
+		return redactSecrets(await componentsTab.textContent('#mount-outcome'));
 	});
 
-	const frameDescriptions = [];
+	const isCardChosen = isMounted && await runStep('2-credit-card', async () => {
+		for (const componentFrame of componentsTab.frames().slice(1)) {
+			const cardOption = componentFrame.getByText('Credit card').first();
 
-	for (const componentFrame of componentsTab.frames().slice(1)) {
-		const frameText = await componentFrame
-			.evaluate(() => document.body?.innerText ?? '')
-			.catch((frameError) => `unreadable: ${String(frameError)}`);
+			if (await cardOption.count() > 0) {
+				await cardOption.click();
+				await waitSeconds(5);
+				return `clicked on ${new URL(componentFrame.url()).host}`;
+			}
+		}
 
-		frameDescriptions.push({
-			host: new URL(componentFrame.url()).host,
-			text: redactSecrets(frameText)
-				.replace(/\s+/g, ' ')
-				.slice(0, 300),
-		});
+		throw new Error('no "Credit card" text in any Mollie frame');
+	});
+
+	const isCardFilled = isCardChosen && await runStep('3-fill-card', async () => {
+		const filledFields = [];
+
+		for (const componentFrame of componentsTab.frames().slice(1)) {
+			const frameInputs = componentFrame.locator('input:visible');
+
+			const inputCount = await frameInputs.count();
+
+			for (let inputIndex = 0; inputIndex < inputCount; inputIndex++) {
+				const frameInput = frameInputs.nth(inputIndex);
+
+				const inputLabel = await frameInput.evaluate((inputField) => {
+					return [
+						inputField.name,
+						inputField.id,
+						inputField.placeholder,
+						inputField.getAttribute('aria-label'),
+						inputField.autocomplete,
+					].join(' ');
+				});
+
+				const matchedField = testCardFields.find((cardField) => {
+					return cardField.fieldPattern.test(inputLabel);
+				});
+
+				if (matchedField === undefined) {
+					continue;
+				}
+
+				await frameInput.click();
+
+				await frameInput.pressSequentially(
+					testCardValues[matchedField.fieldKind],
+					{ delay: 40 },
+				);
+
+				filledFields.push(
+					`${matchedField.fieldKind} <- ${JSON.stringify(inputLabel.trim())}`,
+				);
+			}
+		}
+
+		if (filledFields.length === 0) {
+			throw new Error('no card input in any Mollie frame');
+		}
+
+		return filledFields;
+	});
+
+	const isPayPressed = isCardFilled && await runStep('4-press-pay', async () => {
+		for (const tabFrame of componentsTab.frames()) {
+			const payButton = tabFrame
+				.getByRole('button', { name: /pay/i })
+				.first();
+
+			if (await payButton.count() > 0) {
+				await payButton.click();
+				return `clicked on ${new URL(tabFrame.url()).host}`;
+			}
+		}
+
+		throw new Error('no Pay button in the tab nor its frames');
+	});
+
+	if (isPayPressed) {
+		await runStep('6-after-pay', () => followPaymentOutcome(componentsTab));
 	}
 
-	const mountOutcome = await componentsTab.textContent('#mount-outcome');
-	await componentsTab.close();
 	componentsPage = null;
 
-	return {
-		mountOutcome: redactSecrets(mountOutcome ?? ''),
-		consoleErrors,
-		frames: frameDescriptions,
-	};
+	return { consoleErrors, componentSteps };
 }
 
 // Pays a test checkout page by its `final_state` radio, wherever a frame
@@ -1458,13 +1660,54 @@ async function checkCheckoutSession() {
 	const checkoutBrowser = await chromium.launch();
 	cleanupSteps.push(async () => checkoutBrowser.close());
 
-	sessionFindings.methodsComponent = typeof createdSession.clientAccessToken
+	sessionFindings.components = typeof createdSession.clientAccessToken
 		=== 'string'
-		? await mountMethodsComponent(
+		? await payThroughComponents(
 			checkoutBrowser,
 			createdSession.clientAccessToken,
 		)
 		: 'no clientAccessToken to mount it with';
+
+	let polledSession = null;
+	const sessionStatuses = [];
+
+	for (let pollNumber = 0; pollNumber < 10; pollNumber++) {
+		polledSession = await callMollieVerdict(
+			'GET',
+			`/sessions/${createdSession.id}${sessionQuery}`,
+			{ bearerToken: sessionBearer },
+		);
+
+		sessionStatuses.push(polledSession.mollieAnswer?.status ?? null);
+
+		const paymentId = JSON.stringify(polledSession.mollieAnswer)
+			.match(/\btr_[A-Za-z0-9]+/)?.[0];
+
+		if (paymentId !== undefined) {
+			const paymentReading = await callMollieVerdict(
+				'GET',
+				`/payments/${paymentId}`,
+			);
+
+			sessionFindings.payment = {
+				...describeVerdict(paymentReading),
+				method: paymentReading.mollieAnswer?.method ?? null,
+				hasMandateId: typeof paymentReading.mollieAnswer?.mandateId
+					=== 'string',
+				detailsKeys: Object.keys(paymentReading.mollieAnswer?.details ?? {})
+					.sort(),
+			};
+
+			break;
+		}
+
+		await waitSeconds(3);
+	}
+
+	sessionFindings.sessionAfterPay = {
+		...describeVerdict(polledSession),
+		polledStatuses: sessionStatuses,
+	};
 
 	const checkoutHref = sessionReading.mollieAnswer?._links?.checkout?.href
 		?? createdSession._links?.checkout?.href
@@ -1484,7 +1727,7 @@ async function checkCheckoutSession() {
 
 		listedMandates = mandateList._embedded.mandates;
 
-		if (listedMandates.length > 0 || checkoutHref === null) {
+		if (listedMandates.some((listedMandate) => listedMandate.status === 'valid')) {
 			break;
 		}
 
@@ -1492,7 +1735,11 @@ async function checkCheckoutSession() {
 	}
 
 	sessionFindings.mandates = listedMandates.map((listedMandate) => {
-		return `${listedMandate.method} ${listedMandate.status}`;
+		return {
+			method: listedMandate.method,
+			status: listedMandate.status,
+			detailsKeys: Object.keys(listedMandate.details ?? {}).sort(),
+		};
 	});
 
 	const subscriptionCreation = await callMollieVerdict(
