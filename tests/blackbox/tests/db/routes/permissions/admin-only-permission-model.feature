@@ -4,6 +4,12 @@ Feature: Only an admin or code writes who may do what
     decide what a request may do. A request whose permissions grant it such a
     write is still refused unless it is an admin's: it could hand its author
     more than they hold (#763). Every other field stays the permissions' call.
+  - An invitation is the one way a non-admin hands out a role: code writes
+    the role of the user it invites, who cannot log in before accepting. A
+    role that grants admin access, its own or a parent's, is an admin's to
+    invite into.
+  - A role a user belongs to is never deleted. An empty role's access rows
+    and children's parent are cleaned up by code, whoever deletes the role.
   - A Given states the database rows a scenario starts from, written straight
     into the database. The writer's policy grants every action on the
     permission model.
@@ -169,6 +175,9 @@ Feature: Only an admin or code writes who may do what
       |     policy:                     |                                   |
       |       _eq: <target-policy>      |                                   |
       |   fields: action                |                                   |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 0      | 0      | 0      | 0      |
 
   Scenario: a non-admin writes the model's other fields, an admin all of it
     Given the rows of directus_policies:
@@ -246,3 +255,142 @@ Feature: Only an admin or code writes who may do what
       | path: /users/<writer>           | body:                             |
       | payload:                        |   data:                           |
       |   role: <target-role>           |     role: <target-role>           |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 0      | 0      | 0      | 0      |
+
+  Scenario: a non-admin invites into a role, never into an admin one
+    Given the rows of directus_policies:
+      | id               | name          | app_access | admin_access |
+      | <inviter-policy> | inviter-<run> | false      | false        |
+      | <admin-policy>   | admin-<run>   | true       | true         |
+    And the rows of directus_permissions:
+      | policy           | collection     | action | fields |
+      | <inviter-policy> | directus_users | create | *      |
+      | <inviter-policy> | directus_users | read   | *      |
+      | <inviter-policy> | directus_users | update | *      |
+    And the rows of directus_roles:
+      | id                 | name              | parent       |
+      | <inviter-role>     | inviter-<run>     | null         |
+      | <first-role>       | first-<run>       | null         |
+      | <second-role>      | second-<run>      | null         |
+      | <admin-role>       | admin-<run>       | null         |
+      | <under-admin-role> | under-admin-<run> | <admin-role> |
+    And the rows of directus_access:
+      | id               | role           | policy           |
+      | <inviter-access> | <inviter-role> | <inviter-policy> |
+      | <admin-access>   | <admin-role>   | <admin-policy>   |
+    And the rows of directus_users:
+      | id        | email                     | role           | token         |
+      | <inviter> | inviter-<run>@example.com | <inviter-role> | inviter-<run> |
+    Then these requests get these responses:
+      | request                            | response                                  |
+      | as: inviter-<run>                  | code: 204                                 |+
+      | method: POST                       |                                           |
+      | path: /users/invite                |                                           |
+      | payload:                           |                                           |
+      |   email: invited-<run>@example.com |                                           |
+      |   role: <first-role>               |                                           |
+      | method: GET                        | code: 200                                 |+
+      | path: /users                       | body:                                     |
+      | query:                             |   data:                                   |
+      |   fields: status,role              |     - status: invited                     |
+      |   filter[email][_eq]: >-           |       role: <first-role>                  |
+      |     invited-<run>@example.com      |                                           |
+      | as: inviter-<run>                  | code: 204                                 |+
+      | method: POST                       |                                           |
+      | path: /users/invite                |                                           |
+      | payload:                           |                                           |
+      |   email: invited-<run>@example.com |                                           |
+      |   role: <second-role>              |                                           |
+      | method: GET                        | code: 200                                 |+
+      | path: /users                       | body:                                     |
+      | query:                             |   data:                                   |
+      |   fields: status,role              |     - status: invited                     |
+      |   filter[email][_eq]: >-           |       role: <second-role>                 |
+      |     invited-<run>@example.com      |                                           |
+      | as: inviter-<run>                  | code: 400                                 |+
+      | method: POST                       | body:                                     |
+      | path: /users/invite                |   errors:                                 |
+      | payload:                           |     - message: >-                         |
+      |   email: grabbed-<run>@example.com |         Invalid payload. Role             |
+      |   role: <admin-role>               |         "<admin-role>" grants admin       |
+      |                                    |         access: only an admin             |
+      |                                    |         invites into it.                  |
+      | as: inviter-<run>                  | code: 400                                 |+
+      | method: POST                       | body:                                     |
+      | path: /users/invite                |   errors:                                 |
+      | payload:                           |     - message: >-                         |
+      |   email: under-<run>@example.com   |         Invalid payload. Role             |
+      |   role: <under-admin-role>         |         "<under-admin-role>" grants admin |
+      |                                    |         access: only an admin             |
+      |                                    |         invites into it.                  |
+      | method: GET                        | code: 200                                 |+
+      | path: /users                       | body:                                     |
+      | query:                             |   data: []                                |
+      |   fields: id                       |                                           |
+      |   filter[email][_eq]: >-           |                                           |
+      |     grabbed-<run>@example.com      |                                           |
+      | method: GET                        | code: 200                                 |+
+      | path: /users                       | body:                                     |
+      | query:                             |   data: []                                |
+      |   fields: id                       |                                           |
+      |   filter[email][_eq]: >-           |                                           |
+      |     under-<run>@example.com        |                                           |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 0      | 0      | 0      | 0      |
+
+  Scenario: a role a user belongs to stays, an empty one goes, by a non-admin too
+    Given the rows of directus_policies:
+      | id               | name          | app_access | admin_access |
+      | <deleter-policy> | deleter-<run> | false      | false        |
+      | <empty-policy>   | empty-<run>   | false      | false        |
+    And the rows of directus_permissions:
+      | policy           | collection     | action | fields |
+      | <deleter-policy> | directus_roles | read   | *      |
+      | <deleter-policy> | directus_roles | delete | *      |
+    And the rows of directus_roles:
+      | id             | name          | parent       |
+      | <deleter-role> | deleter-<run> | null         |
+      | <held-role>    | held-<run>    | null         |
+      | <empty-role>   | empty-<run>   | null         |
+      | <child-role>   | child-<run>   | <empty-role> |
+    And the rows of directus_access:
+      | id               | role           | policy           |
+      | <deleter-access> | <deleter-role> | <deleter-policy> |
+      | <empty-access>   | <empty-role>   | <empty-policy>   |
+    And the rows of directus_users:
+      | id        | email                     | role           | token         |
+      | <deleter> | deleter-<run>@example.com | <deleter-role> | deleter-<run> |
+      | <held>    | held-<run>@example.com    | <held-role>    | null          |
+    Then these requests get these responses:
+      | request                           | response                           |
+      | method: DELETE                    | code: 400                          |+
+      | path: /roles/<held-role>          | body:                              |
+      |                                   |   errors:                          |
+      |                                   |     - message: >-                  |
+      |                                   |         Invalid payload. Role      |
+      |                                   |         "<held-role>" can't be     |
+      |                                   |         deleted while users belong |
+      |                                   |         to it.                     |
+      | as: deleter-<run>                 | code: 204                          |+
+      | method: DELETE                    |                                    |
+      | path: /roles/<empty-role>         |                                    |
+      | method: GET                       | code: 200                          |+
+      | path: /roles/<child-role>         | body:                              |
+      | query:                            |   data:                            |
+      |   fields: parent                  |     parent: null                   |
+      | method: GET                       | code: 200                          |+
+      | path: /access                     | body:                              |
+      | query:                            |   data: []                         |
+      |   fields: id                      |                                    |
+      |   filter[role][_eq]: <empty-role> |                                    |
+      | method: GET                       | code: 200                          |+
+      | path: /users/<held>               | body:                              |
+      | query:                            |   data:                            |
+      |   fields: status,role             |     status: active                 |
+      |                                   |     role: <held-role>              |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 0      | 0      | 0      | 0      |

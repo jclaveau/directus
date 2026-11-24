@@ -1,53 +1,55 @@
-Feature: A deleted role suspends its users and drops its presets
+Feature: A role a user belongs to stays, a deleted one drops its presets
 
-  - Pins today's single-role contract (#746). Deleting a role suspends every
-    user holding it and empties their role, deletes the presets of the role,
-    and leaves the roles under it with no parent.
+  - A role a user belongs to is never deleted (#763): its users would be left
+    with nothing to do. A deleted role takes its presets, and the roles under
+    it are left with no parent.
+  - A Given states the database rows a scenario starts from, written straight
+    into the database.
   - A request authenticates as the admin. `<run>` stands for a value unique to
     the scenario, and any other `<name>` for a uuid of its own. A response
     cell states the keys it checks.
 
-  Scenario: a deleted role suspends its user, drops its preset, frees its child
-    Given these requests are sent:
-      | request                                 | response  |
-      | method: POST                            | code: 200 |+
-      | path: /roles                            |           |
-      | payload:                                |           |
-      |   id: <deleted-role>                    |           |
-      |   name: deleted-<run>                   |           |
-      | method: POST                            | code: 200 |+
-      | path: /roles                            |           |
-      | payload:                                |           |
-      |   id: <child-role>                      |           |
-      |   name: child-<run>                     |           |
-      |   parent: <deleted-role>                |           |
-      | method: POST                            | code: 200 |+
-      | path: /users                            |           |
-      | payload:                                |           |
-      |   id: <member>                          |           |
-      |   email: member-<run>@example.com       |           |
-      |   role: <deleted-role>                  |           |
-      | method: POST                            | code: 200 |+
-      | path: /users                            |           |
-      | payload:                                |           |
-      |   id: <child-member>                    |           |
-      |   email: child-member-<run>@example.com |           |
-      |   role: <child-role>                    |           |
-      | method: POST                            | code: 200 |+
-      | path: /presets                          |           |
-      | payload:                                |           |
-      |   bookmark: deleted-<run>               |           |
-      |   collection: directus_users            |           |
-      |   role: <deleted-role>                  |           |
+  Scenario: a role a user belongs to is not deleted
+    Given the rows of directus_roles:
+      | id          | name       |
+      | <held-role> | held-<run> |
+    And the rows of directus_users:
+      | id       | email                    | role        |
+      | <member> | member-<run>@example.com | <held-role> |
+    Then these requests get these responses:
+      | request                  | response                           |
+      | method: DELETE           | code: 400                          |+
+      | path: /roles/<held-role> | body:                              |
+      |                          |   errors:                          |
+      |                          |     - message: >-                  |
+      |                          |         Invalid payload. Role      |
+      |                          |         "<held-role>" can't be     |
+      |                          |         deleted while users belong |
+      |                          |         to it.                     |
+      | method: GET              | code: 200                          |+
+      | path: /users/<member>    | body:                              |
+      | query:                   |   data:                            |
+      |   fields: status,role    |     status: active                 |
+      |                          |     role: <held-role>              |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 0      | 0      | 0      | 0      |
+
+  Scenario: a deleted role drops its preset, frees its child
+    Given the rows of directus_roles:
+      | id             | name          | parent         |
+      | <deleted-role> | deleted-<run> | null           |
+      | <child-role>   | child-<run>   | <deleted-role> |
+    And the rows of directus_users:
+      | id             | email                          | role         |
+      | <child-member> | child-member-<run>@example.com | <child-role> |
+    And the rows of directus_presets:
+      | bookmark      | collection     | role           |
+      | deleted-<run> | directus_users | <deleted-role> |
     Then these requests get these responses:
       | request                                | response               |
       | method: DELETE                         | code: 204              |+
       | path: /roles/<deleted-role>            |                        |
-      | method: GET                            | code: 200              |+
-      | path: /users/<member>                  | body:                  |
-      | query:                                 |   data:                |
-      |   fields: status,role                  |     status: suspended  |
-      |                                        |     role: null         |
       | method: GET                            | code: 200              |+
       | path: /users/<child-member>            | body:                  |
       | query:                                 |   data:                |
@@ -63,27 +65,5 @@ Feature: A deleted role suspends its users and drops its presets
       |   fields: id                           |                        |
       |   filter[bookmark][_eq]: deleted-<run> |                        |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete | with |
-      | 1       | directus_access      | 7      | 0      | 0      | 0      | 0    |
-      | 1       | directus_activity    | 0      | 3      | 0      | 0      | 0    |
-      | 1       | directus_presets     | 1      | 0      | 0      | 1      | 0    |
-      | 1       | directus_revisions   | 0      | 2      | 0      | 0      | 0    |
-      | 1       | directus_roles       | 7      | 0      | 1      | 1      | 0    |
-      | 1       | directus_sessions    | 0      | 0      | 0      | 1      | 0    |
-      | 1       | directus_users       | 8      | 0      | 1      | 0      | 0    |
-      | 2       | directus_access      | 2      | 0      | 0      | 0      | 0    |
-      | 2       | directus_collections | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_users       | 2      | 0      | 0      | 0      | 0    |
-      | 2       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
-      | 2       | information_schema   | 1      | 0      | 0      | 0      | 0    |
-      | 2       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 2       | pg_index             | 2      | 0      | 0      | 0      | 0    |
-      | 2       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_users       | 2      | 0      | 0      | 0      | 0    |
-      | 4       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_users       | 1      | 0      | 0      | 0      | 0    |
-      | 5       | directus_presets     | 1      | 0      | 0      | 0      | 0    |
-      | 5       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 0      | 0      | 0      | 0      |

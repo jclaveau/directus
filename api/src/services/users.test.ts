@@ -13,6 +13,9 @@ import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
+import {
+	validateAccess,
+} from '../permissions/modules/validate-access/validate-access.js';
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
@@ -49,6 +52,17 @@ vi.mock('@directus/env', () => ({
 }));
 
 vi.mock('../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js');
+
+vi.mock(
+	'../permissions/modules/validate-access/validate-access.js',
+	async (importOriginal) => {
+		const original = await importOriginal<
+			typeof import('../permissions/modules/validate-access/validate-access.js')
+		>();
+
+		return { validateAccess: vi.fn(original.validateAccess) };
+	},
+);
 
 vi.mock('../cache.js', async (importOriginal) => {
 	return {
@@ -890,6 +904,103 @@ describe('Integration Tests', () => {
 					}));
 				},
 			);
+		});
+
+		describe('invite by a non-admin', () => {
+			const inviter = new UsersService({
+				knex: db,
+				schema,
+				accountability: { role: 'inviter-role', admin: false } as Accountability,
+			});
+
+			vi.spyOn(UsersService.prototype as any, 'inviteUrl')
+				.mockImplementation(() => vi.fn());
+
+			it('refuses a role that grants admin access', async () => {
+				tracker.on.select('directus_roles')
+					.response({ id: 'admin-role', parent: null });
+
+				tracker.on.select('directus_access').response([
+					{ admin_access: true, app_access: true, ip_access: null },
+				]);
+
+				await expect(inviter.inviteUser('user@example.com', 'admin-role', null))
+					.rejects.toEqual(new InvalidPayloadError({
+						reason: oneLine`Role "admin-role" grants admin access: only an
+							admin invites into it`,
+					}));
+
+				expect(superCreateOneSpy).not.toHaveBeenCalled();
+			});
+
+			it('creates the invited user, then writes its role as code', async () => {
+				tracker.on.select('directus_roles')
+					.response({ id: 'invite-role', parent: null });
+
+				tracker.on.select('directus_access').response([]);
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce(undefined);
+
+				await inviter.inviteUser('user@example.com', 'invite-role', null);
+
+				expect(superCreateOneSpy).toHaveBeenCalledExactlyOnceWith(
+					{ email: 'user@example.com', status: 'invited' },
+					expect.anything(),
+				);
+
+				expect(superCreateOneSpy.mock.contexts[0]).toMatchObject({
+					accountability: { role: 'inviter-role', admin: false },
+				});
+
+				expect(superUpdateGroupsSpy).toHaveBeenCalledExactlyOnceWith(
+					[{ data: { role: 'invite-role' }, keys: ['user-id-1'] }],
+					expect.anything(),
+				);
+
+				expect(superUpdateGroupsSpy.mock.contexts[0]).toMatchObject({
+					accountability: null,
+				});
+			});
+
+			it('checks the inviter may update the invited user it moves', async () => {
+				tracker.on.select('directus_roles')
+					.response({ id: 'invite-role', parent: null });
+
+				tracker.on.select('directus_access').response([]);
+
+				vi.mocked(validateAccess).mockResolvedValueOnce(undefined);
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({
+						id: 'user-id-3',
+						status: 'invited',
+						role: 'existing-role',
+					});
+
+				await inviter.inviteUser('user@example.com', 'invite-role', null);
+
+				expect(vi.mocked(validateAccess)).toHaveBeenCalledExactlyOnceWith(
+					{
+						accountability: { role: 'inviter-role', admin: false },
+						action: 'update',
+						collection: 'directus_users',
+						primaryKeys: ['user-id-3'],
+					},
+					expect.anything(),
+				);
+
+				expect(superCreateOneSpy).not.toHaveBeenCalled();
+
+				expect(superUpdateGroupsSpy).toHaveBeenCalledExactlyOnceWith(
+					[{ data: { role: 'invite-role' }, keys: ['user-id-3'] }],
+					expect.anything(),
+				);
+
+				expect(superUpdateGroupsSpy.mock.contexts[0]).toMatchObject({
+					accountability: null,
+				});
+			});
 		});
 
 		describe('acceptInvite', () => {

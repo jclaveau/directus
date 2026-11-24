@@ -1,4 +1,5 @@
 import { InvalidPayloadError } from '@directus/errors';
+import { oneLine } from '@directus/utils';
 import type {
 	AbstractServiceOptions,
 	ActionEventParams,
@@ -16,7 +17,6 @@ import { transactionHoldingActions } from '../utils/transaction-holding-actions.
 import { emitActionEvents, ItemsService } from './items.js';
 import { AccessService } from './access.js';
 import { PresetsService } from './presets.js';
-import { UsersService } from './users.js';
 import {
 	refusePermissionModelWrite,
 } from '../utils/refuse-permission-model-write.js';
@@ -99,19 +99,36 @@ export class RolesService extends ItemsService {
 		};
 
 		await transactionHoldingActions(this.knex, heldActionEvents, async (trx) => {
-			const options: AbstractServiceOptions = {
+			const heldUser = await trx
+				.select('role')
+				.from('directus_users')
+				.whereIn('role', keys)
+				.first();
+
+			if (heldUser) {
+				throw new InvalidPayloadError({
+					reason: oneLine`Role ${JSON.stringify(heldUser.role)} can't be
+						deleted while users belong to it`,
+				});
+			}
+
+			const rolesItemsService = new ItemsService('directus_roles', {
 				knex: trx,
 				accountability: this.accountability,
 				schema: this.schema,
+			});
+
+			// An empty role's cleanup is code's: its caller may delete the role
+			// without holding a write on the permission model.
+			const cleanupOptions: AbstractServiceOptions = {
+				knex: trx,
+				accountability: null,
+				schema: this.schema,
 			};
 
-			const rolesItemsService = new ItemsService('directus_roles', options);
-			const rolesService = new RolesService(options);
-			const accessService = new AccessService(options);
-			const presetsService = new PresetsService(options);
-			const usersService = new UsersService(options);
-
-			// Delete permissions/presets for this role, suspend all remaining users in role
+			const rolesService = new RolesService(cleanupOptions);
+			const accessService = new AccessService(cleanupOptions);
+			const presetsService = new PresetsService(cleanupOptions);
 
 			await accessService.deleteRoleAccess(
 				keys,
@@ -121,17 +138,6 @@ export class RolesService extends ItemsService {
 			await presetsService.deleteByQuery(
 				{
 					filter: { role: { _in: keys } },
-				},
-				{ ...holdingOpts, bypassLimits: true },
-			);
-
-			await usersService.updateByQuery(
-				{
-					filter: { role: { _in: keys } },
-				},
-				{
-					status: 'suspended',
-					role: null,
 				},
 				{ ...holdingOpts, bypassLimits: true },
 			);
