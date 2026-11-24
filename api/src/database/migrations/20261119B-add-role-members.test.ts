@@ -227,7 +227,7 @@ describe('the migration', () => {
 		expect(tracker.history.any.map(({ sql }) => sql)).toEqual(
 			expect.arrayContaining([
 				'create table "directus_invites" ("id" uuid, "user" uuid not null,'
-				+ ' "role" uuid not null, "user_created" uuid null,'
+				+ ' "role" uuid not null, "inviter" uuid null,'
 				+ ' "date_created" timestamptz default CURRENT_TIMESTAMP,'
 				+ ' constraint "directus_invites_pkey" primary key ("id"))',
 				'alter table "directus_invites" add constraint'
@@ -238,11 +238,11 @@ describe('the migration', () => {
 				+ ' references "directus_roles" ("id") on delete CASCADE',
 				'alter table "directus_invites" add constraint'
 				+ ' "directus_invites_inviter_foreign" foreign key'
-				+ ' ("user_created") references "directus_users" ("id")'
+				+ ' ("inviter") references "directus_users" ("id")'
 				+ ' on delete SET NULL',
 				'alter table "directus_invites" add constraint'
 				+ ' "directus_invites_user_role_inviter_unique"'
-				+ ' unique ("user", "role", "user_created")',
+				+ ' unique ("user", "role", "inviter")',
 			]),
 		);
 	});
