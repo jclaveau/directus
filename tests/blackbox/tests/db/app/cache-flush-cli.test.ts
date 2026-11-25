@@ -221,7 +221,7 @@ describe('`directus cache flush` clears a running node from another process', ()
 			// lock `set` — and the deploy step behind it — until the deadline kills
 			// the process. The first `error` is the dial's answer too.
 			const { code, output } = await runCacheFlush({
-				REDIS: `redis://localhost:${await getPort()}/${redisDb}`,
+				REDIS: `redis://localhost:${await freePortOfWorker()}/${redisDb}`,
 				REDIS_RETRY_BASE_DELAY: '10',
 				REDIS_RETRY_MAX_DELAY: '50',
 				CACHE_FLUSH_TIMEOUT: '20s',
