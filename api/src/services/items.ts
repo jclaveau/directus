@@ -33,6 +33,7 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import { oneLine } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
+import type { PeerNotice } from '../cache-peer-notice.js';
 import { getCache } from '../cache.js';
 import {
 	createScopedCacheHookDeclarations,
@@ -60,10 +61,19 @@ import getDatabase, {
 import { runAst } from '../database/run-ast/run-ast.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
+import {
+	fetchAllowingMemberRolesByRow,
+} from '../permissions/lib/fetch-allowing-member-roles.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
+import {
+	refuseRemovedRoleStampSpecial,
+} from '../utils/refuse-removed-role-stamp-special.js';
+import {
+	refuseRemovedRoleVariableInPayload,
+} from '../utils/refuse-removed-role-variable.js';
 import { resolveMutationBatching } from '../utils/resolve-mutation-batching.js';
 import {
 	flushResponseCacheAfterCommit,
@@ -90,7 +100,7 @@ import {
 } from '../utils/lodash-es-used.js';
 import { validateKeys } from '../utils/validate-keys.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
-import { PayloadService } from './payload.js';
+import { memberRoleStampKey, PayloadService } from './payload.js';
 
 const env = useEnv();
 
@@ -507,6 +517,11 @@ implements AbstractService<Item> {
 
 		if (data.length === 0) {
 			return [];
+		}
+
+		for (const row of data) {
+			refuseRemovedRoleVariableInPayload(this.collection, row);
+			refuseRemovedRoleStampSpecial(this.collection, row);
 		}
 
 		// a row written alone counts itself again
@@ -2236,6 +2251,32 @@ implements AbstractService<Item> {
 	): Promise<void> {}
 
 	/**
+	 * The columns a subclass reads off the rows an update or a delete writes,
+	 * returned by the write statement itself and handed to `onKeyRowsWritten`.
+	 * A service naming some writes its update groups one by one: a batch
+	 * statement returns no rows.
+	 */
+	protected readonly writtenRowColumns: readonly string[] = [];
+
+	/**
+	 * Handed the `writtenRowColumns` of the rows an update or a delete wrote,
+	 * inside its transaction; a delete rolled back to its savepoint hands none.
+	 * TODO(#610): only postgres and cockroach return them; elsewhere it is not
+	 * called.
+	 */
+	protected async onKeyRowsWritten(
+		_writtenRows: Item[],
+		_trx: Knex,
+		_opts: MutationOptions,
+	): Promise<void> {}
+
+	// The rows' `writtenRowColumns` where the statement can return them.
+	private returnsWrittenRows(): boolean {
+		return this.writtenRowColumns.length > 0
+			&& ['postgres', 'cockroachdb'].includes(getDatabaseClient(this.knex));
+	}
+
+	/**
 	 * What writing these groups sets off once they are written — a cache clear,
 	 * a logout. Handed the groups the hooks left.
 	 */
@@ -2330,6 +2371,11 @@ implements AbstractService<Item> {
 			throw new InvalidPayloadError({
 				reason: `Each update group needs a "data" object`,
 			});
+		}
+
+		for (const group of groups) {
+			refuseRemovedRoleVariableInPayload(this.collection, group.data);
+			refuseRemovedRoleStampSpecial(this.collection, group.data);
 		}
 
 		// Answered like an empty batch or a query matching nothing: no row, no hook.
@@ -3426,6 +3472,7 @@ implements AbstractService<Item> {
 		aliases: string[],
 		opts: MutationOptions & { mutationTracker: MutationTracker },
 		nestedActionEvents: ActionEventParams[],
+		memberRoleStamps: Map<string, string[]> = new Map(),
 	): Promise<UpdateGroup<Item>> {
 		// Sorted for the work below only. `group.keys` stays in the caller's row order,
 		// which is what `updateGroups` returns and what the per-row action events walk.
@@ -3449,6 +3496,7 @@ implements AbstractService<Item> {
 				knex: trx,
 				schema: this.schema,
 				nested: this.nested,
+				memberRoleStamps,
 			});
 
 			const {
@@ -3460,21 +3508,43 @@ implements AbstractService<Item> {
 
 			const payloadWithA2O = payloadsWithA2O[0]!;
 			const payloadWithoutAliasAndPK = pick(payloadWithA2O, without(fields, primaryKeyField, ...aliases));
-			const payloadWithTypeCasting = await payloadService.processValues('update', payloadWithoutAliasAndPK);
+
+			const payloadWithTypeCasting = await payloadService.processValues(
+				'update',
+				payloadWithoutAliasAndPK,
+				{},
+				{},
+				keys,
+			);
 
 			let updatedRowCount = 0;
 
 			if (Object.keys(payloadWithTypeCasting).length > 0) {
+				let writtenRows: Item[] | null = null;
+
 				try {
-					updatedRowCount = await trx(this.collection)
-						.update(payloadWithTypeCasting)
-						.whereIn(primaryKeyField, keys);
+					if (this.returnsWrittenRows()) {
+						writtenRows = await trx(this.collection)
+							.update(payloadWithTypeCasting, [...this.writtenRowColumns])
+							.whereIn(primaryKeyField, keys);
+
+						updatedRowCount = writtenRows.length;
+					}
+					else {
+						updatedRowCount = await trx(this.collection)
+							.update(payloadWithTypeCasting)
+							.whereIn(primaryKeyField, keys);
+					}
 				}
 				catch (err: any) {
 					throw await translateDatabaseError(err, payloadWithPresets, this.knex, {
 						collection: this.collection,
 						operation: 'update',
 					});
+				}
+
+				if (writtenRows !== null) {
+					await this.onKeyRowsWritten(writtenRows, trx, opts);
 				}
 			}
 
@@ -3543,28 +3613,100 @@ implements AbstractService<Item> {
 		opts: MutationOptions & { mutationTracker: MutationTracker },
 		nestedActionEvents: ActionEventParams[],
 	): Promise<UpdateGroup<Item>[]> {
-		const appliedGroups: UpdateGroup<Item>[] = [];
+		const { stampedGroups, memberRoleStamps } = await this.splitByMemberRoles(
+			groups,
+			aliases,
+		);
 
-		for (const groupRun of this.splitBatchRuns(groups, aliases, opts)) {
+		for (const groupRun of this.splitBatchRuns(stampedGroups, aliases, opts)) {
 			if (groupRun.length === 1) {
-				appliedGroups.push(await this.applyUpdateGroup(
+				await this.applyUpdateGroup(
 					groupRun[0]!,
 					aliases,
 					opts,
 					nestedActionEvents,
-				));
+					memberRoleStamps,
+				);
 			}
 			else {
-				appliedGroups.push(...await this.applyUpdateBatch(
+				await this.applyUpdateBatch(
 					groupRun,
 					aliases,
 					opts,
 					nestedActionEvents,
-				));
+					memberRoleStamps,
+				);
 			}
 		}
 
-		return appliedGroups;
+		// What was written is each group as asked, however it was split.
+		return groups;
+	}
+
+	/**
+	 * A `roles-updated` stamp lists the member roles allowing each row: a group
+	 * whose rows different roles allow is cut into one group per stamp, the
+	 * stamps worked out here once, as the rows were before the update.
+	 */
+	private async splitByMemberRoles(
+		groups: UpdateGroup<Item>[],
+		aliases: string[],
+	) {
+		const memberRoleStamps = new Map<string, string[]>();
+		const collectionSchema = this.schema.collections[this.collection]!;
+
+		const stampsRows = Object.values(collectionSchema.fields)
+			.some(({ special }) => special.includes('roles-updated'));
+
+		if (!this.accountability?.user || !stampsRows) {
+			return { stampedGroups: groups, memberRoleStamps };
+		}
+
+		const stampedGroups: UpdateGroup<Item>[] = [];
+
+		for (const group of groups) {
+			const writtenFields = Object.keys(pick(
+				group.data,
+				without(
+					Object.keys(collectionSchema.fields),
+					collectionSchema.primary,
+					...aliases,
+				),
+			));
+
+			const rolesByRow = await fetchAllowingMemberRolesByRow(
+				{
+					accountability: this.accountability,
+					action: 'update',
+					collection: this.collection,
+					primaryKeys: group.keys,
+					fields: writtenFields,
+				},
+				{ knex: this.knex, schema: this.schema },
+			);
+
+			const keysByStamp = new Map<string, PrimaryKey[]>();
+
+			for (const key of group.keys) {
+				const stampText = JSON.stringify(rolesByRow.get(String(key)));
+
+				keysByStamp.set(stampText, [
+					...keysByStamp.get(stampText) ?? [],
+					key,
+				]);
+			}
+
+			for (const [stampText, stampKeys] of keysByStamp) {
+				memberRoleStamps.set(
+					memberRoleStampKey(stampKeys, writtenFields),
+					JSON.parse(stampText),
+				);
+
+				stampedGroups.push({ data: group.data, keys: stampKeys });
+			}
+		}
+
+		return { stampedGroups, memberRoleStamps };
 	}
 
 	/**
@@ -3628,7 +3770,11 @@ implements AbstractService<Item> {
 
 		const { capabilities } = getHelpers(this.knex);
 
-		if (!capabilities.supportsJsonBatchUpdate() || isRefused) {
+		if (
+			!capabilities.supportsJsonBatchUpdate()
+			|| isRefused
+			|| this.writtenRowColumns.length > 0
+		) {
 			return null;
 		}
 
@@ -3665,6 +3811,7 @@ implements AbstractService<Item> {
 		aliases: string[],
 		opts: MutationOptions & { mutationTracker: MutationTracker },
 		nestedActionEvents: ActionEventParams[],
+		memberRoleStamps: Map<string, string[]>,
 	): Promise<UpdateGroup<Item>[]> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
@@ -3674,6 +3821,7 @@ implements AbstractService<Item> {
 			knex: this.knex,
 			schema: this.schema,
 			nested: this.nested,
+			memberRoleStamps,
 		});
 
 		const preparedGroups: {
@@ -3691,6 +3839,9 @@ implements AbstractService<Item> {
 				const payloadWithTypeCasting = await payloadService.processValues(
 					'update',
 					pick(payloadWithPresets, without(fields, primaryKeyField, ...aliases)),
+					{},
+					{},
+					group.keys,
 				) as Partial<AnyItem>;
 
 				preparedGroups.push({ group, payloadWithPresets, payloadWithTypeCasting });
@@ -3771,9 +3922,13 @@ implements AbstractService<Item> {
 			const appliedGroups: UpdateGroup<Item>[] = [];
 
 			for (const { group } of preparedGroups) {
-				appliedGroups.push(
-					await this.applyUpdateGroup(group, aliases, opts, nestedActionEvents),
-				);
+				appliedGroups.push(await this.applyUpdateGroup(
+					group,
+					aliases,
+					opts,
+					nestedActionEvents,
+					memberRoleStamps,
+				));
 			}
 
 			if (prepareError !== null) {
@@ -4034,8 +4189,10 @@ implements AbstractService<Item> {
 		};
 
 		// A row whose side effect flushes the response cache (a user's role, a
-		// permission) leaves it to this batch, which flushes once for every row.
+		// permission) leaves it to this batch, which flushes once for every row,
+		// naming the permissions to the other nodes if any row cleared them.
 		let responseCacheFlushDeferred = false;
+		const deferredPeerNotice: PeerNotice = { permissionsCleared: false };
 
 		// Logged, not thrown, like a flush a transaction drains: the rows have
 		// committed, and the scoped purge below must still run.
@@ -4045,7 +4202,12 @@ implements AbstractService<Item> {
 			}
 
 			try {
-				await flushResponseCacheAfterCommit(this.knex, this.cache, opts);
+				await flushResponseCacheAfterCommit(
+					this.knex,
+					this.cache,
+					opts,
+					deferredPeerNotice,
+				);
 			}
 			catch (error) {
 				useLogger().error(
@@ -4094,8 +4256,12 @@ implements AbstractService<Item> {
 
 						hookAddedSnapshots.push(addedSnapshot);
 					},
-					onResponseCacheFlushDeferred: () => {
+					onResponseCacheFlushDeferred: ({ permissionsCleared }) => {
 						responseCacheFlushDeferred = true;
+
+						if (permissionsCleared) {
+							deferredPeerNotice.permissionsCleared = true;
+						}
 					},
 					// counted once every run wrote: a new admin may be created after
 					// the old one is demoted
@@ -4779,6 +4945,20 @@ implements AbstractService<Item> {
 		}
 	}
 
+	// `writtenRows` is null where the statement returns none.
+	private async deleteRowsOf(
+		rowsQuery: Knex.QueryBuilder,
+	): Promise<{ writtenCount: number; writtenRows: Item[] | null }> {
+		if (!this.returnsWrittenRows()) {
+			return { writtenCount: await rowsQuery.delete(), writtenRows: null };
+		}
+
+		const writtenRows = await rowsQuery
+			.delete([...this.writtenRowColumns]) as Item[];
+
+		return { writtenCount: writtenRows.length, writtenRows };
+	}
+
 	/**
 	 * Delete the rows `keys` name. An admin reaches every row, so a key no row
 	 * holds is a 404 for them, as it is for deleteOne. It is told off the
@@ -4792,13 +4972,19 @@ implements AbstractService<Item> {
 	private async deleteKeyRows(
 		keys: PrimaryKey[],
 		trx: Knex,
-		keysFromQuery: boolean,
+		opts: MutationOptions,
 	): Promise<void> {
+		const keysFromQuery = opts.keysFromQuery === true;
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 
 		if (this.accountability?.admin !== true) {
-			await trx(this.collection).whereIn(primaryKeyField, keys)
-				.delete();
+			const { writtenRows } = await this.deleteRowsOf(
+				trx(this.collection).whereIn(primaryKeyField, keys),
+			);
+
+			if (writtenRows !== null) {
+				await this.onKeyRowsWritten(writtenRows, trx, opts);
+			}
 
 			return;
 		}
@@ -4806,11 +4992,13 @@ implements AbstractService<Item> {
 		const keyNames = new Set(keys.map((key) => this.primaryKeyNameOf(key)));
 		const savepoint = await trx.transaction();
 		let deletedCount: number;
+		let deletedRows: Item[] | null;
 
 		try {
-			deletedCount = await savepoint(this.collection)
-				.whereIn(primaryKeyField, keys)
-				.delete();
+			({ writtenCount: deletedCount, writtenRows: deletedRows }
+				= await this.deleteRowsOf(
+					savepoint(this.collection).whereIn(primaryKeyField, keys),
+				));
 		}
 		catch (error) {
 			await savepoint.rollback();
@@ -4819,6 +5007,11 @@ implements AbstractService<Item> {
 
 		if (deletedCount >= keyNames.size) {
 			await savepoint.commit();
+
+			if (deletedRows !== null) {
+				await this.onKeyRowsWritten(deletedRows, trx, opts);
+			}
+
 			return;
 		}
 
@@ -4830,6 +5023,11 @@ implements AbstractService<Item> {
 		// No row is left, so the shortfall is only keys no row held.
 		if (keysFromQuery && keptRows.length === 0) {
 			await savepoint.commit();
+
+			if (deletedRows !== null) {
+				await this.onKeyRowsWritten(deletedRows, trx, opts);
+			}
+
 			return;
 		}
 
@@ -5039,7 +5237,7 @@ implements AbstractService<Item> {
 			await this.validateKeysToDelete(keys, opts, trx);
 
 			try {
-				await this.deleteKeyRows(keys, trx, opts.keysFromQuery === true);
+				await this.deleteKeyRows(keys, trx, opts);
 			}
 			catch (err: any) {
 				if (isDirectusError(err, ErrorCode.ItemNotFound)) {

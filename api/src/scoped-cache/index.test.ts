@@ -22,6 +22,10 @@ import type { Keyv } from 'keyv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CacheSettingField } from '../cache-settings.js';
 import {
+	tellPeersPermissionsCleared,
+	tellPeersResponseCacheCleared,
+} from '../cache-peer-notice.js';
+import {
 	type ScopedCacheFilterKeying,
 	ScopedCacheReadPlan,
 	assertScopedCacheStoreSupported,
@@ -136,6 +140,13 @@ vi.mock('../cache.js', () => ({ getCache: vi.fn() }));
 
 vi.mock('./reap-requests.js', () => {
 	return { requestScopedCacheIndexReap: vi.fn() };
+});
+
+vi.mock('../cache-peer-notice.js', () => {
+	return {
+		tellPeersPermissionsCleared: vi.fn(),
+		tellPeersResponseCacheCleared: vi.fn(),
+	};
 });
 
 vi.mock('../cache-build-identity.js', () => {
@@ -1797,6 +1808,73 @@ describe('flushResponseCache', () => {
 		expect(calls).toEqual(['clear']);
 	});
 
+	it('tells the other nodes once the flush cleared this one', async () => {
+		const { calls, cache } = recordFlush();
+
+		vi.mocked(tellPeersResponseCacheCleared).mockImplementationOnce(async () => {
+			calls.push('tell peers');
+		});
+
+		await flushResponseCache(cache);
+
+		expect(calls).toEqual([
+			'bump ns:scoped-cache-epoch:*',
+			'clear',
+			'tell peers',
+			'scan',
+			'unlink',
+			'exec',
+			'bump ns:scoped-cache-epoch:*',
+		]);
+	});
+
+	it(oneLine`
+		names the permissions to the peers of a shared store before the clear — a
+		peer reading its old copy after the clear fills the store with the old roles
+	`, async () => {
+		const { calls, cache } = recordFlush();
+
+		vi.mocked(tellPeersPermissionsCleared).mockImplementationOnce(async () => {
+			calls.push('tell permissions');
+		});
+
+		await flushResponseCache(cache, { permissionsCleared: true });
+
+		expect(calls).toEqual([
+			'tell permissions',
+			'bump ns:scoped-cache-epoch:*',
+			'clear',
+			'scan',
+			'unlink',
+			'exec',
+			'bump ns:scoped-cache-epoch:*',
+		]);
+
+		expect(tellPeersPermissionsCleared).toHaveBeenCalledExactlyOnceWith({
+			permissionsCleared: true,
+		});
+	});
+
+	it('names to the other nodes the permissions its write cleared', async () => {
+		const { cache } = recordFlush();
+
+		await flushResponseCache(cache, { permissionsCleared: true });
+
+		expect(tellPeersResponseCacheCleared).toHaveBeenCalledExactlyOnceWith({
+			permissionsCleared: true,
+		});
+	});
+
+	it('names no permissions to the other nodes by default', async () => {
+		const { cache } = recordFlush();
+
+		await flushResponseCache(cache);
+
+		expect(tellPeersResponseCacheCleared).toHaveBeenCalledExactlyOnceWith({
+			permissionsCleared: false,
+		});
+	});
+
 	it(oneLine`
 		answers when the index scan is refused — a system service runs this in a
 		\`finally\` after its write committed, and a throw here would fail that
@@ -2461,6 +2539,32 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
+		tells the other nodes once a retried namespace-mode record cleared this
+		one, like any flush
+	`, async () => {
+		const calls: string[] = [];
+
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'namespace',
+			collection: null,
+			scopedCacheFingerprints: [],
+			ids: [7],
+		}]);
+
+		cache.clear.mockImplementationOnce(async () => {
+			calls.push('clear');
+		});
+
+		vi.mocked(tellPeersResponseCacheCleared).mockImplementationOnce(async () => {
+			calls.push('tell peers');
+		});
+
+		expect(await retryPendingScopedCachePurges()).toBe(1);
+
+		expect(calls).toEqual(['clear', 'tell peers']);
+	});
+
+	it(oneLine`
 		keeps a record whose retry failed again and counts the attempt, then carries on
 		to the targets behind it
 	`, async () => {
@@ -3022,6 +3126,28 @@ describe('a purge that fails after its mutation committed', () => {
 		);
 
 		expect(queueCachePurge).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		tells the other nodes once a purge with scoped mode off cleared this one
+	`, async () => {
+		env['CACHE_AUTO_PURGE_MODE'] = 'all';
+		cache.clear.mockResolvedValue(undefined);
+
+		expect(await purgeScopedCache(cache as any, 'articles', [])).toBeNull();
+
+		expect(tellPeersResponseCacheCleared).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
+		tells no other node when scoped mode is off and the flush failed
+	`, async () => {
+		env['CACHE_AUTO_PURGE_MODE'] = 'all';
+		cache.clear.mockRejectedValue(closed);
+
+		await purgeScopedCache(cache as any, 'articles', []);
+
+		expect(tellPeersResponseCacheCleared).not.toHaveBeenCalled();
 	});
 
 	it(oneLine`

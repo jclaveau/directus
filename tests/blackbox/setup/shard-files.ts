@@ -161,6 +161,8 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/harness/remembered-text.test.ts': 100,
 	// Not measured yet: one PATCH and one message, like websocket/batch-update.
 	'/tests/db/websocket/relation-update.test.ts': 500,
+	// Not measured yet: one PATCH, one create and one message.
+	'/tests/db/websocket/membership-refresh.test.ts': 500,
 	// Not measured yet: three sockets, two of them waiting on a note created
 	// until their subscription hears it.
 	'/tests/db/websocket/graphql-second-init.test.ts': 3_000,
@@ -218,6 +220,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/files/tus-resumable-upload.test.ts': 12_000,
 	'/tests/db/routes/files/files-disk-name.test.ts': 10_000,
 	'/tests/db/routes/auth/sso-login.test.ts': 8_000,
+	'/tests/db/routes/auth/sso-login-invite.test.ts': 5_000,
 	'/tests/db/routes/items/write-payload-partials.test.ts': 1_600,
 	'/tests/db/routes/items/nested-write-cycles.test.ts': 1_600,
 	'/tests/db/routes/items/write-unique-value.test.ts': 1_600,

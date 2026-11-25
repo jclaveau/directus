@@ -1333,7 +1333,7 @@ no_value: 尚無內容
 do_nothing: 無動作
 generate_and_save_uuid: 產生並儲存 UUID
 save_current_user_id: 儲存當前使用者 ID
-save_current_user_role: 儲存當前使用者角色
+save_current_user_roles: 儲存當前使用者的所有角色
 save_current_datetime: 儲存當前日期/時間
 always_open: 總是開啟
 start_open: 現在打開

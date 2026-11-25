@@ -7,6 +7,7 @@ import { fetchShareInfo } from './fetch-share-info.js';
 import { mergePermissions } from './merge-permissions.js';
 import { fetchPermissions } from '../lib/fetch-permissions.js';
 import { fetchPolicies } from '../lib/fetch-policies.js';
+import { fetchUserRoles } from '../lib/fetch-member-roles.js';
 import { fetchRolesTree } from '../lib/fetch-roles-tree.js';
 import { reduceSchema } from '../../utils/reduce-schema.js';
 import { fetchGlobalAccess } from '../modules/fetch-global-access/fetch-global-access.js';
@@ -15,7 +16,7 @@ export async function getPermissionsForShare(
 	accountability: Pick<Accountability, 'share' | 'ip'>,
 	collections: string[] | undefined,
 	context: Context,
-): Promise<Permission[]> {
+): Promise<Permission[]> { // bb-out-of-scope: #657 shares
 	const defaults: Permission = {
 		action: 'read',
 		collection: '',
@@ -30,8 +31,7 @@ export async function getPermissionsForShare(
 
 	const userAccountability: Accountability = {
 		user: user_created.id,
-		role: user_created.role,
-		roles: await fetchRolesTree(user_created.role, context.knex),
+		...await fetchUserRoles(user_created.id, context.knex),
 		admin: false,
 		app: false,
 		ip: accountability.ip,
@@ -40,7 +40,9 @@ export async function getPermissionsForShare(
 	// Fallback to public accountability so merging later on has no issues
 	const shareAccountability: Accountability = {
 		user: null,
-		role: role,
+		memberRoles: role
+			? [role]
+			: [],
 		roles: await fetchRolesTree(role, context.knex),
 		admin: false,
 		app: false,

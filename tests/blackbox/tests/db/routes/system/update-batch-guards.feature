@@ -87,11 +87,12 @@ Feature: A batch update of a system collection is checked as a single update is
       |   fields: email                    |     email: >-                 |
       |                                    |       other-<run>@example.com |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 3      | 0      | 0      | 0      |
-      | 1       | directus_permissions | 3      | 0      | 0      | 0      |
-      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
-      | 1       | directus_users       | 4      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      |
+      | 1       | directus_permissions  | 3      | 0      | 0      | 0      |
+      | 1       | directus_policies     | 1      | 0      | 0      | 0      |
+      | 1       | directus_role_members | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 4      | 0      | 0      | 0      |
 
   Scenario: a batch making a role its own parent is refused and writes nothing
     Given the rows of /roles:
@@ -227,12 +228,13 @@ Feature: A batch update of a system collection is checked as a single update is
       | query:               |   data:             |
       |   fields: parent     |     parent: null    |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 3      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_roles     | 5      | 0      | 1      | 0      |
-      | 1       | directus_users     | 4      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 3      | 0      | 0      | 0      |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 2      | 0      | 0      | 0      |
+      | 1       | directus_roles        | 5      | 0      | 1      | 0      |
+      | 1       | directus_users        | 2      | 0      | 0      | 0      |
 
   Scenario: a batch setting an invalid ip_access on a policy is refused
     Given the rows of /policies:
@@ -371,12 +373,13 @@ Feature: A batch update of a system collection is checked as a single update is
       |   fields: email                  |     email: >-               |
       |                                  |       ann-<run>@example.com |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 2      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_sessions  | 0      | 0      | 0      | 2      |
-      | 1       | directus_users     | 5      | 0      | 1      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_role_members | 2      | 0      | 0      | 0      |
+      | 1       | directus_sessions     | 0      | 0      | 0      | 2      |
+      | 1       | directus_users        | 5      | 0      | 1      | 0      |
 
   Scenario: a batch moving a translation key to a row while freeing it is applied
     Given the rows of /translations:

@@ -42,13 +42,13 @@ export const seedDBStructure = () => {
 								},
 								{
 									field: 'role_created',
-									type: 'string',
-									meta: { special: ['role-created'] },
+									type: 'json',
+									meta: { special: ['cast-json', 'roles-created'] },
 								},
 								{
 									field: 'role_updated',
-									type: 'string',
-									meta: { special: ['role-updated'] },
+									type: 'json',
+									meta: { special: ['cast-json', 'roles-updated'] },
 								},
 								{ field: 'day', type: 'date', meta: {} },
 								{ field: 'moment', type: 'dateTime', meta: {} },

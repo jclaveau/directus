@@ -46,8 +46,10 @@ vi.mock('../cache.js', () => {
 	};
 });
 
-vi.mock('../permissions/lib/fetch-roles-tree.js', () => {
-	return { fetchRolesTree: vi.fn().mockResolvedValue([]) };
+vi.mock('../permissions/lib/fetch-member-roles.js', () => {
+	return {
+		fetchUserRoles: vi.fn().mockResolvedValue({ memberRoles: [], roles: [] }),
+	};
 });
 
 vi.mock(
@@ -96,7 +98,6 @@ describe('notification emails', () => {
 			id: 'user-a',
 			email: 'user-a@example.com',
 			email_notifications: true,
-			role: null,
 		}, { scopedCacheFingerprints: [] }));
 	});
 
@@ -180,7 +181,6 @@ describe('notification emails', () => {
 			id: 'user-b',
 			email: 'user-b@example.com',
 			email_notifications: true,
-			role: null,
 		}, { scopedCacheFingerprints: [] }));
 
 		try {
@@ -202,7 +202,7 @@ describe('notification emails', () => {
 		}
 
 		expect(vi.mocked(UsersService.prototype.readOne).mock.calls).toEqual([
-			['user-b', { fields: ['id', 'email', 'email_notifications', 'role'] }],
+			['user-b', { fields: ['id', 'email', 'email_notifications'] }],
 		]);
 
 		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
@@ -224,7 +224,6 @@ describe('notification emails', () => {
 				id: 'user-b',
 				email: 'user-b@example.com',
 				email_notifications: true,
-				role: null,
 			}, { scopedCacheFingerprints: [] }));
 
 		await new NotificationsService({ knex: database, schema }).createMany([
@@ -232,7 +231,7 @@ describe('notification emails', () => {
 			{ recipient: 'user-b', subject: 'B' },
 		]);
 
-		const userFields = ['id', 'email', 'email_notifications', 'role'];
+		const userFields = ['id', 'email', 'email_notifications'];
 
 		expect(vi.mocked(UsersService.prototype.readOne).mock.calls).toEqual([
 			['user-a', { fields: userFields }],
@@ -259,7 +258,7 @@ describe('notification emails', () => {
 			.createMany([{ recipient: { id: 'user-a' } as never, subject: 'A' }]);
 
 		expect(vi.mocked(UsersService.prototype.readOne).mock.calls).toEqual([
-			['user-a', { fields: ['id', 'email', 'email_notifications', 'role'] }],
+			['user-a', { fields: ['id', 'email', 'email_notifications'] }],
 		]);
 
 		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{

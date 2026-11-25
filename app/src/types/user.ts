@@ -1,4 +1,4 @@
-import { Role, User } from '@directus/types';
+import { Role, RoleMembership, User } from '@directus/types';
 
 export type ShareUser = {
 	share: string;
@@ -6,9 +6,12 @@ export type ShareUser = {
 	app_access: boolean;
 };
 
-export type AppUser = User & {
+export type AppUser = Omit<User, 'roles'> & {
 	admin_access: boolean;
 	app_access: boolean;
 	enforce_tfa: boolean;
-	roles: Role[];
+	/** The roles the user is a member of: `role` is the relation inside */
+	roles: RoleMembership[];
+	/** The member roles and every ancestor of each, from /roles/me */
+	effectiveRoles: Role[];
 };

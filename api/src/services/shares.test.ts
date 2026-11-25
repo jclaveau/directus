@@ -306,7 +306,6 @@ describe('Services / Shares', () => {
 				{
 					app_access: false,
 					admin_access: false,
-					role: null,
 					share: 7,
 				},
 				'test-secret',
@@ -353,7 +352,6 @@ describe('Services / Shares', () => {
 				{
 					app_access: false,
 					admin_access: false,
-					role: null,
 					share: 8,
 					session: 'refresh-token-1',
 				},

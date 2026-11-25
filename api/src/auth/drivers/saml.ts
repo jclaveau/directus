@@ -22,6 +22,11 @@ import asyncHandler from '../../utils/async-handler.js';
 import { getConfigFromEnv } from '../../utils/get-config-from-env.js';
 import { LocalAuthDriver } from './local.js';
 import { isLoginRedirectAllowed } from '../../utils/is-login-redirect-allowed.js';
+import {
+	providerMemberships,
+	takeProviderRoles,
+	withProviderRoles,
+} from '../utils/provider-memberships.js';
 
 // Register the samlify schema validator
 samlify.setSchemaValidator(validator);
@@ -52,7 +57,7 @@ export class SAMLAuthDriver extends LocalAuthDriver {
 		return user?.id;
 	}
 
-	override async getUserID(payload: Record<string, any>) {
+	override async getUserID(payload: Record<string, any>) { // bb-out-of-scope: #622 SAML login
 		const logger = useLogger();
 
 		const { provider, emailKey, identifierKey, givenNameKey, familyNameKey, allowPublicRegistration } = this.config;
@@ -83,20 +88,33 @@ export class SAMLAuthDriver extends LocalAuthDriver {
 			last_name: lastName,
 			email: email,
 			external_identifier: identifier.toLowerCase(),
-			role: this.config['defaultRoleId'],
 		};
+
+		const defaultRoleId: string | undefined = this.config['defaultRoleId'];
+
+		const grantedRoles: string[] = defaultRoleId
+			? [defaultRoleId]
+			: [];
 
 		// Run hook so the end user has the chance to augment the
 		// user that is about to be created
 		const updatedUserPayload = await emitter.emitFilter(
 			`auth.create`,
-			userPayload,
+			withProviderRoles('auth.create', userPayload, grantedRoles),
 			{ identifier: identifier.toLowerCase(), provider: this.config['provider'], providerPayload: { ...payload } },
 			{ database: getDatabase(), schema: this.schema, accountability: null },
 		);
 
+		const { userPayload: createdUser, providerRoles } = takeProviderRoles(
+			'auth.create',
+			updatedUserPayload,
+		);
+
 		try {
-			return await this.usersService.createOne(updatedUserPayload);
+			return await this.usersService.createOne({
+				...createdUser,
+				roles: providerMemberships(provider, providerRoles, false),
+			});
 		} catch (error) {
 			if (isDirectusError(error, ErrorCode.RecordNotUnique)) {
 				logger.warn(error, '[SAML] Failed to register user. User not unique');

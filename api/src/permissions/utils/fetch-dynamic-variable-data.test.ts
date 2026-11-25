@@ -44,7 +44,7 @@ test('Returns filter context for current user', async () => {
 
 	const dynamicVariableContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set(['email']),
-		$CURRENT_ROLE: new Set(),
+		$CURRENT_MEMBER_ROLES: new Set(),
 		$CURRENT_ROLES: new Set(),
 		$CURRENT_POLICIES: new Set(),
 	};
@@ -53,7 +53,11 @@ test('Returns filter context for current user', async () => {
 
 	const res = await fetchDynamicVariableData(
 		{
-			accountability: { user: 'user', roles: [] as string[] } as Accountability,
+			accountability: {
+				user: 'user',
+				memberRoles: [] as string[],
+				roles: [] as string[],
+			} as Accountability,
 			policies: [],
 			dynamicVariableContext,
 		},
@@ -64,29 +68,36 @@ test('Returns filter context for current user', async () => {
 	expect(UsersService.prototype.readOne).toHaveBeenCalledWith('user', { fields: ['email'] });
 });
 
-test('Returns filter context for current role', async () => {
-	const role = withMeta({}, { scopedCacheFingerprints: [] });
+test('Returns filter context for the member roles', async () => {
+	const memberRoleRows = withMeta([] as any[], { scopedCacheFingerprints: [] });
 
 	const dynamicVariableContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set(),
-		$CURRENT_ROLE: new Set(['name']),
+		$CURRENT_MEMBER_ROLES: new Set(['name']),
 		$CURRENT_ROLES: new Set(),
 		$CURRENT_POLICIES: new Set(),
 	};
 
-	vi.mocked(RolesService.prototype.readOne).mockResolvedValue(role);
+	vi.mocked(RolesService.prototype.readMany).mockResolvedValue(memberRoleRows);
 
 	const res = await fetchDynamicVariableData(
 		{
 			dynamicVariableContext,
-			accountability: { role: 'role', roles: [] as string[] } as Accountability,
+			accountability: {
+				memberRoles: ['editors', 'moderators'],
+				roles: ['staff', 'editors', 'moderators'],
+			} as Accountability,
 			policies: [],
 		},
 		{} as Context,
 	);
 
-	expect(res['$CURRENT_ROLE']).toBe(role);
-	expect(RolesService.prototype.readOne).toHaveBeenCalledWith('role', { fields: ['name'] });
+	expect(res['$CURRENT_MEMBER_ROLES']).toBe(memberRoleRows);
+
+	expect(RolesService.prototype.readMany).toHaveBeenCalledWith(
+		['editors', 'moderators'],
+		{ fields: ['name'] },
+	);
 });
 
 test('Returns filter context for current policies', async () => {
@@ -94,7 +105,7 @@ test('Returns filter context for current policies', async () => {
 
 	const dynamicVariableContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set(),
-		$CURRENT_ROLE: new Set(),
+		$CURRENT_MEMBER_ROLES: new Set(),
 		$CURRENT_ROLES: new Set(),
 		$CURRENT_POLICIES: new Set(['name']),
 	};
@@ -104,7 +115,10 @@ test('Returns filter context for current policies', async () => {
 	const res = await fetchDynamicVariableData(
 		{
 			dynamicVariableContext,
-			accountability: { roles: [] as string[] } as Accountability,
+			accountability: {
+				memberRoles: [] as string[],
+				roles: [] as string[],
+			} as Accountability,
 			policies: ['policy-1'],
 		},
 		{} as Context,
@@ -126,11 +140,15 @@ test('reads no filter context from a cache that is not serving', async () => {
 
 	const contextData = await fetchDynamicVariableData(
 		{
-			accountability: { user: 'user', roles: [] as string[] } as Accountability,
+			accountability: {
+				user: 'user',
+				memberRoles: [] as string[],
+				roles: [] as string[],
+			} as Accountability,
 			policies: [],
 			dynamicVariableContext: {
 				$CURRENT_USER: new Set(['email']),
-				$CURRENT_ROLE: new Set(),
+				$CURRENT_MEMBER_ROLES: new Set(),
 				$CURRENT_ROLES: new Set(),
 				$CURRENT_POLICIES: new Set(),
 			},

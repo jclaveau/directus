@@ -12,12 +12,22 @@ import {
 	defineStatementCountsStep,
 	warmUpAuditedInstance,
 } from '@common/query-audit-steps';
+import {
+	bindCaptures,
+	captureNamesOf,
+	markedCaptures,
+} from '@common/response-captures';
 import { bindTableRowsSteps, insertTableRows } from '@common/table-rows';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import {
+	type MonitoredCommand,
+	monitorRedisCommands,
+} from '@utils/monitor-redis-commands';
 import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
 import { type ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
+import Redis from 'ioredis';
 import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
@@ -27,6 +37,7 @@ import { yamlSchemaFor } from './singular-write-steps';
 
 type RequestCell = {
 	as?: string;
+	on?: 'peer';
 	method: 'DELETE' | 'GET' | 'HEAD' | 'PATCH' | 'POST';
 	path: string;
 	query?: Record<string, string>;
@@ -47,6 +58,7 @@ type ResponseCell = {
 
 const REQUEST_CELL_KEYS = [
 	'as',
+	'on',
 	'method',
 	'path',
 	'query',
@@ -67,6 +79,19 @@ const RESPONSE_CELL_KEYS = [
 
 type Row = { request: string; response: string };
 
+type RedisCommandRow = {
+	database: string;
+	command: string;
+	key: string;
+	calls: string;
+	senders: string;
+};
+
+type InstanceUrls = {
+	main: string;
+	peer: string | null;
+};
+
 export type ScenarioKeys = {
 	run: string;
 	keysByName: Record<string, string>;
@@ -74,8 +99,12 @@ export type ScenarioKeys = {
 
 type SpawnedFeatureOptions = {
 	envOverrides: Record<string, string>;
+	// A second instance on the same env, which a row reaches by `on: peer`.
+	spawnsPeer?: boolean;
 	beforeFeature?: (vendor: Vendor, instanceUrl: string) => Promise<void>;
 	afterFeature?: (vendor: Vendor) => Promise<void>;
+	// The Redis the instances share, whose commands `Then` watches.
+	monitorsRedisPort?: number;
 };
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -86,7 +115,9 @@ const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
  * are sent:` or the rows of its tables, an optional `this read is cached:`,
  * and a `Then these requests get these responses:`, the request|response
  * tables run row after row. `beforeFeature` gets the instance's url, so a
- * collection it creates is in the schema the instance holds.
+ * collection it creates is in the schema the instance holds. With
+ * `monitorsRedisPort`, `And the requests sent Redis these commands:` counts
+ * the commands Redis ran while `Then` ran.
  */
 export function defineSpawnedWriteFeature(
 	featurePath: string,
@@ -96,7 +127,18 @@ export function defineSpawnedWriteFeature(
 
 	describe.each(vendors)('%s', (vendor) => {
 		const env = cloneDeep(config.envs);
+		const peerEnv = cloneDeep(config.envs);
 		let instance: ChildProcess;
+		let peerInstance: ChildProcess | null = null;
+
+		const instanceUrls = (): InstanceUrls => {
+			return {
+				main: getUrl(vendor, env),
+				peer: peerInstance === null
+					? null
+					: getUrl(vendor, peerEnv),
+			};
+		};
 
 		beforeAll(async () => {
 			const port = await freePortOfWorker();
@@ -117,10 +159,34 @@ export function defineSpawnedWriteFeature(
 			await awaitDirectusConnection(port);
 			await featureOptions.beforeFeature?.(vendor, getUrl(vendor, env));
 			await warmUpAuditedInstance(feature, vendor, getUrl(vendor, env));
+
+			// Started once the feature's collections exist, so it loads them.
+			if (featureOptions.spawnsPeer) {
+				const peerPort = await freePortOfWorker();
+
+				peerEnv[vendor] = {
+					...env[vendor],
+					PORT: String(peerPort),
+				};
+
+				peerEnv[vendor]['PUBLIC_URL'] = getUrl(vendor, peerEnv);
+
+				peerInstance = spawn('node', [paths.cli, 'start'], {
+					cwd: paths.cwd,
+					env: peerEnv[vendor],
+				});
+
+				await awaitDirectusConnection(peerPort);
+			}
 		}, 60_000);
 
 		afterAll(async () => {
 			await stopSpawnedInstance(instance);
+
+			if (peerInstance !== null) {
+				await stopSpawnedInstance(peerInstance);
+			}
+
 			await featureOptions.afterFeature?.(vendor);
 		}, 60_000);
 
@@ -133,9 +199,10 @@ export function defineSpawnedWriteFeature(
 					};
 
 					const receivedResponses: Response[] = [];
+					const ranRedisCommands: MonitoredCommand[] = [];
 
 					given.optional('these requests are sent:', async (table: Row[]) => {
-						await sendRows(getUrl(vendor, env), scenarioKeys, table, true, vendor);
+						await sendRows(instanceUrls(), scenarioKeys, table, true, vendor);
 					});
 
 					bindTableRowsSteps(given, feature, title, (tableName, tableRows) => {
@@ -149,7 +216,7 @@ export function defineSpawnedWriteFeature(
 					// The first send fills the cache; the row's response is the second's.
 					and.optional('this read is cached:', async (table: Row[]) => {
 						await sendRows(
-							getUrl(vendor, env),
+							instanceUrls(),
 							scenarioKeys,
 							table.map(({ request: requestText }) => {
 								return { request: requestText, response: '' };
@@ -159,7 +226,7 @@ export function defineSpawnedWriteFeature(
 						);
 
 						await sendRows(
-							getUrl(vendor, env),
+							instanceUrls(),
 							scenarioKeys,
 							table,
 							false,
@@ -168,19 +235,100 @@ export function defineSpawnedWriteFeature(
 					});
 
 					then('these requests get these responses:', async (table: Row[]) => {
-						receivedResponses.push(...await sendRows(
-							getUrl(vendor, env),
-							scenarioKeys,
-							table,
-							false,
-							vendor,
-						));
+						const sendTable = async () => {
+							receivedResponses.push(...await sendRows(
+								instanceUrls(),
+								scenarioKeys,
+								table,
+								false,
+								vendor,
+							));
+						};
+
+						if (featureOptions.monitorsRedisPort === undefined) {
+							await sendTable();
+
+							return;
+						}
+
+						const redis = new Redis({
+							host: 'localhost',
+							port: featureOptions.monitorsRedisPort,
+						});
+
+						try {
+							ranRedisCommands.push(
+								...await monitorRedisCommands(redis, sendTable),
+							);
+						}
+						finally {
+							await redis.quit();
+						}
 					});
+
+					and.optional(
+						'the requests sent Redis these commands:',
+						(table: RedisCommandRow[]) => {
+							if (featureOptions.monitorsRedisPort === undefined) {
+								throw new Error(
+									`${JSON.stringify(featurePath)} counts Redis commands`
+									+ ' without monitorsRedisPort',
+								);
+							}
+
+							expect(countedRedisCommands(
+								ranRedisCommands,
+								env[vendor]['CACHE_NAMESPACE']!,
+								table,
+							)).toEqual(table);
+						},
+					);
 
 					defineStatementCountsStep(and, vendor, receivedResponses);
 				}, 60_000);
 			}
 		});
+	});
+}
+
+/**
+ * The rows of `table`, each `calls` counting the commands that match it: the
+ * command, whatever its case; the key, its first argument past the namespace,
+ * any when empty; the database, any when empty. `senders` counts the client
+ * connections that sent them, which tells one instance's commands apart from
+ * two instances'.
+ */
+function countedRedisCommands(
+	ranCommands: MonitoredCommand[],
+	namespace: string,
+	table: RedisCommandRow[],
+): RedisCommandRow[] {
+	const namespacePrefix = `${namespace}:`;
+
+	return table.map((commandRow) => {
+		const matchingCommands = ranCommands.filter((ranCommand) => {
+			const [commandName = '', firstArg = ''] = ranCommand.commandArgs;
+
+			const keyMatches = commandRow.key === ''
+				|| firstArg === `${namespacePrefix}${commandRow.key}`;
+
+			const databaseMatches = commandRow.database === ''
+				|| String(ranCommand.database) === commandRow.database;
+
+			return commandName.toLowerCase() === commandRow.command.toLowerCase()
+				&& keyMatches
+				&& databaseMatches;
+		});
+
+		const senderSources = new Set(matchingCommands.map((matchingCommand) => {
+			return matchingCommand.source;
+		}));
+
+		return {
+			...commandRow,
+			calls: String(matchingCommands.length),
+			senders: String(senderSources.size),
+		};
 	});
 }
 
@@ -207,6 +355,21 @@ function uploadMetadataHeader(uploadMetadata: Record<string, string>) {
 		.join(',');
 }
 
+function instanceUrlOf(instanceUrls: InstanceUrls, requestCell: RequestCell) {
+	if (requestCell.on === undefined) {
+		return instanceUrls.main;
+	}
+
+	if (requestCell.on !== 'peer' || instanceUrls.peer === null) {
+		throw new Error(
+			`A row sent on ${JSON.stringify(requestCell.on)} needs the feature`
+			+ ' to start that instance: pass `spawnsPeer: true`',
+		);
+	}
+
+	return instanceUrls.peer;
+}
+
 function sendRequest(instanceUrl: string, requestCell: RequestCell) {
 	const {
 		as: token,
@@ -227,14 +390,19 @@ function sendRequest(instanceUrl: string, requestCell: RequestCell) {
 		POST: () => request(instanceUrl).post(path),
 	}[method]();
 
-	const authorization = token === undefined
-		? AUTH
-		: `Bearer ${token}`;
-
 	pendingRequest
 		.query(query)
-		.set(headers)
-		.set('Authorization', authorization);
+		.set(headers);
+
+	// `as: public` sends no credentials at all.
+	if (token !== 'public') {
+		pendingRequest.set(
+			'Authorization',
+			token === undefined
+				? AUTH
+				: `Bearer ${token}`,
+		);
+	}
 
 	if (uploadMetadata !== undefined) {
 		pendingRequest.set('Upload-Metadata', uploadMetadataHeader(uploadMetadata));
@@ -303,17 +471,29 @@ function lowercaseHeaders(expectedResponse: ResponseCell) {
 	};
 }
 
-// One row at a time, so a row can name the key one before it remembered. A
-// remembered header keeps its last path segment: the upload a `Location`
-// names, or the `Directus-File-Id` whole.
+// One row at a time, so a row can name the key one before it remembered or
+// captured (see response-captures.ts). A remembered header keeps its last path
+// segment: the upload a `Location` names, or the `Directus-File-Id` whole.
 async function sendRows(
-	instanceUrl: string,
+	instanceUrls: InstanceUrls,
 	scenarioKeys: ScenarioKeys,
 	table: Row[],
 	allowsBlankResponse: boolean,
 	vendor: Vendor,
 ) {
 	const responses: Response[] = [];
+
+	const responseCellFrom = (responseText: string) => {
+		const responseCell = loadYaml(withKeys(responseText, scenarioKeys));
+
+		return responseCellOf<ResponseCell>(
+			allowsBlankResponse
+				? responseCell ?? {}
+				: responseCell,
+			RESPONSE_CELL_KEYS,
+			'spawned-write-steps.ts',
+		);
+	};
 
 	for (const { request: requestText, response: responseText } of table) {
 		const requestCell = cellOfKnownKeys<RequestCell>(
@@ -325,16 +505,30 @@ async function sendRows(
 			'spawned-write-steps.ts',
 		);
 
-		const expectedResponse = responseCellOf<ResponseCell>(
-			allowsBlankResponse
-				? loadYaml(withKeys(responseText, scenarioKeys)) ?? {}
-				: loadYaml(withKeys(responseText, scenarioKeys)),
-			RESPONSE_CELL_KEYS,
-			'spawned-write-steps.ts',
+		const captureNames = captureNamesOf(
+			responseText,
+			scenarioKeys.keysByName,
 		);
 
-		const response = await sendRequest(instanceUrl, requestCell);
+		const markedResponse = responseCellFrom(
+			markedCaptures(responseText, captureNames),
+		);
+
+		const response = await sendRequest(
+			instanceUrlOf(instanceUrls, requestCell),
+			requestCell,
+		);
+
 		responses.push(response);
+
+		bindCaptures(
+			lowercaseHeaders(markedResponse),
+			receivedPart(response, markedResponse),
+			scenarioKeys.keysByName,
+			captureNames,
+		);
+
+		const expectedResponse = responseCellFrom(responseText);
 
 		expect(receivedPart(response, expectedResponse)).toMatchObject(
 			lowercaseHeaders(expectedResponse),

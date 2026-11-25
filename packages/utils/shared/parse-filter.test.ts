@@ -604,12 +604,12 @@ describe('#parseFilter', () => {
 		expect(parseFilter(mockFilter, mockAccountability)).toStrictEqual(mockResult);
 	});
 
-	it('replaces the role from accountability to $CURRENT_ROLE', () => {
+	it('replaces $CURRENT_MEMBER_ROLES with the member roles', () => {
 		const mockFilter = {
 			_and: [
 				{
 					owner: {
-						_eq: '$CURRENT_ROLE',
+						_in: '$CURRENT_MEMBER_ROLES',
 					},
 				},
 			],
@@ -619,14 +619,31 @@ describe('#parseFilter', () => {
 			_and: [
 				{
 					owner: {
-						_eq: 'admin',
+						_in: ['editors', 'moderators'],
 					},
 				},
 			],
 		} as Filter;
 
-		const mockAccountability = { role: 'admin' };
-		expect(parseFilter(mockFilter, mockAccountability)).toStrictEqual(mockResult);
+		expect(parseFilter(mockFilter, {
+			memberRoles: ['editors', 'moderators'],
+			roles: ['staff', 'editors', 'moderators'],
+		})).toStrictEqual(mockResult);
+	});
+
+	it('reads a $CURRENT_MEMBER_ROLES field from the context', () => {
+		expect(parseFilter(
+			{ owner: { _in: '$CURRENT_MEMBER_ROLES.name' } } as Filter,
+			{ memberRoles: ['editors'] },
+			{ $CURRENT_MEMBER_ROLES: [{ name: 'Editors' }] as any },
+		)).toStrictEqual({ owner: { _in: ['Editors'] } });
+	});
+
+	it('leaves the removed $CURRENT_ROLE as a literal', () => {
+		expect(parseFilter(
+			{ owner: { _eq: '$CURRENT_ROLE' } } as Filter,
+			{ memberRoles: ['editors'], roles: ['editors'] },
+		)).toStrictEqual({ owner: { _eq: '$CURRENT_ROLE' } });
 	});
 
 	it('replaces the roles from accountability to $CURRENT_ROLES', () => {

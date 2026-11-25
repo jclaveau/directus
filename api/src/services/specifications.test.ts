@@ -49,7 +49,7 @@ describe('Integration Tests', () => {
 						const service = new SpecificationService({
 							knex: db,
 							schema,
-							accountability: { role: 'admin', admin: true } as Accountability,
+							accountability: { admin: true } as Accountability,
 						});
 
 						const spec = await service.oas.generate();
@@ -260,7 +260,7 @@ describe('Integration Tests', () => {
 						const service = new SpecificationService({
 							knex: db,
 							schema: schema2,
-							accountability: { role: 'admin', admin: true } as Accountability,
+							accountability: { admin: true } as Accountability,
 						});
 
 						const spec = await service.oas.generate();
@@ -283,7 +283,7 @@ describe('Integration Tests', () => {
 						const service = new SpecificationService({
 							knex: db,
 							schema,
-							accountability: { role: 'admin', admin: true } as Accountability,
+							accountability: { admin: true } as Accountability,
 						});
 
 						const spec = await service.oas.generate();

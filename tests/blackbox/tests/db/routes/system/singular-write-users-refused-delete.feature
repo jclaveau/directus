@@ -56,9 +56,11 @@ Feature: A refused user delete leaves the user's references as they were
       | request | table                  | select | insert | update | delete |
       | 1       | directus_access        | 4      | 0      | 0      | 0      |
       | 1       | directus_comments      | 1      | 0      | 0      | 0      |
+      | 1       | directus_invites       | 1      | 0      | 0      | 0      |
       | 1       | directus_notifications | 1      | 0      | 1      | 0      |
       | 1       | directus_permissions   | 2      | 0      | 0      | 0      |
       | 1       | directus_policies      | 1      | 0      | 0      | 0      |
+      | 1       | directus_role_members  | 1      | 0      | 0      | 0      |
       | 1       | directus_roles         | 1      | 0      | 0      | 0      |
       | 1       | directus_users         | 2      | 0      | 0      | 0      |
       | 1       | directus_versions      | 1      | 0      | 0      | 0      |

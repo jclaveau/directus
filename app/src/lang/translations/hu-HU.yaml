@@ -1245,7 +1245,7 @@ no_value: Hiányzó érték
 do_nothing: Ne tegyen semmit
 generate_and_save_uuid: UUID generálása és mentése
 save_current_user_id: Jelenlegi felhasználói azonosító mentése
-save_current_user_role: Jelenlegi felhasználói szerepkör mentése
+save_current_user_roles: Jelenlegi felhasználó szerepköreinek mentése
 save_current_datetime: Aktuális dátum/idő mentése
 always_open: Mindig nyitva
 start_open: Indíts nyitva!

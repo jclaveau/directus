@@ -7,9 +7,12 @@ const tests: [string, boolean][] = [
 	['test', false],
 	['$CUSTOM', false],
 	['$CURRENT_USER', true],
-	['$CURRENT_ROLE', true],
+	['$CURRENT_ROLE', false],
 	['$CURRENT_USER.role.name', true],
-	['$CURRENT_ROLE.users.id', true],
+	['$CURRENT_ROLE.users.id', false],
+	['$CURRENT_MEMBER_ROLES', true],
+	['$CURRENT_MEMBER_ROLES.name', true],
+	['$CURRENT_ROLES', true],
 ];
 
 describe('is extension type', () => {

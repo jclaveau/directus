@@ -14,6 +14,11 @@ import {
 	queueCachePurge,
 	type CachePurgeScan,
 } from '../cache-events.js';
+import {
+	tellPeersPermissionsCleared,
+	tellPeersResponseCacheCleared,
+	type PeerNotice,
+} from '../cache-peer-notice.js';
 import { cacheStoreDropsEntries } from '../cache-store-probe.js';
 import { flushCacheRedisDatabase } from '../redis/index.js';
 import {
@@ -794,10 +799,18 @@ export async function clearResponseCache(cache: Keyv | null): Promise<boolean> {
  * behind name keys that are gone, until the reap drops those members or the
  * set's expiry runs out — never, for a set filed while `CACHE_TTL` was unset.
  */
-export async function flushResponseCache(cache: Keyv | null): Promise<void> {
+export async function flushResponseCache(
+	cache: Keyv | null,
+	peerNotice: PeerNotice = { permissionsCleared: false },
+): Promise<void> {
+	// Before the clear: a peer of a shared store reading its old permissions
+	// after it would fill the store again with the old roles.
+	await tellPeersPermissionsCleared(peerNotice);
+
 	const flushedDatabase = await clearResponseCache(cache);
 
 	recordScopedCachePurged(null);
+	await tellPeersResponseCacheCleared(peerNotice);
 
 	// Gated here, not in the drop: the flush command drops the index whatever the
 	// mode, so a store switched out of scoped purging leaves no sets behind — while
@@ -1199,6 +1212,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 		try {
 			if (target.mode === 'namespace') {
 				await cache.clear();
+				await tellPeersResponseCacheCleared();
 
 				queueCachePurge({
 					purgeId,
@@ -1615,6 +1629,9 @@ async function purgeScopedCacheUnrecorded(
 		if (!cleared) {
 			return null;
 		}
+
+		// A memory store holds a copy per node; a Redis one is cleared already.
+		await tellPeersResponseCacheCleared();
 
 		// Not folded into the `flush` config-event marker, though both mean "the
 		// whole cache went": that marker is a direct, unbuffered INSERT, which is

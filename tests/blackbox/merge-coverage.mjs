@@ -63,3 +63,7 @@ console.log(`merged ${merged} dumps, skipped ${skipped} → ${fileCount} files`)
 const context = createContext({ dir, coverageMap: map });
 reports.create('lcovonly', { file: 'lcov.info' }).execute(context);
 console.log(`wrote ${join(dir, 'lcov.info')}`);
+
+// The per-shard input of branch-audit.mjs, which merges every shard of a run.
+reports.create('json', { file: 'coverage-final.json' }).execute(context);
+console.log(`wrote ${join(dir, 'coverage-final.json')}`);

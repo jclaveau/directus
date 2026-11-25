@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createCli } from './index.js';
+import { dumpCoverageAtExit } from '../utils/dump-coverage.js';
 import { armDeadline } from './utils/arm-deadline.js';
 
 // Factories, not automocks: an automock imports the real module to shape itself,
 // and `createCli` pulls the whole API graph in behind it.
 vi.mock('./index.js', () => ({ createCli: vi.fn() }));
 vi.mock('./utils/arm-deadline.js', () => ({ armDeadline: vi.fn() }));
+vi.mock('../utils/dump-coverage.js', () => ({ dumpCoverageAtExit: vi.fn() }));
 const env = vi.hoisted(() => ({}) as Record<string, unknown>);
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
@@ -86,4 +88,16 @@ test('leaves the flush and the limiter armed for every other command', async () 
 
 	expect(env['CACHE_AUTO_FLUSH_ON_DEPLOY']).toBe(true);
 	expect(env['PRESSURE_LIMITER_ENABLED']).toBe(true);
+});
+
+// A command ends in `process.exit`, which runs no shutdown hook.
+test('writes the coverage when the command exits', async () => {
+	const processOn = vi.spyOn(process, 'on').mockReturnValue(process);
+	process.argv = ['node', 'directus', 'bootstrap'];
+
+	await import('./run.js');
+
+	expect(processOn).toHaveBeenCalledWith('exit', dumpCoverageAtExit);
+
+	processOn.mockRestore();
 });

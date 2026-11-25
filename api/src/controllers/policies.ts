@@ -91,7 +91,7 @@ router.get(
 	'/me/globals',
 	asyncHandler(async (req, res, next) => {
 		try {
-			if (!req.accountability?.user && !req.accountability?.role)
+			if (!req.accountability?.user && !req.accountability?.memberRoles.length)
 				throw new ForbiddenError({
 					reason: `Can't access /me/globals without being logged in`,
 				});

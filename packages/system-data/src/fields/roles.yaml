@@ -94,12 +94,12 @@ fields:
     group: users_group
 
   - field: users
-    interface: list-o2m
+    interface: list-m2m
     special:
-      - o2m
+      - m2m
     options:
-      fields:
-        - first_name
-        - last_name
+      layout: list
+      managedByField: managed_by
+      template: '{{ user.first_name }} {{ user.last_name }}'
     width: full
     group: users_group

@@ -1,0 +1,38 @@
+table: directus_invites
+
+fields:
+  - field: id
+    special:
+      - uuid
+    hidden: true
+    readonly: true
+    width: half
+
+  # Compared in lower case, as a login compares it.
+  - field: email
+    hidden: true
+    readonly: true
+    width: half
+
+  - field: role
+    hidden: true
+    readonly: true
+    width: half
+    special:
+      - m2o
+
+  # Set by the invite code: a `user-created` special would overwrite the null
+  # of an invite made by code.
+  - field: inviter
+    hidden: true
+    readonly: true
+    width: half
+    special:
+      - m2o
+
+  - field: date_created
+    hidden: true
+    readonly: true
+    width: half
+    special:
+      - date-created

@@ -105,12 +105,20 @@ export default async function init(): Promise<void> {
 	await db('directus_policies').insert({ ...defaultAdminPolicy, id: policy });
 	await db('directus_access').insert({ id: randomUUID(), role, policy });
 
+	const user = randomUUID();
+
 	await db('directus_users').insert({
 		...defaultAdminUser,
-		id: randomUUID(),
+		id: user,
 		email: firstUser.email.trim(),
 		password: firstUser.password,
+	});
+
+	await db('directus_role_members').insert({
+		id: randomUUID(),
+		user,
 		role,
+		sort: 1,
 	});
 
 	await db.destroy();

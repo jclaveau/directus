@@ -5,12 +5,13 @@ import { describe, expect, test, vi } from 'vitest';
 import emitter from '../emitter.js';
 import { getAccountabilityForToken } from '../utils/get-accountability-for-token.js';
 import { authenticateConnection, authenticationSuccess } from './authenticate.js';
+import { rerunAuthenticateFilter } from './authenticate-filter.js';
 import type { WebSocketAuthMessage } from './messages.js';
 import { getExpiresAtForToken } from './utils/get-expires-at-for-token.js';
 
 vi.mock('../utils/get-accountability-for-token', () => ({
 	getAccountabilityForToken: vi.fn().mockReturnValue({
-		role: null, // minimum viable accountability
+		user: null,
 	} as Accountability),
 }));
 
@@ -56,7 +57,7 @@ describe('authenticateConnection', () => {
 		} as WebSocketAuthMessage);
 
 		expect(result).toStrictEqual({
-			accountability: { role: null },
+			accountability: { user: null },
 			expires_at: TIMESTAMP,
 			refresh_token: 'refresh',
 		});
@@ -72,7 +73,7 @@ describe('authenticateConnection', () => {
 		} as WebSocketAuthMessage);
 
 		expect(result).toStrictEqual({
-			accountability: { role: null },
+			accountability: { user: null },
 			expires_at: TIMESTAMP,
 			refresh_token: 'refresh',
 		});
@@ -88,26 +89,131 @@ describe('authenticateConnection', () => {
 		} as WebSocketAuthMessage);
 
 		expect(result).toStrictEqual({
-			accountability: { role: null },
+			accountability: { user: null },
 			expires_at: TIMESTAMP,
 			refresh_token: undefined,
 		});
 	});
 
-	test('Short-circuits when authenticate filter is used', async () => {
-		const TIMESTAMP = 456987;
-		(getExpiresAtForToken as Mock).mockReturnValue(TIMESTAMP);
+	// A membership change runs the filter again on the socket it let in.
+	test('Runs the filter again on what it saw, the password left out', async () => {
+		const refreshedAccountability = {
+			user: 'user-member',
+			roles: ['role-press'],
+			ip: '10.0.0.1',
+		};
 
-		const customAccountability = { admin: true };
+		vi.mocked(emitter.emitFilter)
+			.mockResolvedValueOnce({
+				user: 'user-member',
+				roles: ['role-reader'],
+				ip: '10.0.0.1',
+			})
+			.mockResolvedValueOnce(refreshedAccountability);
 
-		vi.mocked(emitter.emitFilter).mockResolvedValueOnce(customAccountability);
+		const { accountability } = await authenticateConnection(
+			{
+				type: 'auth',
+				email: 'email',
+				password: 'password',
+				uid: 'auth-1',
+			} as WebSocketAuthMessage,
+			{ ip: '10.0.0.1' },
+		);
+
+		await expect(rerunAuthenticateFilter(accountability!))
+			.resolves.toBe(refreshedAccountability);
+
+		expect(emitter.emitFilter).toHaveBeenLastCalledWith(
+			'websocket.authenticate',
+			{
+				user: null,
+				memberRoles: [],
+				roles: [],
+				admin: false,
+				app: false,
+				ip: '10.0.0.1',
+			},
+			{ message: { type: 'auth', email: 'email', uid: 'auth-1' } },
+			{ database: undefined, schema: null, accountability: null },
+		);
+	});
+
+	test('Runs the filter again without the refresh token', async () => {
+		const refreshedAccountability = { user: 'user-member', roles: [] };
+
+		vi.mocked(emitter.emitFilter)
+			.mockResolvedValueOnce({ user: 'user-member', roles: ['role-reader'] })
+			.mockResolvedValueOnce(refreshedAccountability);
+
+		const { accountability } = await authenticateConnection({
+			type: 'auth',
+			refresh_token: 'refresh_token',
+		} as WebSocketAuthMessage);
+
+		await expect(rerunAuthenticateFilter(accountability!))
+			.resolves.toBe(refreshedAccountability);
+
+		expect(emitter.emitFilter).toHaveBeenLastCalledWith(
+			'websocket.authenticate',
+			{
+				user: null,
+				memberRoles: [],
+				roles: [],
+				admin: false,
+				app: false,
+				ip: null,
+			},
+			{ message: { type: 'auth' } },
+			{ database: undefined, schema: null, accountability: null },
+		);
+	});
+
+	// Its roles are the memberships a refresh reads.
+	test('Answers null for a socket the filter left as is', async () => {
+		vi.mocked(emitter.emitFilter).mockClear();
 
 		const { accountability } = await authenticateConnection({
 			type: 'auth',
 			access_token: 'access_token',
 		} as WebSocketAuthMessage);
 
-		expect(accountability).toEqual(customAccountability);
+		await expect(rerunAuthenticateFilter(accountability!))
+			.resolves.toBeNull();
+
+		expect(emitter.emitFilter).toHaveBeenCalledOnce();
+	});
+
+	test('Answers null when the filter run again keeps the token\'s', async () => {
+		vi.mocked(emitter.emitFilter)
+			.mockResolvedValueOnce({ user: 'user-member', roles: ['role-reader'] })
+			.mockImplementationOnce(async (_event, defaultAccountability) => {
+				return defaultAccountability;
+			});
+
+		const { accountability } = await authenticateConnection({
+			type: 'auth',
+			access_token: 'ws-auth-narrow-member',
+		} as WebSocketAuthMessage);
+
+		await expect(rerunAuthenticateFilter(accountability!))
+			.resolves.toBeNull();
+	});
+
+	test('Throws the refusal of the filter run again', async () => {
+		const refusal = new Error('ws-auth-narrow refuses the user "user-member"');
+
+		vi.mocked(emitter.emitFilter)
+			.mockResolvedValueOnce({ user: 'user-member', roles: ['role-reader'] })
+			.mockRejectedValueOnce(refusal);
+
+		const { accountability } = await authenticateConnection({
+			type: 'auth',
+			access_token: 'ws-auth-narrow-member',
+		} as WebSocketAuthMessage);
+
+		await expect(rerunAuthenticateFilter(accountability!))
+			.rejects.toBe(refusal);
 	});
 
 	test('Failure token expired', async () => {

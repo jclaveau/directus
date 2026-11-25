@@ -274,7 +274,6 @@ export async function down(knex: Knex) {
 			const rawPermissions = await fetchPermissions(
 				{
 					accountability: {
-						role: null,
 						roles: roleTree,
 						user: null,
 						app: roleAccess?.app_access || false,

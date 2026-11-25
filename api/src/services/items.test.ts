@@ -3534,7 +3534,6 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				schema: nestingSchema,
 				accountability: {
 					user: 'u1',
-					role: 'r1',
 					admin: true,
 					app: true,
 				} as any,
@@ -3969,20 +3968,30 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 	describe('a users upsert moving users to another role', () => {
 		beforeEach(() => {
-			vi.mocked(flushResponseCache).mockClear();
+			vi.mocked(flushResponseCache).mockReset();
 		});
 
-		it('flushes the response cache once the upsert commits', async () => {
+		it('flushes per membership deselect, after the commit', async () => {
 			tracker.on.select('directus_users').response([
 				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' },
 				{ id: 'b6d7c3f0-6a2e-4f0b-9a51-2f4a8e1c0d22' },
 			]);
 
+			tracker.on.select('directus_role_members').response([{
+				id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d',
+				user: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+			}]);
+
+			tracker.on.delete('directus_role_members').response([{
+				id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d',
+				user: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+			}]);
+
 			tracker.on.update('directus_users').response(1);
 
 			const transactionStates: string[][] = [];
 
-			vi.mocked(flushResponseCache).mockImplementationOnce(async () => {
+			vi.mocked(flushResponseCache).mockImplementation(async () => {
 				transactionStates.push(
 					tracker.history.transactions.map((trx) => trx.state),
 				);
@@ -3995,32 +4004,69 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 						c.field('id').uuid()
 							.primary();
 
+						c.field('roles').o2m(
+							'directus_role_members',
+							'user',
+							(relation) => {
+								return relation.options({
+									meta: { one_deselect_action: 'delete' },
+								});
+							},
+						);
+					})
+					.collection('directus_role_members', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('user').uuid();
 						c.field('role').uuid();
 					})
 					.build(),
 			}).upsertMany([
 				{
 					id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
-					role: '4ccdb196-14b3-4ed1-b9da-c1978be07ca2',
+					roles: [],
 				},
 				{
 					id: 'b6d7c3f0-6a2e-4f0b-9a51-2f4a8e1c0d22',
-					role: '4ccdb196-14b3-4ed1-b9da-c1978be07ca2',
+					roles: [],
 				},
 			]);
 
-			expect(flushResponseCache).toHaveBeenCalledExactlyOnceWith({
-				clear: expect.any(Function),
-				delete: expect.any(Function),
-			});
+			expect(vi.mocked(flushResponseCache).mock.calls).toEqual([
+				[
+					{
+						clear: expect.any(Function),
+						delete: expect.any(Function),
+					},
+					{ permissionsCleared: true },
+				],
+				[
+					{
+						clear: expect.any(Function),
+						delete: expect.any(Function),
+					},
+					{ permissionsCleared: true },
+				],
+			]);
 
-			expect(transactionStates).toEqual([['committed']]);
+			expect(transactionStates).toEqual([['committed'], ['committed']]);
 		});
 
-		it('hands the flush to a caller that opted out', async () => {
+		it('flushes the membership deselect past a caller that opted out', async () => {
 			tracker.on.select('directus_users').response([
 				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' },
 			]);
+
+			tracker.on.select('directus_role_members').response([{
+				id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d',
+				user: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+			}]);
+
+			tracker.on.delete('directus_role_members').response([{
+				id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d',
+				user: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+			}]);
 
 			tracker.on.update('directus_users').response(1);
 
@@ -4033,6 +4079,21 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 						c.field('id').uuid()
 							.primary();
 
+						c.field('roles').o2m(
+							'directus_role_members',
+							'user',
+							(relation) => {
+								return relation.options({
+									meta: { one_deselect_action: 'delete' },
+								});
+							},
+						);
+					})
+					.collection('directus_role_members', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('user').uuid();
 						c.field('role').uuid();
 					})
 					.build(),
@@ -4040,20 +4101,35 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				[
 					{
 						id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
-						role: '4ccdb196-14b3-4ed1-b9da-c1978be07ca2',
+						roles: [],
 					},
 				],
 				{ autoPurgeCache: false, onResponseCacheFlushDeferred },
 			);
 
-			expect(flushResponseCache).not.toHaveBeenCalled();
-			expect(onResponseCacheFlushDeferred).toHaveBeenCalledOnce();
+			expect(flushResponseCache).toHaveBeenCalledExactlyOnceWith(
+				{
+					clear: expect.any(Function),
+					delete: expect.any(Function),
+				},
+				{ permissionsCleared: true },
+			);
 		});
 
 		it('logs a flush that fails once the upsert committed', async () => {
 			tracker.on.select('directus_users').response([
 				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' },
 			]);
+
+			tracker.on.select('directus_role_members').response([{
+				id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d',
+				user: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+			}]);
+
+			tracker.on.delete('directus_role_members').response([{
+				id: '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d',
+				user: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+			}]);
 
 			tracker.on.update('directus_users').response(1);
 
@@ -4068,13 +4144,28 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 						c.field('id').uuid()
 							.primary();
 
+						c.field('roles').o2m(
+							'directus_role_members',
+							'user',
+							(relation) => {
+								return relation.options({
+									meta: { one_deselect_action: 'delete' },
+								});
+							},
+						);
+					})
+					.collection('directus_role_members', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('user').uuid();
 						c.field('role').uuid();
 					})
 					.build(),
 			}).upsertMany([
 				{
 					id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
-					role: '4ccdb196-14b3-4ed1-b9da-c1978be07ca2',
+					roles: [],
 				},
 			]);
 
@@ -4082,8 +4173,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			expect(useLogger().error).toHaveBeenCalledWith(
 				flushFailure,
-				oneLine`[cache] the response-cache flush a batch held until its
-					transaction settled failed: Error: connect ECONNREFUSED 127.0.0.1:6379`,
+				oneLine`[transaction] a task queued after commit failed: Error: connect
+					ECONNREFUSED 127.0.0.1:6379`,
 			);
 		});
 	});
@@ -7671,8 +7762,13 @@ describe('Services / Items / a batched upsert', () => {
 
 			await database.schema.createTable('directus_users', (table) => {
 				table.uuid('id').primary();
-				table.uuid('role');
 				table.string('status');
+			});
+
+			await database.schema.createTable('directus_role_members', (table) => {
+				table.uuid('id').primary();
+				table.uuid('user');
+				table.uuid('role');
 			});
 
 			await database.schema.createTable('directus_roles', (table) => {
@@ -7713,8 +7809,13 @@ describe('Services / Items / a batched upsert', () => {
 
 			await database('directus_users').insert({
 				id: '10000000-0000-4000-8000-000000000001',
-				role: 'a0000000-0000-4000-8000-000000000001',
 				status: 'active',
+			});
+
+			await database('directus_role_members').insert({
+				id: 'b0000000-0000-4000-8000-000000000001',
+				user: '10000000-0000-4000-8000-000000000001',
+				role: 'a0000000-0000-4000-8000-000000000001',
 			});
 		});
 
@@ -7730,33 +7831,61 @@ describe('Services / Items / a batched upsert', () => {
 						c.field('id').uuid()
 							.primary();
 
-						c.field('role').uuid();
 						c.field('status').string();
+
+						c.field('roles').o2m(
+							'directus_role_members',
+							'user',
+							(relation) => {
+								return relation.options({
+									meta: { one_deselect_action: 'delete' },
+								});
+							},
+						);
+					})
+					.collection('directus_role_members', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('user').uuid();
+						c.field('role').uuid();
 					})
 					.build(),
 			}).upsertMany([
 				{
 					id: '20000000-0000-4000-8000-000000000002',
-					role: 'a0000000-0000-4000-8000-000000000001',
+					roles: [
+						{
+							id: 'b0000000-0000-4000-8000-000000000003',
+							role: 'a0000000-0000-4000-8000-000000000001',
+						},
+					],
 					status: 'active',
 				},
 				{
 					id: '10000000-0000-4000-8000-000000000001',
-					role: 'e0000000-0000-4000-8000-000000000001',
+					roles: [
+						{
+							id: 'b0000000-0000-4000-8000-000000000002',
+							role: 'e0000000-0000-4000-8000-000000000001',
+						},
+					],
 				},
 			])).resolves.toStrictEqual([
 				'20000000-0000-4000-8000-000000000002',
 				'10000000-0000-4000-8000-000000000001',
 			]);
 
-			await expect(database('directus_users').select('id', 'role')
-				.orderBy('id')).resolves.toStrictEqual([
+			await expect(database('directus_role_members').select('id', 'user', 'role')
+				.orderBy('user')).resolves.toStrictEqual([
 				{
-					id: '10000000-0000-4000-8000-000000000001',
+					id: 'b0000000-0000-4000-8000-000000000002',
+					user: '10000000-0000-4000-8000-000000000001',
 					role: 'e0000000-0000-4000-8000-000000000001',
 				},
 				{
-					id: '20000000-0000-4000-8000-000000000002',
+					id: 'b0000000-0000-4000-8000-000000000003',
+					user: '20000000-0000-4000-8000-000000000002',
 					role: 'a0000000-0000-4000-8000-000000000001',
 				},
 			]);
@@ -7772,15 +7901,36 @@ describe('Services / Items / a batched upsert', () => {
 						c.field('id').uuid()
 							.primary();
 
-						c.field('role').uuid();
 						c.field('status').string();
+
+						c.field('roles').o2m(
+							'directus_role_members',
+							'user',
+							(relation) => {
+								return relation.options({
+									meta: { one_deselect_action: 'delete' },
+								});
+							},
+						);
+					})
+					.collection('directus_role_members', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('user').uuid();
+						c.field('role').uuid();
 					})
 					.build(),
 			}).upsertMany(
 				[
 					{
 						id: '10000000-0000-4000-8000-000000000001',
-						role: 'e0000000-0000-4000-8000-000000000001',
+						roles: [
+							{
+								id: 'b0000000-0000-4000-8000-000000000002',
+								role: 'e0000000-0000-4000-8000-000000000001',
+							},
+						],
 					},
 				],
 				{ onRequireUserIntegrityCheck },
@@ -7798,31 +7948,63 @@ describe('Services / Items / a batched upsert', () => {
 						c.field('id').uuid()
 							.primary();
 
-						c.field('role').uuid();
 						c.field('status').string();
+
+						c.field('roles').o2m(
+							'directus_role_members',
+							'user',
+							(relation) => {
+								return relation.options({
+									meta: { one_deselect_action: 'delete' },
+								});
+							},
+						);
+					})
+					.collection('directus_role_members', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('user').uuid();
+						c.field('role').uuid();
 					})
 					.build(),
 			}).upsertMany([
 				{
 					id: '20000000-0000-4000-8000-000000000002',
-					role: 'e0000000-0000-4000-8000-000000000001',
+					roles: [
+						{
+							id: 'b0000000-0000-4000-8000-000000000003',
+							role: 'e0000000-0000-4000-8000-000000000001',
+						},
+					],
 					status: 'active',
 				},
 				{
 					id: '10000000-0000-4000-8000-000000000001',
-					role: 'e0000000-0000-4000-8000-000000000001',
+					roles: [
+						{
+							id: 'b0000000-0000-4000-8000-000000000002',
+							role: 'e0000000-0000-4000-8000-000000000001',
+						},
+					],
 				},
 			])).rejects.toMatchObject({
 				message: "Can't process content. "
 					+ 'Cannot remove the last admin user from the system.',
 			});
 
-			await expect(database('directus_users').select('id', 'role'))
+			await expect(database('directus_role_members').select('id', 'user', 'role'))
 				.resolves.toStrictEqual([
 					{
-						id: '10000000-0000-4000-8000-000000000001',
+						id: 'b0000000-0000-4000-8000-000000000001',
+						user: '10000000-0000-4000-8000-000000000001',
 						role: 'a0000000-0000-4000-8000-000000000001',
 					},
+				]);
+
+			await expect(database('directus_users').select('id'))
+				.resolves.toStrictEqual([
+					{ id: '10000000-0000-4000-8000-000000000001' },
 				]);
 		});
 	});
@@ -12018,5 +12200,136 @@ describe('Services / Items / mutationBatching', () => {
 
 		expect(sqlStatements).toStrictEqual([]);
 		expect(hookCalls).toStrictEqual([]);
+	});
+});
+
+describe('ItemsService — the rows an update or a delete returns', () => {
+	// A write runs on a fork of the service, which hands its rows here.
+	const handedRows: unknown[][] = [];
+
+	class WrittenRowsService extends ItemsService {
+		protected override readonly writtenRowColumns = ['name'];
+
+		constructor(options: AbstractServiceOptions) {
+			super('test', options);
+		}
+
+		protected override async onKeyRowsWritten(writtenRows: unknown[]) {
+			handedRows.push(writtenRows);
+		}
+	}
+
+	let db: Knex;
+	let tracker: Tracker;
+
+	beforeEach(() => {
+		db = knex.default({ client: MockClient, dialect: 'pg' });
+
+		// As in the pg updateBatch tests: a savepoint client inherits the pg
+		// client's `_events` and re-emits 'query' to itself forever.
+		delete Object.getPrototypeOf(MockClient.prototype)._events;
+
+		tracker = createTracker(db);
+	});
+
+	afterEach(() => {
+		tracker.reset();
+		handedRows.length = 0;
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+	});
+
+	it('hands the rows an update statement returns', async () => {
+		tracker.on.update('test').response([{ name: 'a' }, { name: 'a' }]);
+
+		const service = new WrittenRowsService({ knex: db, schema });
+
+		await service.updateMany([1, 2], { name: 'a' });
+
+		expect(tracker.history.update.map(({ sql }) => sql)).toEqual([
+			'update "test" set "name" = $1 where "id" in ($2, $3) returning "name"',
+		]);
+
+		expect(handedRows).toEqual([[{ name: 'a' }, { name: 'a' }]]);
+	});
+
+	it('writes its update groups one by one, each returning its rows', async () => {
+		tracker.on.update('test').responseOnce([{ name: 'a' }]);
+		tracker.on.update('test').responseOnce([{ name: 'b' }]);
+
+		const service = new WrittenRowsService({ knex: db, schema });
+
+		await service.updateBatch([{ id: 1, name: 'a' }, { id: 2, name: 'b' }]);
+
+		expect(tracker.history.update.map(({ sql }) => sql)).toEqual([
+			'update "test" set "name" = $1 where "id" in ($2) returning "name"',
+			'update "test" set "name" = $1 where "id" in ($2) returning "name"',
+		]);
+
+		expect(handedRows).toEqual([[{ name: 'a' }], [{ name: 'b' }]]);
+	});
+
+	it('hands the rows a delete statement returns', async () => {
+		tracker.on.delete('test').response([{ name: 'a' }]);
+
+		const service = new WrittenRowsService({ knex: db, schema });
+
+		await service.deleteMany([1]);
+
+		expect(tracker.history.delete.map(({ sql }) => sql)).toEqual([
+			'delete from "test" where "id" in ($1) returning "name"',
+		]);
+
+		expect(handedRows).toEqual([[{ name: 'a' }]]);
+	});
+
+	it(oneLine`
+		hands no row of an admin's delete rolled back to its savepoint over a key
+		no row holds
+	`, async () => {
+		tracker.on.delete('test').response([{ name: 'a' }]);
+		tracker.on.select('test').response([{ id: 1 }]);
+
+		const service = new WrittenRowsService({
+			knex: db,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		await expect(service.deleteMany([1, 2])).rejects.toThrow(
+			new ItemNotFoundError({ collection: 'test', primaryKey: 2 }),
+		);
+
+		expect(handedRows).toEqual([]);
+	});
+
+	it(oneLine`
+		hands the rows of an admin's delete once its savepoint committed
+	`, async () => {
+		tracker.on.delete('test').response([{ name: 'a' }, { name: 'b' }]);
+
+		const service = new WrittenRowsService({
+			knex: db,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		await service.deleteMany([1, 2]);
+
+		expect(handedRows).toEqual([[{ name: 'a' }, { name: 'b' }]]);
+	});
+
+	it('returns no row off postgres and cockroach, handing none', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+		tracker.on.delete('test').response(1);
+
+		const service = new WrittenRowsService({ knex: db, schema });
+
+		await service.deleteMany([1]);
+
+		expect(tracker.history.delete.map(({ sql }) => sql)).toEqual([
+			'delete from "test" where "id" in ($1)',
+		]);
+
+		expect(handedRows).toEqual([]);
 	});
 });

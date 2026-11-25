@@ -85,7 +85,7 @@ let cache: FakeCache;
 // The descriptor table as the queue reads it: what was described, minus what
 // a run has advanced past, in the order it was described.
 let queue: CacheAuditDescriptor[];
-const users = new Map<string, { id: string; role: string | null }>();
+const users = new Map<string, { id: string }>();
 const userLookups = vi.fn();
 
 function descriptor(
@@ -163,7 +163,7 @@ beforeEach(() => {
 	cache = new FakeCache();
 	envRef.current = { CACHE_AUDIT_IGNORE_PATHS: [] };
 	users.clear();
-	users.set('user-1', { id: 'user-1', role: 'role-1' });
+	users.set('user-1', { id: 'user-1' });
 
 	vi.mocked(getCache).mockReturnValue({ cache } as any);
 
@@ -502,7 +502,7 @@ describe('a fresh entry', () => {
 		const token = String(request.headers['authorization']).replace('Bearer ', '');
 		const claims = jwt.verify(token, 'audit-secret') as Record<string, unknown>;
 		expect(claims['id']).toBe('user-1');
-		expect(claims['role']).toBe('role-1');
+		expect(claims['role']).toBeUndefined();
 		expect(claims['iss']).toBe('directus');
 		expect(claims['exp']).toBeGreaterThan(Date.now() / 1000);
 		// Present because the verifier refuses a token without them; false
@@ -1152,7 +1152,7 @@ describe('narrowing the sweep', () => {
 			descriptor({ redisKey: 'rk3', cacheKey: 'ck3', collection: 'authors' }),
 		);
 
-		users.set('user-2', { id: 'user-2', role: null });
+		users.set('user-2', { id: 'user-2' });
 	});
 
 	test(oneLine`

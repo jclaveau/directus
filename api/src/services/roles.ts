@@ -8,6 +8,7 @@ import type {
 	UpdateGroup,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
+import type { Knex } from 'knex';
 import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
 import {
 	clearCachesThenFireActions,
@@ -16,7 +17,34 @@ import { transactionHoldingActions } from '../utils/transaction-holding-actions.
 import { emitActionEvents, ItemsService } from './items.js';
 import { AccessService } from './access.js';
 import { PresetsService } from './presets.js';
-import { UsersService } from './users.js';
+
+/**
+ * A role a user holds is refused its delete, whoever asks: taking it away
+ * from its users is their memberships' delete, never a side effect.
+ *
+ * ```
+ * DELETE /roles/<staff>, a user holding <staff> → 400 Role "<staff>" is held
+ * by users: delete their memberships of it first
+ * ```
+ */
+async function refuseHeldRoleDelete(
+	trx: Knex,
+	roleKeys: PrimaryKey[],
+): Promise<void> {
+	const [heldMembership]: { role: string }[] = await trx
+		.select('role')
+		.from('directus_role_members')
+		.whereIn('role', roleKeys)
+		.orderBy('role')
+		.limit(1);
+
+	if (heldMembership) {
+		throw new InvalidPayloadError({
+			reason: `Role ${JSON.stringify(heldMembership.role)} is held by users:`
+				+ ' delete their memberships of it first',
+		});
+	}
+}
 
 const DESCENDANT_PARENT_REASON =
 	'A role cannot have a parent that is already a descendant of itself';
@@ -78,19 +106,25 @@ export class RolesService extends ItemsService {
 		};
 
 		await transactionHoldingActions(this.knex, heldActionEvents, async (trx) => {
-			const options: AbstractServiceOptions = {
+			await refuseHeldRoleDelete(trx, keys);
+
+			const rolesItemsService = new ItemsService('directus_roles', {
 				knex: trx,
 				accountability: this.accountability,
 				schema: this.schema,
+			});
+
+			// The cleanup of an empty role runs as code: its access rows and its
+			// children's parent are the permission model's, which only an admin's
+			// request writes.
+			const codeOptions: AbstractServiceOptions = {
+				knex: trx,
+				schema: this.schema,
 			};
 
-			const rolesItemsService = new ItemsService('directus_roles', options);
-			const rolesService = new RolesService(options);
-			const accessService = new AccessService(options);
-			const presetsService = new PresetsService(options);
-			const usersService = new UsersService(options);
-
-			// Delete permissions/presets for this role, suspend all remaining users in role
+			const rolesService = new RolesService(codeOptions);
+			const accessService = new AccessService(codeOptions);
+			const presetsService = new PresetsService(codeOptions);
 
 			await accessService.deleteRoleAccess(
 				keys,
@@ -100,17 +134,6 @@ export class RolesService extends ItemsService {
 			await presetsService.deleteByQuery(
 				{
 					filter: { role: { _in: keys } },
-				},
-				{ ...holdingOpts, bypassLimits: true },
-			);
-
-			await usersService.updateByQuery(
-				{
-					filter: { role: { _in: keys } },
-				},
-				{
-					status: 'suspended',
-					role: null,
 				},
 				{ ...holdingOpts, bypassLimits: true },
 			);

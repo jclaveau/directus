@@ -1303,7 +1303,7 @@ no_value: Ingen værdi
 do_nothing: Gør intet
 generate_and_save_uuid: Generer og gem UUID
 save_current_user_id: Gem nuværende bruger-Id
-save_current_user_role: Gem Nuværende brugerrolle
+save_current_user_roles: Gem nuværende brugers roller
 save_current_datetime: Gem nuværende dato og tid
 always_open: Åbn altid
 start_open: Start åben

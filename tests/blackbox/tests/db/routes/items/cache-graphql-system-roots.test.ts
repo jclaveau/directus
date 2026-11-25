@@ -141,7 +141,7 @@ describe.each(vendors)('%s', (vendor) => {
 						email: `${marker}-${token}@system-roots.example.com`,
 						token,
 						first_name,
-						role: adminRoleId,
+						roles: [{ role: adminRoleId }],
 					})
 					.set('Authorization', auth);
 

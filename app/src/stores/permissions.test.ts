@@ -42,10 +42,9 @@ describe('actions', () => {
 		test('should fetch additional fields when there are dynamic variables in presets', async () => {
 			const mockUser = {
 				id: sample.user.id,
-				role: {
-					id: sample.role.id,
-				},
-			} as User;
+				roles: [{ role: { id: sample.role.id } }],
+				effectiveRoles: [{ id: sample.role.id }],
+			} as unknown as User;
 
 			const userStore = useUserStore();
 			userStore.currentUser = mockUser;
@@ -54,7 +53,7 @@ describe('actions', () => {
 
 			const permissionWithDynamicVariablesInPresets = {
 				presets: {
-					field_a: '$CURRENT_ROLE.name',
+					field_a: '$CURRENT_MEMBER_ROLES.name',
 					field_b: '$CURRENT_USER.custom_user_field',
 				},
 			};
@@ -67,16 +66,18 @@ describe('actions', () => {
 			await permissionsStore.hydrate();
 
 			expect(hydrateAdditionalFieldsSpy).toHaveBeenCalledOnce();
-			expect(hydrateAdditionalFieldsSpy).toBeCalledWith(expect.arrayContaining(['role.name', 'custom_user_field']));
+
+			expect(hydrateAdditionalFieldsSpy).toBeCalledWith(
+				expect.arrayContaining(['roles.role.name', 'custom_user_field']),
+			);
 		});
 
 		test('should not fetch additional fields when there are no dynamic variables in presets', async () => {
 			const mockUser = {
 				id: sample.user.id,
-				role: {
-					id: sample.role.id,
-				},
-			} as User;
+				roles: [{ role: { id: sample.role.id } }],
+				effectiveRoles: [{ id: sample.role.id }],
+			} as unknown as User;
 
 			const userStore = useUserStore();
 			userStore.currentUser = mockUser;

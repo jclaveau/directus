@@ -53,7 +53,7 @@ export const ASSET_TRANSFORM_QUERY_KEYS = [
 	'focal_point_y',
 ] as const satisfies Readonly<(keyof TransformationParams)[]>;
 
-export const FILTER_VARIABLES = ['$NOW', '$CURRENT_USER', '$CURRENT_ROLE'];
+export const FILTER_VARIABLES = ['$NOW', '$CURRENT_USER', '$CURRENT_MEMBER_ROLES'];
 
 export const ALIAS_TYPES = ['alias', 'o2m', 'm2m', 'm2a', 'o2a', 'files', 'translations'];
 
@@ -61,7 +61,12 @@ export const DEFAULT_AUTH_PROVIDER = 'default';
 
 export const COLUMN_TRANSFORMS = ['year', 'month', 'day', 'weekday', 'hour', 'minute', 'second'];
 
-export const GENERATE_SPECIAL = ['uuid', 'date-created', 'role-created', 'user-created'] as const;
+export const GENERATE_SPECIAL = [
+	'uuid',
+	'date-created',
+	'roles-created',
+	'user-created',
+] as const;
 
 export const UUID_REGEX = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 

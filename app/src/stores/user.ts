@@ -66,10 +66,10 @@ export const useUserStore = defineStore('userStore', () => {
 		loading.value = true;
 
 		try {
-			const fields = ['*', 'role.id'];
-
 			const [{ data: user }, { data: globals }, { data: roles }] = await Promise.all([
-				api.get('/users/me', { params: { fields } }),
+				api.get('/users/me', {
+					params: { fields: ['*', 'roles.role.id'] },
+				}),
 				api.get('/policies/me/globals'),
 				api.get('/roles/me', { params: { fields: ['id'] } }),
 			]);
@@ -78,7 +78,7 @@ export const useUserStore = defineStore('userStore', () => {
 				...user.data,
 				...(user.data?.avatar != null ? { avatar: { id: user.data?.avatar } } : {}),
 				...globals.data,
-				roles: roles.data,
+				effectiveRoles: roles.data,
 			};
 		} catch (error: any) {
 			error.value = error;

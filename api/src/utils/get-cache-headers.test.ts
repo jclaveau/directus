@@ -146,7 +146,7 @@ const scenarios: Scenario[] = [
 			env: {},
 			headers: {},
 			accountability: {
-				role: '7efc7413-7ffe-4e6f-a0ac-687bbf9f8076',
+				memberRoles: ['7efc7413-7ffe-4e6f-a0ac-687bbf9f8076'],
 			} as Accountability,
 			ttl: 5678910,
 			globalCacheSettings: false,
@@ -155,11 +155,11 @@ const scenarios: Scenario[] = [
 		output: 'private, max-age=5679',
 	},
 	{
-		name: 'when personalized is true and accountability with missing role is provided',
+		name: 'when personalized is true and accountability has no member role',
 		input: {
 			env: {},
 			headers: {},
-			accountability: {} as Accountability,
+			accountability: { memberRoles: [] } as unknown as Accountability,
 			ttl: 5678910,
 			globalCacheSettings: false,
 			personalized: true,

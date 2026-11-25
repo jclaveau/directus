@@ -42,7 +42,7 @@ function getErrorUrl(error: undefined | Error) {
 			userAgent: navigator.userAgent,
 		},
 		user: {},
-		role: {},
+		roles: [] as { id: string; name?: string }[],
 	};
 
 	if (currentUser !== null && 'id' in currentUser) {
@@ -56,10 +56,13 @@ function getErrorUrl(error: undefined | Error) {
 			status: currentUser.status,
 		};
 
-		renderScope.role = {
-			id: currentUser.role?.id,
-			name: currentUser.role?.name,
-		};
+		renderScope.roles = currentUser.roles.map(({ role }) => {
+			if (typeof role === 'string') {
+				return { id: role };
+			}
+
+			return { id: role.id, name: role.name };
+		});
 	}
 
 	return render(settings.value.report_error_url, renderScope);

@@ -16,7 +16,7 @@ import type {
 	UpdateGroup,
 } from '@directus/types';
 import { useLogger } from '../logger/index.js';
-import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+import { fetchUserRoles } from '../permissions/lib/fetch-member-roles.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { isValidUuid } from '../utils/is-valid-uuid.js';
@@ -127,15 +127,14 @@ export class CommentsService extends ItemsService {
 				}
 
 				const user = await this.usersService.readOne(userID, {
-					fields: ['id', 'first_name', 'last_name', 'email', 'role.id'],
+					fields: ['id', 'first_name', 'last_name', 'email'],
 				});
 
 				const accountability: Accountability = {
 					user: userID,
-					role: user['role']?.id ?? null,
+					...await fetchUserRoles(userID, this.knex),
 					admin: false,
 					app: false,
-					roles: await fetchRolesTree(user['role']?.id ?? null, this.knex),
 					ip: null,
 				};
 

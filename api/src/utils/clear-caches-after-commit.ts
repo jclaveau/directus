@@ -1,18 +1,24 @@
-import type { MutationOptions } from '@directus/types';
+import type { MutationOptions, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
 import type { Keyv } from 'keyv';
+import type { PeerNotice } from '../cache-peer-notice.js';
 import { clearSystemCache } from '../cache.js';
+import {
+	createScopedCacheExtensionHandle,
+} from '../extensions/lib/scoped-cache-handle.js';
 import { useLogger } from '../logger/index.js';
 import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
+import { announceMembershipsChanged } from '../websocket/memberships-changed.js';
 import { queueAfterCommitOrRollback } from './transaction.js';
 
 /**
  * Set by a batch that runs its rows with `autoPurgeCache` off: a row asking for
- * a response-cache flush reports it here, and the batch flushes once for all.
+ * a response-cache flush reports it here, with whether it cleared the
+ * permissions, and the batch flushes once for all.
  */
 export type ResponseCacheFlushDeferral = {
-	onResponseCacheFlushDeferred?: () => void;
+	onResponseCacheFlushDeferred?: (peerNotice: PeerNotice) => void;
 };
 
 /**
@@ -30,14 +36,14 @@ export async function clearCachesAfterCommit(
 	opts?: MutationOptions & ResponseCacheFlushDeferral,
 ): Promise<void> {
 	if (responseCache && opts?.autoPurgeCache === false) {
-		opts.onResponseCacheFlushDeferred?.();
+		opts.onResponseCacheFlushDeferred?.({ permissionsCleared: true });
 	}
 
 	const clearCaches = async () => {
 		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
 
 		if (responseCache && opts?.autoPurgeCache !== false) {
-			await flushResponseCache(responseCache);
+			await flushResponseCache(responseCache, { permissionsCleared: true });
 		}
 	};
 
@@ -47,24 +53,53 @@ export async function clearCachesAfterCommit(
 /**
  * Flush the response cache once the transaction `knex` belongs to commits or
  * rolls back, as `clearCachesAfterCommit` does; a write that opted out hands
- * the flush on to its own batch, if any.
+ * the flush on to its own batch, if any. `peerNotice` tells the other nodes
+ * whether the write cleared the permissions too.
  */
 export async function flushResponseCacheAfterCommit(
 	knex: Knex,
 	responseCache: Keyv | null,
-	opts?: MutationOptions & ResponseCacheFlushDeferral,
+	opts: (MutationOptions & ResponseCacheFlushDeferral) | undefined,
+	peerNotice: PeerNotice,
 ): Promise<void> {
 	if (!responseCache) {
 		return;
 	}
 
 	if (opts?.autoPurgeCache === false) {
-		opts.onResponseCacheFlushDeferred?.();
+		opts.onResponseCacheFlushDeferred?.(peerNotice);
 
 		return;
 	}
 
-	await runOnceSettled(knex, () => flushResponseCache(responseCache));
+	await runOnceSettled(
+		knex,
+		() => flushResponseCache(responseCache, peerNotice),
+	);
+}
+
+/**
+ * Purge the responses that read `mutatedRows` once the transaction `knex`
+ * belongs to commits or rolls back, as `flushResponseCacheAfterCommit` flushes
+ * them all; a write that opted out hands the flush on to its own batch, if any.
+ */
+export async function purgeMutatedRowsAfterCommit(
+	knex: Knex,
+	schema: SchemaOverview,
+	collection: string,
+	mutatedRows: Record<string, unknown>[],
+	opts?: MutationOptions & ResponseCacheFlushDeferral,
+): Promise<void> {
+	if (opts?.autoPurgeCache === false) {
+		opts.onResponseCacheFlushDeferred?.({ permissionsCleared: false });
+
+		return;
+	}
+
+	await runOnceSettled(knex, () => {
+		return createScopedCacheExtensionHandle(async () => schema)
+			.purgeForMutatedRows(collection, mutatedRows);
+	});
 }
 
 /**
@@ -73,6 +108,17 @@ export async function flushResponseCacheAfterCommit(
  */
 export async function clearPermissionsCacheAfterCommit(knex: Knex): Promise<void> {
 	await runOnceSettled(knex, () => clearPermissionsCache());
+}
+
+/**
+ * Recompute the roles of the sockets `users` hold open, on every node, once the
+ * transaction `knex` belongs to commits or rolls back.
+ */
+export async function announceMembershipsChangedAfterCommit(
+	knex: Knex,
+	users: readonly string[],
+): Promise<void> {
+	await runOnceSettled(knex, () => announceMembershipsChanged(users));
 }
 
 /**

@@ -208,6 +208,36 @@ describe('clear', () => {
 	});
 });
 
+describe('clearLocalTier', () => {
+	// The process that sent the clear dropped redis and told every peer already.
+	test('Clears the local tier only, telling no other process', async () => {
+		await cache.clearLocalTier();
+
+		expect(cache['local'].clear).toHaveBeenCalledExactlyOnceWith();
+		expect(cache['redis'].clear).not.toHaveBeenCalled();
+		expect(mockBus.publish).not.toHaveBeenCalled();
+	});
+
+	test('Keeps nothing a redis read crossing it would refill', async () => {
+		vi.mocked(cache['local'].get).mockResolvedValue(undefined);
+
+		let resolveRead!: (value: string) => void;
+
+		vi.mocked(cache['redis'].get).mockReturnValue(
+			new Promise<string>((resolve) => (resolveRead = resolve)) as never,
+		);
+
+		const pending = cache.get(mockKey);
+		await vi.waitFor(() => expect(cache['redis'].get).toHaveBeenCalled());
+
+		await cache.clearLocalTier();
+		resolveRead(mockRedisValue);
+
+		expect(await pending).toBe(mockRedisValue);
+		expect(cache['local'].set).not.toHaveBeenCalled();
+	});
+});
+
 describe('getWithGeneration', () => {
 	test('Returns the local value without a redis round trip', async () => {
 		await expect(cache.getWithGeneration(mockKey)).resolves.toEqual({

@@ -3,13 +3,17 @@ import { ServiceUnavailableError } from '@directus/errors';
 import type { CacheFlushTarget, SchemaOverview } from '@directus/types';
 import Keyv, { type KeyvOptions } from 'keyv';
 import { useBus } from './bus/index.js';
+import type { CacheClearMessage } from './cache-peer-notice.js';
 import { responseCacheWanted } from './cache-settings.js';
 import {
 	deserializeCacheEnvelope,
 	serializeCacheEnvelope,
 } from './cache-envelope.js';
 import { useLogger } from './logger/index.js';
-import { clearCache as clearPermissionCache } from './permissions/cache.js';
+import {
+	clearCache as clearPermissionCache,
+	clearLocalCache as clearLocalPermissionCache,
+} from './permissions/cache.js';
 import { cacheRedisDatabase, redisConfigAvailable } from './redis/index.js';
 import { withRedisDatabase } from './redis/lib/create-redis.js';
 import {
@@ -17,6 +21,7 @@ import {
 	warnOncePerConnectionOutage,
 } from './redis/lib/warn-once-per-connection-outage.js';
 import {
+	bumpScopedCacheEpochs,
 	clearResponseCache,
 	dropScopedCacheIndex,
 	scopedCachePurgeEnabled,
@@ -25,6 +30,7 @@ import { requestScopedCacheIndexReap } from './scoped-cache/reap-requests.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
+import { nodeId } from './utils/node-id.js';
 import { validateEnv } from './utils/validate-env.js';
 
 import { createRequire } from 'node:module';
@@ -54,11 +60,10 @@ interface CacheMessage {
 
 // The subset a flush drops, chosen per-target on the cache page. `system` rides the
 // existing `schemaChanged` broadcast; `response`/`locks` are per-node memory tiers a
-// dedicated channel has to reach (see `clearCacheTargets`). `permissions` needs
-// neither: its cache's own `clear()` tells the peers to drop their memory tier.
-interface CacheClearMessage {
-	targets: CacheFlushTarget[];
-}
+// dedicated channel has to reach (see `clearCacheTargets`). `permissions` rides
+// the same message as the responses a write flushed, so a peer drops them first;
+// on a Redis store it rides alone, sent before the shared clear.
+// The message is `CacheClearMessage` (cache-peer-notice.ts).
 
 if (redisConfigAvailable() && !messengerSubscribed) {
 	messengerSubscribed = true;
@@ -72,14 +77,36 @@ if (redisConfigAvailable() && !messengerSubscribed) {
 		dropMemorySchemaCache();
 	});
 
-	messenger.subscribe<CacheClearMessage>('cacheCleared', async ({ targets }) => {
-		// Redis-backed tiers are shared, so the initiator already cleared them globally;
-		// only a per-node memory store leaves each node its own copy to drop here.
+	messenger.subscribe<CacheClearMessage>('cacheCleared', async ({
+		targets,
+		origin,
+	}) => {
+		// The initiator cleared its own before it published.
+		if (origin === nodeId) {
+			return;
+		}
+
+		// Redis-backed tiers are shared, so the initiator already cleared them
+		// globally. Not this node's copy of the permissions: a request here reading
+		// the old one would fill the shared responses again with the old roles, and
+		// one in flight on it declines its fill once the counter moved.
 		if (env['CACHE_STORE'] !== 'memory') {
+			if (targets.includes('permissions')) {
+				await clearLocalPermissionCache();
+				await bumpScopedCacheEpochs(['*']);
+			}
+
 			return;
 		}
 
 		const { cache, systemCache, lockCache } = getCache();
+
+		// Before the responses: a request here reading the old roles off this
+		// node's permissions tier would cache a response built with them. Its own
+		// copy only: the sender dropped the shared tier and told every node.
+		if (targets.includes('permissions')) {
+			await clearLocalPermissionCache();
+		}
 
 		if (targets.includes('response')) {
 			await cache?.clear();
@@ -407,6 +434,7 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	try {
 		await messenger.publish<CacheClearMessage>('cacheCleared', {
 			targets: ['response', 'system'],
+			origin: nodeId,
 		});
 	}
 	catch (error: any) {
@@ -559,7 +587,10 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 	// are already cleared, and an operator who asked for a flush is not served by
 	// an error over the one part of it nothing can retry.
 	try {
-		await messenger.publish<CacheClearMessage>('cacheCleared', { targets });
+		await messenger.publish<CacheClearMessage>('cacheCleared', {
+			targets,
+			origin: nodeId,
+		});
 	}
 	catch (error: any) {
 		logger.warn(error, `[cache] could not tell the other nodes: ${error}`);

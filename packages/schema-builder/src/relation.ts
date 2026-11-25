@@ -10,7 +10,10 @@ export type InitialRelationOverview = Pick<Relation, 'collection' | 'field'> & {
 export type FinalRelationOverview = Relation & { _kind: 'finished'; _type: 'o2m' | 'm2o' | 'a2o' };
 
 export type RelationOveriewBuilderOptions = DeepPartial<{
-	meta: Pick<NonNullable<Relation['meta']>, 'id' | 'junction_field' | 'sort_field'>;
+	meta: Pick<
+		NonNullable<Relation['meta']>,
+		'id' | 'junction_field' | 'sort_field' | 'one_deselect_action'
+	>;
 	schema: Pick<NonNullable<Relation['schema']>, 'constraint_name' | 'foreign_key_schema'>;
 }>;
 

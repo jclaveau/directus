@@ -10,7 +10,7 @@ import {
 	ServiceUnavailableError,
 } from '@directus/errors';
 import type { Accountability } from '@directus/types';
-import { parseJSON, toArray } from '@directus/utils';
+import { oneLine, parseJSON, toArray } from '@directus/utils';
 import express, { Router } from 'express';
 import { flatten } from 'flat';
 import jwt from 'jsonwebtoken';
@@ -34,8 +34,16 @@ import { getIPFromReq } from '../../utils/get-ip-from-req.js';
 import { getSecret } from '../../utils/get-secret.js';
 import { isLoginRedirectAllowed } from '../../utils/is-login-redirect-allowed.js';
 import { verifyJWT } from '../../utils/jwt.js';
+import { transaction } from '../../utils/transaction.js';
 import { Url } from '../../utils/url.js';
 import { LocalAuthDriver } from './local.js';
+import {
+	providerMemberships,
+	syncProviderMemberships,
+	takeProviderRoles,
+	withProviderRoles,
+} from '../utils/provider-memberships.js';
+import { isEmailUnverified } from '../utils/verified-email.js';
 
 export class OpenIDAuthDriver extends LocalAuthDriver {
 	client: null | Client;
@@ -213,13 +221,18 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		return user?.id;
 	}
 
-	override async getUserID(payload: Record<string, any>): Promise<string> {
+	override async getUserID(payload: Record<string, any>): Promise<string> { // bb-out-of-scope: #622 OpenID login
 		const logger = useLogger();
 
 		if (!payload['code'] || !payload['codeVerifier'] || !payload['state']) {
 			logger.warn('[OpenID] No code, codeVerifier or state in payload');
 			throw new InvalidCredentialsError();
 		}
+
+		// Read before the provider is asked: a refused invite creates no user.
+		const invite = payload['invite'] === undefined
+			? null
+			: await this.usersService.readInvite(payload['invite']);
 
 		const { plainCodeChallenge } = this.config;
 
@@ -267,10 +280,19 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			logger.debug(`[OpenID] Configured group claim with name "${groupClaimName}" does not exist or is empty.`);
 		}
 
+		const grantedRoles: string[] = role
+			? [role]
+			: [];
+
 		// Flatten response to support dot indexes
 		userInfo = flatten(userInfo) as Record<string, unknown>;
 
-		const { provider, identifierKey, allowPublicRegistration, requireVerifiedEmail, syncUserInfo } = this.config;
+		const {
+			provider,
+			identifierKey,
+			allowPublicRegistration,
+			syncUserInfo,
+		} = this.config;
 
 		const email = userInfo['email'] ? String(userInfo['email']) : undefined;
 		// Fallback to email if explicit identifier not found
@@ -287,9 +309,13 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			last_name: userInfo['family_name'],
 			email: email,
 			external_identifier: identifier,
-			role: role,
 			auth_data: tokenSet.refresh_token && JSON.stringify({ refreshToken: tokenSet.refresh_token }),
 		};
+
+		const emailUnverified = isEmailUnverified(
+			this.config,
+			userInfo['email_verified'],
+		);
 
 		const userId = await this.fetchUserId(identifier);
 
@@ -301,22 +327,31 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			};
 
 			// Make sure a user's role gets updated if their openid group or role mapping changes
-			if (this.config['roleMapping']) {
-				emitPayload['role'] = role;
-			}
+			const syncedRoles = this.config['roleMapping']
+				? grantedRoles
+				: undefined;
 
 			if (syncUserInfo) {
 				emitPayload = {
 					...emitPayload,
 					first_name: userPayload.first_name,
 					last_name: userPayload.last_name,
-					email: userPayload.email,
 				};
+
+				if (emailUnverified) {
+					logger.warn(oneLine`
+						[OpenID] Unverified email not synced for provider
+						${JSON.stringify(provider)}
+					`);
+				}
+				else {
+					emitPayload['email'] = userPayload.email;
+				}
 			}
 
 			const updatedUserPayload = await emitter.emitFilter(
 				`auth.update`,
-				emitPayload,
+				withProviderRoles('auth.update', emitPayload, syncedRoles),
 				{
 					identifier,
 					provider: this.config['provider'],
@@ -325,18 +360,43 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 				{ database: getDatabase(), schema: this.schema, accountability: null },
 			);
 
+			const { userPayload: updatedUser, providerRoles } = takeProviderRoles(
+				'auth.update',
+				updatedUserPayload,
+			);
+
 			// Update user to update refresh_token and other properties that might have changed
-			if (Object.values(updatedUserPayload).some((value) => value !== undefined)) {
-				await this.usersService.updateOne(userId, updatedUserPayload);
+			if (Object.values(updatedUser).some((value) => value !== undefined)) {
+				await this.usersService.updateOne(userId, updatedUser);
+			}
+
+			if (providerRoles !== undefined) {
+				await syncProviderMemberships(userId, provider, providerRoles, {
+					knex: this.knex,
+					schema: this.schema,
+				});
+			}
+
+			if (invite !== null) {
+				await transaction(this.knex, async (trx) => {
+					await this.usersService.grantInvitedRoles(trx, userId, invite.inviteRows);
+				});
 			}
 
 			return userId;
 		}
 
-		const isEmailVerified = !requireVerifiedEmail || userInfo['email_verified'];
+		if (emailUnverified) {
+			logger.warn(oneLine`
+				[OpenID] Unverified email can't create a user for provider
+				${JSON.stringify(provider)}
+			`);
 
-		// Is public registration allowed?
-		if (!allowPublicRegistration || !isEmailVerified) {
+			throw new InvalidCredentialsError();
+		}
+
+		// Is public registration allowed? An invite allows its own.
+		if (!allowPublicRegistration && invite === null) {
 			logger.warn(`[OpenID] User doesn't exist, and public registration not allowed for provider "${provider}"`);
 			throw new InvalidCredentialsError();
 		}
@@ -345,7 +405,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		// user that is about to be created
 		const updatedUserPayload = await emitter.emitFilter(
 			`auth.create`,
-			userPayload,
+			withProviderRoles('auth.create', userPayload, grantedRoles),
 			{
 				identifier,
 				provider: this.config['provider'],
@@ -354,8 +414,33 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			{ database: getDatabase(), schema: this.schema, accountability: null },
 		);
 
+		const { userPayload: createdUser, providerRoles } = takeProviderRoles(
+			'auth.create',
+			updatedUserPayload,
+		);
+
 		try {
-			await this.usersService.createOne(updatedUserPayload);
+			await transaction(this.knex, async (trx) => {
+				const createdUserId = await new UsersService({
+					knex: trx,
+					schema: this.schema,
+				}).createOne({
+					...createdUser,
+					roles: providerMemberships(
+						provider,
+						providerRoles,
+						Boolean(this.config['roleMapping']),
+					),
+				});
+
+				if (invite !== null) {
+					await this.usersService.grantInvitedRoles(
+						trx,
+						createdUserId,
+						invite.inviteRows,
+					);
+				}
+			});
 		} catch (e) {
 			if (isDirectusError(e, ErrorCode.RecordNotUnique)) {
 				logger.warn(e, '[OpenID] Failed to register user. User not unique');
@@ -440,12 +525,22 @@ export function createOpenIDAuthRouter(providerName: string): Router {
 			const codeVerifier = provider.generateCodeVerifier();
 			const prompt = !!req.query['prompt'];
 			const redirect = req.query['redirect'];
+			const invite = req.query['invite'];
 
 			if (isLoginRedirectAllowed(redirect, providerName) === false) {
 				throw new InvalidPayloadError({ reason: `URL "${redirect}" can't be used to redirect after login` });
 			}
 
-			const token = jwt.sign({ verifier: codeVerifier, redirect, prompt }, getSecret(), {
+			if (invite !== undefined && typeof invite !== 'string') {
+				throw new InvalidPayloadError({
+					reason: '"invite" must be one invite token',
+				});
+			}
+
+			// The invite rides the signed state: the callback accepts it.
+			const statePayload = { verifier: codeVerifier, redirect, prompt, invite };
+
+			const token = jwt.sign(statePayload, getSecret(), {
 				expiresIn: (env[`AUTH_${providerName.toUpperCase()}_LOGIN_TIMEOUT`] ?? '5m') as StringValue | number,
 				issuer: 'directus',
 			});
@@ -491,6 +586,7 @@ export function createOpenIDAuthRouter(providerName: string): Router {
 					verifier: string;
 					redirect?: string;
 					prompt: boolean;
+					invite?: string;
 				};
 			} catch (e: any) {
 				logger.warn(e, `[OpenID] Couldn't verify OpenID cookie`);
@@ -498,7 +594,7 @@ export function createOpenIDAuthRouter(providerName: string): Router {
 				return res.redirect(`${url.toString()}?reason=${ErrorCode.InvalidCredentials}`);
 			}
 
-			const { verifier, redirect, prompt } = tokenData;
+			const { verifier, redirect, prompt, invite } = tokenData;
 
 			const accountability: Accountability = createDefaultAccountability({ ip: getIPFromReq(req) });
 
@@ -526,13 +622,19 @@ export function createOpenIDAuthRouter(providerName: string): Router {
 						code: req.query['code'],
 						codeVerifier: verifier,
 						state: req.query['state'],
+						invite,
 						iss: req.query['iss'],
 					},
 					{ session: authMode === 'session' },
 				);
 			} catch (error: any) {
-				// Prompt user for a new refresh_token if invalidated
-				if (isDirectusError(error, ErrorCode.InvalidToken) && !prompt) {
+				// Prompt user for a new refresh_token if invalidated; a refused
+				// invite token is no refresh_token to renew.
+				const isRenewable = isDirectusError(error, ErrorCode.InvalidToken)
+					&& !prompt
+					&& invite === undefined;
+
+				if (isRenewable) {
 					return res.redirect(`./?${redirect ? `redirect=${redirect}&` : ''}prompt=true`);
 				}
 

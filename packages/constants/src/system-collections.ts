@@ -1,5 +1,7 @@
 export const SYSTEM_COLLECTION_NAMES = [
 	'directus_access',
+	'directus_role_members',
+	'directus_invites',
 	'directus_activity',
 	'directus_collections',
 	'directus_comments',

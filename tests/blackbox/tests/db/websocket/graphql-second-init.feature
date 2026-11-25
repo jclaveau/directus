@@ -28,8 +28,11 @@ Feature: A GraphQL socket refuses a second connection_init before reading its to
       | id              | role          | policy          |
       | <reader-access> | <reader-role> | <reader-policy> |
     And the rows of directus_users:
-      | id       | email                    | role          | token        |
-      | <reader> | reader-<run>@example.com | <reader-role> | reader-<run> |
+      | id       | email                    | token        |
+      | <reader> | reader-<run>@example.com | reader-<run> |
+    And the rows of directus_role_members:
+      | id           | user     | role          | sort |
+      | <membership> | <reader> | <reader-role> | 1    |
     Then the socket exchanges these frames:
       | sent                          | received                                   |
       | type: connection_init         | - type: connection_ack                     |+
@@ -53,9 +56,13 @@ Feature: A GraphQL socket refuses a second connection_init before reading its to
       | id              | role          | policy          |
       | <reader-access> | <reader-role> | <reader-policy> |
     And the rows of directus_users:
-      | id       | email                    | role          | token        |
-      | <reader> | reader-<run>@example.com | <reader-role> | reader-<run> |
-      | <other>  | other-<run>@example.com  | <reader-role> | other-<run>  |
+      | id       | email                    | token        |
+      | <reader> | reader-<run>@example.com | reader-<run> |
+      | <other>  | other-<run>@example.com  | other-<run>  |
+    And the rows of directus_role_members:
+      | id                  | user     | role          | sort |
+      | <reader-membership> | <reader> | <reader-role> | 1    |
+      | <other-membership>  | <other>  | <reader-role> | 1    |
     When the socket exchanges these frames:
       | sent                                          | received               |
       | type: connection_init                         | - type: connection_ack |+
@@ -94,8 +101,11 @@ Feature: A GraphQL socket refuses a second connection_init before reading its to
       | id              | role          | policy          |
       | <reader-access> | <reader-role> | <reader-policy> |
     And the rows of directus_users:
-      | id       | email                    | role          | token        |
-      | <reader> | reader-<run>@example.com | <reader-role> | reader-<run> |
+      | id       | email                    | token        |
+      | <reader> | reader-<run>@example.com | reader-<run> |
+    And the rows of directus_role_members:
+      | id           | user     | role          | sort |
+      | <membership> | <reader> | <reader-role> | 1    |
     When the socket exchanges these frames:
       | sent                                          | received               |
       | type: connection_init                         | - type: connection_ack |+

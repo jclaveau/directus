@@ -446,3 +446,81 @@ describe('dumpCoverage', () => {
 		expect(reloadedModule.COVERAGE_DUMP_NAME).not.toBe(COVERAGE_DUMP_NAME);
 	});
 });
+
+// A fresh module per test: a dump already started skips the exit one for the
+// rest of the process, and the dump name carries the module's load time.
+describe('dumpCoverageAtExit', () => {
+	beforeEach(() => {
+		vi.resetModules();
+	});
+
+	test('writes the coverage of a command to COVERAGE_DIR', async () => {
+		const dumpModule = await import('./dump-coverage.js');
+		vi.stubEnv('COVERAGE_DIR', join(workDir, 'core'));
+
+		(globalThis as Record<string, unknown>)['__coverage__'] = {
+			'src/cli/commands/bootstrap/index.ts': { s: { 0: 1 } },
+		};
+
+		dumpModule.dumpCoverageAtExit();
+
+		await expect(readdir(join(workDir, 'core')))
+			.resolves.toEqual([dumpModule.COVERAGE_DUMP_NAME]);
+
+		await expect(
+			readFile(join(workDir, 'core', dumpModule.COVERAGE_DUMP_NAME), 'utf8'),
+		).resolves.toBe(JSON.stringify({
+			'src/cli/commands/bootstrap/index.ts': { s: { 0: 1 } },
+		}));
+	});
+
+	test('writes nothing when nothing loaded is instrumented', async () => {
+		const dumpModule = await import('./dump-coverage.js');
+		vi.stubEnv('COVERAGE_DIR', join(workDir, 'core'));
+
+		dumpModule.dumpCoverageAtExit();
+
+		await expect(readdir(workDir)).resolves.toEqual([]);
+	});
+
+	// The server's shutdown dump holds the sandboxes' coverage too: the exit one
+	// would overwrite its file without them.
+	test('leaves the file of a dump the server started', async () => {
+		const dumpModule = await import('./dump-coverage.js');
+		vi.stubEnv('COVERAGE_DIR', join(workDir, 'core'));
+
+		(globalThis as Record<string, unknown>)['__coverage__'] = {
+			'src/app.ts': { s: { 0: 1 } },
+		};
+
+		await dumpModule.dumpCoverage();
+
+		(globalThis as Record<string, unknown>)['__coverage__'] = {
+			'src/app.ts': { s: { 0: 2 } },
+		};
+
+		dumpModule.dumpCoverageAtExit();
+
+		await expect(
+			readFile(join(workDir, 'core', dumpModule.COVERAGE_DUMP_NAME), 'utf8'),
+		).resolves.toBe(JSON.stringify({ 'src/app.ts': { s: { 0: 1 } } }));
+	});
+
+	test('names the count of files it could not write anywhere', async () => {
+		const dumpModule = await import('./dump-coverage.js');
+		const stderrWrite = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+		vi.stubEnv('COVERAGE_DIR', '');
+
+		(globalThis as Record<string, unknown>)['__coverage__'] = {
+			'src/app.ts': {},
+			'src/server.ts': {},
+		};
+
+		dumpModule.dumpCoverageAtExit();
+
+		expect(stderrWrite).toHaveBeenCalledWith(
+			'Coverage of 2 source files not written: no extension built with '
+			+ 'coverage owns them, and COVERAGE_DIR is unset.\n',
+		);
+	});
+});

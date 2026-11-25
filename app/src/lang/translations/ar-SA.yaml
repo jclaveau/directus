@@ -1488,7 +1488,7 @@ no_value: لا توجد قيمة
 do_nothing: لا تفعل شيئا
 generate_and_save_uuid: إنشاء وحفظ UUID
 save_current_user_id: حفظ معرف المستخدم الحالي
-save_current_user_role: احفظ دور المستخدم الحالي
+save_current_user_roles: احفظ أدوار المستخدم الحالي
 save_current_datetime: أحفظ التاريخ/الوقت الحالي
 always_open: يعمل دائماً
 block: حَظْر

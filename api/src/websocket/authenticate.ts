@@ -1,12 +1,13 @@
 import type { Accountability } from '@directus/types';
 import { DEFAULT_AUTH_PROVIDER } from '../constants.js';
-import getDatabase from '../database/index.js';
-import emitter from '../emitter.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
 import { AuthenticationService } from '../services/index.js';
 import { getAccountabilityForToken } from '../utils/get-accountability-for-token.js';
 import { getSchema } from '../utils/get-schema.js';
-import { isEqual } from '../utils/lodash-es-used.js';
+import {
+	keepFilterAuthentication,
+	runAuthenticateFilter,
+} from './authenticate-filter.js';
 import { WebSocketError } from './errors.js';
 import type { BasicAuthMessage, WebSocketResponse } from './messages.js';
 import type { AuthenticationState } from './types.js';
@@ -47,20 +48,18 @@ export async function authenticateConnection(
 			refresh_token,
 		} as AuthenticationState;
 
-		const customAccountability = await emitter.emitFilter(
-			'websocket.authenticate',
+		const customAccountability = await runAuthenticateFilter(
 			defaultAccountability,
-			{
-				message,
-			},
-			{
-				database: getDatabase(),
-				schema: null,
-				accountability: null,
-			},
+			message,
 		);
 
-		if (customAccountability && isEqual(customAccountability, defaultAccountability) === false) {
+		if (customAccountability) {
+			keepFilterAuthentication(
+				customAccountability,
+				message,
+				accountabilityOverrides,
+			);
+
 			authenticationState.accountability = customAccountability;
 		} else {
 			authenticationState.accountability = await getAccountabilityForToken(access_token, defaultAccountability);

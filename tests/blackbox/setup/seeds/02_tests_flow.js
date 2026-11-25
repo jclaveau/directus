@@ -42,8 +42,16 @@ export async function seed(knex) {
 			email: 'flow@tests.com',
 			password: await generateHash('TestsFlowUserPassword'),
 			status: 'active',
-			role: 'd70c0943-5b55-4c5d-a613-f539a27a57f5',
 			token: 'TestsFlowToken',
+		},
+	]);
+
+	await knex('directus_role_members').insert([
+		{
+			id: 'f1d1b2c3-6a3e-4b8e-9d0f-2c4a5e6f7a8b',
+			user: '3d075128-c073-4f5d-891c-ed2eb2790a1c',
+			role: 'd70c0943-5b55-4c5d-a613-f539a27a57f5',
+			sort: 1,
 		},
 	]);
 }

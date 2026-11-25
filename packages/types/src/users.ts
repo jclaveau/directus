@@ -32,7 +32,7 @@ export type User = {
 	theme_dark: string | null;
 	theme_light_overrides: Record<string, unknown> | null;
 	theme_dark_overrides: Record<string, unknown> | null;
-	role: Role | null;
+	roles: RoleMembership[];
 	policies: Policy[];
 	language: string | null;
 	text_direction: 'ltr' | 'rtl' | 'auto';
@@ -60,3 +60,16 @@ export enum UserIntegrityCheckFlag {
 	UserLimits = 1 << 1,
 	All = ~(~0 << 2),
 }
+
+/**
+ * One row of `directus_role_members`: who granted it, when not set by hand.
+ * `managed_by` is `auth:<provider>` for an SSO group, `ext:<extension name>`
+ * for an extension; null for one given by hand or by an accepted invite.
+ */
+export type RoleMembership = {
+	id: string;
+	user: string | User;
+	role: string | Role;
+	sort: number | null;
+	managed_by: string | null;
+};

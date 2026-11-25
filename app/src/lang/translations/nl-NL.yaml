@@ -1577,7 +1577,7 @@ no_value: Geen waarde
 do_nothing: Niets doen
 generate_and_save_uuid: Genereer een UUID
 save_current_user_id: Huidige gebruikers-ID opslaan
-save_current_user_role: Huidige gebruikersrol opslaan
+save_current_user_roles: Huidige gebruikersrollen opslaan
 save_current_datetime: Huidige datum/tijd opslaan
 always_open: Altijd open
 start_open: Start geopend

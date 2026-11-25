@@ -2,6 +2,7 @@ import {
 	ContainsNullValuesError,
 	DatabasePoolExhaustedError,
 	InvalidForeignKeyError,
+	InvalidPayloadError,
 	NotNullViolationError,
 	RecordNotUniqueError,
 	ValueOutOfRangeError,
@@ -20,6 +21,12 @@ enum PostgresErrorCodes {
 	UNIQUE_VIOLATION = '23505',
 	VALUE_LIMIT_VIOLATION = '22001',
 }
+
+/**
+ * The unique index giving a user each role once per manager (C6 of #749):
+ * its violation is a 400 naming the role, not a RecordNotUniqueError.
+ */
+const ROLE_HELD_ONCE_INDEX = 'directus_role_members_user_role_managed_by_unique';
 
 /**
  * Whether a driver error is postgres' unique_violation, which an update batch
@@ -59,6 +66,10 @@ export function extractError(
 	function uniqueViolation() {
 		const { table, detail } = error;
 
+		if (error.constraint === ROLE_HELD_ONCE_INDEX) {
+			return roleHeldTwice() ?? error;
+		}
+
 		const betweenParens = /\(([^)]+)\)/g;
 		const matches = detail.match(betweenParens);
 
@@ -72,6 +83,32 @@ export function extractError(
 			field,
 			value: field ? data[field] : null,
 		});
+	}
+
+	/**
+	 * The detail of the (user, role, managed_by) index names the three values,
+	 * an empty manager standing for null:
+	 * Key ("user", role, COALESCE(managed_by, ''::character varying))=(u-1, r-1, )
+	 * → The user "u-1" already holds the role "r-1" with managed_by null
+	 */
+	function roleHeldTwice() {
+		const heldValues = /\)=\(([^,]*), ([^,]*), (.*)\) already exists/
+			.exec(error.detail);
+
+		if (!heldValues) {
+			return null;
+		}
+
+		const [, user, role, managedBy] = heldValues;
+
+		return new InvalidPayloadError(
+			{
+				reason: `The user ${JSON.stringify(user)}`
+					+ ` already holds the role ${JSON.stringify(role)}`
+					+ ` with managed_by ${JSON.stringify(managedBy || null)}`,
+			},
+			{ cause: error },
+		);
 	}
 
 	function numericValueOutOfRange() {

@@ -6,6 +6,7 @@ import {
 	type StepDefinitions,
 } from 'jest-cucumber';
 import { describe, test } from 'vitest';
+import { refuseLoneCaptures } from '@common/response-captures';
 
 // The blackbox suite runs vitest without `globals`, so `describe` and `test` are
 // not on the global object jest-cucumber looks them up on.
@@ -103,6 +104,11 @@ export function defineFeature(
 	feature: ParsedFeature,
 	defineScenarios: (defineScenario: DefineScenario) => void,
 ): void {
+	refuseLoneCaptures([
+		...feature.scenarios,
+		...feature.scenarioOutlines.flatMap(({ scenarios }) => scenarios),
+	]);
+
 	return defineFeatureFromLibrary(feature, (defineScenario) => {
 		const defineScenarioWithOptionalSteps: DefineScenario = (
 			scenarioTitle,

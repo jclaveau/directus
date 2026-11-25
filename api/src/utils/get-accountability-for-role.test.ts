@@ -26,8 +26,8 @@ describe('getAccountabilityForRole', async () => {
 			admin: false,
 			app: false,
 			ip: null,
+			memberRoles: [],
 			roles: [],
-			role: null,
 			user: null,
 		});
 	});
@@ -43,8 +43,8 @@ describe('getAccountabilityForRole', async () => {
 			admin: true,
 			app: true,
 			ip: null,
+			memberRoles: [],
 			roles: [],
-			role: null,
 			user: null,
 		});
 	});
@@ -69,7 +69,7 @@ describe('getAccountabilityForRole', async () => {
 			admin: false,
 			app: true,
 			roles: roles,
-			role: '123-456',
+			memberRoles: ['123-456'],
 			user: null,
 			ip: null,
 			grantedDbConnections: [],

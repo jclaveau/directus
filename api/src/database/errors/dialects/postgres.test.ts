@@ -2,6 +2,7 @@ import {
 	ContainsNullValuesError,
 	DatabasePoolExhaustedError,
 	InvalidForeignKeyError,
+	InvalidPayloadError,
 	NotNullViolationError,
 	RecordNotUniqueError,
 	ValueOutOfRangeError,
@@ -70,6 +71,59 @@ describe('unique violation (23505)', () => {
 
 		expect(result).toBeInstanceOf(RecordNotUniqueError);
 		expect(result).not.toBeInstanceOf(DatabasePoolExhaustedError);
+	});
+});
+
+describe('a role held twice from one manager (23505)', () => {
+	it('is a 400 naming the user and the role, the db error its cause', () => {
+		const databaseError = pgError({
+			code: '23505',
+			table: 'directus_role_members',
+			constraint: 'directus_role_members_user_role_managed_by_unique',
+			detail: 'Key ("user", role, COALESCE(managed_by,'
+				+ ' \'\'::character varying))=(user-1, role-staff, )'
+				+ ' already exists.',
+		});
+
+		const result = extractError(databaseError, { role: 'role-staff' });
+
+		expect(result).toEqual(new InvalidPayloadError({
+			reason: 'The user "user-1" already holds the role "role-staff"'
+				+ ' with managed_by null',
+		}));
+
+		expect((result as Error).cause).toBe(databaseError);
+	});
+
+	it('names the manager of a managed membership', () => {
+		expect(extractError(pgError({
+			code: '23505',
+			table: 'directus_role_members',
+			constraint: 'directus_role_members_user_role_managed_by_unique',
+			detail: 'Key ("user", role, COALESCE(managed_by,'
+				+ ' \'\'::character varying))=(user-2, role-press, ext:sync)'
+				+ ' already exists.',
+		}), {})).toEqual(new InvalidPayloadError({
+			reason: 'The user "user-2" already holds the role "role-press"'
+				+ ' with managed_by "ext:sync"',
+		}));
+	});
+
+	it('leaves another unique index of the table to RecordNotUniqueError', () => {
+		expect(extractError(
+			pgError({
+				code: '23505',
+				table: 'directus_role_members',
+				constraint: 'directus_role_members_pkey',
+				detail: 'Key (id)=(member-1) already exists.',
+			}),
+			{ id: 'member-1' },
+		))
+			.toEqual(new RecordNotUniqueError({
+				collection: 'directus_role_members',
+				field: 'id',
+				value: 'member-1',
+			}));
 	});
 });
 

@@ -321,7 +321,10 @@ router.delete(
 
 const inviteSchema = Joi.object({
 	email: Joi.alternatives(Joi.string().email(), Joi.array().items(Joi.string().email())).required(),
-	role: Joi.string().uuid({ version: 'uuidv4' }).required(),
+	roles: Joi.array()
+		.items(Joi.string().uuid({ version: 'uuidv4' }))
+		.min(1)
+		.required(),
 	invite_url: Joi.string().uri(),
 });
 
@@ -336,15 +339,21 @@ router.post(
 			schema: req.schema,
 		});
 
-		await service.inviteUser(req.body.email, req.body.role, req.body.invite_url || null);
+		await service.inviteUser(
+			req.body.email,
+			req.body.roles,
+			req.body.invite_url || null,
+		);
+
 		return next();
 	}),
 	respond,
 );
 
+// A logged-in user accepts into their account, sending no password.
 const acceptInviteSchema = Joi.object({
 	token: Joi.string().required(),
-	password: Joi.string().required(),
+	password: Joi.string(),
 });
 
 router.post(

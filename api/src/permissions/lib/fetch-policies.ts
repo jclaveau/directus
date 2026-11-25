@@ -9,15 +9,43 @@ export interface AccessRow {
 	role: string | null;
 }
 
-export const fetchPolicies = withCache('policies', _fetchPolicies, ({ roles, user, ip }) => ({ roles, user, ip }));
+export const fetchPolicyAccessRows = withCache(
+	'policy-access-rows',
+	_fetchPolicyAccessRows,
+	({ roles, user, ip }) => ({ roles, user, ip }),
+);
 
 /**
- * Fetch the policies associated with the current user accountability
+ * The policies of the accountability, by priority, each once: a policy
+ * reached through several member roles counts at its last place, so its
+ * presets win where the last role holding it would.
+ * staff → p-pub, editors → p-rev, press → p-pub: p-rev, p-pub
  */
-export async function _fetchPolicies(
-	{ roles, user, ip }: Pick<Accountability, 'user' | 'roles' | 'ip'>,
+export async function fetchPolicies(
+	accountability: Pick<Accountability, 'user' | 'roles' | 'ip'>,
 	context: Context,
 ): Promise<string[]> {
+	const accessRows = await fetchPolicyAccessRows(accountability, context);
+	const policyIds = accessRows.map(({ policy }) => policy.id);
+
+	// The access rows keep every role a policy came through, for the role
+	// stamps; only the policy list drops the earlier places.
+	return policyIds.filter((policyId, position) => {
+		return policyIds.lastIndexOf(policyId) === position;
+	});
+}
+
+/**
+ * The access rows granting the accountability its policies, by priority, each
+ * keeping the role it is attached to: null for a policy given to the user.
+ * Role rows follow `roles` (fetchUserRoles: parents root first, then the leaf
+ * roles by membership `sort`), and the user's own rows come last, so the
+ * presets of a later row win.
+ */
+export async function _fetchPolicyAccessRows(
+	{ roles, user, ip }: Pick<Accountability, 'user' | 'roles' | 'ip'>,
+	context: Context,
+): Promise<AccessRow[]> {
 	const { AccessService } = await import('../../services/access.js');
 	const accessService = new AccessService(context);
 
@@ -55,7 +83,5 @@ export async function _fetchPolicies(
 		return roles.indexOf(a.role) - roles.indexOf(b.role);
 	});
 
-	const ids = filteredAccessRows.map(({ policy }) => policy.id);
-
-	return ids;
+	return filteredAccessRows;
 }

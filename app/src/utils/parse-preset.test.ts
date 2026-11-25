@@ -11,10 +11,8 @@ beforeEach(() => {
 				userStore: {
 					currentUser: {
 						id: '1',
-						role: {
-							id: '1',
-							name: 'admin',
-						},
+						roles: [{ id: 'm1', role: { id: '1', name: 'admin' } }],
+						effectiveRoles: [{ id: '1' }],
 						// Custom nested user field
 						org: { name: 'Directus' },
 					},
@@ -27,14 +25,14 @@ beforeEach(() => {
 describe('parse-preset', () => {
 	it('Should return preset with populated variables', () => {
 		const preset = {
-			role: '$CURRENT_ROLE',
+			roles: '$CURRENT_MEMBER_ROLES',
 			orgName: '$CURRENT_USER.org.name',
 		};
 
 		const parsedPreset = parsePreset(preset);
 
 		expect(parsedPreset).toEqual({
-			role: '1',
+			roles: ['1'],
 			orgName: 'Directus',
 		});
 	});

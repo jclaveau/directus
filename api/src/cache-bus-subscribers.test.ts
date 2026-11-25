@@ -40,12 +40,30 @@ vi.mock('./redis/index.js', () => {
 	};
 });
 
-vi.mock('./scoped-cache/index.js', () => ({ dropScopedCacheIndex: vi.fn() }));
-vi.mock('./permissions/cache.js', () => ({ clearCache: vi.fn() }));
+vi.mock('./scoped-cache/index.js', () => {
+	return {
+		bumpScopedCacheEpochs: vi.fn(),
+		dropScopedCacheIndex: vi.fn(),
+	};
+});
+
+vi.mock('./permissions/cache.js', () => {
+	return {
+		clearCache: vi.fn(),
+		clearLocalCache: vi.fn(),
+	};
+});
+
 vi.mock('./logger/index.js', () => ({ useLogger: () => ({ warn: vi.fn() }) }));
 vi.mock('./utils/validate-env.js', () => ({ validateEnv: vi.fn() }));
 
 import { getCache } from './cache.js';
+import {
+	clearCache as clearPermissionCache,
+	clearLocalCache as clearLocalPermissionCache,
+} from './permissions/cache.js';
+import { bumpScopedCacheEpochs } from './scoped-cache/index.js';
+import { nodeId } from './utils/node-id.js';
 
 async function seedTiers() {
 	const { cache, systemCache, lockCache } = getCache();
@@ -88,6 +106,76 @@ describe('cacheCleared subscriber (peer-side flush)', () => {
 		expect(await lockCache.get('l')).toBe('l');
 	});
 
+	it('memory peer drops the responses another node flushed', async () => {
+		const { cache } = await seedTiers();
+
+		await handlers['cacheCleared']!({
+			targets: ['response'],
+			origin: 'other-node',
+		});
+
+		expect(await cache.get('r')).toBeUndefined();
+	});
+
+	// The cache-page button and an item write change no role: reloading every
+	// permission on every node for them is a cost with nothing to drop.
+	it('memory peer keeps its permissions on a responses-only flush', async () => {
+		await handlers['cacheCleared']!({
+			targets: ['response'],
+			origin: 'other-node',
+		});
+
+		expect(clearLocalPermissionCache).not.toHaveBeenCalled();
+		expect(clearPermissionCache).not.toHaveBeenCalled();
+	});
+
+	// Else a request on this node, reading its roles off the permissions tier the
+	// write did not clear here yet, caches a response built with the old roles.
+	it('memory peer drops its permissions before the responses', async () => {
+		const { cache } = await seedTiers();
+		const responseClear = vi.spyOn(cache, 'clear');
+
+		await handlers['cacheCleared']!({
+			targets: ['permissions', 'response'],
+			origin: 'other-node',
+		});
+
+		expect(
+			vi.mocked(clearLocalPermissionCache).mock.invocationCallOrder[0],
+		).toBeLessThan(responseClear.mock.invocationCallOrder[0]!);
+
+		responseClear.mockRestore();
+	});
+
+	// The sender's own clear already reached every node: a peer clearing its
+	// shared tier too would tell all of them again, N clears for one write.
+	it('memory peer drops only its own permissions copy', async () => {
+		await handlers['cacheCleared']!({
+			targets: ['permissions', 'response'],
+			origin: 'other-node',
+		});
+
+		expect(clearLocalPermissionCache).toHaveBeenCalledExactlyOnceWith();
+		expect(clearPermissionCache).not.toHaveBeenCalled();
+	});
+
+	it('memory peer keeps its permissions on a system flush', async () => {
+		await handlers['cacheCleared']!({
+			targets: ['system'],
+			origin: 'other-node',
+		});
+
+		expect(clearPermissionCache).not.toHaveBeenCalled();
+	});
+
+	it('memory node keeps what it sent, having cleared it before', async () => {
+		const { cache } = await seedTiers();
+
+		await handlers['cacheCleared']!({ targets: ['response'], origin: nodeId });
+
+		expect(await cache.get('r')).toBe('r');
+	});
+
 	it('redis peer is a no-op on the shared tiers', async () => {
 		const tiers = await seedTiers();
 		env['CACHE_STORE'] = 'redis';
@@ -97,6 +185,59 @@ describe('cacheCleared subscriber (peer-side flush)', () => {
 		expect(await tiers.cache.get('r')).toBe('r');
 		expect(await tiers.systemCache.get('s')).toBe('s');
 		expect(await tiers.lockCache.get('l')).toBe('l');
+	});
+
+	// The writer cleared the shared responses once: a request here reading this
+	// node's old permissions would fill them again with the old roles, and a
+	// read already in flight on them declines its fill once the counter moved.
+	it('redis peer drops its own permissions, then moves the counter', async () => {
+		const tiers = await seedTiers();
+		env['CACHE_STORE'] = 'redis';
+
+		await handlers['cacheCleared']!({
+			targets: ['permissions'],
+			origin: 'other-node',
+		});
+
+		expect(clearLocalPermissionCache).toHaveBeenCalledExactlyOnceWith();
+		expect(bumpScopedCacheEpochs).toHaveBeenCalledExactlyOnceWith(['*']);
+
+		const [permissionsClear] = vi.mocked(clearLocalPermissionCache)
+			.mock
+			.invocationCallOrder;
+
+		const [counterMove] = vi.mocked(bumpScopedCacheEpochs)
+			.mock
+			.invocationCallOrder;
+
+		expect(permissionsClear).toBeLessThan(counterMove!);
+
+		expect(clearPermissionCache).not.toHaveBeenCalled();
+		expect(await tiers.cache.get('r')).toBe('r');
+	});
+
+	it('redis node keeps the permissions it told the peers of', async () => {
+		env['CACHE_STORE'] = 'redis';
+
+		await handlers['cacheCleared']!({
+			targets: ['permissions'],
+			origin: nodeId,
+		});
+
+		expect(clearLocalPermissionCache).not.toHaveBeenCalled();
+		expect(bumpScopedCacheEpochs).not.toHaveBeenCalled();
+	});
+
+	it('redis peer keeps its permissions on a responses-only clear', async () => {
+		env['CACHE_STORE'] = 'redis';
+
+		await handlers['cacheCleared']!({
+			targets: ['response'],
+			origin: 'other-node',
+		});
+
+		expect(clearLocalPermissionCache).not.toHaveBeenCalled();
+		expect(bumpScopedCacheEpochs).not.toHaveBeenCalled();
 	});
 });
 

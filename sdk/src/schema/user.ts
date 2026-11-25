@@ -1,5 +1,5 @@
 import type { MergeCoreCollection } from '../index.js';
-import type { DirectusRole } from './role.js';
+import type { DirectusRoleMember } from './role-member.js';
 import type { DirectusFile } from './file.js';
 import type { DirectusPolicy } from './policy.js';
 
@@ -24,7 +24,7 @@ export type DirectusUser<Schema = any> = MergeCoreCollection<
 		theme: string | null;
 		tfa_secret: string | null;
 		status: string;
-		role: DirectusRole<Schema> | string | null;
+		roles: string[] | DirectusRoleMember<Schema>[];
 		token: string | null;
 		last_access: 'datetime' | null;
 		last_page: string | null;

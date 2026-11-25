@@ -13,6 +13,7 @@ import type { DirectusPanel } from './panel.js';
 import type { DirectusPermission } from './permission.js';
 import type { DirectusPreset } from './preset.js';
 import type { DirectusRelation } from './relation.js';
+import type { DirectusRoleMember } from './role-member.js';
 import type { DirectusRole } from './role.js';
 import type { DirectusSettings } from './settings.js';
 import type { DirectusShare } from './share.js';
@@ -36,6 +37,7 @@ export interface CoreSchema<Schema = any> {
 	directus_permissions: DirectusPermission<Schema>[];
 	directus_presets: DirectusPreset<Schema>[];
 	directus_relations: DirectusRelation<Schema>[];
+	directus_role_members: DirectusRoleMember<Schema>[];
 	directus_roles: DirectusRole<Schema>[];
 	directus_settings: DirectusSettings<Schema>;
 	directus_shares: DirectusShare<Schema>[];

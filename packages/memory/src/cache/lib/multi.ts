@@ -141,6 +141,16 @@ export class CacheMulti implements Cache {
 		await this.clearOthers();
 	}
 
+	/**
+	 * Clear this process's tier alone, telling no other process: for a process
+	 * another one told of a clear it made, of redis and of every peer, already.
+	 * A redis read crossing it refills nothing.
+	 */
+	async clearLocalTier(): Promise<void> {
+		this.clearGeneration++;
+		await this.local.clear();
+	}
+
 	private async onMessageClear(payload: CacheMultiMessageClear) {
 		// Ignore messages that were sent by the current process. The message is sent in the set and
 		// delete methods; we don't need to delete keys that are already up-to-date / already deleted

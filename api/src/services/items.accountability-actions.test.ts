@@ -64,7 +64,6 @@ schema.collections['directus_activity']!.accountability = null;
 schema.collections['directus_revisions']!.accountability = null;
 
 const admin = {
-	role: 'admin',
 	user: 'admin-1',
 	admin: true,
 	app: false,

@@ -14,10 +14,20 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { getDatabaseClient } from '../database/index.js';
+import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
+import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+import {
+	processPayload,
+} from '../permissions/modules/process-payload/process-payload.js';
+// eslint-disable-next-line max-len
+import { fetchGlobalAccessForRoles } from '../permissions/modules/fetch-global-access/lib/fetch-global-access-for-roles.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
+import {
+	clearPermissionsCacheAfterCommit,
+	flushResponseCacheAfterCommit,
+} from '../utils/clear-caches-after-commit.js';
 import { verifyJWT } from '../utils/jwt.js';
-import { transaction } from '../utils/transaction.js';
 import { withMeta } from '../utils/read-meta.js';
 import { ItemsService, MailService, UsersService } from './index.js';
 import { SettingsService } from './settings.js';
@@ -50,10 +60,63 @@ vi.mock('@directus/env', () => ({
 
 vi.mock('../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js');
 
+vi.mock('../permissions/lib/fetch-policies.js', async (importOriginal) => {
+	const { fetchPolicies: realFetchPolicies } = await importOriginal<
+		typeof import('../permissions/lib/fetch-policies.js')
+	>();
+
+	return { fetchPolicies: vi.fn(realFetchPolicies) };
+});
+
+vi.mock('../permissions/lib/fetch-roles-tree.js', () => {
+	return {
+		fetchRolesTree: vi.fn(async (role: string) => [role]),
+	};
+});
+
+vi.mock(
+	'../permissions/modules/fetch-global-access/lib/fetch-global-access-for-roles.js',
+	() => {
+		return {
+			fetchGlobalAccessForRoles: vi.fn(async () => {
+				return { admin: false, app: true };
+			}),
+		};
+	},
+);
+
+vi.mock(
+	'../permissions/modules/process-payload/process-payload.js',
+	async (importOriginal) => {
+		const { processPayload: realProcessPayload } = await importOriginal<
+			typeof import('../permissions/modules/process-payload/process-payload.js')
+		>();
+
+		return { processPayload: vi.fn(realProcessPayload) };
+	},
+);
+
+vi.mock('../websocket/memberships-changed.js', () => {
+	return { announceMembershipsChanged: vi.fn() };
+});
+
 vi.mock('../cache.js', async (importOriginal) => {
 	return {
 		...await importOriginal<typeof import('../cache.js')>(),
 		clearSystemCache: vi.fn(),
+	};
+});
+
+vi.mock('../utils/clear-caches-after-commit.js', async (importOriginal) => {
+	const original =
+		await importOriginal<typeof import('../utils/clear-caches-after-commit.js')>();
+
+	return {
+		...original,
+		clearPermissionsCacheAfterCommit:
+			vi.fn(original.clearPermissionsCacheAfterCommit),
+		flushResponseCacheAfterCommit: vi.fn(original.flushResponseCacheAfterCommit),
+		purgeMutatedRowsAfterCommit: vi.fn(original.purgeMutatedRowsAfterCommit),
 	};
 });
 
@@ -77,7 +140,6 @@ const schema = new SchemaBuilder()
 		c.field('email').string();
 		c.field('password').string();
 		c.field('status').string();
-		c.field('role').uuid();
 	})
 	.collection('directus_comments', (c) => {
 		c.field('id').uuid()
@@ -88,6 +150,14 @@ const schema = new SchemaBuilder()
 	.collection('directus_notifications', (c) => {
 		c.field('id').id();
 		c.field('sender').uuid();
+	})
+	.collection('directus_role_members', (c) => {
+		c.field('id').uuid()
+			.primary();
+	})
+	.collection('directus_invites', (c) => {
+		c.field('id').uuid()
+			.primary();
 	})
 	.collection('directus_versions', (c) => {
 		c.field('id').uuid()
@@ -192,6 +262,17 @@ describe('Integration Tests', () => {
 				}));
 			});
 
+			it('refuses a role, replaced by the memberships in roles', async () => {
+				const opts: MutationOptions = {};
+
+				await service.createMany([{ role: testRoleId }], opts);
+
+				expect(opts.preMutationError).toEqual(new InvalidPayloadError({
+					reason: '"role" is replaced by the memberships in "roles":'
+						+ ' send "roles": [{ "role": <role id> }]',
+				}));
+			});
+
 			it('should request user limits checks', async () => {
 				const opts: MutationOptions = {};
 
@@ -211,7 +292,25 @@ describe('Integration Tests', () => {
 				expect(clearUserSessionsSpy).not.toBeCalled();
 			});
 
-			it('should request all user integrity checks if role is changed', async () => {
+			it('refuses a role, replaced by the memberships in roles', async () => {
+				const opts: MutationOptions = {};
+
+				await service.updateMany(
+					['8e2b4c10-5d3a-4f6e-9a7b-000000000060'],
+					{ role: testRoleId },
+					opts,
+				);
+
+				expect(opts.preMutationErrorsByKey).toEqual(new Map([[
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000060',
+					new InvalidPayloadError({
+						reason: '"role" is replaced by the memberships in "roles":'
+							+ ' send "roles": [{ "role": <role id> }]',
+					}),
+				]]));
+			});
+
+			it('should request all integrity checks if memberships change', async () => {
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
 
@@ -219,7 +318,7 @@ describe('Integration Tests', () => {
 
 				await service.updateMany(
 					['8e2b4c10-5d3a-4f6e-9a7b-000000000004'],
-					{ role: testRoleId },
+					{ roles: [{ role: testRoleId }] },
 					{ onRequireUserIntegrityCheck },
 				);
 
@@ -264,54 +363,31 @@ describe('Integration Tests', () => {
 				expect(clearUserSessionsSpy).not.toBeCalled();
 			});
 
-			it('should clear caches if role is changed', async () => {
+			it(oneLine`
+				leaves the caches to the memberships' service when the memberships
+				change
+			`, async () => {
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
-
-				const clearCacheSpy = vi.spyOn(UsersService.prototype as any, 'clearCaches');
 
 				await service.updateMany(
 					['8e2b4c10-5d3a-4f6e-9a7b-000000000007'],
-					{ role: testRoleId },
+					{ roles: [{ role: testRoleId }] },
 					{ onRequireUserIntegrityCheck: vi.fn() },
 				);
 
-				expect(clearCacheSpy).toHaveBeenCalled();
+				expect(clearSystemCache).not.toHaveBeenCalled();
 			});
 
-			it('clears the caches once the parent transaction has committed', async () => {
+			it('checks every integrity when a users.update hook sets roles', async () => {
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
 
-				const transactionStates: string[][] = [];
-
-				vi.mocked(clearSystemCache).mockImplementationOnce(async () => {
-					transactionStates.push(
-						tracker.history.transactions.map((trx) => trx.state),
-					);
-				});
-
-				await transaction(db, async (trx) => {
-					await new UsersService({ knex: trx, schema }).updateMany(
-						['8e2b4c10-5d3a-4f6e-9a7b-000000000051'],
-						{ role: testRoleId },
-						{ onRequireUserIntegrityCheck: vi.fn() },
-					);
-				});
-
-				expect(transactionStates).toEqual([['committed']]);
-			});
-
-			it('clears the caches when a users.update hook changes the role', async () => {
-				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
-				tracker.on.update('directus_users').response(1);
-
-				const clearCacheSpy = vi.spyOn(UsersService.prototype as any, 'clearCaches');
 				const onRequireUserIntegrityCheck = vi.fn();
 
 				const giveRole = () => {
 					return [{
-						data: { first_name: 'Ada', role: testRoleId },
+						data: { first_name: 'Ada', roles: [{ role: testRoleId }] },
 						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000040'],
 					}];
 				};
@@ -332,7 +408,7 @@ describe('Integration Tests', () => {
 				expect(onRequireUserIntegrityCheck)
 					.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
 
-				expect(clearCacheSpy).toHaveBeenCalled();
+				expect(clearSystemCache).not.toHaveBeenCalled();
 			});
 
 			it('logs out the users a users.update hook suspends', async () => {
@@ -445,7 +521,7 @@ describe('Integration Tests', () => {
 					const service = new UsersService({
 						knex: db,
 						schema,
-						accountability: { role: 'test', admin: false } as Accountability,
+						accountability: { user: 'user-id-9', admin: false } as Accountability,
 					});
 
 					it.each(['tfa_secret', 'provider', 'external_identifier'])('%s', async (field) => {
@@ -465,7 +541,7 @@ describe('Integration Tests', () => {
 				});
 
 				describe.each([
-					['admin users', { role: 'admin', admin: true } as Accountability],
+					['admin users', { user: 'user-id-9', admin: true } as Accountability],
 					['null accountability', null],
 				])('should allow updates for %s', (_, accountability) => {
 					const service = new UsersService({
@@ -589,7 +665,10 @@ describe('Integration Tests', () => {
 
 				await service.updateBatch([
 					{ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000029', status: 'active' },
-					{ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000030', role: testRoleId },
+					{
+						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000030',
+						roles: [{ role: testRoleId }],
+					},
 				], { onRequireUserIntegrityCheck });
 
 				expect(onRequireUserIntegrityCheck).toHaveBeenCalledTimes(1);
@@ -618,6 +697,8 @@ describe('Integration Tests', () => {
 			vi.spyOn(ItemsService.prototype, 'deleteMany').mockResolvedValue(['user-id-15']);
 
 			it('should validate remaining admin users', async () => {
+				tracker.on.delete('directus_role_members').response(0);
+
 				const getKeysByQuerySpy = vi
 					.spyOn(ItemsService.prototype, 'getKeysByQuery')
 					.mockResolvedValue([]);
@@ -629,8 +710,10 @@ describe('Integration Tests', () => {
 				const service = new UsersService({
 					knex: db,
 					schema,
-					accountability: { role: 'test', admin: false } as Accountability,
+					accountability: { user: 'user-id-9', admin: false } as Accountability,
 				});
+
+				tracker.on.select('directus_invites').response([]);
 
 				await service.deleteMany(['user-id-16']);
 
@@ -639,10 +722,40 @@ describe('Integration Tests', () => {
 			});
 
 			it(oneLine`
+				clears the permissions cache once the delete's transaction settles,
+				the memberships cascading with the user
+			`, async () => {
+				tracker.on.delete('directus_role_members').response(0);
+
+				const getKeysByQuerySpy = vi
+					.spyOn(ItemsService.prototype, 'getKeysByQuery')
+					.mockResolvedValue([]);
+
+				onTestFinished(() => {
+					getKeysByQuerySpy.mockRestore();
+				});
+
+				const clearedThrough: boolean[] = [];
+
+				vi.mocked(clearPermissionsCacheAfterCommit)
+					.mockImplementationOnce(async (knex) => {
+						clearedThrough.push(knex.isTransaction === true);
+					});
+
+				tracker.on.select('directus_invites').response([]);
+
+				await service.deleteMany(['user-id-16']);
+
+				expect(clearedThrough).toEqual([true]);
+			});
+
+			it(oneLine`
 				unlinks the user from the comments and notifications through
 				ItemsService, so the purge sees each row before and after the write, and
 				skips the versions with none
 			`, async () => {
+				tracker.on.delete('directus_role_members').response(0);
+
 				const unlinkCalls: unknown[] = [];
 
 				const getKeysByQuerySpy = vi
@@ -681,6 +794,8 @@ describe('Integration Tests', () => {
 					getKeysByQuerySpy.mockRestore();
 					updateManySpy.mockRestore();
 				});
+
+				tracker.on.select('directus_invites').response([]);
 
 				await service.deleteMany(['user-id-16']);
 
@@ -723,6 +838,8 @@ describe('Integration Tests', () => {
 				unlinks 10 000 rows per update, since one statement past 65 535 keys would
 				overflow Postgres's bind parameters
 			`, async () => {
+				tracker.on.delete('directus_role_members').response(0);
+
 				const getKeysByQuerySpy = vi
 					.spyOn(ItemsService.prototype, 'getKeysByQuery')
 					.mockImplementation(async function (this: ItemsService) {
@@ -740,6 +857,8 @@ describe('Integration Tests', () => {
 					updateManySpy.mockRestore();
 				});
 
+				tracker.on.select('directus_invites').response([]);
+
 				await service.deleteMany(['user-id-16']);
 
 				expect(updateManySpy.mock.calls).toEqual([
@@ -751,6 +870,56 @@ describe('Integration Tests', () => {
 					[[10_000], { user_updated: null }, { emitEvents: false }],
 				]);
 			});
+
+			it(oneLine`
+				deletes the invites a deleted inviter leaves twice with a null inviter,
+				keeping the oldest of each email and role
+			`, async () => {
+				tracker.on.delete('directus_role_members').response(0);
+
+				const getKeysByQuerySpy = vi
+					.spyOn(ItemsService.prototype, 'getKeysByQuery')
+					.mockResolvedValue([]);
+
+				onTestFinished(() => {
+					getKeysByQuerySpy.mockRestore();
+				});
+
+				tracker.on.select('directus_invites').response([
+					{ id: 'invite-1', email: 'ann@example.com', role: 'role-a' },
+					{ id: 'invite-2', email: 'Ann@example.com', role: 'role-a' },
+					{ id: 'invite-3', email: 'ann@example.com', role: 'role-b' },
+				]);
+
+				const deletedKeys: unknown[] = [];
+
+				vi.mocked(ItemsService.prototype.deleteMany)
+					.mockImplementationOnce(async function (this: ItemsService, keys) {
+						deletedKeys.push([this.collection, keys]);
+						return keys;
+					})
+					.mockImplementationOnce(async function (this: ItemsService, keys) {
+						deletedKeys.push([this.collection, keys]);
+						return keys;
+					});
+
+				await service.deleteMany(['user-id-16']);
+
+				expect(tracker.history.select.map(({ sql, bindings }) => [sql, bindings]))
+					.toEqual([[
+						'select "id", "email", "role" from "directus_invites"'
+						+ ' where "inviter" in (?) or ("inviter" is null'
+						+ ' and LOWER("email") in (select LOWER("email")'
+						+ ' from "directus_invites" where "inviter" in (?)))'
+						+ ' order by "date_created" asc, "id" asc',
+						['user-id-16', 'user-id-16'],
+					]]);
+
+				expect(deletedKeys).toEqual([
+					['directus_invites', ['invite-2']],
+					['directus_users', ['user-id-16']],
+				]);
+			});
 		});
 
 		describe('invite', () => {
@@ -760,106 +929,455 @@ describe('Integration Tests', () => {
 
 			vi.spyOn(UsersService.prototype as any, 'inviteUrl').mockImplementation(() => vi.fn());
 
-			it('should invite new users', async () => {
-				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
-					.mockResolvedValueOnce(undefined);
+			it(oneLine`
+				invites an email with one invite per role, writing no user, no
+				membership and clearing no cache
+			`, async () => {
+				tracker.on.select('directus_invites').response([]);
 
-				const service = new UsersService({
+				const writes: unknown[] = [];
+
+				vi.spyOn(ItemsService.prototype, 'createMany')
+					.mockImplementation(async function (this: ItemsService, rows, opts) {
+						writes.push({ collection: this.collection, rows, opts });
+						return [];
+					});
+
+				await new UsersService({
 					knex: db,
 					schema,
-					accountability: { role: 'test', admin: true } as Accountability,
-				});
+					accountability: { user: 'inviter-id', admin: true } as Accountability,
+				}).inviteUser('User@example.com', ['invite-role', 'invite-role'], null);
 
-				const promise = service.inviteUser('user@example.com', 'invite-role', null);
+				expect(tracker.history.select).toMatchObject([{
+					sql: 'select "id", "role" from "directus_invites"'
+						+ ' where LOWER("email") = ? and ("inviter" = ?)',
+					bindings: ['user@example.com', 'inviter-id'],
+				}]);
 
-				await expect(promise).resolves.not.toThrow();
+				expect(superCreateOneSpy).not.toBeCalled();
 
-				expect(superCreateOneSpy.mock.lastCall![0]).toEqual(
-					expect.objectContaining({
-						email: 'user@example.com',
-						status: 'invited',
-						role: 'invite-role',
-					}),
+				expect(writes).toEqual([
+					{
+						collection: 'directus_invites',
+						rows: [{
+							email: 'User@example.com',
+							role: 'invite-role',
+							inviter: 'inviter-id',
+						}],
+						opts: {},
+					},
+				]);
+
+				expect(fetchGlobalAccessForRoles).toHaveBeenCalledExactlyOnceWith(
+					{ roles: ['invite-role'], ip: null },
+					db,
 				);
 
+				expect(clearPermissionsCacheAfterCommit).not.toHaveBeenCalled();
+				expect(flushResponseCacheAfterCommit).not.toHaveBeenCalled();
+				expect(clearSystemCache).not.toHaveBeenCalled();
 				expect(mailService.send).toBeCalledTimes(1);
 			});
 
-			it('should re-send invites for invited users', async () => {
-				const service = new UsersService({
+			it(oneLine`
+				checks a non-admin inviter's permission to create each invite row
+			`, async () => {
+				vi.mocked(fetchPolicies).mockResolvedValueOnce(['policy-held']);
+
+				tracker.on.select('directus_access').response([
+					{ id: 'policy-held', name: 'Held' },
+				]);
+
+				tracker.on.select('directus_invites').response([]);
+
+				vi.mocked(processPayload).mockResolvedValueOnce({})
+					.mockResolvedValueOnce({});
+
+				const createManySpy = vi.spyOn(ItemsService.prototype, 'createMany')
+					.mockResolvedValue([]);
+
+				const inviterAccountability = {
+					user: 'inviter-id',
+					admin: false,
+					app: true,
+					ip: null,
+					memberRoles: [],
+					roles: ['inviter-role'],
+				};
+
+				await new UsersService({
 					knex: db,
 					schema,
-					accountability: { role: 'test', admin: true } as Accountability,
-				});
+					accountability: inviterAccountability,
+				}).inviteUser(
+					'user@example.com',
+					['first-role', 'second-role', 'first-role'],
+					null,
+				);
 
-				// mock an invited user
-				vi.spyOn(UsersService.prototype as any, 'getUserByEmail').mockResolvedValueOnce({
-					status: 'invited',
-					role: 'invite-role',
-				});
+				expect(vi.mocked(processPayload).mock.calls).toEqual([
+					[
+						{
+							accountability: inviterAccountability,
+							action: 'create',
+							collection: 'directus_invites',
+							payload: { email: 'user@example.com', role: 'first-role' },
+							nested: [],
+						},
+						{ knex: db, schema },
+					],
+					[
+						{
+							accountability: inviterAccountability,
+							action: 'create',
+							collection: 'directus_invites',
+							payload: { email: 'user@example.com', role: 'second-role' },
+							nested: [],
+						},
+						{ knex: db, schema },
+					],
+				]);
 
-				const promise = service.inviteUser('user@example.com', 'invite-role', null);
-				await expect(promise).resolves.not.toThrow();
-
-				expect(superCreateOneSpy).not.toBeCalled();
-				expect(mailService.send).toBeCalledTimes(1);
+				expect(createManySpy).toHaveBeenCalledExactlyOnceWith(
+					[
+						{
+							email: 'user@example.com',
+							role: 'first-role',
+							inviter: 'inviter-id',
+						},
+						{
+							email: 'user@example.com',
+							role: 'second-role',
+							inviter: 'inviter-id',
+						},
+					],
+					{},
+				);
 			});
 
-			it('should not re-send invites for users in state other than invited', async () => {
-				const service = new UsersService({
+			it(oneLine`
+				refuses a non-admin inviter a role whose tree grants a policy they
+				don't hold, naming the role and the policy
+			`, async () => {
+				vi.mocked(fetchPolicies).mockResolvedValueOnce(['policy-held']);
+
+				vi.mocked(fetchRolesTree)
+					.mockResolvedValueOnce(['editor-role'])
+					.mockResolvedValueOnce(['parent-role', 'editor-role']);
+
+				tracker.on.select('directus_access').response([
+					{ id: 'policy-held', name: 'Held' },
+					{ id: 'policy-publish', name: 'Publish' },
+				]);
+
+				tracker.on.select('directus_roles').response({ name: 'Editors' });
+
+				const createManySpy = vi.spyOn(ItemsService.prototype, 'createMany');
+
+				const promise = new UsersService({
 					knex: db,
 					schema,
-					accountability: { role: 'test', admin: true } as Accountability,
-				});
+					accountability: {
+						user: 'inviter-id',
+						admin: false,
+						app: true,
+						ip: null,
+						memberRoles: [],
+						roles: ['inviter-role'],
+					},
+				}).inviteUser('user@example.com', ['editor-role'], null);
 
-				// mock an active user
-				vi.spyOn(UsersService.prototype as any, 'getUserByEmail').mockResolvedValueOnce({
-					status: 'active',
-					role: 'invite-role',
-				});
+				await expect(promise).rejects.toHaveProperty(
+					'message',
+					'Invalid payload. You can\'t invite into role "Editors": it grants'
+					+ ' policy "Publish" you don\'t hold.',
+				);
 
-				const promise = service.inviteUser('user@example.com', 'invite-role', null);
-				await expect(promise).resolves.not.toThrow();
+				expect(tracker.history.select).toMatchObject([
+					{
+						sql: 'select "directus_policies"."id", "directus_policies"."name"'
+							+ ' from "directus_access" inner join "directus_policies"'
+							+ ' on "directus_policies"."id" = "directus_access"."policy"'
+							+ ' where "directus_access"."role" in (?, ?)'
+							+ ' order by "directus_policies"."name" asc',
+						bindings: ['parent-role', 'editor-role'],
+					},
+					{
+						sql: 'select "name" from "directus_roles" where "id" = ? limit ?',
+						bindings: ['editor-role', 1],
+					},
+				]);
 
-				expect(superCreateOneSpy).not.toBeCalled();
+				expect(createManySpy).not.toBeCalled();
 				expect(mailService.send).not.toBeCalled();
 			});
 
-			it('should update role when re-sent invite contains different role than user has', async () => {
-				const service = new UsersService({
+			it(oneLine`
+				refuses an inviter not allowed to create the invite row, before the
+				URL off the allow list
+			`, async () => {
+				vi.mocked(fetchPolicies).mockResolvedValueOnce([]);
+				tracker.on.select('directus_access').response([]);
+				vi.mocked(processPayload).mockRejectedValueOnce(new ForbiddenError());
+
+				const createManySpy = vi.spyOn(ItemsService.prototype, 'createMany');
+
+				const promise = new UsersService({
 					knex: db,
 					schema,
-					accountability: { role: 'test', admin: true } as Accountability,
-				});
-
-				const mockUser = {
-					id: '8e2b4c10-5d3a-4f6e-9a7b-000000000017',
-					status: 'invited',
-					role: 'existing-role',
-				};
-
-				// mock an invited user with different role
-				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
-					.mockResolvedValueOnce(mockUser);
-
-				const promise = service.inviteUser('user@example.com', 'invite-role', null);
-				await expect(promise).resolves.not.toThrow();
-
-				expect(superUpdateGroupsSpy).toHaveBeenCalledWith(
-					[{ data: { role: 'invite-role' }, keys: [mockUser.id] }],
-					expect.anything(),
+					accountability: {
+						user: 'inviter-id',
+						admin: false,
+						app: true,
+						ip: null,
+						memberRoles: [],
+						roles: ['inviter-role'],
+					},
+				}).inviteUser(
+					'user@example.com',
+					['invite-role'],
+					'https://elsewhere.example.com/invite',
 				);
+
+				await expect(promise).rejects.toEqual(new ForbiddenError());
+
+				await expect(promise).rejects.toHaveProperty(
+					'message',
+					'You don\'t have permission to access this.',
+				);
+
+				expect(createManySpy).not.toBeCalled();
+				expect(mailService.send).not.toBeCalled();
+			});
+
+			it('refuses an invite to a role reaching admin access', async () => {
+				vi.mocked(fetchRolesTree)
+					.mockResolvedValueOnce(['invite-role'])
+					.mockResolvedValueOnce(['admin-child-role', 'admin-role']);
+
+				vi.mocked(fetchGlobalAccessForRoles)
+					.mockResolvedValueOnce({
+						admin: false,
+						app: true,
+						grantedDbConnections: [],
+					})
+					.mockResolvedValueOnce({
+						admin: true,
+						app: true,
+						grantedDbConnections: [],
+					});
+
+				const promise = new UsersService({
+					knex: db,
+					schema,
+					accountability: { user: 'inviter-id', admin: true } as Accountability,
+				}).inviteUser(
+					'user@example.com',
+					['invite-role', 'admin-child-role'],
+					null,
+				);
+
+				await expect(promise).rejects.toHaveProperty(
+					'message',
+					'Invalid payload. Role "admin-child-role" gives admin access,'
+					+ ' which an invite can\'t give: add the membership once the user'
+					+ ' accepted.',
+				);
+
+				expect(vi.mocked(fetchGlobalAccessForRoles).mock.calls).toEqual([
+					[{ roles: ['invite-role'], ip: null }, db],
+					[{ roles: ['admin-child-role', 'admin-role'], ip: null }, db],
+				]);
+
+				expect(mailService.send).not.toBeCalled();
+			});
+
+			it(oneLine`
+				invites the email of an active account too, proposing it the roles
+				by mail
+			`, async () => {
+				tracker.on.select('directus_invites').response([]);
+
+				const createManySpy = vi.spyOn(ItemsService.prototype, 'createMany')
+					.mockResolvedValue([]);
+
+				const getUserByEmailSpy = vi
+					.spyOn(UsersService.prototype as any, 'getUserByEmail');
+
+				await new UsersService({
+					knex: db,
+					schema,
+					accountability: { user: 'inviter-id', admin: true } as Accountability,
+				}).inviteUser('active@example.com', ['invite-role'], null);
+
+				expect(getUserByEmailSpy).not.toBeCalled();
+
+				expect(createManySpy).toHaveBeenCalledExactlyOnceWith(
+					[{
+						email: 'active@example.com',
+						role: 'invite-role',
+						inviter: 'inviter-id',
+					}],
+					{},
+				);
+
+				expect(mailService.send).toBeCalledTimes(1);
+			});
+
+			it(oneLine`
+				replaces the invites of the same inviter on a re-invite, reading
+				no other inviter's
+			`, async () => {
+				tracker.on.select('directus_invites').response([
+					{ id: 'invite-id-2', role: 'old-role' },
+					{ id: 'invite-id-3', role: 'shared-role' },
+				]);
+
+				const writes: unknown[] = [];
+
+				vi.spyOn(ItemsService.prototype, 'createMany')
+					.mockImplementation(async function (this: ItemsService, rows, opts) {
+						writes.push({ collection: this.collection, rows, opts });
+						return [];
+					});
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockImplementation(async function (this: ItemsService, keys) {
+						writes.push({ collection: this.collection, keys });
+						return keys;
+					});
+
+				await new UsersService({
+					knex: db,
+					schema,
+					accountability: { user: 'inviter-id', admin: true } as Accountability,
+				}).inviteUser('user@example.com', ['shared-role', 'new-role'], null);
+
+				expect(tracker.history.select).toMatchObject([{
+					sql: 'select "id", "role" from "directus_invites"'
+						+ ' where LOWER("email") = ? and ("inviter" = ?)',
+					bindings: ['user@example.com', 'inviter-id'],
+				}]);
+
+				expect(writes).toEqual([
+					{
+						collection: 'directus_invites',
+						rows: [{
+							email: 'user@example.com',
+							role: 'new-role',
+							inviter: 'inviter-id',
+						}],
+						opts: {},
+					},
+					{
+						collection: 'directus_invites',
+						keys: ['invite-id-2'],
+					},
+				]);
+
+				expect(mailService.send).toBeCalledTimes(1);
+			});
+
+			it('writes nothing on a re-invite to the same roles', async () => {
+				tracker.on.select('directus_invites').response([
+					{ id: 'invite-id-5', role: 'invite-role' },
+				]);
+
+				const createMany = vi.spyOn(ItemsService.prototype, 'createMany');
+				const deleteMany = vi.spyOn(ItemsService.prototype, 'deleteMany');
+
+				await new UsersService({
+					knex: db,
+					schema,
+					accountability: { user: 'inviter-id', admin: true } as Accountability,
+				}).inviteUser('user@example.com', ['invite-role'], null);
+
+				expect(createMany).not.toHaveBeenCalled();
+				expect(deleteMany).not.toHaveBeenCalled();
+				expect(mailService.send).toBeCalledTimes(1);
+			});
+
+			it('records an invite from a service with a null inviter', async () => {
+				tracker.on.select('directus_invites').response([]);
+
+				const writes: unknown[] = [];
+
+				vi.spyOn(ItemsService.prototype, 'createMany')
+					.mockImplementation(async function (this: ItemsService, rows, opts) {
+						writes.push({ collection: this.collection, rows, opts });
+						return [];
+					});
+
+				await new UsersService({ knex: db, schema, accountability: null })
+					.inviteUser('user@example.com', ['invite-role'], null);
+
+				expect(writes).toEqual([
+					{
+						collection: 'directus_invites',
+						rows: [{
+							email: 'user@example.com',
+							role: 'invite-role',
+							inviter: null,
+						}],
+						opts: {},
+					},
+				]);
+
+				expect(mailService.send).toBeCalledTimes(1);
+			});
+
+			it('a service re-invite replaces only the no-inviter invites', async () => {
+				tracker.on.select('directus_invites').response([
+					{ id: 'invite-id-6', role: 'old-role' },
+				]);
+
+				const writes: unknown[] = [];
+
+				vi.spyOn(ItemsService.prototype, 'createMany')
+					.mockImplementation(async function (this: ItemsService, rows, opts) {
+						writes.push({ collection: this.collection, rows, opts });
+						return [];
+					});
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockImplementation(async function (this: ItemsService, keys) {
+						writes.push({ collection: this.collection, keys });
+						return keys;
+					});
+
+				await new UsersService({ knex: db, schema, accountability: null })
+					.inviteUser('user@example.com', ['invite-role'], null);
+
+				expect(tracker.history.select).toMatchObject([{
+					sql: 'select "id", "role" from "directus_invites"'
+						+ ' where LOWER("email") = ? and ("inviter" is null)',
+					bindings: ['user@example.com'],
+				}]);
+
+				expect(writes).toEqual([
+					{
+						collection: 'directus_invites',
+						rows: [{
+							email: 'user@example.com',
+							role: 'invite-role',
+							inviter: null,
+						}],
+						opts: {},
+					},
+					{
+						collection: 'directus_invites',
+						keys: ['invite-id-6'],
+					},
+				]);
 			});
 
 			it(
-				'refuses re-inviting an invited user to a URL off the allow list',
+				'refuses an invite to a URL off the allow list, writing nothing',
 				async () => {
-					vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
-						.mockResolvedValueOnce({ status: 'invited', role: 'invite-role' });
-
 					const promise = service.inviteUser(
 						'user@example.com',
-						'invite-role',
+						['invite-role'],
 						'https://elsewhere.example.com/invite',
 					);
 
@@ -868,26 +1386,8 @@ describe('Integration Tests', () => {
 							+ 'can\'t be used to invite users',
 					}));
 
+					expect(tracker.history.all).toEqual([]);
 					expect(mailService.send).not.toBeCalled();
-				},
-			);
-
-			it(
-				'refuses inviting an active user to a URL off the allow list',
-				async () => {
-					vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
-						.mockResolvedValueOnce({ status: 'active', role: 'other-role' });
-
-					const promise = service.inviteUser(
-						'user@example.com',
-						'invite-role',
-						'https://elsewhere.example.com/invite',
-					);
-
-					await expect(promise).rejects.toEqual(new InvalidPayloadError({
-						reason: 'URL "https://elsewhere.example.com/invite" '
-							+ 'can\'t be used to invite users',
-					}));
 				},
 			);
 		});
@@ -904,6 +1404,260 @@ describe('Integration Tests', () => {
 				await expect(promise).rejects.toThrowError('Not an invite token');
 
 				expect(getUserByEmailSpy).not.toBeCalled();
+			});
+
+			it(oneLine`
+				creates the account of a logged-out invited email, then turns its
+				invites into memberships, one per role in invite order after the held
+				ones, but for a role held by hand, and deletes the invites
+			`, async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'user@example.com',
+					scope: 'invite',
+				} as any);
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce(undefined);
+
+				tracker.on.select('directus_invites').response([
+					{ id: 'invite-id-21', role: 'role-b' },
+					{ id: 'invite-id-22', role: 'role-a' },
+					{ id: 'invite-id-23', role: 'role-e' },
+					{ id: 'invite-id-24', role: 'role-b' },
+				]);
+
+				tracker.on.select('directus_role_members').response([
+					{ role: 'role-c', managed_by: null, sort: 1 },
+					{ role: 'role-a', managed_by: null, sort: 2 },
+					{ role: 'role-d', managed_by: 'auth:okta', sort: 5 },
+				]);
+
+				const writes: unknown[] = [];
+
+				superCreateOneSpy.mockImplementationOnce(async function (
+					this: ItemsService,
+					data,
+				) {
+					writes.push({
+						collection: this.collection,
+						data,
+						accountability: this.accountability,
+					});
+
+					return 'user-id-21';
+				});
+
+				vi.spyOn(ItemsService.prototype, 'createMany')
+					.mockImplementation(async function (this: ItemsService, rows) {
+						writes.push({
+							collection: this.collection,
+							rows,
+							accountability: this.accountability,
+						});
+
+						return [];
+					});
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockImplementation(async function (this: ItemsService, keys) {
+						writes.push({
+							collection: this.collection,
+							keys,
+							accountability: this.accountability,
+						});
+
+						return keys;
+					});
+
+				await service.acceptInvite('invite-token', 'new-password');
+
+				expect(tracker.history.select).toMatchObject([
+					{
+						sql: 'select "id", "role" from "directus_invites"'
+							+ ' where LOWER("email") = ?'
+							+ ' order by "date_created" asc, "id" asc',
+						bindings: ['user@example.com'],
+					},
+					{
+						sql: 'select "role", "managed_by", "sort"'
+							+ ' from "directus_role_members" where "user" = ?',
+						bindings: ['user-id-21'],
+					},
+				]);
+
+				expect(writes).toEqual([
+					{
+						collection: 'directus_users',
+						data: {
+							email: 'user@example.com',
+							password: 'new-password',
+							status: 'active',
+						},
+						accountability: null,
+					},
+					{
+						collection: 'directus_role_members',
+						rows: [
+							{ user: 'user-id-21', role: 'role-b', sort: 6 },
+							{ user: 'user-id-21', role: 'role-e', sort: 7 },
+						],
+						accountability: null,
+					},
+					{
+						collection: 'directus_invites',
+						keys: [
+							'invite-id-21',
+							'invite-id-22',
+							'invite-id-23',
+							'invite-id-24',
+						],
+						accountability: null,
+					},
+				]);
+
+				expect(clearPermissionsCacheAfterCommit).toHaveBeenCalledTimes(1);
+				expect(flushResponseCacheAfterCommit).toHaveBeenCalledTimes(1);
+			});
+
+			it(oneLine`
+				grants a logged-in user the invited roles, sending no password and
+				creating no account
+			`, async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'invited@example.com',
+					scope: 'invite',
+				} as any);
+
+				tracker.on.select('directus_invites').response([
+					{ id: 'invite-id-31', role: 'role-a' },
+				]);
+
+				tracker.on.select('directus_role_members').response([]);
+
+				const createManySpy = vi.spyOn(ItemsService.prototype, 'createMany')
+					.mockResolvedValue([]);
+
+				const deleteManySpy = vi.spyOn(ItemsService.prototype, 'deleteMany')
+					.mockResolvedValue([]);
+
+				const getUserByEmailSpy = vi
+					.spyOn(UsersService.prototype as any, 'getUserByEmail');
+
+				await new UsersService({
+					knex: db,
+					schema,
+					accountability: { user: 'user-id-31', admin: false } as Accountability,
+				}).acceptInvite('invite-token');
+
+				expect(getUserByEmailSpy).not.toBeCalled();
+				expect(superCreateOneSpy).not.toBeCalled();
+
+				expect(createManySpy).toHaveBeenCalledExactlyOnceWith(
+					[{ user: 'user-id-31', role: 'role-a', sort: 1 }],
+					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits },
+				);
+
+				expect(deleteManySpy)
+					.toHaveBeenCalledExactlyOnceWith(['invite-id-31'], undefined);
+			});
+
+			it('refuses a logged-in user sending a password', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'invited@example.com',
+					scope: 'invite',
+				} as any);
+
+				tracker.on.select('directus_invites').response([
+					{ id: 'invite-id-32', role: 'role-a' },
+				]);
+
+				await expect(new UsersService({
+					knex: db,
+					schema,
+					accountability: { user: 'user-id-32', admin: false } as Accountability,
+				}).acceptInvite('invite-token', 'new-password')).rejects.toHaveProperty(
+					'message',
+					'Invalid payload. A password creates a new account: log out to create'
+					+ ' the account of "invited@example.com", or send no password to add'
+					+ ' the invited roles to your account.',
+				);
+
+				expect(superCreateOneSpy).not.toBeCalled();
+				expect(tracker.history.select).toHaveLength(1);
+			});
+
+			it(oneLine`
+				refuses a logged-out invite of an email holding an account, setting
+				no password
+			`, async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'active@example.com',
+					scope: 'invite',
+				} as any);
+
+				tracker.on.select('directus_invites').response([
+					{ id: 'invite-id-33', role: 'role-a' },
+				]);
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({ id: 'user-id-33', status: 'active' });
+
+				const updateUserSpy = vi.spyOn(UsersService.prototype, 'updateOne');
+
+				onTestFinished(() => {
+					updateUserSpy.mockRestore();
+				});
+
+				await expect(service.acceptInvite('invite-token', 'new-password'))
+					.rejects.toHaveProperty(
+						'message',
+						'Invalid payload. Email address "active@example.com" has an account:'
+						+ ' log in to it, then accept the invite.',
+					);
+
+				expect(updateUserSpy).not.toBeCalled();
+				expect(superCreateOneSpy).not.toBeCalled();
+			});
+
+			it('refuses a logged-out invite sending no password', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'new@example.com',
+					scope: 'invite',
+				} as any);
+
+				tracker.on.select('directus_invites').response([
+					{ id: 'invite-id-34', role: 'role-a' },
+				]);
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce(undefined);
+
+				await expect(service.acceptInvite('invite-token'))
+					.rejects.toHaveProperty(
+						'message',
+						'Invalid payload. A password is required to create the account of'
+						+ ' "new@example.com".',
+					);
+
+				expect(superCreateOneSpy).not.toBeCalled();
+			});
+
+			it('refuses an email no longer invited', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'user@example.com',
+					scope: 'invite',
+				} as any);
+
+				tracker.on.select('directus_invites').response([]);
+
+				await expect(service.acceptInvite('invite-token', 'new-password'))
+					.rejects.toHaveProperty(
+						'message',
+						'Invalid payload. Email address user@example.com hasn\'t been'
+						+ ' invited.',
+					);
+
+				expect(superCreateOneSpy).not.toBeCalled();
 			});
 		});
 
@@ -1164,7 +1918,11 @@ describe('Integration Tests', () => {
 				tracker.on.select('directus_versions').response([]);
 				tracker.on.delete('directus_sessions').response(1);
 
+				tracker.on.select('directus_invites').response([]);
+
 				await service.deleteMany(['user-id-41']);
+
+				expect(tracker.history.delete).toHaveLength(1);
 
 				expect(tracker.history.delete[0]?.bindings)
 					.toStrictEqual(['user-id-41']);
@@ -1202,6 +1960,8 @@ describe('Integration Tests', () => {
 
 		describe('deleteMany without a caller integrity hook', () => {
 			it('keeps the last admin refusal for the mutation', async () => {
+				tracker.on.delete('directus_role_members').response(0);
+
 				const lastAdminError = new Error('last admin');
 
 				vi.mocked(validateRemainingAdminUsers)
@@ -1218,6 +1978,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('keeps the references to a last admin its refusal keeps', async () => {
+				tracker.on.delete('directus_role_members').response(0);
+
 				vi.mocked(validateRemainingAdminUsers)
 					.mockRejectedValueOnce(new Error('last admin'));
 
@@ -1229,6 +1991,8 @@ describe('Integration Tests', () => {
 
 		describe('deleteMany action hooks', () => {
 			it('fires users.delete once the delete has committed', async () => {
+				tracker.on.delete('directus_role_members').response(0);
+
 				vi.mocked(ItemsService.prototype.deleteMany)
 					.mockImplementationOnce(itemsDeleteMany);
 
@@ -1247,6 +2011,8 @@ describe('Integration Tests', () => {
 				tracker.on.select('directus_users').response([]);
 				tracker.on.delete('directus_users').response(1);
 
+				tracker.on.select('directus_invites').response([]);
+
 				await service.deleteMany(['8e2b4c10-5d3a-4f6e-9a7b-000000000047']);
 
 				expect(emittedActions).toEqual([['users.delete', ['committed']]]);
@@ -1255,6 +2021,8 @@ describe('Integration Tests', () => {
 
 		describe('deleteMany retried', () => {
 			it('fires only the action of the attempt that committed', async () => {
+				tracker.on.delete('directus_role_members').response(0);
+
 				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
 
 				const emitActionSpy = vi
@@ -1278,6 +2046,8 @@ describe('Integration Tests', () => {
 				tracker.on.select('directus_comments').response([]);
 				tracker.on.select('directus_notifications').response([]);
 				tracker.on.select('directus_versions').response([]);
+
+				tracker.on.select('directus_invites').response([]);
 
 				await service.deleteMany(['8e2b4c10-5d3a-4f6e-9a7b-000000000048']);
 
@@ -1323,9 +2093,8 @@ describe('Integration Tests', () => {
 				vi.spyOn(UsersService.prototype as any, 'inviteUrl')
 					.mockImplementationOnce(usersInviteUrl);
 
-				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
-					.mockResolvedValueOnce(undefined);
-
+				tracker.on.select('directus_invites').response([]);
+				vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue([]);
 				vi.spyOn(jwt, 'sign').mockReturnValueOnce('invite-token' as any);
 				const mailError = new Error('SMTP down');
 
@@ -1337,7 +2106,7 @@ describe('Integration Tests', () => {
 
 				await service.inviteUser(
 					'ada@example.com',
-					'invite-role',
+					['invite-role'],
 					'https://app.example.com/invite',
 				);
 
@@ -1365,13 +2134,12 @@ describe('Integration Tests', () => {
 				vi.spyOn(UsersService.prototype as any, 'inviteUrl')
 					.mockImplementationOnce(usersInviteUrl);
 
-				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
-					.mockResolvedValueOnce(undefined);
-
+				tracker.on.select('directus_invites').response([]);
+				vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue([]);
 				vi.spyOn(jwt, 'sign').mockReturnValueOnce('invite-token' as any);
 				const sendMail = vi.mocked(MailService.prototype.send);
 
-				await service.inviteUser('ada@example.com', 'invite-role', null, 'Join');
+				await service.inviteUser('ada@example.com', ['invite-role'], null, 'Join');
 
 				expect(sendMail).toHaveBeenCalledWith({
 					to: 'ada@example.com',
@@ -1429,7 +2197,7 @@ describe('Integration Tests', () => {
 					{
 						email: 'ada@example.com',
 						password: 'new-password',
-						role: 'role-id-1',
+						roles: [{ role: 'role-id-1' }],
 						status: 'unverified',
 						first_name: 'Ada',
 						last_name: null,
@@ -1589,7 +2357,6 @@ describe('Integration Tests', () => {
 
 				expect(superUpdateGroupsSpy.mock.contexts[0]).toMatchObject({
 					accountability: {
-						role: null,
 						user: null,
 						roles: [],
 						admin: true,
@@ -1620,8 +2387,8 @@ describe('Integration Tests', () => {
 					knex: db,
 					schema,
 					accountability: {
-						role: null,
 						user: null,
+						memberRoles: [],
 						roles: [],
 						admin: false,
 						app: false,
@@ -1631,7 +2398,6 @@ describe('Integration Tests', () => {
 
 				expect(superUpdateGroupsSpy.mock.contexts[0]).toMatchObject({
 					accountability: {
-						role: null,
 						user: null,
 						roles: [],
 						admin: true,

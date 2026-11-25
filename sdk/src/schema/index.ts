@@ -17,6 +17,7 @@ export * from './policy.js';
 export * from './preset.js';
 export * from './relation.js';
 export * from './revision.js';
+export * from './role-member.js';
 export * from './role.js';
 export * from './settings.js';
 export * from './share.js';

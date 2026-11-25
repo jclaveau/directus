@@ -1,5 +1,5 @@
 import type { MergeCoreCollection } from '../index.js';
-import type { DirectusUser } from './user.js';
+import type { DirectusRoleMember } from './role-member.js';
 import type { DirectusAccess } from './access.js';
 
 export type DirectusRole<Schema = any> = MergeCoreCollection<
@@ -13,6 +13,6 @@ export type DirectusRole<Schema = any> = MergeCoreCollection<
 		parent: string | DirectusRole<Schema>;
 		children: string[] | DirectusRole<Schema>[];
 		policies: string[] | DirectusAccess<Schema>[];
-		users: string[] | DirectusUser<Schema>[];
+		users: string[] | DirectusRoleMember<Schema>[];
 	}
 >;
