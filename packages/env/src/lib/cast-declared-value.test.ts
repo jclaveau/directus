@@ -23,7 +23,7 @@ test.each([
 	['false | string', 'false', false],
 	['false | string', '10mb', '10mb'],
 	['false | string[]', 'false', false],
-	['false | string[]', 'PUBLIC_URL, PORT', ['PUBLIC_URL', 'PORT']],
+	['false | string[]', 'PUBLIC_URL,PORT', ['PUBLIC_URL', 'PORT']],
 	['boolean | number | string | string[]', 'true', true],
 	['boolean | number | string | string[]', 'false', false],
 	['boolean | number | string | string[]', '1', 1],

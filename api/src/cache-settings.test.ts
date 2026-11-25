@@ -395,7 +395,7 @@ test('reads a spelled-out false stats budget as no budget, and boots on it', () 
 test('boots on the variables it is given, and on none of the optional ones', () => {
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		CACHE_ENABLED: true,
-		CACHE_VALUE_MAX_SIZE: 1048576,
+		CACHE_VALUE_MAX_SIZE: '1048576',
 		CACHE_SCOPED_INDEX_SCAN_COUNT: 1000,
 		CACHE_SCOPED_INDEX_TTL_FACTOR: 2,
 	});
