@@ -218,6 +218,7 @@ Feature: A user's role, status and deletion purge the cache as today
       | 1       | directus_users         | 3      | 0      | 0      | 1      |
       | 1       | directus_versions      | 2      | 0      | 0      | 0      |
       | 3       | directus_invites       | 1      | 0      | 0      | 0      |
+      | 3       | directus_users         | 2      | 0      | 0      | 0      |
 
   Scenario: an accepted invitation grants its role and drops the cached read
     Given the rows of directus_roles:

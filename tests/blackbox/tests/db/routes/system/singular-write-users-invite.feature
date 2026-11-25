@@ -67,9 +67,11 @@ Feature: An email is invited, invited again and accepts the invitation
       | 1       | directus_access  | 1      | 0      | 0      | 0      |
       | 1       | directus_invites | 1      | 1      | 0      | 0      |
       | 1       | directus_roles   | 1      | 0      | 0      | 0      |
+      | 1       | directus_users   | 1      | 0      | 0      | 0      |
       | 3       | directus_access  | 1      | 0      | 0      | 0      |
       | 3       | directus_invites | 1      | 1      | 0      | 1      |
       | 3       | directus_roles   | 1      | 0      | 0      | 0      |
+      | 3       | directus_users   | 1      | 0      | 0      | 0      |
 
   Scenario: an invitation accepted logged out creates the account of its email
     Given the rows of directus_roles:
@@ -112,6 +114,7 @@ Feature: An email is invited, invited again and accepts the invitation
       | request | table                 | select | insert | update | delete |
       | 1       | directus_invites      | 1      | 0      | 0      | 1      |
       | 1       | directus_role_members | 1      | 1      | 0      | 0      |
+      | 1       | directus_settings     | 1      | 0      | 0      | 0      |
       | 1       | directus_users        | 2      | 1      | 0      | 0      |
 
   Scenario: an active user accepts logged in the roles an invitation proposes
@@ -158,9 +161,15 @@ Feature: An email is invited, invited again and accepts the invitation
       |     "member-<run>@example.com"}})    |                                 |
       |     { role { id } } }                |                                 |
     And on postgres the requests ran these statements:
-      | request | table            | select | insert | update | delete |
-      | 1       | directus_invites | 1      | 1      | 0      | 0      |
-      | 3       | directus_invites | 1      | 0      | 0      | 1      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_access       | 1      | 0      | 0      | 0      |
+      | 1       | directus_invites      | 1      | 1      | 0      | 0      |
+      | 1       | directus_roles        | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 3       | directus_access       | 2      | 0      | 0      | 0      |
+      | 3       | directus_invites      | 1      | 0      | 0      | 1      |
+      | 3       | directus_role_members | 2      | 1      | 0      | 0      |
+      | 3       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: an invitation of an account's email accepted logged out is refused
     Given the rows of directus_roles:
@@ -305,8 +314,8 @@ Feature: An email is invited, invited again and accepts the invitation
       | request | table           | select | insert | update | delete |
       | 1       | directus_access | 1      | 0      | 0      | 0      |
       | 1       | directus_roles  | 1      | 0      | 0      | 0      |
-      | 2       | directus_access | 1      | 0      | 0      | 0      |
-      | 2       | directus_roles  | 1      | 0      | 0      | 0      |
+      | 1       | directus_users  | 1      | 0      | 0      | 0      |
+      | 2       | directus_users  | 1      | 0      | 0      | 0      |
 
   Scenario: graphql invites an email into the one role it names
     Given the rows of directus_roles:
@@ -334,6 +343,7 @@ Feature: An email is invited, invited again and accepts the invitation
       | 1       | directus_access  | 1      | 0      | 0      | 0      |
       | 1       | directus_invites | 1      | 1      | 0      | 0      |
       | 1       | directus_roles   | 1      | 0      | 0      | 0      |
+      | 1       | directus_users   | 1      | 0      | 0      | 0      |
 
   Scenario: an email invited again into the same role keeps its invitation
     Given the rows of directus_policies:
@@ -374,7 +384,7 @@ Feature: An email is invited, invited again and accepts the invitation
       | 1       | directus_invites      | 1      | 0      | 0      | 0      |
       | 1       | directus_role_members | 1      | 0      | 0      | 0      |
       | 1       | directus_roles        | 1      | 0      | 0      | 0      |
-      | 1       | directus_users        | 2      | 0      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: an email invited again by another inviter keeps both invitations
     Given the rows of directus_roles:
@@ -405,8 +415,8 @@ Feature: An email is invited, invited again and accepts the invitation
       | 1       | directus_access  | 1      | 0      | 0      | 0      |
       | 1       | directus_invites | 1      | 1      | 0      | 0      |
       | 1       | directus_roles   | 1      | 0      | 0      | 0      |
+      | 1       | directus_users   | 1      | 0      | 0      | 0      |
       | 2       | directus_invites | 1      | 0      | 0      | 0      |
-      | 2       | directus_roles   | 1      | 0      | 0      | 0      |
       | 2       | directus_users   | 2      | 0      | 0      | 0      |
 
   Scenario: an invitation to a role reaching admin access is refused
