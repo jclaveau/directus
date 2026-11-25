@@ -32,7 +32,7 @@ export class InstallationManager {
 
 			const options: DownloadOptions = {};
 
-			if (env['MARKETPLACE_REGISTRY'] && typeof env['MARKETPLACE_REGISTRY'] === 'string') {
+			if (env['MARKETPLACE_REGISTRY']) {
 				options.registry = env['MARKETPLACE_REGISTRY'];
 			}
 
@@ -69,7 +69,7 @@ export class InstallationManager {
 			if (env['EXTENSIONS_LOCATION']) {
 				// Upload the extension into the configured extensions location
 				const storage = await getStorage();
-				const remoteDisk = storage.location(env['EXTENSIONS_LOCATION'] as string);
+				const remoteDisk = storage.location(env['EXTENSIONS_LOCATION']);
 
 				const queue = new Queue({ concurrency: 1000 });
 
@@ -107,7 +107,7 @@ export class InstallationManager {
 	async uninstall(folder: string) {
 		if (env['EXTENSIONS_LOCATION']) {
 			const storage = await getStorage();
-			const remoteDisk = storage.location(env['EXTENSIONS_LOCATION'] as string);
+			const remoteDisk = storage.location(env['EXTENSIONS_LOCATION']);
 
 			const queue = new Queue({ concurrency: 1000 });
 

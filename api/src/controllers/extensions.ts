@@ -105,7 +105,7 @@ router.get(
 
 		const options: ListOptions = {};
 
-		if (env['MARKETPLACE_REGISTRY'] && typeof env['MARKETPLACE_REGISTRY'] === 'string') {
+		if (env['MARKETPLACE_REGISTRY']) {
 			options.registry = env['MARKETPLACE_REGISTRY'];
 		}
 
@@ -126,7 +126,7 @@ router.get(
 
 		const options: AccountOptions = {};
 
-		if (env['MARKETPLACE_REGISTRY'] && typeof env['MARKETPLACE_REGISTRY'] === 'string') {
+		if (env['MARKETPLACE_REGISTRY']) {
 			options.registry = env['MARKETPLACE_REGISTRY'];
 		}
 
@@ -147,7 +147,7 @@ router.get(
 
 		const options: DescribeOptions = {};
 
-		if (env['MARKETPLACE_REGISTRY'] && typeof env['MARKETPLACE_REGISTRY'] === 'string') {
+		if (env['MARKETPLACE_REGISTRY']) {
 			options.registry = env['MARKETPLACE_REGISTRY'];
 		}
 

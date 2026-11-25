@@ -196,7 +196,7 @@ export async function startServer(): Promise<void> {
 	void watchOutstandingMigrations();
 
 	const host = env['HOST'];
-	const path = env['UNIX_SOCKET_PATH'] as string | undefined;
+	const path = env['UNIX_SOCKET_PATH'];
 	const port = env['PORT'];
 
 	let listenOptions: ListenOptions;

@@ -1,6 +1,5 @@
 import { useEnv } from '@directus/env';
 import { InvalidProviderConfigError } from '@directus/errors';
-import { toArray } from '@directus/utils';
 import type { AuthDriver } from './auth/auth.js';
 import {
 	LDAPAuthDriver,
@@ -34,20 +33,14 @@ export async function registerAuthProviders(): Promise<void> {
 	const logger = useLogger();
 	const options = { knex: getDatabase(), schema: await getSchema() };
 
-	const providerNames = toArray(env['AUTH_PROVIDERS'] as string);
-
 	// Register default provider if not disabled
 	if (!env['AUTH_DISABLE_DEFAULT']) {
 		const defaultProvider = getProviderInstance('local', options)!;
 		providers.set(DEFAULT_AUTH_PROVIDER, defaultProvider);
 	}
 
-	if (!env['AUTH_PROVIDERS']) {
-		return;
-	}
-
 	// Register configured providers
-	providerNames.forEach((name: string) => {
+	env['AUTH_PROVIDERS'].forEach((name: string) => {
 		name = name.trim();
 
 		if (name === DEFAULT_AUTH_PROVIDER) {

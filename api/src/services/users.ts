@@ -456,7 +456,7 @@ export class UsersService extends ItemsService {
 		const opts: MutationOptions = {};
 
 		try {
-			if (url && isUrlAllowed(url, env['USER_INVITE_URL_ALLOW_LIST'] as string) === false) {
+			if (url && isUrlAllowed(url, env['USER_INVITE_URL_ALLOW_LIST']) === false) {
 				throw new InvalidPayloadError({ reason: `URL "${url}" can't be used to invite users` });
 			}
 		} catch (err: any) {
@@ -538,7 +538,10 @@ export class UsersService extends ItemsService {
 	async registerUser(input: RegisterUserInput) {
 		if (
 			input.verification_url &&
-			isUrlAllowed(input.verification_url, env['USER_REGISTER_URL_ALLOW_LIST'] as string) === false
+			isUrlAllowed(
+				input.verification_url,
+				env['USER_REGISTER_URL_ALLOW_LIST'],
+			) === false
 		) {
 			throw new InvalidPayloadError({
 				reason: `URL "${input.verification_url}" can't be used to verify registered users`,
@@ -675,7 +678,7 @@ export class UsersService extends ItemsService {
 			});
 		}
 
-		if (url && isUrlAllowed(url, env['PASSWORD_RESET_URL_ALLOW_LIST'] as string) === false) {
+		if (url && isUrlAllowed(url, env['PASSWORD_RESET_URL_ALLOW_LIST']) === false) {
 			throw new InvalidPayloadError({ reason: `URL "${url}" can't be used to reset passwords` });
 		}
 

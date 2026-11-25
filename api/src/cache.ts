@@ -755,7 +755,7 @@ function getConfig(
 export function getRedisConnection(
 	database?: number,
 ): string | Record<string, unknown> {
-	const configuredUrl = env['REDIS'] as string | undefined;
+	const configuredUrl = env['REDIS'];
 
 	const url = configuredUrl && database !== undefined
 		? withRedisDatabase(configuredUrl, database)

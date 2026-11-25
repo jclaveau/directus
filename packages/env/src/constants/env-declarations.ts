@@ -360,11 +360,13 @@ export const ENV_DECLARATIONS = {
 	EMAIL_SMTP_PASSWORD: { type: 'string' },
 	REDIS_PASSWORD: { type: 'string' },
 
+	// `auth.ts` walks the list, so the empty default casts to `[]`: none.
+	AUTH_PROVIDERS: { type: 'string[]', default: '' },
+	// Read straight off `process.env` before any casting runs.
+	CONFIG_PATH: { type: 'string', default: resolve(cwd(), '.env') },
+
 	// Guessed: a declared type would change what their consumer sees rather than
 	// just how it is parsed.
-	// `auth.ts` gates on `!env['AUTH_PROVIDERS']`, and `string[]` turns the empty
-	// default into `[]`, which is truthy.
-	AUTH_PROVIDERS: { default: '' },
 	// `false` disables them and any other value configures them, which no single
 	// type covers.
 	ROOT_REDIRECT: { default: './admin' },
@@ -378,64 +380,64 @@ export const ENV_DECLARATIONS = {
 	PRESSURE_LIMITER_RETRY_AFTER: { default: false },
 	// express reads a boolean, a number, a string or a list.
 	IP_TRUST_PROXY: { default: true },
-	// Read straight off `process.env` before any casting runs.
-	CONFIG_PATH: { default: resolve(cwd(), '.env') },
-
-	// Guessed: read by core with no type declared yet.
-	ADMIN_EMAIL: {},
+	// Read only as the prefix of `getConfigFromEnv`, which hands helmet the
+	// directives under it: the bare name holds none.
 	ASSETS_CONTENT_SECURITY_POLICY: {},
-	CACHE_HEALTHCHECK_THRESHOLD: {},
-	CACHE_SYSTEM_TTL: {},
-	EMAIL_MAILGUN_API_KEY: {},
-	EMAIL_MAILGUN_DOMAIN: {},
-	EMAIL_MAILGUN_HOST: {},
-	EMAIL_SES_CREDENTIALS__ACCESS_KEY_ID: {},
-	EMAIL_SES_CREDENTIALS__SECRET_ACCESS_KEY: {},
-	EMAIL_SES_REGION: {},
-	EMAIL_SMTP_HOST: {},
-	EMAIL_SMTP_IGNORE_TLS: {},
-	EMAIL_SMTP_NAME: {},
-	EMAIL_SMTP_POOL: {},
-	EMAIL_SMTP_PORT: {},
-	EMAIL_SMTP_SECURE: {},
-	EMAIL_SMTP_USER: {},
-	EXTENSIONS_CACHE_TTL: {},
-	EXTENSIONS_LIMIT: {},
-	EXTENSIONS_LOCATION: {},
-	// Read only to refuse it: this build no longer does.
-	EXTENSIONS_PATH: {},
-	FILES_CONTENT_TYPE_ALLOW_LIST: {},
-	FILES_MAX_UPLOAD_SIZE: {},
-	GRAPHQL_SCHEMA_CACHE_CAPACITY: {},
-	LOG_LEVEL: {},
-	LOG_STYLE: {},
-	MARKETPLACE_REGISTRY: {},
-	PASSWORD_RESET_URL_ALLOW_LIST: {},
-	PROJECT_NAME: {},
-	QUERY_LIMIT_MAX: {},
-	REDIS: {},
-	REDIS_DB: {},
-	REDIS_HOST: {},
+	// `false` disables the probe and a number spaces it in ms.
 	REDIS_KEEP_ALIVE: {},
-	REDIS_PORT: {},
-	REDIS_USERNAME: {},
-	REFRESH_TOKEN_COOKIE_DOMAIN: {},
-	SESSION_COOKIE_DOMAIN: {},
-	SYNCHRONIZATION_NAMESPACE: {},
-	SYNCHRONIZATION_STORE: {},
-	TELEMETRY_AUTHORIZATION: {},
-	UNIX_SOCKET_PATH: {},
-	USER_INVITE_URL_ALLOW_LIST: {},
-	USER_REGISTER_URL_ALLOW_LIST: {},
-	WEBSOCKETS_LOGS_LEVEL: {},
-	WEBSOCKETS_LOGS_STYLE: {},
 
-	// Guessed: set by the platform or the process manager, read by core.
-	NODE_ENV: {},
-	RAILWAY_GIT_COMMIT_SHA: {},
-	RAILWAY_REPLICA_ID: {},
-	RAILWAY_SERVICE_NAME: {},
-	name: {},
+	ADMIN_EMAIL: { type: 'string' },
+	CACHE_HEALTHCHECK_THRESHOLD: { type: 'number' },
+	CACHE_SYSTEM_TTL: { type: 'string' },
+	EMAIL_MAILGUN_API_KEY: { type: 'string' },
+	EMAIL_MAILGUN_DOMAIN: { type: 'string' },
+	EMAIL_MAILGUN_HOST: { type: 'string' },
+	EMAIL_SES_CREDENTIALS__ACCESS_KEY_ID: { type: 'string' },
+	EMAIL_SES_CREDENTIALS__SECRET_ACCESS_KEY: { type: 'string' },
+	EMAIL_SES_REGION: { type: 'string' },
+	EMAIL_SMTP_HOST: { type: 'string' },
+	EMAIL_SMTP_IGNORE_TLS: { type: 'boolean' },
+	EMAIL_SMTP_NAME: { type: 'string' },
+	EMAIL_SMTP_POOL: { type: 'boolean' },
+	EMAIL_SMTP_PORT: { type: 'number' },
+	EMAIL_SMTP_SECURE: { type: 'boolean' },
+	EMAIL_SMTP_USER: { type: 'string' },
+	EXTENSIONS_CACHE_TTL: { type: 'string' },
+	EXTENSIONS_LIMIT: { type: 'number' },
+	EXTENSIONS_LOCATION: { type: 'string' },
+	// Read only to refuse it: this build no longer does.
+	EXTENSIONS_PATH: { type: 'string' },
+	FILES_CONTENT_TYPE_ALLOW_LIST: { type: 'string[]' },
+	FILES_MAX_UPLOAD_SIZE: { type: 'string' },
+	GRAPHQL_SCHEMA_CACHE_CAPACITY: { type: 'number' },
+	LOG_LEVEL: { type: 'string' },
+	LOG_STYLE: { type: 'string' },
+	MARKETPLACE_REGISTRY: { type: 'string' },
+	PASSWORD_RESET_URL_ALLOW_LIST: { type: 'string[]' },
+	PROJECT_NAME: { type: 'string' },
+	QUERY_LIMIT_MAX: { type: 'number' },
+	REDIS: { type: 'string' },
+	REDIS_DB: { type: 'number' },
+	REDIS_HOST: { type: 'string' },
+	REDIS_PORT: { type: 'number' },
+	REDIS_USERNAME: { type: 'string' },
+	REFRESH_TOKEN_COOKIE_DOMAIN: { type: 'string' },
+	SESSION_COOKIE_DOMAIN: { type: 'string' },
+	SYNCHRONIZATION_NAMESPACE: { type: 'string' },
+	SYNCHRONIZATION_STORE: { type: 'string' },
+	TELEMETRY_AUTHORIZATION: { type: 'string' },
+	UNIX_SOCKET_PATH: { type: 'string' },
+	USER_INVITE_URL_ALLOW_LIST: { type: 'string[]' },
+	USER_REGISTER_URL_ALLOW_LIST: { type: 'string[]' },
+	WEBSOCKETS_LOGS_LEVEL: { type: 'string' },
+	WEBSOCKETS_LOGS_STYLE: { type: 'string' },
+
+	// Set by the platform or the process manager, read by core.
+	NODE_ENV: { type: 'string' },
+	RAILWAY_GIT_COMMIT_SHA: { type: 'string' },
+	RAILWAY_REPLICA_ID: { type: 'string' },
+	RAILWAY_SERVICE_NAME: { type: 'string' },
+	name: { type: 'string' },
 } as const satisfies Record<string, CoreEnvDeclaration>;
 
 /**

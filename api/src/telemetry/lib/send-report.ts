@@ -15,7 +15,7 @@ export const sendReport = async (report: TelemetryReport) => {
 	};
 
 	if (env['TELEMETRY_AUTHORIZATION']) {
-		headers['Authorization'] = env['TELEMETRY_AUTHORIZATION'] as string;
+		headers['Authorization'] = env['TELEMETRY_AUTHORIZATION'];
 	}
 
 	const res = await fetch(url, {

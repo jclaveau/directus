@@ -1026,7 +1026,7 @@ export function loopbackTarget(): LoopbackTarget {
 	const env = useEnv();
 
 	if (env['UNIX_SOCKET_PATH']) {
-		return { socketPath: String(env['UNIX_SOCKET_PATH']) };
+		return { socketPath: env['UNIX_SOCKET_PATH'] };
 	}
 
 	const host = String(env['HOST'] ?? '');

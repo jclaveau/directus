@@ -7,13 +7,13 @@ vi.mock('@directus/env');
 const scenarios = [
 	{
 		name: 'when no providers configured',
-		input: {},
+		input: { AUTH_PROVIDERS: [] },
 		output: [],
 	},
 	{
 		name: 'when no driver configured',
 		input: {
-			AUTH_PROVIDERS: 'directus',
+			AUTH_PROVIDERS: ['directus'],
 		},
 		output: [],
 	},
@@ -21,7 +21,7 @@ const scenarios = [
 	{
 		name: 'when single provider and driver are properly configured',
 		input: {
-			AUTH_PROVIDERS: 'directus',
+			AUTH_PROVIDERS: ['directus'],
 			AUTH_DIRECTUS_DRIVER: 'openid',
 			AUTH_DIRECTUS_LABEL: 'Directus',
 			AUTH_DIRECTUS_ICON: 'hare',
@@ -39,7 +39,7 @@ const scenarios = [
 	{
 		name: 'when multiple provider and driver are properly configured',
 		input: {
-			AUTH_PROVIDERS: 'directus,custom',
+			AUTH_PROVIDERS: ['directus', 'custom'],
 			AUTH_DIRECTUS_DRIVER: 'openid',
 			AUTH_DIRECTUS_LABEL: 'Directus',
 			AUTH_DIRECTUS_ICON: 'hare',
@@ -73,7 +73,7 @@ describe('get auth providers', () => {
 
 	test('keeps the session providers only when asked', () => {
 		vi.mocked(useEnv, { partial: true }).mockReturnValue({
-			AUTH_PROVIDERS: 'google,github,okta,ldap',
+			AUTH_PROVIDERS: ['google', 'github', 'okta', 'ldap'],
 			AUTH_GOOGLE_DRIVER: 'openid',
 			AUTH_GOOGLE_MODE: 'json',
 			AUTH_GITHUB_DRIVER: 'oauth2',

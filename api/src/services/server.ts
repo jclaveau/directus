@@ -124,7 +124,9 @@ export class ServerService {
 				info['websocket'].logs =
 					toBoolean(env['WEBSOCKETS_LOGS_ENABLED']) && this.accountability.admin
 						? {
-								allowedLogLevels: getAllowedLogLevels((env['WEBSOCKETS_LOGS_LEVEL'] as string) || 'info'),
+								allowedLogLevels: getAllowedLogLevels(
+									env['WEBSOCKETS_LOGS_LEVEL'] || 'info',
+								),
 							}
 						: false;
 			} else {
@@ -346,7 +348,7 @@ export class ServerService {
 						componentType: 'cache',
 						observedValue: 0,
 						observedUnit: 'ms',
-						threshold: env['CACHE_HEALTHCHECK_THRESHOLD'] ? +env['CACHE_HEALTHCHECK_THRESHOLD'] : 150,
+						threshold: env['CACHE_HEALTHCHECK_THRESHOLD'] || 150,
 					},
 				],
 			};

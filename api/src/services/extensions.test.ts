@@ -114,7 +114,7 @@ describe('Services / Extensions / install', () => {
 		});
 
 		vi.mocked(useEnv, { partial: true })
-			.mockReturnValueOnce({ EXTENSIONS_LIMIT: '4' });
+			.mockReturnValueOnce({ EXTENSIONS_LIMIT: 4 });
 
 		const installation = service.install('extension-id', 'version-1');
 
@@ -145,7 +145,7 @@ describe('Services / Extensions / install', () => {
 		});
 
 		vi.mocked(useEnv, { partial: true })
-			.mockReturnValueOnce({ EXTENSIONS_LIMIT: '2' });
+			.mockReturnValueOnce({ EXTENSIONS_LIMIT: 2 });
 
 		const installation = service.install('extension-id', 'version-1');
 
@@ -273,7 +273,7 @@ describe('Services / Extensions / install', () => {
 		});
 
 		vi.mocked(useEnv, { partial: true })
-			.mockReturnValueOnce({ EXTENSIONS_LIMIT: '4' });
+			.mockReturnValueOnce({ EXTENSIONS_LIMIT: 4 });
 
 		await service.install('extension-id', 'version-1');
 

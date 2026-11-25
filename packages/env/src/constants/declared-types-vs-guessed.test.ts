@@ -11,9 +11,9 @@ import { DEFAULTS } from './defaults.js';
  * downstream sees, so the two agree for almost every default. The ones that do
  * differ are the interesting list: each has been read against its consumer, and a
  * new one appearing here is the signal to go and do that, not to update the list.
- * It is how `AUTH_PROVIDERS` was caught before it shipped — `auth.ts` gates on
+ * It is how `AUTH_PROVIDERS` was caught before it shipped — `auth.ts` gated on
  * `!env['AUTH_PROVIDERS']`, and declaring it `array` turns the empty default into
- * `[]`, which is truthy.
+ * `[]`, which is truthy, so `auth.ts` now walks the list instead.
  */
 const CHANGED_BY_DECLARING: Record<string, string> = {
 	// Ports are compared and concatenated as strings.
@@ -24,6 +24,8 @@ const CHANGED_BY_DECLARING: Record<string, string> = {
 	CACHE_VARY_REQUEST_HEADERS_EXCLUDED: 'string("") -> array([])',
 	SYSTEM_MCP_ALLOWED_ORIGINS: 'string("") -> array([])',
 	PGBOUNCER_CONNECTIONS: 'string("") -> array([])',
+	// `auth.ts` walks the list rather than gating on its truthiness.
+	AUTH_PROVIDERS: 'string("") -> array([])',
 	// Spread into the audit's ignore list: a string would spread its characters.
 	CACHE_AUDIT_IGNORE_PATHS: 'string("") -> array([])',
 	FILES_MIME_TYPE_ALLOW_LIST: 'string("*/*") -> array(["*/*"])',

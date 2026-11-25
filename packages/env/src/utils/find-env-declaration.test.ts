@@ -19,7 +19,7 @@ test('finds a typed glob before a guessed one', () => {
 });
 
 test('finds a declaration whose value is guessed', () => {
-	expect(findEnvDeclaration('AUTH_PROVIDERS')).toEqual({ default: '' });
+	expect(findEnvDeclaration('ROOT_REDIRECT')).toEqual({ default: './admin' });
 });
 
 test('finds a guessed declaration by the glob of its name', () => {

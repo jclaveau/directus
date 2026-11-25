@@ -120,7 +120,7 @@ describe('createRedis', () => {
 
 	test('Selects the given database over REDIS_DB in the object form', () => {
 		vi.mocked(useEnv, { partial: true })
-			.mockReturnValue({ REDIS_HOST: 'h', REDIS_DB: '0' });
+			.mockReturnValue({ REDIS_HOST: 'h', REDIS_DB: 0 });
 
 		vi.mocked(getConfigFromEnv).mockReturnValue({ host: 'h', db: '0' });
 
