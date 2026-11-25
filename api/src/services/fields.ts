@@ -53,6 +53,7 @@ import { getCollectionRelationList } from './fields/get-collection-relation-list
 import {
 	findRelationalSpecial,
 	isRelationAliasColumn,
+	RELATION_ALIAS_COLUMN,
 	unnamedRelationalAliasReason,
 } from '../utils/relational-alias.js';
 import { ItemsService } from './items.js';
@@ -204,7 +205,7 @@ export class FieldsService {
 		}
 
 		const aliasRows = (await aliasQuery).map((aliasRow) => {
-			return omit(aliasRow, []);
+			return omit(aliasRow, RELATION_ALIAS_COLUMN);
 		});
 
 		let aliasFields = [...(await this.payloadService.processValues(
@@ -350,7 +351,7 @@ export class FieldsService {
 		if (fieldInfo) {
 			fieldInfo = (await this.payloadService.processValues(
 				'read',
-				omit(fieldInfo, []),
+				omit(fieldInfo, RELATION_ALIAS_COLUMN),
 			)) as FieldMeta[];
 		}
 
