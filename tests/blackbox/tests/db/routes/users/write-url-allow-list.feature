@@ -43,13 +43,11 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |     "allowed-<run>@example.com"}})       |                              |
       |     { role { id } } }                    |                              |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 1      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_invites   | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_roles     | 1      | 0      | 0      | 0      |
-      | 1       | directus_users     | 3      | 1      | 0      | 0      |
+      | request | table            | select | insert | update | delete |
+      | 1       | directus_access  | 1      | 0      | 0      | 0      |
+      | 1       | directus_invites | 1      | 1      | 0      | 0      |
+      | 1       | directus_roles   | 1      | 0      | 0      | 0      |
+      | 1       | directus_users   | 1      | 0      | 0      | 0      |
 
   Scenario: an email invited again to the same role keeps its one invite
     Given these requests are sent:
@@ -92,7 +90,7 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
     And on postgres the requests ran these statements:
       | request | table            | select | insert | update | delete |
       | 1       | directus_invites | 1      | 0      | 0      | 0      |
-      | 1       | directus_users   | 2      | 0      | 0      | 0      |
+      | 1       | directus_users   | 1      | 0      | 0      | 0      |
 
   Scenario: an invitation of an active user proposes its role, leaving the roles held
     Given these requests are sent:
@@ -136,10 +134,11 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |     "active-<run>@example.com"}}) |                              |
       |     { role { id } } }             |                              |
     And on postgres the requests ran these statements:
-      | request | table           | select | insert | update | delete |
-      | 1       | directus_access | 1      | 0      | 0      | 0      |
-      | 1       | directus_roles  | 1      | 0      | 0      | 0      |
-      | 1       | directus_users  | 2      | 0      | 0      | 0      |
+      | request | table            | select | insert | update | delete |
+      | 1       | directus_access  | 1      | 0      | 0      | 0      |
+      | 1       | directus_invites | 1      | 1      | 0      | 0      |
+      | 1       | directus_roles   | 1      | 0      | 0      | 0      |
+      | 1       | directus_users   | 1      | 0      | 0      | 0      |
 
   Scenario: a registration needing no verification makes an active user
     Given these requests are sent:

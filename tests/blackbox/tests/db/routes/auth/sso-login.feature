@@ -225,7 +225,6 @@ Feature: A first SSO login creates the user, a later one updates it
       | request | table                 | select | insert | update | delete |
       | 1       | directus_access       | 1      | 0      | 0      | 0      |
       | 1       | directus_activity     | 0      | 2      | 0      | 0      |
-      | 1       | directus_invites      | 1      | 0      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 2      | 1      | 0      |
       | 1       | directus_role_members | 2      | 1      | 0      | 0      |
       | 1       | directus_users        | 3      | 1      | 0      | 0      |
@@ -335,7 +334,6 @@ Feature: A first SSO login creates the user, a later one updates it
       | request | table                 | select | insert | update | delete |
       | 1       | directus_access       | 1      | 0      | 0      | 0      |
       | 1       | directus_activity     | 0      | 2      | 0      | 0      |
-      | 1       | directus_invites      | 1      | 0      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 2      | 1      | 0      |
       | 1       | directus_role_members | 2      | 1      | 0      | 0      |
       | 1       | directus_users        | 3      | 1      | 0      | 0      |

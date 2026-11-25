@@ -60,13 +60,11 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | request | table                 | select | insert | update | delete |
       | 1       | directus_access       | 1      | 0      | 0      | 0      |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      |
-      | 1       | directus_invites      | 1      | 0      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
       | 1       | directus_role_members | 1      | 0      | 0      | 0      |
       | 1       | directus_users        | 3      | 1      | 0      | 0      |
       | 2       | directus_access       | 1      | 0      | 0      | 0      |
       | 2       | directus_activity     | 0      | 2      | 0      | 0      |
-      | 2       | directus_invites      | 1      | 0      | 0      | 0      |
       | 2       | directus_revisions    | 0      | 2      | 1      | 0      |
       | 2       | directus_role_members | 1      | 0      | 0      | 0      |
       | 2       | directus_users        | 3      | 0      | 1      | 0      |
@@ -109,7 +107,6 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
       | 2       | directus_access       | 3      | 0      | 0      | 0      | 0    |
       | 2       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_invites      | 1      | 0      | 0      | 0      | 0    |
       | 2       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
       | 2       | directus_role_members | 2      | 0      | 0      | 0      | 0    |
       | 2       | directus_roles        | 1      | 0      | 0      | 0      | 0    |
@@ -122,7 +119,6 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | 4       | directus_activity     | 0      | 2      | 0      | 0      | 0    |
       | 4       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
       | 4       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_invites      | 2      | 0      | 0      | 0      | 0    |
       | 4       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
       | 4       | directus_role_members | 3      | 0      | 0      | 0      | 0    |
       | 4       | directus_roles        | 2      | 0      | 0      | 0      | 0    |
@@ -161,7 +157,6 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | request | table                 | select | insert | update | delete | with |
       | 1       | directus_access       | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_invites      | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_revisions    | 0      | 1      | 0      | 0      | 0    |
       | 1       | directus_role_members | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_users        | 3      | 1      | 0      | 0      | 0    |
@@ -173,7 +168,6 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | 3       | directus_activity     | 0      | 2      | 0      | 0      | 0    |
       | 3       | directus_collections  | 1      | 0      | 0      | 0      | 0    |
       | 3       | directus_fields       | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_invites      | 2      | 0      | 0      | 0      | 0    |
       | 3       | directus_relations    | 1      | 0      | 0      | 0      | 0    |
       | 3       | directus_role_members | 3      | 0      | 0      | 0      | 0    |
       | 3       | directus_roles        | 2      | 0      | 0      | 0      | 0    |
@@ -218,7 +212,6 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | 1       | directus_users        | 1      | 0      | 0      | 0      |
       | 2       | directus_access       | 1      | 0      | 0      | 0      |
       | 2       | directus_activity     | 0      | 2      | 0      | 0      |
-      | 2       | directus_invites      | 1      | 0      | 0      | 0      |
       | 2       | directus_revisions    | 0      | 2      | 1      | 0      |
       | 2       | directus_role_members | 2      | 1      | 0      | 0      |
       | 2       | directus_users        | 3      | 1      | 0      | 0      |
@@ -282,13 +275,11 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | request | table                 | select | insert | update | delete |
       | 1       | directus_access       | 1      | 0      | 0      | 0      |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      |
-      | 1       | directus_invites      | 1      | 0      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
       | 1       | directus_role_members | 1      | 0      | 0      | 0      |
       | 1       | directus_users        | 3      | 1      | 0      | 0      |
       | 2       | directus_access       | 3      | 0      | 0      | 0      |
       | 2       | directus_activity     | 0      | 3      | 0      | 0      |
-      | 2       | directus_invites      | 1      | 0      | 0      | 0      |
       | 2       | directus_revisions    | 0      | 2      | 1      | 0      |
       | 2       | directus_role_members | 3      | 1      | 0      | 0      |
       | 2       | directus_roles        | 5      | 0      | 0      | 0      |
@@ -320,7 +311,6 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | request | table                 | select | insert | update | delete |
       | 1       | directus_access       | 1      | 0      | 0      | 0      |
       | 1       | directus_activity     | 0      | 2      | 0      | 0      |
-      | 1       | directus_invites      | 1      | 0      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 2      | 1      | 0      |
       | 1       | directus_role_members | 4      | 1      | 0      | 0      |
       | 1       | directus_users        | 3      | 1      | 0      | 0      |

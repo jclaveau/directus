@@ -37,6 +37,7 @@ Feature: A user is deleted through a nested write on a related item
       | request | table                  | select | insert | update | delete |
       | 1       | directus_activity      | 0      | 2      | 0      | 0      |
       | 1       | directus_comments      | 1      | 0      | 0      | 0      |
+      | 1       | directus_invites       | 1      | 0      | 0      | 0      |
       | 1       | directus_notifications | 1      | 0      | 0      | 0      |
       | 1       | directus_sessions      | 0      | 0      | 0      | 1      |
       | 1       | directus_users         | 4      | 0      | 0      | 1      |

@@ -120,7 +120,6 @@ Feature: A role change reaches a static token and a session at once
       | 1       | role_change_notes     | 1      | 0      | 0      | 0      |
       | 2       | directus_access       | 3      | 0      | 0      | 0      |
       | 2       | directus_activity     | 0      | 3      | 0      | 0      |
-      | 2       | directus_invites      | 2      | 0      | 0      | 0      |
       | 2       | directus_revisions    | 0      | 1      | 0      | 0      |
       | 2       | directus_role_members | 4      | 1      | 0      | 1      |
       | 2       | directus_roles        | 1      | 0      | 0      | 0      |
@@ -224,7 +223,6 @@ Feature: A role change reaches a static token and a session at once
       | request | table                 | select | insert | update | delete |
       | 1       | directus_access       | 3      | 0      | 0      | 0      |
       | 1       | directus_activity     | 0      | 3      | 0      | 0      |
-      | 1       | directus_invites      | 2      | 0      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
       | 1       | directus_role_members | 4      | 1      | 0      | 1      |
       | 1       | directus_roles        | 1      | 0      | 0      | 0      |

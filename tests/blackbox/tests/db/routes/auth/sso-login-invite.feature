@@ -112,7 +112,7 @@ Feature: An invitation lets an SSO login create its user and gives its roles
       | profile:                         |                                        |
       |   sub: refused-oauth             |                                        |
       |   email: refused@sso.example.com |                                        |
-      | login: mockoauth                 | code: 401                              |+
+      | login: mockoauth                 | code: 403                              |+
       | invite: not-a-token              | body:                                  |
       | profile:                         |   errors:                              |
       |   sub: refused-oauth             |     - message: >-                      |

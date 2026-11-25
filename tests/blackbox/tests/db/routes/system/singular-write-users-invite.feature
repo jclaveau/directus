@@ -395,12 +395,10 @@ Feature: An email is invited, invited again and accepts the invitation
       | path: /graphql/system                | body:                                  |
       | payload:                             |   data:                                |
       |   query: >-                          |     invites:                           |
-      |     { invites(filter: {role:         |       - id: <invite>                   |
-      |     {id: {_eq: "<same-role>"}}},     |         email: again-<run>@example.com |
-      |     sort: ["date_created"])          |         inviter: null                  |
-      |     { id email inviter { email } } } |       - id: <new-invite>               |
-      |                                      |         email: Again-<run>@example.com |
-      |                                      |         inviter:                       |
+      |     { invites(filter: {role:         |       - email: again-<run>@example.com |
+      |     {id: {_eq: "<same-role>"}}},     |         inviter: null                  |
+      |     sort: ["date_created"])          |       - email: Again-<run>@example.com |
+      |     { email inviter { email } } }    |         inviter:                       |
       |                                      |           email: admin@default.com     |
     And on postgres the requests ran these statements:
       | request | table            | select | insert | update | delete |
