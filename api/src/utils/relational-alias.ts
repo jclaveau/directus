@@ -41,3 +41,13 @@ export function unnamedRelationalAliasReason(
 		+ ` is ${specialArticle} ${relationalSpecial} alias no relation names`
 		+ ' in one_field';
 }
+
+/**
+ * The generated column of `directus_fields` the relational alias foreign key
+ * holds. It is the database's, not a field: no read hands it out.
+ */
+export const RELATION_ALIAS_COLUMN = 'relation_alias';
+
+export function isRelationAliasColumn(tableName: string, columnName: string) {
+	return tableName === 'directus_fields' && columnName === RELATION_ALIAS_COLUMN;
+}

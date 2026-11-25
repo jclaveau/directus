@@ -45,10 +45,12 @@ describe.each(vendors)('%s', (vendor) => {
 					'the rows of directus_relations:',
 					async (relationRows: Record<string, string>[]) => {
 						await database('directus_relations').insert(
-							relationRows.map((relationRow) => ({
-								...relationRow,
-								one_field: relationRow['one_field'] || null,
-							})),
+							relationRows.map((relationRow) => {
+								return {
+									...relationRow,
+									one_field: relationRow['one_field'] || null,
+								};
+							}),
 						);
 					},
 				);

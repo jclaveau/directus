@@ -5,7 +5,7 @@ import { spawnSync } from 'child_process';
 import knex, { type Knex } from 'knex';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 
-const MIGRATION_VERSION = '20261125A';
+const MIGRATION_VERSIONS = ['20261125A', '20261125B'];
 
 const postgresVendors = ['postgres', 'postgres10'];
 
@@ -18,6 +18,13 @@ describe.each(vendors)('%s', (vendor) => {
 
 	beforeAll(async () => {
 		database = knex(config.knexConfig[vendor]!);
+
+		// The foreign key refuses the unnamed alias this scenario seeds.
+		if (postgresVendors.includes(vendor)) {
+			await database.raw(
+				'alter table directus_fields drop column if exists relation_alias',
+			);
+		}
 	});
 
 	afterAll(async () => {
@@ -54,7 +61,7 @@ describe.each(vendors)('%s', (vendor) => {
 					'the migration deleting the unnamed relational aliases is run again',
 					async () => {
 						await database('directus_migrations')
-							.where({ version: MIGRATION_VERSION })
+							.whereIn('version', MIGRATION_VERSIONS)
 							.delete();
 
 						if (postgresVendors.includes(vendor)) {

@@ -37,7 +37,7 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import getDefaultValue from '../utils/get-default-value.js';
 import { getSystemFieldRowsWithAuthProviders } from '../utils/get-field-system-rows.js';
 import getLocalType from '../utils/get-local-type.js';
-import { isEqual, isNil, merge } from '../utils/lodash-es-used.js';
+import { isEqual, isNil, merge, omit } from '../utils/lodash-es-used.js';
 import { withMeta } from '../utils/read-meta.js';
 import { sanitizeColumn } from '../utils/sanitize-schema.js';
 import {
@@ -52,6 +52,8 @@ import { getCollectionMetaUpdates } from './fields/get-collection-meta-updates.j
 import { getCollectionRelationList } from './fields/get-collection-relation-list.js';
 import {
 	findRelationalSpecial,
+	isRelationAliasColumn,
+	RELATION_ALIAS_COLUMN,
 	unnamedRelationalAliasReason,
 } from '../utils/relational-alias.js';
 import { ItemsService } from './items.js';
@@ -114,7 +116,8 @@ export class FieldsService {
 		}
 
 		if (!columnInfo) {
-			columnInfo = await this.schemaInspector.columnInfo();
+			columnInfo = (await this.schemaInspector.columnInfo())
+				.filter((column) => !isRelationAliasColumn(column.table, column.name));
 
 			if (schemaCacheIsEnabled) {
 				await setCacheValue(this.schemaCache, 'columnInfo', columnInfo);
@@ -201,7 +204,11 @@ export class FieldsService {
 			aliasQuery.andWhere('collection', collection);
 		}
 
-		let aliasFields = [...((await this.payloadService.processValues('read', await aliasQuery)) as FieldMeta[])];
+		const aliasRows = (await aliasQuery).map((aliasRow) => {
+			return omit(aliasRow, RELATION_ALIAS_COLUMN);
+		});
+
+		let aliasFields = [...((await this.payloadService.processValues('read', aliasRows)) as FieldMeta[])];
 
 		if (collection) {
 			aliasFields.push(...systemFieldRows.filter((fieldMeta) => fieldMeta.collection === collection));
@@ -339,7 +346,10 @@ export class FieldsService {
 		let fieldInfo = await this.knex.select('*').from('directus_fields').where({ collection, field }).first();
 
 		if (fieldInfo) {
-			fieldInfo = (await this.payloadService.processValues('read', fieldInfo)) as FieldMeta[];
+			fieldInfo = (await this.payloadService.processValues(
+				'read',
+				omit(fieldInfo, RELATION_ALIAS_COLUMN),
+			)) as FieldMeta[];
 		}
 
 		fieldInfo =
