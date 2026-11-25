@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 // Lists the branches a pull request adds to api/src that no blackbox server ran,
-// and checks the lines listed as unit-only are run by the api unit tests.
+// and checks the code tagged unit-only is run by the api unit tests.
 //
 //   node tests/blackbox/branch-audit/branch-audit.mjs
 //     --blackbox <dir> --base <ref> --head <ref>
@@ -14,19 +14,25 @@
 //
 // --unit holds the api unit tests' coverage-final.json, built from --unit-head.
 //
-// A line no blackbox server ran is
-// - out of scope when out-of-scope.json lists it under its `oos feature` issue;
-// - unit-only when unit-only.json lists it: no request can reach it, so the
-//   unit tests must run it;
+// A tag ends the code line it covers, and covers every statement, function and
+// branch starting on that line, to their end:
+//
+//   if (retryDelay > 0) { // bb-unit-only: Redis never refuses in bb
+//   if (isMysql) { // bb-out-of-scope: #610
+//
+// A counter under several tags takes the innermost one. A line no blackbox
+// server ran is
+// - out of scope under a `bb-out-of-scope: #<oos feature issue>` tag;
+// - unit-only under a `bb-unit-only: <why>` tag: no request can reach it, so
+//   the unit tests must run it;
 // - otherwise a gap: a blackbox scenario should reach it.
 //
-// Exits 1 when a list entry names no line, a unit-only line is run by
-// blackbox, or a unit-only line is not run by the unit tests. Gaps alone
-// never fail it.
+// Exits 1 when a tag is malformed or covers nothing, blackbox runs all a tag
+// covers, or the unit tests leave a unit-only counter unrun. Gaps alone never
+// fail it.
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
 const { values: options } = parseArgs({
@@ -49,8 +55,6 @@ if (!options.blackbox || !options.base || !options.head
 
 	process.exit(2);
 }
-
-const listDir = dirname(fileURLToPath(import.meta.url));
 
 function findCoverageFiles(dir) {
 	return readdirSync(dir).flatMap((name) => {
@@ -154,28 +158,46 @@ function armNameOf(branchType, arm, armCount) {
 	}
 }
 
-// Every statement and branch arm starting on `line`, with its hit count.
-function countersOnLine(fileCoverage, line) {
-	const counters = [];
-
-	for (const [id, statement] of Object.entries(fileCoverage.statementMap)) {
-		if (statement.start.line === line) {
-			counters.push({ name: 'statement', hits: fileCoverage.s[id] });
-		}
-	}
-
-	for (const [id, branch] of Object.entries(fileCoverage.branchMap)) {
-		branch.locations.forEach((location, arm) => {
-			const armLine = location?.start?.line ?? branch.loc.start.line;
-
-			if (armLine === line) {
-				const name = armNameOf(branch.type, arm, branch.locations.length);
-				counters.push({ name, hits: fileCoverage.b[id][arm] });
-			}
+// Every statement and branch arm of a file: where it starts, its hit count.
+// An arm with no location of its own starts where its branch does.
+function countersOf(fileCoverage) {
+	const statementCounters = Object.entries(fileCoverage.statementMap)
+		.map(([id, statement]) => {
+			return {
+				kind: 'statement',
+				name: 'statement',
+				start: statement.start,
+				hits: fileCoverage.s[id],
+			};
 		});
-	}
 
-	return counters;
+	const armCounters = Object.entries(fileCoverage.branchMap)
+		.flatMap(([id, branch]) => {
+			return branch.locations.map((location, arm) => {
+				const start = location?.start?.line === undefined
+					? branch.loc.start
+					: location.start;
+
+				return {
+					kind: 'arm',
+					name: armNameOf(branch.type, arm, branch.locations.length),
+					start,
+					branchLine: branch.loc.start.line,
+					hits: fileCoverage.b[id][arm],
+				};
+			});
+		});
+
+	return [...statementCounters, ...armCounters];
+}
+
+function comparePositions(left, right) {
+	return left.line - right.line || left.column - right.column;
+}
+
+function rangeHolds(range, position) {
+	return comparePositions(range.start, position) <= 0
+		&& comparePositions(position, range.end) <= 0;
 }
 
 const sourceByRef = new Map();
@@ -196,93 +218,122 @@ function sourceLinesAt(ref, path) {
 	return sourceByRef.get(key);
 }
 
-const listErrors = [];
-
-function readList(fileName, requiredKeys, optionalKeys) {
-	const entries = JSON.parse(readFileSync(join(listDir, fileName), 'utf8'));
-
-	entries.forEach((entry, index) => {
-		const name = `${fileName} entry ${index + 1}`;
-		const keys = Object.keys(entry);
-
-		for (const key of requiredKeys) {
-			if (!keys.includes(key)) {
-				listErrors.push(`${name} has no ${JSON.stringify(key)}.`);
-			}
-		}
-
-		for (const key of keys) {
-			if (!requiredKeys.includes(key) && !optionalKeys.includes(key)) {
-				listErrors.push(`${name} has an unknown key ${JSON.stringify(key)}.`);
-			}
-		}
-
-		entry.name = name;
-	});
-
-	return entries;
-}
-
-// The line an entry names at `ref`: its `source` (trimmed) is found exactly
-// once in the file, or at its `occurrence` (1-based) when repeated.
-function lineOfEntry(entry, ref) {
-	let sourceLines;
-
-	try {
-		sourceLines = sourceLinesAt(ref, entry.file);
-	}
-	catch {
-		listErrors.push(`${entry.name}: ${JSON.stringify(entry.file)} does not `
-			+ `exist at ${ref}.`);
-
-		return null;
-	}
-
-	const matchedLines = [];
-
-	sourceLines.forEach((text, index) => {
-		if (text.trim() === entry.source) {
-			matchedLines.push(index + 1);
-		}
-	});
-
-	if (entry.occurrence === undefined && matchedLines.length > 1) {
-		listErrors.push(`${entry.name}: ${JSON.stringify(entry.source)} is on `
-			+ `lines ${matchedLines.join(', ')} of ${entry.file} at ${ref}; `
-			+ 'set "occurrence".');
-
-		return null;
-	}
-
-	const line = matchedLines[(entry.occurrence ?? 1) - 1];
-
-	if (line === undefined) {
-		listErrors.push(`${entry.name}: no line ${JSON.stringify(entry.source)} `
-			+ `in ${entry.file} at ${ref}.`);
-
-		return null;
-	}
-
-	return line;
-}
-
-const outOfScope = readList('out-of-scope.json', ['issue', 'file', 'reason'], [
-	'source',
-	'occurrence',
-]);
-
-const unitOnly = readList('unit-only.json', ['file', 'source', 'reason'], [
-	'occurrence',
-]);
-
-const blackbox = readCoverage(options.blackbox);
-
 // Test files and test helpers are never instrumented (api/tsdown.config.ts).
 function isInstrumentedSource(path) {
 	return /^api\/src\/.*\.ts$/.test(path)
 		&& !/\.test(-d)?\.ts$/.test(path)
 		&& !/^api\/src\/(__[^/]*|test-utils)\//.test(path);
 }
+
+const tagErrors = [];
+const TAG_PATTERN = /^(.*?)\/\/ bb-(unit-only|out-of-scope):(.*)$/;
+
+// The tags in api/src at `ref`, keyed by path, each `{ path, line, kind, text }`.
+function readTags(ref) {
+	let grepText;
+
+	try {
+		grepText = execFileSync(
+			'git',
+			['grep', '-n', '-E', '// bb-(unit-only|out-of-scope):', ref, '--', 'api/src'],
+			{ encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+		);
+	}
+	catch (error) {
+		// git grep exits 1 when nothing matches.
+		if (error.status === 1) {
+			return new Map();
+		}
+
+		throw error;
+	}
+
+	const tagsByPath = new Map();
+
+	for (const grepLine of grepText.split('\n')) {
+		if (grepLine === '') {
+			continue;
+		}
+
+		// `<ref>:<path>:<line>:<source line>`
+		const [, path, lineText, sourceLine] = /^([^:]+):(\d+):(.*)$/
+			.exec(grepLine.slice(ref.length + 1));
+
+		if (!isInstrumentedSource(path)) {
+			continue;
+		}
+
+		const [, code, kind, rawText] = TAG_PATTERN.exec(sourceLine);
+		const tag = { path, line: Number(lineText), kind, text: rawText.trim() };
+		const place = `Tag on ${path}:${tag.line} at ${ref}`;
+
+		if (code.trim() === '') {
+			tagErrors.push(`${place} is alone on its line: end the code line `
+				+ 'it covers with it.');
+
+			continue;
+		}
+
+		if (tag.text === '') {
+			tagErrors.push(`${place} gives no reason.`);
+			continue;
+		}
+
+		if (kind === 'out-of-scope' && !/^#\d+\b/.test(tag.text)) {
+			tagErrors.push(`${place} names no issue: `
+				+ `${JSON.stringify(tag.text)} does not start with "#<number>".`);
+
+			continue;
+		}
+
+		tagsByPath.set(path, [...tagsByPath.get(path) ?? [], tag]);
+	}
+
+	return tagsByPath;
+}
+
+// What a tag covers in a file's coverage: every statement, function and
+// branch starting on its line, each to its end.
+function rangesOfTag(tag, fileCoverage) {
+	return [
+		...Object.values(fileCoverage.statementMap),
+		...Object.values(fileCoverage.fnMap).map(({ loc }) => loc),
+		...Object.values(fileCoverage.branchMap).map(({ loc }) => loc),
+	].filter((range) => range.start.line === tag.line);
+}
+
+// Resolves a file's tags against its coverage, then the innermost tag of each
+// counter: the covering range starting last.
+function tagCounters(tags, fileCoverage, ref) {
+	const tagRanges = tags.flatMap((tag) => {
+		const ranges = rangesOfTag(tag, fileCoverage);
+
+		if (ranges.length === 0) {
+			tagErrors.push(`Tag on ${tag.path}:${tag.line} at ${ref} covers no `
+				+ 'statement, function or branch: end the line one starts on.');
+		}
+
+		return ranges.map((range) => ({ tag, range }));
+	});
+
+	const counters = countersOf(fileCoverage);
+
+	for (const counter of counters) {
+		const holding = tagRanges
+			.filter(({ range }) => rangeHolds(range, counter.start))
+			.sort((left, right) => {
+				return comparePositions(right.range.start, left.range.start)
+					|| comparePositions(left.range.end, right.range.end);
+			});
+
+		counter.tag = holding[0]?.tag;
+	}
+
+	return counters;
+}
+
+const blackbox = readCoverage(options.blackbox);
+const headTags = readTags(options.head);
 
 const diffText = execFileSync(
 	'git',
@@ -331,8 +382,37 @@ for (const diffLine of diffText.split('\n')) {
 	addedLinesByPath.set(currentPath, addedLines);
 }
 
+// Every tag is checked, added by this PR or not, so a stale one fails
+// whichever PR runs next.
+const countersByPath = new Map();
+
+for (const [path, tags] of headTags) {
+	const fileCoverage = blackbox.coverageByPath.get(path);
+
+	// A file no server loaded: its unit-only tags are checked on the unit side.
+	if (!fileCoverage) {
+		continue;
+	}
+
+	const counters = tagCounters(tags, fileCoverage, options.head);
+	countersByPath.set(path, counters);
+
+	for (const tag of tags) {
+		const tagged = counters.filter((counter) => counter.tag === tag);
+
+		if (tagged.length > 0 && tagged.every(({ hits }) => hits > 0)) {
+			tagErrors.push(`Blackbox runs all the tag on ${path}:${tag.line} `
+				+ `covers: drop the tag.`);
+		}
+	}
+}
+
 const findings = [];
-const totals = { arms: 0, armsRun: 0, statements: 0, statementsRun: 0 };
+
+const totals = {
+	arm: { added: 0, run: 0 },
+	statement: { added: 0, run: 0 },
+};
 
 for (const [path, addedLines] of [...addedLinesByPath].sort()) {
 	const fileCoverage = blackbox.coverageByPath.get(path);
@@ -344,85 +424,26 @@ for (const [path, addedLines] of [...addedLinesByPath].sort()) {
 		continue;
 	}
 
-	for (const [id, branch] of Object.entries(fileCoverage.branchMap)) {
-		const hits = fileCoverage.b[id];
-		const branchLine = branch.loc.start.line;
+	const counters = countersByPath.get(path) ?? countersOf(fileCoverage);
 
-		branch.locations.forEach((location, arm) => {
-			const line = location?.start?.line ?? branchLine;
+	for (const counter of counters) {
+		const line = counter.start.line;
 
-			if (!addedLines.has(line) && !addedLines.has(branchLine)) {
-				return;
-			}
+		const isAdded = addedLines.has(line)
+			|| addedLines.has(counter.branchLine);
 
-			totals.arms++;
-
-			if (hits[arm] > 0) {
-				totals.armsRun++;
-				return;
-			}
-
-			const detail = armNameOf(branch.type, arm, branch.locations.length);
-			findings.push({ path, line, detail });
-		});
-	}
-
-	for (const [id, statement] of Object.entries(fileCoverage.statementMap)) {
-		const line = statement.start.line;
-
-		if (!addedLines.has(line)) {
+		if (!isAdded) {
 			continue;
 		}
 
-		totals.statements++;
+		totals[counter.kind].added++;
 
-		if (fileCoverage.s[id] > 0) {
-			totals.statementsRun++;
+		if (counter.hits > 0) {
+			totals[counter.kind].run++;
 			continue;
 		}
 
-		findings.push({ path, line, detail: 'statement never run' });
-	}
-}
-
-// Resolve every entry, so a stale one fails whichever PR runs next.
-const outOfScopeByLine = new Map();
-const outOfScopeFiles = new Map();
-
-for (const entry of outOfScope) {
-	if (entry.source === undefined) {
-		outOfScopeFiles.set(entry.file, entry);
-		continue;
-	}
-
-	const line = lineOfEntry(entry, options.head);
-
-	if (line !== null) {
-		outOfScopeByLine.set(`${entry.file}:${line}`, entry);
-	}
-}
-
-const unitOnlyByLine = new Map();
-
-for (const entry of unitOnly) {
-	const line = lineOfEntry(entry, options.head);
-
-	if (line === null) {
-		continue;
-	}
-
-	unitOnlyByLine.set(`${entry.file}:${line}`, entry);
-
-	// Listed as out of reach, yet a blackbox server ran all of it.
-	const fileCoverage = blackbox.coverageByPath.get(entry.file);
-
-	const counters = fileCoverage
-		? countersOnLine(fileCoverage, line)
-		: [];
-
-	if (counters.length > 0 && counters.every(({ hits }) => hits > 0)) {
-		listErrors.push(`${entry.name}: blackbox runs ${entry.file}:${line} `
-			+ `${JSON.stringify(entry.source)}; drop the entry.`);
+		findings.push({ path, line, detail: counter.name, tag: counter.tag });
 	}
 }
 
@@ -435,21 +456,17 @@ const gapRows = new Map();
 const outOfScopeRows = new Map();
 
 for (const finding of findings) {
-	const key = `${finding.path}:${finding.line}`;
-
-	// A unit-only line is reported by the unit check below, not here.
-	if (unitOnlyByLine.has(key)) {
+	// A unit-only counter is reported by the unit check below, not here.
+	if (finding.tag?.kind === 'unit-only') {
 		continue;
 	}
 
-	const scopeEntry = outOfScopeByLine.get(key)
-		?? outOfScopeFiles.get(finding.path);
-
-	const rows = scopeEntry
+	const rows = finding.tag?.kind === 'out-of-scope'
 		? outOfScopeRows
 		: gapRows;
 
-	const row = rows.get(key) ?? { ...finding, details: new Set(), scopeEntry };
+	const key = `${finding.path}:${finding.line}`;
+	const row = rows.get(key) ?? { ...finding, details: new Set() };
 	row.details.add(finding.detail);
 	rows.set(key, row);
 }
@@ -482,8 +499,9 @@ function sourceCellOf(row) {
 		: `\`${sourceLineOf(row.path, row.line)}\``;
 }
 
-const armsPercent = percentOf(totals.armsRun, totals.arms);
-const statementsPercent = percentOf(totals.statementsRun, totals.statements);
+function totalRow(label, { added, run }) {
+	return `| ${label} | ${run} | ${added} | ${percentOf(run, added)} |`;
+}
 
 const report = [
 	'## Blackbox branch audit',
@@ -493,21 +511,20 @@ const report = [
 	'',
 	'| added | run by blackbox | total | run |',
 	'|---|---|---|---|',
-	`| branch arms | ${totals.armsRun} | ${totals.arms} | ${armsPercent} |`,
-	`| statements | ${totals.statementsRun} | ${totals.statements} `
-	+ `| ${statementsPercent} |`,
+	totalRow('branch arms', totals.arm),
+	totalRow('statements', totals.statement),
 	'',
 	`### Not run by blackbox: ${gapRows.size} line(s)`,
 	'',
 ];
 
 if (gapRows.size === 0) {
-	report.push('Every added line is run by blackbox or listed.');
+	report.push('Every added line is run by blackbox or tagged.');
 }
 else {
 	report.push(
 		'Each needs a blackbox scenario reaching it. When no request can reach',
-		'it, list it in `tests/blackbox/branch-audit/unit-only.json`.',
+		'it, end the line its statement starts on with `// bb-unit-only: <why>`.',
 		'',
 		'| line | not run | source |',
 		'|---|---|---|',
@@ -517,50 +534,56 @@ else {
 
 const unitFailures = [];
 
-report.push('', `### Unit-only: ${unitOnly.length} listed line(s)`, '');
+const unitOnlyTags = [...headTags.values()]
+	.flat()
+	.filter(({ kind }) => kind === 'unit-only');
+
+report.push('', `### Unit-only: ${unitOnlyTags.length} tag(s)`, '');
 
 if (options.unit) {
+	const unitHead = options['unit-head'];
 	const unit = readCoverage(options.unit);
 	const unitRows = [];
 
-	for (const entry of unitOnly) {
-		const line = lineOfEntry(entry, options['unit-head']);
+	for (const [path, tags] of readTags(unitHead)) {
+		const unitOnlyOfFile = tags.filter(({ kind }) => kind === 'unit-only');
 
-		if (line === null) {
+		if (unitOnlyOfFile.length === 0) {
 			continue;
 		}
 
-		const fileCoverage = unit.coverageByPath.get(entry.file);
+		const fileCoverage = unit.coverageByPath.get(path);
 
 		const counters = fileCoverage
-			? countersOnLine(fileCoverage, line)
+			? tagCounters(tags, fileCoverage, unitHead)
 			: [];
 
-		const unrunNames = counters
-			.filter(({ hits }) => hits === 0)
-			.map(({ name }) => name);
+		for (const tag of unitOnlyOfFile) {
+			const unrunNames = counters
+				.filter((counter) => counter.tag === tag && counter.hits === 0)
+				.map(({ name, start }) => `${name} on ${start.line}`);
 
-		let verdict = 'run';
+			let verdict = 'run';
 
-		if (counters.length === 0) {
-			verdict = 'no unit coverage on this line';
+			if (!fileCoverage) {
+				verdict = 'no unit coverage of the file';
+			}
+			else if (unrunNames.length > 0) {
+				verdict = `not run: ${[...new Set(unrunNames)].join(', ')}`;
+			}
+
+			if (verdict !== 'run') {
+				unitFailures.push(`Unit-only tag on ${path}:${tag.line}: ${verdict}`);
+			}
+
+			unitRows.push(`| \`${path}:${tag.line}\` | ${verdict} | ${tag.text} |`);
 		}
-		else if (unrunNames.length > 0) {
-			verdict = `not run: ${[...new Set(unrunNames)].join(', ')}`;
-		}
-
-		if (verdict !== 'run') {
-			unitFailures.push(`${entry.name}: ${entry.file}:${line} ${verdict}`);
-		}
-
-		unitRows.push(`| \`${entry.file}:${line}\` | ${verdict} `
-			+ `| ${entry.reason} |`);
 	}
 
 	report.push(
-		`Checked against the api unit tests at \`${options['unit-head']}\`.`,
+		`Checked against the api unit tests at \`${unitHead}\`.`,
 		'',
-		'| line | unit tests | why blackbox cannot reach it |',
+		'| tag | unit tests | why blackbox cannot reach it |',
 		'|---|---|---|',
 		...unitRows,
 	);
@@ -575,12 +598,11 @@ if (outOfScopeRows.size > 0) {
 	report.push(
 		'| line | not run | issue |',
 		'|---|---|---|',
-		...[...outOfScopeRows.values()]
-			.map((row) => rowLine(row, `#${row.scopeEntry.issue}`)),
+		...[...outOfScopeRows.values()].map((row) => rowLine(row, row.tag.text)),
 	);
 }
 
-const failures = [...listErrors, ...unitFailures];
+const failures = [...tagErrors, ...unitFailures];
 
 if (failures.length > 0) {
 	report.push('', '### Failures', '', ...failures.map((text) => `- ${text}`));
