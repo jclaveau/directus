@@ -24,7 +24,7 @@ export default defineOperationApi<Options>({
 	handler: async (
 		{ body, template, data, to, type, subject, cc, bcc, replyTo },
 		{ accountability, database, getSchema },
-	) => {
+	) => { // bb-out-of-scope: #651 flows
 		const mailService = new MailService({ schema: await getSchema({ database }), accountability, knex: database });
 		const mailObject: EmailOptions = { to, subject, cc, bcc, replyTo };
 		const safeBody = typeof body !== 'string' ? JSON.stringify(body) : body;

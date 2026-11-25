@@ -6,7 +6,7 @@ import { getMetadata, type Metadata } from '../utils/get-metadata.js';
 export async function extractMetadata(
 	storageLocation: string,
 	data: Partial<File> & Pick<File, 'type' | 'filename_disk'>,
-): Promise<Metadata> {
+): Promise<Metadata> { // bb-out-of-scope: #709 file storage
 	const storage = await getStorage();
 	const fileMeta: Metadata = {};
 

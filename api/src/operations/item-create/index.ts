@@ -14,7 +14,7 @@ type Options = {
 export default defineOperationApi<Options>({
 	id: 'item-create',
 
-	handler: async ({ collection, payload, emitEvents, permissions }, { accountability, database, getSchema }) => {
+	handler: async ({ collection, payload, emitEvents, permissions }, { accountability, database, getSchema }) => { // bb-out-of-scope: #651 flows
 		const schema = await getSchema({ database });
 		let customAccountability: Accountability | null;
 

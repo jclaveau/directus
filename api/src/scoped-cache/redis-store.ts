@@ -1859,7 +1859,7 @@ const redisStore: ScopedCacheStore = {
 	 * bites a custom override.
 	 */
 	assertStoreSupported(): void {
-		if (useCacheRedis().isCluster) {
+		if (useCacheRedis().isCluster) { // bb-out-of-scope: #646 Redis cluster
 			throw new Error(
 				'CACHE_AUTO_PURGE_MODE=scoped is not implemented for Redis cluster '
 				+ 'clients (SCAN and multi-key DEL are single-node). Use a standalone '

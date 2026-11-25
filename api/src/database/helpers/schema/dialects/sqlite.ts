@@ -6,7 +6,7 @@ export class SchemaHelperSQLite extends SchemaHelper {
 		type: 'unique' | 'foreign' | 'index',
 		collection: string,
 		fields: string | string[],
-	): string {
+	): string { // bb-out-of-scope: #610 non-Postgres
 		return getDefaultIndexName(type, collection, fields, { maxLength: Infinity });
 	}
 
@@ -24,7 +24,7 @@ export class SchemaHelperSQLite extends SchemaHelper {
 		await this.knex.raw('PRAGMA foreign_keys = ON');
 	}
 
-	override async getDatabaseSize(): Promise<number | null> {
+	override async getDatabaseSize(): Promise<number | null> { // bb-out-of-scope: #610 non-Postgres
 		try {
 			const result = await this.knex.raw(
 				'SELECT page_count * page_size as "size" FROM pragma_page_count(), pragma_page_size();',

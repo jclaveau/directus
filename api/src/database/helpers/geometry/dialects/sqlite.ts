@@ -7,7 +7,7 @@ export class GeometryHelperSQLite extends GeometryHelper {
 		return res.length > 0;
 	}
 
-	asGeoJSON(table: string, column: string): Knex.Raw {
+	asGeoJSON(table: string, column: string): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw('asgeojson(??.??) as ??', [table, column, column]);
 	}
 }

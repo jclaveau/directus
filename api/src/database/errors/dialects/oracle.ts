@@ -6,7 +6,7 @@ enum OracleErrorCodes {
 	// @TODO extend with other errors
 }
 
-export function extractError(error: OracleError): OracleError | Error {
+export function extractError(error: OracleError): OracleError | Error { // bb-out-of-scope: #610 non-Postgres
 	switch (error.errorNum) {
 		case OracleErrorCodes.CONTAINS_NULL_VALUES:
 			return containsNullValues(error);
@@ -15,7 +15,7 @@ export function extractError(error: OracleError): OracleError | Error {
 	}
 }
 
-function containsNullValues(error: OracleError): OracleError | InstanceType<typeof ContainsNullValuesError> {
+function containsNullValues(error: OracleError): OracleError | InstanceType<typeof ContainsNullValuesError> { // bb-out-of-scope: #610 non-Postgres
 	const betweenQuotes = /"([^"]+)"/g;
 	const matches = error.message.match(betweenQuotes);
 

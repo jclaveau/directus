@@ -3,7 +3,7 @@ import { getHelpers } from '../helpers/index.js';
 
 export async function up(knex: Knex): Promise<void> {
 	const helper = getHelpers(knex).schema;
-	const type = helper.isOneOfClients(['oracle', 'cockroachdb']) ? 'text' : 'string';
+	const type = helper.isOneOfClients(['oracle', 'cockroachdb']) ? 'text' : 'string'; // bb-out-of-scope: #610 non-Postgres
 	await helper.changeToType('directus_webhooks', 'collections', type);
 }
 

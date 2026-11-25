@@ -15,7 +15,7 @@ export async function getPermissionsForShare(
 	accountability: Pick<Accountability, 'share' | 'ip'>,
 	collections: string[] | undefined,
 	context: Context,
-): Promise<Permission[]> {
+): Promise<Permission[]> { // bb-out-of-scope: #657 shares
 	const defaults: Permission = {
 		action: 'read',
 		collection: '',
@@ -179,7 +179,7 @@ export function traverse(
 	currentCollection: string,
 	parentCollections: string[] = [],
 	path: string[] = [],
-): Partial<Permission>[] {
+): Partial<Permission>[] { // bb-out-of-scope: #657 shares
 	const permissions: Partial<Permission>[] = [];
 
 	// If there's already a permissions rule for the collection we're currently checking, we'll shortcircuit.
@@ -270,7 +270,7 @@ function getFilterForPath(
 	path: string[],
 	rootPrimaryKeyField: string,
 	rootPrimaryKey: string,
-): Filter {
+): Filter { // bb-out-of-scope: #657 shares
 	const filter: Filter = {};
 
 	if (type === 'm2o' || type === 'a2o') {

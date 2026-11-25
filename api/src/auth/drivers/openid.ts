@@ -44,7 +44,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 	config: Record<string, any>;
 	roleMap: RoleMap;
 
-	constructor(options: AuthDriverOptions, config: Record<string, any>) {
+	constructor(options: AuthDriverOptions, config: Record<string, any>) { // bb-out-of-scope: #622 OpenID login
 		super(options, config);
 
 		const env = useEnv();
@@ -76,13 +76,13 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 
 		const roleMapping = this.config['roleMapping'];
 
-		if (roleMapping) {
+		if (roleMapping) { // bb-out-of-scope: #753 provider roles
 			this.roleMap = roleMapping;
 		}
 
 		// role mapping will fail on login if AUTH_<provider>_ROLE_MAPPING is an array instead of an object.
 		// This happens if the 'json:' prefix is missing from the variable declaration. To save the user from exhaustive debugging, we'll try to fail early here.
-		if (roleMapping instanceof Array) {
+		if (roleMapping instanceof Array) { // bb-out-of-scope: #753 provider roles
 			logger.error(
 				"[OpenID] Expected a JSON-Object as role mapping, got an Array instead. Make sure you declare the variable with 'json:' prefix.",
 			);
@@ -106,7 +106,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		});
 	}
 
-	private async getClient() {
+	private async getClient() { // bb-out-of-scope: #622 OpenID login
 		if (this.client) return this.client;
 
 		const logger = useLogger();
@@ -179,7 +179,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		return generators.codeVerifier();
 	}
 
-	async generateAuthUrl(codeVerifier: string, prompt = false): Promise<string> {
+	async generateAuthUrl(codeVerifier: string, prompt = false): Promise<string> { // bb-out-of-scope: #622 OpenID login
 		const { plainCodeChallenge } = this.config;
 
 		try {
@@ -213,7 +213,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		return user?.id;
 	}
 
-	override async getUserID(payload: Record<string, any>): Promise<string> {
+	override async getUserID(payload: Record<string, any>): Promise<string> { // bb-out-of-scope: #622 OpenID login
 		const logger = useLogger();
 
 		if (!payload['code'] || !payload['codeVerifier'] || !payload['state']) {
@@ -255,7 +255,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		const groupClaimName: string = this.config['groupClaimName'] ?? 'groups';
 		const groups = userInfo[groupClaimName] ? toArray(userInfo[groupClaimName]) : [];
 
-		if (groups.length > 0) {
+		if (groups.length > 0) { // bb-out-of-scope: #753 provider roles
 			for (const key in this.roleMap) {
 				if (groups.includes(key)) {
 					// Overwrite default role if user is member of a group specified in roleMap
@@ -301,7 +301,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			};
 
 			// Make sure a user's role gets updated if their openid group or role mapping changes
-			if (this.config['roleMapping']) {
+			if (this.config['roleMapping']) { // bb-out-of-scope: #753 provider roles
 				emitPayload['role'] = role;
 			}
 
@@ -372,7 +372,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		return this.refresh(user);
 	}
 
-	override async refresh(user: User): Promise<void> {
+	override async refresh(user: User): Promise<void> { // bb-out-of-scope: #622 OpenID login
 		const logger = useLogger();
 
 		let authData = user.auth_data as AuthData;
@@ -403,7 +403,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 	}
 }
 
-const handleError = (e: any) => {
+const handleError = (e: any) => { // bb-out-of-scope: #622 OpenID login
 	const logger = useLogger();
 
 	if (e instanceof errors.OPError) {
@@ -429,7 +429,7 @@ const handleError = (e: any) => {
 	return e;
 };
 
-export function createOpenIDAuthRouter(providerName: string): Router {
+export function createOpenIDAuthRouter(providerName: string): Router { // bb-out-of-scope: #622 OpenID login
 	const env = useEnv();
 	const router = Router();
 

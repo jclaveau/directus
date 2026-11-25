@@ -9,7 +9,7 @@ export async function validateStorage(): Promise<void> {
 	const env = useEnv();
 	const logger = useLogger();
 
-	if (env['DB_CLIENT'] === 'sqlite3') {
+	if (env['DB_CLIENT'] === 'sqlite3') { // bb-out-of-scope: #610 SQLite
 		try {
 			await access(path.dirname(env['DB_FILENAME'] as string), constants.R_OK | constants.W_OK);
 		} catch {

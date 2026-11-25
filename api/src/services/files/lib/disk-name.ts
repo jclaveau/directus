@@ -3,7 +3,7 @@
  * path. A driver resolves the name under its root, so `/a`, `./a` or `a/../b`
  * would reach a file the row doesn't name.
  */
-export function unnormalisedDiskNameReason(filenameDisk: string): string | null {
+export function unnormalisedDiskNameReason(filenameDisk: string): string | null { // bb-out-of-scope: #709 file storage
 	if (filenameDisk === '') {
 		return '"filename_disk" can\'t be empty';
 	}

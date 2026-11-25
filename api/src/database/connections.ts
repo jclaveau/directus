@@ -143,7 +143,7 @@ export function requiredConnectionFields(config: Record<string, any>): string[] 
 			break;
 
 		case 'oracledb':
-			if (connectString) {
+			if (connectString) { // bb-out-of-scope: #610 non-Postgres
 				fields.push('user', 'password', 'connectString');
 			}
 			else {
@@ -164,7 +164,7 @@ export function requiredConnectionFields(config: Record<string, any>): string[] 
 			break;
 
 		case 'mysql':
-			if (socketPath) {
+			if (socketPath) { // bb-out-of-scope: #610 non-Postgres
 				fields.push('database', 'user', 'password', 'socketPath');
 			}
 			else {
@@ -174,7 +174,7 @@ export function requiredConnectionFields(config: Record<string, any>): string[] 
 			break;
 
 		case 'mssql':
-			if (!type || type === 'default') {
+			if (!type || type === 'default') { // bb-out-of-scope: #610 non-Postgres
 				fields.push('host', 'port', 'database', 'user', 'password');
 			}
 

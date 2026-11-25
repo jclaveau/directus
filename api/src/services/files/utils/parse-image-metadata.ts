@@ -13,7 +13,7 @@ const IPTC_ENTRY_TYPES = new Map([
 
 const IPTC_ENTRY_MARKER = Buffer.from([0x1c, 0x02]);
 
-export function parseIptc(buffer: Buffer): Record<string, unknown> {
+export function parseIptc(buffer: Buffer): Record<string, unknown> { // bb-out-of-scope: #709 file storage
 	if (!Buffer.isBuffer(buffer)) return {};
 
 	const iptc: Record<string, any> = {};
@@ -50,7 +50,7 @@ export function parseIptc(buffer: Buffer): Record<string, unknown> {
 	return iptc;
 }
 
-export function parseXmp(buffer: Buffer): Record<string, unknown> {
+export function parseXmp(buffer: Buffer): Record<string, unknown> { // bb-out-of-scope: #709 file storage
 	const xmp: Record<string, unknown> = {};
 
 	['title', 'description', 'rights', 'creator', 'subject'].forEach((x) => {

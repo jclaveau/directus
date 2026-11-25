@@ -10,7 +10,7 @@ type Options = {
 export default defineOperationApi<Options>({
 	id: 'condition',
 
-	handler: ({ filter }, { data, accountability }) => {
+	handler: ({ filter }, { data, accountability }) => { // bb-out-of-scope: #651 flows
 		const parsedFilter = parseFilter(filter, accountability, undefined, true);
 
 		if (!parsedFilter) {

@@ -16,7 +16,7 @@ type Options = {
 export default defineOperationApi<Options>({
 	id: 'item-delete',
 
-	handler: async ({ collection, key, query, emitEvents, permissions }, { accountability, database, getSchema }) => {
+	handler: async ({ collection, key, query, emitEvents, permissions }, { accountability, database, getSchema }) => { // bb-out-of-scope: #651 flows
 		const schema = await getSchema({ database });
 		let customAccountability: Accountability | null;
 

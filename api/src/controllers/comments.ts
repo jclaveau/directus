@@ -16,7 +16,7 @@ router.use(useCollection('directus_comments'));
 
 router.post(
 	'/',
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #647 comments
 		const service = new CommentsService({
 			accountability: req.accountability,
 			schema: req.schema,
@@ -57,7 +57,7 @@ router.post(
 	respond,
 );
 
-const readHandler = asyncHandler(async (req, res, next) => {
+const readHandler = asyncHandler(async (req, res, next) => { // bb-out-of-scope: #647 comments
 	const service = new CommentsService({
 		accountability: req.accountability,
 		schema: req.schema,
@@ -87,7 +87,7 @@ router.search('/', validateBatch('read'), readHandler, respond);
 
 router.get(
 	'/:pk',
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #647 comments
 		const service = new CommentsService({
 			accountability: req.accountability,
 			schema: req.schema,
@@ -104,7 +104,7 @@ router.get(
 router.patch(
 	'/',
 	validateBatch('update'),
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #647 comments
 		const service = new CommentsService({
 			accountability: req.accountability,
 			schema: req.schema,
@@ -152,7 +152,7 @@ router.patch(
 
 router.patch(
 	'/:pk',
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #647 comments
 		const service = new CommentsService({
 			accountability: req.accountability,
 			schema: req.schema,
@@ -183,7 +183,7 @@ router.patch(
 router.delete(
 	'/',
 	validateBatch('delete'),
-	asyncHandler(async (req, _res, next) => {
+	asyncHandler(async (req, _res, next) => { // bb-out-of-scope: #647 comments
 		const service = new CommentsService({
 			accountability: req.accountability,
 			schema: req.schema,

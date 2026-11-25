@@ -76,7 +76,7 @@ export class GraphQLSubscriptionController extends SocketController {
 		logger.info(`GraphQL Subscriptions started at ${getAddress(httpServer)}${this.endpoint}`);
 	}
 
-	private bindEvents(client: WebSocketClient) {
+	private bindEvents(client: WebSocketClient) { // bb-out-of-scope: #756 GraphQL websocket
 		let connectionInitReceived = false;
 
 		const closedHandler = this.gql.opened(
@@ -152,7 +152,7 @@ export class GraphQLSubscriptionController extends SocketController {
 		}
 	}
 
-	override setTokenExpireTimer(client: WebSocketClient) {
+	override setTokenExpireTimer(client: WebSocketClient) { // bb-out-of-scope: #756 GraphQL websocket
 		if (client.auth_timer !== null) {
 			clearTimeout(client.auth_timer);
 			client.auth_timer = null;

@@ -7,7 +7,7 @@ type Options = {
 export default defineOperationApi<Options>({
 	id: 'sleep',
 
-	handler: async ({ milliseconds }) => {
+	handler: async ({ milliseconds }) => { // bb-out-of-scope: #651 flows
 		await new Promise((resolve) => setTimeout(resolve, Number(milliseconds)));
 	},
 });

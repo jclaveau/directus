@@ -11,11 +11,11 @@ export class NumberHelperMSSQL extends NumberDatabaseHelper {
 		name: string,
 		value: NumericValue,
 		logical: 'and' | 'or',
-	): Knex.QueryBuilder {
+	): Knex.QueryBuilder { // bb-out-of-scope: #610 non-Postgres
 		return dbQuery[logical].where({ [`${collection}.${name}`]: maybeStringifyBigInt(value) });
 	}
 
-	override isNumberValid(value: NumericValue, info: NumberInfo) {
+	override isNumberValid(value: NumericValue, info: NumberInfo) { // bb-out-of-scope: #610 non-Postgres
 		return numberInRange(value, info);
 	}
 }

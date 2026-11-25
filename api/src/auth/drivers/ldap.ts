@@ -48,7 +48,7 @@ export class LDAPAuthDriver extends AuthDriver {
 	usersService: UsersService;
 	config: Record<string, any>;
 
-	constructor(options: AuthDriverOptions, config: Record<string, any>) {
+	constructor(options: AuthDriverOptions, config: Record<string, any>) { // bb-out-of-scope: #619 LDAP login
 		super(options, config);
 
 		const logger = useLogger();
@@ -78,7 +78,7 @@ export class LDAPAuthDriver extends AuthDriver {
 		this.config = config;
 	}
 
-	private async validateBindClient(): Promise<void> {
+	private async validateBindClient(): Promise<void> { // bb-out-of-scope: #619 LDAP login
 		const logger = useLogger();
 
 		const { bindDn, bindPassword, provider } = this.config;
@@ -129,7 +129,7 @@ export class LDAPAuthDriver extends AuthDriver {
 		baseDn: string,
 		filter?: ldap.EqualityFilter,
 		scope?: SearchScope,
-	): Promise<UserInfo | undefined> {
+	): Promise<UserInfo | undefined> { // bb-out-of-scope: #619 LDAP login
 		let { firstNameAttribute, lastNameAttribute, mailAttribute } = this.config;
 
 		firstNameAttribute ??= 'givenName';
@@ -186,7 +186,7 @@ export class LDAPAuthDriver extends AuthDriver {
 		});
 	}
 
-	private async fetchUserGroups(baseDn: string, filter?: ldap.EqualityFilter, scope?: SearchScope): Promise<string[]> {
+	private async fetchUserGroups(baseDn: string, filter?: ldap.EqualityFilter, scope?: SearchScope): Promise<string[]> { // bb-out-of-scope: #619 LDAP login
 		return new Promise((resolve, reject) => {
 			let userGroups: string[] = [];
 
@@ -226,7 +226,7 @@ export class LDAPAuthDriver extends AuthDriver {
 		});
 	}
 
-	private async fetchUserId(userDn: string): Promise<string | undefined> {
+	private async fetchUserId(userDn: string): Promise<string | undefined> { // bb-out-of-scope: #619 LDAP login
 		const user = await this.knex
 			.select('id')
 			.from('directus_users')
@@ -236,7 +236,7 @@ export class LDAPAuthDriver extends AuthDriver {
 		return user?.id;
 	}
 
-	async getUserID(payload: Record<string, any>): Promise<string> {
+	async getUserID(payload: Record<string, any>): Promise<string> { // bb-out-of-scope: #619 LDAP login
 		if (!payload['identifier']) {
 			throw new InvalidCredentialsError();
 		}
@@ -263,7 +263,7 @@ export class LDAPAuthDriver extends AuthDriver {
 
 		let userRole;
 
-		if (groupDn) {
+		if (groupDn) { // bb-out-of-scope: #753 provider roles
 			const userGroups = await this.fetchUserGroups(
 				groupDn,
 				new ldap.EqualityFilter({
@@ -293,7 +293,7 @@ export class LDAPAuthDriver extends AuthDriver {
 			let emitPayload = {};
 
 			// Only sync roles if the AD groups are configured
-			if (groupDn) {
+			if (groupDn) { // bb-out-of-scope: #753 provider roles
 				emitPayload = {
 					role: userRole?.id ?? defaultRoleId ?? null,
 				};
@@ -357,7 +357,7 @@ export class LDAPAuthDriver extends AuthDriver {
 		return (await this.fetchUserId(userInfo.dn)) as string;
 	}
 
-	async verify(user: User, password?: string): Promise<void> {
+	async verify(user: User, password?: string): Promise<void> { // bb-out-of-scope: #619 LDAP login
 		if (!user.external_identifier || !password) {
 			throw new InvalidCredentialsError();
 		}
@@ -387,11 +387,11 @@ export class LDAPAuthDriver extends AuthDriver {
 		});
 	}
 
-	override async login(user: User, payload: Record<string, any>): Promise<void> {
+	override async login(user: User, payload: Record<string, any>): Promise<void> { // bb-out-of-scope: #619 LDAP login
 		await this.verify(user, payload['password']);
 	}
 
-	override async refresh(user: User): Promise<void> {
+	override async refresh(user: User): Promise<void> { // bb-out-of-scope: #619 LDAP login
 		await this.validateBindClient();
 
 		const userInfo = await this.fetchUserInfo(user.external_identifier!);
@@ -402,7 +402,7 @@ export class LDAPAuthDriver extends AuthDriver {
 	}
 }
 
-const handleError = (e: Error) => {
+const handleError = (e: Error) => { // bb-out-of-scope: #619 LDAP login
 	if (
 		e instanceof ldap.InappropriateAuthenticationError ||
 		e instanceof ldap.InvalidCredentialsError ||
@@ -417,13 +417,13 @@ const handleError = (e: Error) => {
 	});
 };
 
-const getEntryValue = (value: string | string[] | undefined): string | undefined => {
+const getEntryValue = (value: string | string[] | undefined): string | undefined => { // bb-out-of-scope: #619 LDAP login
 	return typeof value === 'object' ? value[0] : value;
 };
 
 // ldapjs v3's SearchEntry dropped the flat `.object` attribute map; rebuild it from
 // `.pojo.attributes`, collapsing single-value attributes to a string as v2 did.
-const ldapEntryToObject = (entry: SearchEntry): Record<string, string | string[] | undefined> => {
+const ldapEntryToObject = (entry: SearchEntry): Record<string, string | string[] | undefined> => { // bb-out-of-scope: #619 LDAP login
 	const object: Record<string, string | string[]> = {};
 
 	for (const { type, values } of entry.pojo.attributes) {
@@ -433,7 +433,7 @@ const ldapEntryToObject = (entry: SearchEntry): Record<string, string | string[]
 	return object;
 };
 
-export function createLDAPAuthRouter(provider: string): Router {
+export function createLDAPAuthRouter(provider: string): Router { // bb-out-of-scope: #619 LDAP login
 	const router = Router();
 
 	const loginSchema = Joi.object({

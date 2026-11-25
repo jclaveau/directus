@@ -13,7 +13,7 @@ type Options = {
 export default defineOperationApi<Options>({
 	id: 'trigger',
 
-	handler: async ({ flow, payload, iterationMode, batchSize }, context) => {
+	handler: async ({ flow, payload, iterationMode, batchSize }, context) => { // bb-out-of-scope: #651 flows
 		const flowManager = getFlowManager();
 
 		const payloadObject = optionToObject(payload) ?? null;

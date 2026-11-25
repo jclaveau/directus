@@ -2,7 +2,7 @@ import type { Knex } from 'knex';
 import type { FnHelperOptions } from '../types.js';
 import { FnHelper } from '../types.js';
 
-const parseLocaltime = (columnType?: string) => {
+const parseLocaltime = (columnType?: string) => { // bb-out-of-scope: #610 non-Postgres
 	if (columnType === 'timestamp') {
 		return ` AT TIME ZONE 'UTC'`;
 	}
@@ -11,39 +11,39 @@ const parseLocaltime = (columnType?: string) => {
 };
 
 export class FnHelperOracle extends FnHelper {
-	year(table: string, column: string, options: FnHelperOptions): Knex.Raw {
+	year(table: string, column: string, options: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'IYYY')`, [table, column]);
 	}
 
-	month(table: string, column: string, options: FnHelperOptions): Knex.Raw {
+	month(table: string, column: string, options: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'MM')`, [table, column]);
 	}
 
-	week(table: string, column: string, options: FnHelperOptions): Knex.Raw {
+	week(table: string, column: string, options: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'IW')`, [table, column]);
 	}
 
-	day(table: string, column: string, options: FnHelperOptions): Knex.Raw {
+	day(table: string, column: string, options: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'DD')`, [table, column]);
 	}
 
-	weekday(table: string, column: string, options: FnHelperOptions): Knex.Raw {
+	weekday(table: string, column: string, options: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'D')`, [table, column]);
 	}
 
-	hour(table: string, column: string, options: FnHelperOptions): Knex.Raw {
+	hour(table: string, column: string, options: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'HH24')`, [table, column]);
 	}
 
-	minute(table: string, column: string, options: FnHelperOptions): Knex.Raw {
+	minute(table: string, column: string, options: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'MI')`, [table, column]);
 	}
 
-	second(table: string, column: string, options: FnHelperOptions): Knex.Raw {
+	second(table: string, column: string, options: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'SS')`, [table, column]);
 	}
 
-	count(table: string, column: string, options: FnHelperOptions): Knex.Raw<any> {
+	count(table: string, column: string, options: FnHelperOptions): Knex.Raw<any> { // bb-out-of-scope: #610 non-Postgres
 		const collectionName = options?.originalCollectionName || table;
 		const type = this.schema.collections?.[collectionName]?.fields?.[column]?.type ?? 'unknown';
 

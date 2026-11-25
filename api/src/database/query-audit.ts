@@ -411,7 +411,7 @@ function rowsOfQuery(
 	const { response, context } = queryObject;
 	let rowCount: unknown;
 
-	if (dialectName === 'mysql' || dialectName === 'mysql2') {
+	if (dialectName === 'mysql' || dialectName === 'mysql2') { // bb-out-of-scope: #610 non-Postgres
 		const [mysqlRows] = Array.isArray(response)
 			? response
 			: [];
@@ -420,7 +420,7 @@ function rowsOfQuery(
 			? mysqlRows.length
 			: (mysqlRows as { affectedRows?: unknown } | undefined)?.affectedRows;
 	}
-	else if (dialectName === 'sqlite3') {
+	else if (dialectName === 'sqlite3') { // bb-out-of-scope: #610 non-Postgres
 		// A raw statement runs through `all`, which returns no count of the rows
 		// a write changed.
 		const readsRows = queryObject.method !== 'raw'

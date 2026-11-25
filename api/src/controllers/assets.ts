@@ -26,7 +26,7 @@ router.use(useCollection('directus_files'));
 router.get(
 	'/:pk/:filename?',
 	// Validate query params
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #709 file storage
 		const payloadService = new PayloadService('directus_settings', { schema: req.schema });
 		const defaults = { storage_asset_presets: [], storage_asset_transform: 'all' };
 
@@ -147,7 +147,7 @@ router.get(
 	}),
 
 	// Return file
-	asyncHandler(async (req, res) => {
+	asyncHandler(async (req, res) => { // bb-out-of-scope: #709 file storage
 		const logger = useLogger();
 
 		const id = req.params['pk']!.substring(0, 36);

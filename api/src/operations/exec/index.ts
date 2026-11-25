@@ -10,13 +10,13 @@ type Options = {
  * A helper for making the logs prettier.
  * The logger prints arrays with their indices but this looks "bad" when you have only one argument.
  */
-function unpackArgs(args: any[]) {
+function unpackArgs(args: any[]) { // bb-out-of-scope: #651 flows
 	return args.length === 1 ? args[0] : args;
 }
 
 export default defineOperationApi<Options>({
 	id: 'exec',
-	handler: async ({ code }, { data, env, logger }) => {
+	handler: async ({ code }, { data, env, logger }) => { // bb-out-of-scope: #651 flows
 		const ivm = await loadIsolatedVm();
 
 		const allowedEnv = data['$env'] ?? {};

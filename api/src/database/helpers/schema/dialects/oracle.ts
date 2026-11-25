@@ -13,7 +13,7 @@ export class SchemaHelperOracle extends SchemaHelper {
 		type: 'unique' | 'foreign' | 'index',
 		collection: string,
 		fields: string | string[],
-	): string {
+	): string { // bb-out-of-scope: #610 non-Postgres
 		// Backwards compatibility with oracle requires no hash added to the name.
 		let indexName = getDefaultIndexName(type, collection, fields, { maxLength: Infinity });
 
@@ -30,13 +30,13 @@ export class SchemaHelperOracle extends SchemaHelper {
 	// Oracle has no DROP ... IF EXISTS for indexes/constraints, so check the catalog first.
 	// knex quotes identifiers on creation, so the name is stored case-sensitively as generated;
 	// a unique constraint's backing index shares the name, so user_indexes covers both drops.
-	private async hasIndex(knex: Knex, indexName: string): Promise<boolean> {
+	private async hasIndex(knex: Knex, indexName: string): Promise<boolean> { // bb-out-of-scope: #610 non-Postgres
 		const result = await knex.select('index_name').from('user_indexes').where({ index_name: indexName }).first();
 
 		return Boolean(result);
 	}
 
-	override async dropUniqueIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+	override async dropUniqueIfExists(knex: Knex, collection: string, field: string): Promise<void> { // bb-out-of-scope: #610 non-Postgres
 		const constraintName = this.generateIndexName('unique', collection, field);
 
 		if (await this.hasIndex(knex, constraintName)) {
@@ -46,7 +46,7 @@ export class SchemaHelperOracle extends SchemaHelper {
 		}
 	}
 
-	override async dropIndexIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+	override async dropIndexIfExists(knex: Knex, collection: string, field: string): Promise<void> { // bb-out-of-scope: #610 non-Postgres
 		const indexName = this.generateIndexName('index', collection, field);
 
 		if (await this.hasIndex(knex, indexName)) {
@@ -61,15 +61,15 @@ export class SchemaHelperOracle extends SchemaHelper {
 		column: string,
 		type: (typeof KNEX_TYPES)[number],
 		options: Options = {},
-	): Promise<void> {
+	): Promise<void> { // bb-out-of-scope: #610 non-Postgres
 		await this.changeToTypeByCopy(table, column, type, options);
 	}
 
-	override castA2oPrimaryKey(): string {
+	override castA2oPrimaryKey(): string { // bb-out-of-scope: #610 non-Postgres
 		return 'CAST(?? AS VARCHAR2(255))';
 	}
 
-	override preRelationChange(relation: Partial<Relation>): void {
+	override preRelationChange(relation: Partial<Relation>): void { // bb-out-of-scope: #610 non-Postgres
 		if (relation.collection === relation.related_collection) {
 			// Constraints are not allowed on self referencing relationships
 			// Setting NO ACTION throws - ORA-00905: missing keyword
@@ -79,7 +79,7 @@ export class SchemaHelperOracle extends SchemaHelper {
 		}
 	}
 
-	override processFieldType(field: Field): Type {
+	override processFieldType(field: Field): Type { // bb-out-of-scope: #610 non-Postgres
 		if (field.type === 'integer') {
 			if (field.schema?.numeric_precision === 20) {
 				return 'bigInteger';
@@ -93,7 +93,7 @@ export class SchemaHelperOracle extends SchemaHelper {
 		return field.type;
 	}
 
-	override async getDatabaseSize(): Promise<number | null> {
+	override async getDatabaseSize(): Promise<number | null> { // bb-out-of-scope: #610 non-Postgres
 		try {
 			const result = await this.knex.raw('select SUM(bytes) from dba_segments');
 
@@ -106,7 +106,7 @@ export class SchemaHelperOracle extends SchemaHelper {
 	/**
 	 * Oracle throws an error when overwriting the nullable option for an existing column with the same value.
 	 */
-	override setNullable(column: Knex.ColumnBuilder, field: RawField | Field, existing: Column | null): void {
+	override setNullable(column: Knex.ColumnBuilder, field: RawField | Field, existing: Column | null): void { // bb-out-of-scope: #610 non-Postgres
 		if (!existing) {
 			super.setNullable(column, field, existing);
 
@@ -120,11 +120,11 @@ export class SchemaHelperOracle extends SchemaHelper {
 		}
 	}
 
-	override prepQueryParams(queryParams: Sql): Sql {
+	override prepQueryParams(queryParams: Sql): Sql { // bb-out-of-scope: #610 non-Postgres
 		return prepQueryParams(queryParams, { format: (index) => `:${index + 1}` });
 	}
 
-	override prepBindings(bindings: Knex.Value[]): any {
+	override prepBindings(bindings: Knex.Value[]): any { // bb-out-of-scope: #610 non-Postgres
 		// Create an object with keys 1, 2, 3, ... and the bindings as values
 		// This will use the "named" binding syntax in the oracledb driver instead of the positional binding
 		return Object.fromEntries(bindings.map((binding: any, index: number) => [index + 1, binding]));
@@ -134,7 +134,7 @@ export class SchemaHelperOracle extends SchemaHelper {
 		groupByFields: (string | Knex.Raw)[],
 		sortRecords: SortRecord[],
 		_hasRelationalSort: boolean,
-	) {
+	) { // bb-out-of-scope: #610 non-Postgres
 		/*
 		Oracle requires all selected columns that are not aggregated over to be present in the GROUP BY clause
 		aliases can not be used before version 23c.
@@ -157,11 +157,11 @@ export class SchemaHelperOracle extends SchemaHelper {
 		}
 	}
 
-	override getColumnNameMaxLength(): number {
+	override getColumnNameMaxLength(): number { // bb-out-of-scope: #610 non-Postgres
 		return 128;
 	}
 
-	override getTableNameMaxLength(): number {
+	override getTableNameMaxLength(): number { // bb-out-of-scope: #610 non-Postgres
 		return 128;
 	}
 }

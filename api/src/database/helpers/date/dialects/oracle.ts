@@ -2,7 +2,7 @@ import { DateHelper } from '../types.js';
 
 export class DateHelperOracle extends DateHelper {
 	// Required to handle timezoned offset
-	override parse(date: string | Date): string {
+	override parse(date: string | Date): string { // bb-out-of-scope: #610 non-Postgres
 		if (!date) {
 			return date;
 		}
@@ -19,7 +19,7 @@ export class DateHelperOracle extends DateHelper {
 		return String(new Date(date).toISOString());
 	}
 
-	override fieldFlagForField(fieldType: string): string {
+	override fieldFlagForField(fieldType: string): string { // bb-out-of-scope: #610 non-Postgres
 		switch (fieldType) {
 			case 'dateTime':
 				return 'cast-datetime';

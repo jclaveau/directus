@@ -34,20 +34,20 @@ export async function extractDatabaseError(
 
 	switch (client) {
 		case 'mysql':
-			translated = mysql(error, data, context);
+			translated = mysql(error, data, context); // bb-out-of-scope: #610 non-Postgres
 			break;
 		case 'cockroachdb':
 		case 'postgres':
 			translated = postgres(error, data, context);
 			break;
 		case 'sqlite':
-			translated = sqlite(error, data, context);
+			translated = sqlite(error, data, context); // bb-out-of-scope: #610 non-Postgres
 			break;
 		case 'oracle':
-			translated = oracle(error);
+			translated = oracle(error); // bb-out-of-scope: #610 non-Postgres
 			break;
 		case 'mssql':
-			translated = await mssql(error, data);
+			translated = await mssql(error, data); // bb-out-of-scope: #610 non-Postgres
 			break;
 		default:
 			translated = error;

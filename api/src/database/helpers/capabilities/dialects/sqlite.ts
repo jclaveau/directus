@@ -12,7 +12,7 @@ const MIN_SQLITE_RETURNING_VERSION: [number, number] = [3, 35];
 export class CapabilitiesHelperSqlite extends CapabilitiesHelperDefault {
 	private preservesOrderCache?: boolean;
 
-	override async preservesInsertOrderInReturning(): Promise<boolean> {
+	override async preservesInsertOrderInReturning(): Promise<boolean> { // bb-out-of-scope: #610 non-Postgres
 		if (this.preservesOrderCache !== undefined) return this.preservesOrderCache;
 
 		const row = await this.knex.select(this.knex.raw('sqlite_version() as version')).first<{ version?: string }>();

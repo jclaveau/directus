@@ -19,7 +19,7 @@ export type Credentials = {
 export default function createDBConnection(client: Driver, credentials: Credentials): Knex<any, unknown[]> {
 	let connection: any = {};
 
-	if (client === 'sqlite3') {
+	if (client === 'sqlite3') { // bb-out-of-scope: #610 non-Postgres
 		const { filename } = credentials;
 
 		connection = {
@@ -36,12 +36,12 @@ export default function createDBConnection(client: Driver, credentials: Credenti
 			password: password,
 		};
 
-		if (client === 'pg' || client === 'cockroachdb') {
+		if (client === 'pg' || client === 'cockroachdb') { // bb-out-of-scope: #610 non-Postgres
 			const { ssl } = credentials as Credentials;
 			connection.ssl = ssl;
 		}
 
-		if (client === 'mssql') {
+		if (client === 'mssql') { // bb-out-of-scope: #610 non-Postgres
 			const { options__encrypt } = credentials as Credentials;
 
 			connection = {
@@ -61,11 +61,11 @@ export default function createDBConnection(client: Driver, credentials: Credenti
 		pool: {},
 	};
 
-	if (client === 'sqlite3') {
+	if (client === 'sqlite3') { // bb-out-of-scope: #610 non-Postgres
 		knexConfig.useNullAsDefault = true;
 	}
 
-	if (client === 'cockroachdb') {
+	if (client === 'cockroachdb') { // bb-out-of-scope: #610 non-Postgres
 		knexConfig.pool!.afterCreate = (conn: any, callback: any) => {
 			conn.query('SET serial_normalization = "sql_sequence"');
 			conn.query('SET default_int_size = 4');

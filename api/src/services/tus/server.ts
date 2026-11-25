@@ -24,7 +24,7 @@ type Context = {
 	accountability?: Accountability | undefined;
 };
 
-async function createTusStore(context: Context) {
+async function createTusStore(context: Context) { // bb-out-of-scope: #709 file storage
 	const env = useEnv();
 	const storage = await getStorage();
 	const location = toArray(env['STORAGE_LOCATIONS'] as string)[0]!;
@@ -43,7 +43,7 @@ async function createTusStore(context: Context) {
 	});
 }
 
-export async function createTusServer(context: Context): Promise<[Server, () => void]> {
+export async function createTusServer(context: Context): Promise<[Server, () => void]> { // bb-out-of-scope: #709 file storage
 	const env = useEnv();
 	const store = await createTusStore(context);
 

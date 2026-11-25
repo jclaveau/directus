@@ -35,7 +35,7 @@ export class CapabilitiesHelperMSSQL extends CapabilitiesHelperDefault {
 	 *   - Keep this flag off for trigger-bearing schemas; the default-false per-row dispatch
 	 *     retains trigger support.
 	 */
-	override async preservesInsertOrderInReturning(): Promise<boolean> {
+	override async preservesInsertOrderInReturning(): Promise<boolean> { // bb-out-of-scope: #610 non-Postgres
 		return env['DB_MSSQL_TRUST_BATCH_RETURNING'] as boolean;
 	}
 
@@ -45,7 +45,7 @@ export class CapabilitiesHelperMSSQL extends CapabilitiesHelperDefault {
 	 * `includeTriggerModifications` option. Apply it on every per-row insert so
 	 * triggered tables work transparently.
 	 */
-	override insertReturningOptions(): { includeTriggerModifications: true } {
+	override insertReturningOptions(): { includeTriggerModifications: true } { // bb-out-of-scope: #610 non-Postgres
 		return { includeTriggerModifications: true };
 	}
 }

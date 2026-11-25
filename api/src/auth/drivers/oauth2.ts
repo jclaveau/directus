@@ -43,7 +43,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 	config: Record<string, any>;
 	roleMap: RoleMap;
 
-	constructor(options: AuthDriverOptions, config: Record<string, any>) {
+	constructor(options: AuthDriverOptions, config: Record<string, any>) { // bb-out-of-scope: #622 OAuth2 login
 		super(options, config);
 
 		const env = useEnv();
@@ -71,13 +71,13 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 
 		const roleMapping = this.config['roleMapping'];
 
-		if (roleMapping) {
+		if (roleMapping) { // bb-out-of-scope: #753 provider roles
 			this.roleMap = roleMapping;
 		}
 
 		// role mapping will fail on login if AUTH_<provider>_ROLE_MAPPING is an array instead of an object.
 		// This happens if the 'json:' prefix is missing from the variable declaration. To save the user from exhaustive debugging, we'll try to fail early here.
-		if (roleMapping instanceof Array) {
+		if (roleMapping instanceof Array) { // bb-out-of-scope: #753 provider roles
 			logger.error(
 				"[OAuth2] Expected a JSON-Object as role mapping, got an Array instead. Make sure you declare the variable with 'json:' prefix.",
 			);
@@ -114,7 +114,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 		return generators.codeVerifier();
 	}
 
-	generateAuthUrl(codeVerifier: string, prompt = false): string {
+	generateAuthUrl(codeVerifier: string, prompt = false): string { // bb-out-of-scope: #622 OAuth2 login
 		const { plainCodeChallenge } = this.config;
 
 		try {
@@ -146,7 +146,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 		return user?.id;
 	}
 
-	override async getUserID(payload: Record<string, any>): Promise<string> {
+	override async getUserID(payload: Record<string, any>): Promise<string> { // bb-out-of-scope: #622 OAuth2 login
 		const logger = useLogger();
 
 		if (!payload['code'] || !payload['codeVerifier'] || !payload['state']) {
@@ -179,7 +179,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 		const groupClaimName: string = this.config['groupClaimName'] ?? 'groups';
 		const groups = userInfo[groupClaimName] ? toArray(userInfo[groupClaimName]) : [];
 
-		if (groups.length > 0) {
+		if (groups.length > 0) { // bb-out-of-scope: #753 provider roles
 			for (const key in this.roleMap) {
 				if (groups.includes(key)) {
 					// Overwrite default role if user is member of a group specified in roleMap
@@ -225,7 +225,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			};
 
 			// Make sure a user's role gets updated if their oauth group or role mapping changes
-			if (this.config['roleMapping']) {
+			if (this.config['roleMapping']) { // bb-out-of-scope: #753 provider roles
 				emitPayload['role'] = role;
 			}
 
@@ -294,7 +294,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 		return this.refresh(user);
 	}
 
-	override async refresh(user: User): Promise<void> {
+	override async refresh(user: User): Promise<void> { // bb-out-of-scope: #622 OAuth2 login
 		const logger = useLogger();
 
 		let authData = user.auth_data as AuthData;
@@ -324,7 +324,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 	}
 }
 
-const handleError = (e: any) => {
+const handleError = (e: any) => { // bb-out-of-scope: #622 OAuth2 login
 	const logger = useLogger();
 
 	if (e instanceof errors.OPError) {
@@ -350,7 +350,7 @@ const handleError = (e: any) => {
 	return e;
 };
 
-export function createOAuth2AuthRouter(providerName: string): Router {
+export function createOAuth2AuthRouter(providerName: string): Router { // bb-out-of-scope: #622 OAuth2 login
 	const router = Router();
 	const env = useEnv();
 

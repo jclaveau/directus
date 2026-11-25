@@ -15,7 +15,7 @@ export function extractError(
 	error: SQLiteError,
 	data: Partial<Item>,
 	context?: DatabaseErrorContext,
-): SQLiteError | Error {
+): SQLiteError | Error { // bb-out-of-scope: #610 non-Postgres
 	if (error.message.includes('SQLITE_CONSTRAINT: NOT NULL')) {
 		return notNullConstraint(error);
 	}
@@ -64,7 +64,7 @@ export function extractError(
 	return error;
 }
 
-function notNullConstraint(error: SQLiteError) {
+function notNullConstraint(error: SQLiteError) { // bb-out-of-scope: #610 non-Postgres
 	const errorParts = error.message.split(' ');
 	const [table, column] = errorParts[errorParts.length - 1]!.split('.');
 

@@ -19,7 +19,7 @@ export default defineOperationApi<Options>({
 	handler: async (
 		{ recipient, subject, message, permissions, collection, item },
 		{ accountability, database, getSchema },
-	) => {
+	) => { // bb-out-of-scope: #651 flows
 		const schema = await getSchema({ database });
 		let customAccountability: Accountability | null;
 

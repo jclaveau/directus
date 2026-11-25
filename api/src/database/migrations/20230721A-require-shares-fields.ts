@@ -6,7 +6,7 @@ import { getDatabaseClient } from '../index.js';
 export async function up(knex: Knex): Promise<void> {
 	const isMysql = getDatabaseClient(knex) === 'mysql';
 
-	if (isMysql) {
+	if (isMysql) { // bb-out-of-scope: #610 MySQL
 		await dropConstraint(knex);
 	}
 
@@ -15,7 +15,7 @@ export async function up(knex: Knex): Promise<void> {
 		table.dropNullable('item');
 	});
 
-	if (isMysql) {
+	if (isMysql) { // bb-out-of-scope: #610 MySQL
 		await recreateConstraint(knex);
 	}
 }
@@ -23,7 +23,7 @@ export async function up(knex: Knex): Promise<void> {
 export async function down(knex: Knex): Promise<void> {
 	const isMysql = getDatabaseClient(knex) === 'mysql';
 
-	if (isMysql) {
+	if (isMysql) { // bb-out-of-scope: #610 MySQL
 		await dropConstraint(knex);
 	}
 
@@ -32,7 +32,7 @@ export async function down(knex: Knex): Promise<void> {
 		table.setNullable('item');
 	});
 
-	if (isMysql) {
+	if (isMysql) { // bb-out-of-scope: #610 MySQL
 		await recreateConstraint(knex);
 	}
 }

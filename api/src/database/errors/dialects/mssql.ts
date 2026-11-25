@@ -19,7 +19,7 @@ enum MSSQLErrorCodes {
 	VALUE_LIMIT_VIOLATION = 2628,
 }
 
-export async function extractError(error: MSSQLError, data: Partial<Item>): Promise<MSSQLError | Error> {
+export async function extractError(error: MSSQLError, data: Partial<Item>): Promise<MSSQLError | Error> { // bb-out-of-scope: #610 non-Postgres
 	switch (error.number) {
 		case MSSQLErrorCodes.UNIQUE_VIOLATION:
 		case 2627:

@@ -8,11 +8,11 @@ export class SchemaHelperMSSQL extends SchemaHelper {
 		type: 'unique' | 'foreign' | 'index',
 		collection: string,
 		fields: string | string[],
-	): string {
+	): string { // bb-out-of-scope: #610 non-Postgres
 		return getDefaultIndexName(type, collection, fields, { maxLength: 128 });
 	}
 
-	override applyLimit(rootQuery: Knex.QueryBuilder, limit: number): void {
+	override applyLimit(rootQuery: Knex.QueryBuilder, limit: number): void { // bb-out-of-scope: #610 non-Postgres
 		// The ORDER BY clause is invalid in views, inline functions, derived tables, subqueries,
 		// and common table expressions, unless TOP, OFFSET or FOR XML is also specified.
 		if (limit === -1) {
@@ -22,16 +22,16 @@ export class SchemaHelperMSSQL extends SchemaHelper {
 		}
 	}
 
-	override applyOffset(rootQuery: Knex.QueryBuilder, offset: number): void {
+	override applyOffset(rootQuery: Knex.QueryBuilder, offset: number): void { // bb-out-of-scope: #610 non-Postgres
 		rootQuery.offset(offset);
 		rootQuery.orderBy(1);
 	}
 
-	override formatUUID(uuid: string): string {
+	override formatUUID(uuid: string): string { // bb-out-of-scope: #610 non-Postgres
 		return uuid.toUpperCase();
 	}
 
-	override async getDatabaseSize(): Promise<number | null> {
+	override async getDatabaseSize(): Promise<number | null> { // bb-out-of-scope: #610 non-Postgres
 		try {
 			const result = await this.knex.raw('SELECT SUM(size) * 8192 AS size FROM sys.database_files;');
 
@@ -41,7 +41,7 @@ export class SchemaHelperMSSQL extends SchemaHelper {
 		}
 	}
 
-	override prepQueryParams(queryParams: Sql): Sql {
+	override prepQueryParams(queryParams: Sql): Sql { // bb-out-of-scope: #610 non-Postgres
 		return prepQueryParams(queryParams, { format: (index) => `@p${index}` });
 	}
 
@@ -49,7 +49,7 @@ export class SchemaHelperMSSQL extends SchemaHelper {
 		groupByFields: (string | Knex.Raw)[],
 		sortRecords: SortRecord[],
 		_hasRelationalSort: boolean,
-	) {
+	) { // bb-out-of-scope: #610 non-Postgres
 		/*
 		MSSQL requires all selected columns that are not aggregated over are to be present in the GROUP BY clause
 
@@ -71,11 +71,11 @@ export class SchemaHelperMSSQL extends SchemaHelper {
 		}
 	}
 
-	override getColumnNameMaxLength(): number {
+	override getColumnNameMaxLength(): number { // bb-out-of-scope: #610 non-Postgres
 		return 128;
 	}
 
-	override getTableNameMaxLength(): number {
+	override getTableNameMaxLength(): number { // bb-out-of-scope: #610 non-Postgres
 		return 128;
 	}
 }

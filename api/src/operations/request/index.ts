@@ -14,7 +14,7 @@ type Options = {
 export default defineOperationApi<Options>({
 	id: 'request',
 
-	handler: async ({ url, method, body, headers }) => {
+	handler: async ({ url, method, body, headers }) => { // bb-out-of-scope: #651 flows
 		const customHeaders =
 			headers?.reduce(
 				(acc, { header, value }) => {

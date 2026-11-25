@@ -21,7 +21,7 @@ export default async function createEnv(client: Driver, credentials: Credentials
 	const { nanoid } = await import('nanoid');
 
 	// For backwards-compatibility, DB_CLIENT is still 'mysql'
-	const dbClient = client === 'mysql2' ? 'mysql' : client;
+	const dbClient = client === 'mysql2' ? 'mysql' : client; // bb-out-of-scope: #610 MySQL
 
 	const config: Record<string, any> = {
 		security: {

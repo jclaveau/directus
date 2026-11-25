@@ -26,7 +26,7 @@ const env = useEnv();
 
 router.use(useCollection('directus_files'));
 
-export const multipartHandler: RequestHandler = (req, res, routeNext) => {
+export const multipartHandler: RequestHandler = (req, res, routeNext) => { // bb-out-of-scope: #709 file storage
 	const next = answerOnce(routeNext);
 
 	if (req.is('multipart/form-data') === false) return next();
@@ -199,7 +199,7 @@ export const multipartHandler: RequestHandler = (req, res, routeNext) => {
 router.post(
 	'/',
 	asyncHandler(multipartHandler),
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #709 file storage
 		const service = new FilesService({
 			accountability: req.accountability,
 			schema: req.schema,
@@ -250,7 +250,7 @@ const importSchema = Joi.object({
 
 router.post(
 	'/import',
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #709 file storage
 		const { error } = importSchema.validate(req.body);
 
 		if (error) {
@@ -280,7 +280,7 @@ router.post(
 	respond,
 );
 
-const readHandler = asyncHandler(async (req, res, next) => {
+const readHandler = asyncHandler(async (req, res, next) => { // bb-out-of-scope: #709 file storage
 	const service = new FilesService({
 		accountability: req.accountability,
 		schema: req.schema,
@@ -312,7 +312,7 @@ router.search('/', validateBatch('read'), readHandler, respond);
 
 router.get(
 	'/:pk',
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #709 file storage
 		const service = new FilesService({
 			accountability: req.accountability,
 			schema: req.schema,
@@ -328,7 +328,7 @@ router.get(
 router.patch(
 	'/',
 	validateBatch('update'),
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #709 file storage
 		const service = new FilesService({
 			accountability: req.accountability,
 			schema: req.schema,
@@ -377,7 +377,7 @@ router.patch(
 router.patch(
 	'/:pk',
 	asyncHandler(multipartHandler),
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #709 file storage
 		const service = new FilesService({
 			accountability: req.accountability,
 			schema: req.schema,
@@ -406,7 +406,7 @@ router.patch(
 router.delete(
 	'/',
 	validateBatch('delete'),
-	asyncHandler(async (req, _res, next) => {
+	asyncHandler(async (req, _res, next) => { // bb-out-of-scope: #709 file storage
 		const service = new FilesService({
 			accountability: req.accountability,
 			schema: req.schema,
