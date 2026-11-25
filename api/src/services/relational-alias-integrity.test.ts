@@ -43,7 +43,7 @@ const schema = new SchemaBuilder()
 
 		c.field('note_items')
 			.string()
-			.options({ type: 'alias', alias: true, dbType: null });
+			.options({ alias: true });
 	})
 	.collection('pin_item', (c) => {
 		c.field('id').id();
@@ -133,7 +133,7 @@ describe('Services / relational aliases a relation names', () => {
 				meta: { special: ['o2m'] },
 			} as any)).rejects.toEqual(new InvalidPayloadError({
 				reason: 'Field "loose_items" of "pin_owner" is an o2m alias no'
-					+ ' relation names in one_field.',
+					+ ' relation names in one_field',
 			}));
 
 			await expect(database('directus_fields').select('field'))
@@ -149,7 +149,7 @@ describe('Services / relational aliases a relation names', () => {
 				meta: { special: 'translations' },
 			} as any)).rejects.toEqual(new InvalidPayloadError({
 				reason: 'Field "loose_translations" of "pin_owner" is a translations'
-					+ ' alias no relation names in one_field.',
+					+ ' alias no relation names in one_field',
 			}));
 		});
 
@@ -192,7 +192,7 @@ describe('Services / relational aliases a relation names', () => {
 				meta: { special: ['m2m'] },
 			} as any)).rejects.toEqual(new InvalidPayloadError({
 				reason: 'Field "note_items" of "pin_owner" is an m2m alias no'
-					+ ' relation names in one_field.',
+					+ ' relation names in one_field',
 			}));
 
 			await expect(database('directus_fields').select('special'))
@@ -272,7 +272,7 @@ describe('Services / relational aliases a relation names', () => {
 				meta: { one_field: 'kept_items' },
 			} as any)).rejects.toEqual(new InvalidPayloadError({
 				reason: 'Field "kept_items" of "pin_owner" already exists, so'
-					+ ' one_field cannot name it in place of "owned_items".',
+					+ ' one_field cannot name it in place of "owned_items"',
 			}));
 
 			await expect(database('directus_relations').select('one_field'))

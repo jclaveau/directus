@@ -24,7 +24,7 @@ describe('unnamedRelationalAliasReason', () => {
 	it('names a files alias with its article', () => {
 		expect(unnamedRelationalAliasReason('pin_owner', 'photos', 'files')).toBe(
 			'Field "photos" of "pin_owner" is a files alias no relation names'
-			+ ' in one_field.',
+			+ ' in one_field',
 		);
 	});
 });

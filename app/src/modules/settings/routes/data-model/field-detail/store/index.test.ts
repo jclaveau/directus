@@ -180,6 +180,7 @@ describe('save', () => {
 		fieldDetailStore.$patch({
 			collection: 'pin_owner',
 			editing: '+',
+			field: { field: 'owned_items', type: 'alias' },
 			fieldUpdates: {
 				field: 'owned_items',
 				type: 'alias',
@@ -227,6 +228,7 @@ describe('save', () => {
 		fieldDetailStore.$patch({
 			collection: 'pin_item',
 			editing: '+',
+			field: { field: 'owner', type: 'uuid' },
 			fieldUpdates: { field: 'owner', type: 'uuid' },
 			relations: {
 				m2o: {

@@ -672,7 +672,7 @@ export class RelationsService {
 			throw new InvalidPayloadError({
 				reason: `Field ${JSON.stringify(nextAlias)} of`
 					+ ` ${JSON.stringify(aliasCollection)} already exists, so one_field`
-					+ ` cannot name it in place of ${JSON.stringify(previousAlias)}.`,
+					+ ` cannot name it in place of ${JSON.stringify(previousAlias)}`,
 			});
 		}
 

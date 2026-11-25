@@ -39,5 +39,5 @@ export function unnamedRelationalAliasReason(
 
 	return `Field ${JSON.stringify(field)} of ${JSON.stringify(collection)}`
 		+ ` is ${specialArticle} ${relationalSpecial} alias no relation names`
-		+ ' in one_field.';
+		+ ' in one_field';
 }
