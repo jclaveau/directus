@@ -44,6 +44,11 @@ const castToType = (
 		case 'boolean | number | string | string[]': {
 			const guessedType = guessType(value);
 
+			// guessType keeps `0` a string for its leading 0
+			if (guessedType === 'json' && String(Number(value)) === value) {
+				return Number(value);
+			}
+
 			return castToType(
 				value,
 				guessedType === 'json'
