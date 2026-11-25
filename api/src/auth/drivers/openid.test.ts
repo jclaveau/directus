@@ -1,4 +1,4 @@
-import { InvalidPayloadError } from '@directus/errors';
+import { InvalidCredentialsError, InvalidPayloadError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
@@ -23,6 +23,7 @@ const mockedDeps = vi.hoisted(() => {
 		readInvite: vi.fn(),
 		grantInvitedRoles: vi.fn(),
 		profileGroups: [] as string[],
+		emailVerified: true as unknown,
 	};
 });
 
@@ -44,6 +45,7 @@ vi.mock('openid-client', () => {
 											sub: 'Ada',
 											email: 'ada@example.com',
 											groups: mockedDeps.profileGroups,
+											email_verified: mockedDeps.emailVerified,
 										};
 									},
 								};
@@ -129,6 +131,7 @@ afterEach(() => {
 	knexTracker.reset();
 	vi.resetAllMocks();
 	mockedDeps.profileGroups = [];
+	mockedDeps.emailVerified = true;
 });
 
 describe('OpenIDAuthDriver getUserID', () => {
@@ -427,5 +430,129 @@ describe('OpenIDAuthDriver getUserID', () => {
 		expect(knexTracker.history.all).toEqual([]);
 		expect(mockedDeps.createOne).not.toHaveBeenCalled();
 		expect(mockedDeps.grantInvitedRoles).not.toHaveBeenCalled();
+	});
+});
+
+describe('OpenIDAuthDriver getUserID with a verified email required', () => {
+	test.each([false, 'false', undefined])(
+		'a first login with email_verified %j creates no user',
+		async (emailVerified) => {
+			knexTracker.on.select('directus_users').response(undefined);
+			mockedDeps.emailVerified = emailVerified;
+
+			await expect(new OpenIDAuthDriver(
+				{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+				{
+					provider: 'oidc',
+					issuerUrl: 'https://idp.example.com',
+					clientId: 'client-id',
+					clientSecret: 'client-secret',
+					allowPublicRegistration: true,
+				},
+			).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' }))
+				.rejects.toThrow(new InvalidCredentialsError());
+
+			expect(mockedDeps.logger.warn).toHaveBeenCalledExactlyOnceWith(
+				'[OpenID] Unverified email can\'t create a user for provider "oidc"',
+			);
+
+			expect(mockedDeps.createOne).not.toHaveBeenCalled();
+		},
+	);
+
+	test('a first login with email_verified "true" creates the user', async () => {
+		knexTracker.on.select('directus_users').response(undefined);
+		mockedDeps.createOne.mockResolvedValue('user-1');
+		mockedDeps.emailVerified = 'true';
+
+		await new OpenIDAuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'oidc',
+				issuerUrl: 'https://idp.example.com',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				allowPublicRegistration: true,
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
+
+		expect(mockedDeps.createOne).toHaveBeenCalledOnce();
+	});
+
+	test('a first login creates the user when not required', async () => {
+		knexTracker.on.select('directus_users').response(undefined);
+		mockedDeps.createOne.mockResolvedValue('user-1');
+		mockedDeps.emailVerified = false;
+
+		await new OpenIDAuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'oidc',
+				issuerUrl: 'https://idp.example.com',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				requireVerifiedEmail: false,
+				allowPublicRegistration: true,
+				defaultRoleId: 'role-default',
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
+
+		expect(mockedDeps.createOne).toHaveBeenCalledWith({
+			provider: 'oidc',
+			email: 'ada@example.com',
+			external_identifier: 'Ada',
+			auth_data: '{"refreshToken":"refresh"}',
+			roles: [{ role: 'role-default', managed_by: null }],
+		});
+	});
+
+	test('a known user login never syncs an unverified email', async () => {
+		knexTracker.on.select('directus_users').response({ id: 'user-1' });
+		mockedDeps.emailVerified = false;
+
+		const userId = await new OpenIDAuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'oidc',
+				issuerUrl: 'https://idp.example.com',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				syncUserInfo: true,
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
+
+		expect(userId).toBe('user-1');
+
+		expect(mockedDeps.updateOne).toHaveBeenCalledExactlyOnceWith('user-1', {
+			auth_data: '{"refreshToken":"refresh"}',
+			first_name: undefined,
+			last_name: undefined,
+		});
+
+		expect(mockedDeps.logger.warn).toHaveBeenCalledExactlyOnceWith(
+			'[OpenID] Unverified email not synced for provider "oidc"',
+		);
+	});
+
+	test('a known user login syncs a verified email', async () => {
+		knexTracker.on.select('directus_users').response({ id: 'user-1' });
+
+		await new OpenIDAuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'oidc',
+				issuerUrl: 'https://idp.example.com',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				syncUserInfo: true,
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
+
+		expect(mockedDeps.updateOne).toHaveBeenCalledExactlyOnceWith('user-1', {
+			auth_data: '{"refreshToken":"refresh"}',
+			first_name: undefined,
+			last_name: undefined,
+			email: 'ada@example.com',
+		});
 	});
 });

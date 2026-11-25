@@ -1,4 +1,4 @@
-import { InvalidPayloadError } from '@directus/errors';
+import { InvalidCredentialsError, InvalidPayloadError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
@@ -23,6 +23,7 @@ const mockedDeps = vi.hoisted(() => {
 		readInvite: vi.fn(),
 		grantInvitedRoles: vi.fn(),
 		profileGroups: [] as string[],
+		emailVerified: true as unknown,
 	};
 });
 
@@ -40,6 +41,7 @@ vi.mock('openid-client', () => {
 								login: 'Ada',
 								email: 'ada@example.com',
 								groups: mockedDeps.profileGroups,
+								verified: mockedDeps.emailVerified,
 							};
 						},
 					};
@@ -121,6 +123,7 @@ afterEach(() => {
 	knexTracker.reset();
 	vi.resetAllMocks();
 	mockedDeps.profileGroups = [];
+	mockedDeps.emailVerified = true;
 });
 
 describe('OAuth2AuthDriver getUserID', () => {
@@ -137,6 +140,7 @@ describe('OAuth2AuthDriver getUserID', () => {
 				clientId: 'client-id',
 				clientSecret: 'client-secret',
 				identifierKey: 'login',
+				emailVerifiedKey: 'verified',
 				defaultRoleId: 'role-default',
 				roleMapping: {},
 			},
@@ -174,6 +178,7 @@ describe('OAuth2AuthDriver getUserID', () => {
 				clientId: 'client-id',
 				clientSecret: 'client-secret',
 				identifierKey: 'login',
+				emailVerifiedKey: 'verified',
 				defaultRoleId: 'role-default',
 				roleMapping: { staff: 'role-staff', auditors: 'role-auditors' },
 			},
@@ -212,6 +217,7 @@ describe('OAuth2AuthDriver getUserID', () => {
 				clientId: 'client-id',
 				clientSecret: 'client-secret',
 				identifierKey: 'login',
+				emailVerifiedKey: 'verified',
 				defaultRoleId: 'role-default',
 				roleMapping: { staff: 'role-staff', auditors: 'role-auditors' },
 			},
@@ -242,6 +248,7 @@ describe('OAuth2AuthDriver getUserID', () => {
 				clientId: 'client-id',
 				clientSecret: 'client-secret',
 				identifierKey: 'login',
+				emailVerifiedKey: 'verified',
 				defaultRoleId: 'role-default',
 			},
 		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
@@ -263,6 +270,7 @@ describe('OAuth2AuthDriver getUserID', () => {
 				clientId: 'client-id',
 				clientSecret: 'client-secret',
 				identifierKey: 'login',
+				emailVerifiedKey: 'verified',
 				allowPublicRegistration: true,
 				defaultRoleId: 'role-default',
 			},
@@ -292,6 +300,7 @@ describe('OAuth2AuthDriver getUserID', () => {
 				clientId: 'client-id',
 				clientSecret: 'client-secret',
 				identifierKey: 'login',
+				emailVerifiedKey: 'verified',
 				allowPublicRegistration: true,
 				defaultRoleId: 'role-default',
 				roleMapping: { staff: 'role-staff', auditors: 'role-auditors' },
@@ -326,6 +335,7 @@ describe('OAuth2AuthDriver getUserID', () => {
 				clientId: 'client-id',
 				clientSecret: 'client-secret',
 				identifierKey: 'login',
+				emailVerifiedKey: 'verified',
 				allowPublicRegistration: true,
 				defaultRoleId: 'role-default',
 			},
@@ -361,6 +371,7 @@ describe('OAuth2AuthDriver getUserID', () => {
 				clientId: 'client-id',
 				clientSecret: 'client-secret',
 				identifierKey: 'login',
+				emailVerifiedKey: 'verified',
 				defaultRoleId: 'role-default',
 				allowPublicRegistration: false,
 			},
@@ -399,6 +410,7 @@ describe('OAuth2AuthDriver getUserID', () => {
 				clientId: 'client-id',
 				clientSecret: 'client-secret',
 				identifierKey: 'login',
+				emailVerifiedKey: 'verified',
 				defaultRoleId: 'role-default',
 			},
 		).getUserID({
@@ -434,6 +446,7 @@ describe('OAuth2AuthDriver getUserID', () => {
 				clientId: 'client-id',
 				clientSecret: 'client-secret',
 				identifierKey: 'login',
+				emailVerifiedKey: 'verified',
 				defaultRoleId: 'role-default',
 				allowPublicRegistration: true,
 			},
@@ -449,5 +462,143 @@ describe('OAuth2AuthDriver getUserID', () => {
 		expect(knexTracker.history.all).toEqual([]);
 		expect(mockedDeps.createOne).not.toHaveBeenCalled();
 		expect(mockedDeps.grantInvitedRoles).not.toHaveBeenCalled();
+	});
+});
+
+describe('OAuth2AuthDriver getUserID with a verified email required', () => {
+	test('a first login with an unverified email creates no user', async () => {
+		knexTracker.on.select('directus_users').response(undefined);
+		mockedDeps.emailVerified = false;
+
+		await expect(new OAuth2AuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'github',
+				authorizeUrl: 'https://idp.example.com/authorize',
+				accessUrl: 'https://idp.example.com/token',
+				profileUrl: 'https://idp.example.com/profile',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				identifierKey: 'login',
+				emailVerifiedKey: 'verified',
+				allowPublicRegistration: true,
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' }))
+			.rejects.toThrow(new InvalidCredentialsError());
+
+		expect(mockedDeps.logger.warn).toHaveBeenCalledExactlyOnceWith(
+			'[OAuth2] Unverified email can\'t create a user for provider "github"',
+		);
+
+		expect(mockedDeps.createOne).not.toHaveBeenCalled();
+	});
+
+	test('a first login without the key creates no user', async () => {
+		knexTracker.on.select('directus_users').response(undefined);
+
+		await expect(new OAuth2AuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'github',
+				authorizeUrl: 'https://idp.example.com/authorize',
+				accessUrl: 'https://idp.example.com/token',
+				profileUrl: 'https://idp.example.com/profile',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				identifierKey: 'login',
+				allowPublicRegistration: true,
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' }))
+			.rejects.toThrow(new InvalidCredentialsError());
+
+		expect(mockedDeps.createOne).not.toHaveBeenCalled();
+	});
+
+	test('a first login creates the user when not required', async () => {
+		knexTracker.on.select('directus_users').response(undefined);
+		mockedDeps.createOne.mockResolvedValue('user-1');
+		mockedDeps.emailVerified = false;
+
+		await new OAuth2AuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'github',
+				authorizeUrl: 'https://idp.example.com/authorize',
+				accessUrl: 'https://idp.example.com/token',
+				profileUrl: 'https://idp.example.com/profile',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				identifierKey: 'login',
+				requireVerifiedEmail: false,
+				allowPublicRegistration: true,
+				defaultRoleId: 'role-default',
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
+
+		expect(mockedDeps.createOne).toHaveBeenCalledWith({
+			provider: 'github',
+			email: 'ada@example.com',
+			external_identifier: 'Ada',
+			auth_data: '{"refreshToken":"refresh"}',
+			roles: [{ role: 'role-default', managed_by: null }],
+		});
+	});
+
+	test('a known user login syncs a verified email', async () => {
+		knexTracker.on.select('directus_users').response({ id: 'user-1' });
+
+		await new OAuth2AuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'github',
+				authorizeUrl: 'https://idp.example.com/authorize',
+				accessUrl: 'https://idp.example.com/token',
+				profileUrl: 'https://idp.example.com/profile',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				identifierKey: 'login',
+				emailVerifiedKey: 'verified',
+				syncUserInfo: true,
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
+
+		expect(mockedDeps.updateOne).toHaveBeenCalledExactlyOnceWith('user-1', {
+			auth_data: '{"refreshToken":"refresh"}',
+			first_name: undefined,
+			last_name: undefined,
+			email: 'ada@example.com',
+		});
+	});
+
+	test('a known user login never syncs an unverified email', async () => {
+		knexTracker.on.select('directus_users').response({ id: 'user-1' });
+		mockedDeps.emailVerified = false;
+
+		const userId = await new OAuth2AuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'github',
+				authorizeUrl: 'https://idp.example.com/authorize',
+				accessUrl: 'https://idp.example.com/token',
+				profileUrl: 'https://idp.example.com/profile',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				identifierKey: 'login',
+				emailVerifiedKey: 'verified',
+				syncUserInfo: true,
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
+
+		expect(userId).toBe('user-1');
+
+		expect(mockedDeps.updateOne).toHaveBeenCalledExactlyOnceWith('user-1', {
+			auth_data: '{"refreshToken":"refresh"}',
+			first_name: undefined,
+			last_name: undefined,
+		});
+
+		expect(mockedDeps.logger.warn).toHaveBeenCalledExactlyOnceWith(
+			'[OAuth2] Unverified email not synced for provider "github"',
+		);
 	});
 });

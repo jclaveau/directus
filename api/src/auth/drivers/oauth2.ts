@@ -10,7 +10,7 @@ import {
 	ServiceUnavailableError,
 } from '@directus/errors';
 import type { Accountability } from '@directus/types';
-import { parseJSON, toArray } from '@directus/utils';
+import { oneLine, parseJSON, toArray } from '@directus/utils';
 import express, { Router } from 'express';
 import { flatten } from 'flat';
 import jwt from 'jsonwebtoken';
@@ -42,6 +42,7 @@ import {
 	takeProviderRoles,
 	withProviderRoles,
 } from '../utils/provider-memberships.js';
+import { isEmailUnverified } from '../utils/verified-email.js';
 
 export class OAuth2AuthDriver extends LocalAuthDriver {
 	client: Client;
@@ -211,6 +212,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 		userInfo = flatten(userInfo) as Record<string, unknown>;
 
 		const { provider, emailKey, identifierKey, allowPublicRegistration, syncUserInfo } = this.config;
+		const emailVerifiedKey: string | undefined = this.config['emailVerifiedKey'];
 
 		const email = userInfo[emailKey ?? 'email'] ? String(userInfo[emailKey ?? 'email']) : undefined;
 		// Fallback to email if explicit identifier not found
@@ -229,6 +231,13 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			external_identifier: identifier,
 			auth_data: tokenSet.refresh_token && JSON.stringify({ refreshToken: tokenSet.refresh_token }),
 		};
+
+		const emailUnverified = isEmailUnverified(
+			this.config,
+			emailVerifiedKey === undefined
+				? undefined
+				: userInfo[emailVerifiedKey],
+		);
 
 		const userId = await this.fetchUserId(identifier);
 
@@ -249,8 +258,17 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 					...emitPayload,
 					first_name: userPayload.first_name,
 					last_name: userPayload.last_name,
-					email: userPayload.email,
 				};
+
+				if (emailUnverified) {
+					logger.warn(oneLine`
+						[OAuth2] Unverified email not synced for provider
+						${JSON.stringify(provider)}
+					`);
+				}
+				else {
+					emitPayload['email'] = userPayload.email;
+				}
 			}
 
 			const updatedUserPayload = await emitter.emitFilter(
@@ -288,6 +306,15 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			}
 
 			return userId;
+		}
+
+		if (emailUnverified) {
+			logger.warn(oneLine`
+				[OAuth2] Unverified email can't create a user for provider
+				${JSON.stringify(provider)}
+			`);
+
+			throw new InvalidCredentialsError();
 		}
 
 		// Is public registration allowed? An invite allows its own.
