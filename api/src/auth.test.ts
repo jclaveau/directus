@@ -1,9 +1,13 @@
-import { useEnv } from '@directus/env';
 import { oneLine } from '@directus/utils';
 import { expect, test, vi } from 'vitest';
 import { getAuthProvider, registerAuthProviders } from './auth.js';
 
-vi.mock('@directus/env');
+// Hoisted: `constants.ts` reads the env as `auth.ts` imports it.
+const env = vi.hoisted<Record<string, unknown>>(() => {
+	return { AUTH_PROVIDERS: [] };
+});
+
+vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
 vi.mock('./utils/get-schema.js', () => ({ getSchema: vi.fn() }));
 
@@ -32,8 +36,6 @@ vi.mock('./auth/drivers/index.js', () => {
 test(oneLine`
 	registers the default provider alone when AUTH_PROVIDERS is empty
 `, async () => {
-	vi.mocked(useEnv, { partial: true }).mockReturnValue({ AUTH_PROVIDERS: [] });
-
 	await registerAuthProviders();
 
 	expect(getAuthProvider('default')).toEqual({ driver: 'local' });
@@ -41,8 +43,7 @@ test(oneLine`
 });
 
 test('registers each provider AUTH_PROVIDERS lists', async () => {
-	vi.mocked(useEnv, { partial: true })
-		.mockReturnValue({ AUTH_PROVIDERS: ['github'] });
+	env['AUTH_PROVIDERS'] = ['github'];
 
 	await registerAuthProviders();
 

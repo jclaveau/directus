@@ -64,6 +64,8 @@ import { UsersService } from './users.js';
 // useEnv() at import time) sees an initialized env.
 const env = vi.hoisted<Record<string, any>>(() => {
 	return {
+		// `useEnv` merges defaults.ts, so the real one always carries this.
+		AUTH_PROVIDERS: [],
 		CACHE_AUTO_PURGE: true,
 		CACHE_AUTO_PURGE_IGNORE_LIST: [],
 		CACHE_NAMESPACE: 'scalabus',
