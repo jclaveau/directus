@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { logout } from '@/auth';
 import { useEditsGuard } from '@/composables/use-edits-guard';
-import { useImpersonate } from '@/composables/use-impersonate';
 import { useItem } from '@/composables/use-item';
 import { useShortcut } from '@/composables/use-shortcut';
 import { useCollectionsStore } from '@/stores/collections';
 import { useFieldsStore } from '@/stores/fields';
 import { useServerStore } from '@/stores/server';
-import { useSettingsStore } from '@/stores/settings';
 import { useUserStore } from '@/stores/user';
 import { getAssetUrl } from '@/utils/get-asset-url';
 import { userName } from '@/utils/user-name';
@@ -19,6 +17,7 @@ import type { User } from '@directus/types';
 import { computed, ref, toRefs } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
+import ImpersonateUserButton from '../components/impersonate-user-button.vue';
 import UsersNavigation from '../components/navigation.vue';
 import UserInfoSidebarDetail from '../components/user-info-sidebar-detail.vue';
 
@@ -36,7 +35,6 @@ const fieldsStore = useFieldsStore();
 const collectionsStore = useCollectionsStore();
 const userStore = useUserStore();
 const serverStore = useServerStore();
-const settingsStore = useSettingsStore();
 
 const { primaryKey } = toRefs(props);
 const { breadcrumb } = useBreadcrumb();
@@ -92,28 +90,6 @@ const { confirmLeave, leaveTo } = useEditsGuard(hasEdits);
 
 const confirmDelete = ref(false);
 const confirmArchive = ref(false);
-const confirmImpersonate = ref(false);
-const { impersonating, impersonate } = useImpersonate();
-
-const impersonateAllowed = computed(() => {
-	if (!userStore.impersonationAvailable || !userStore.isAdmin) {
-		return false;
-	}
-
-	if (userStore.impersonator || isNew.value) {
-		return false;
-	}
-
-	const me = userStore.currentUser;
-
-	if (!item.value || !me || 'share' in me) {
-		return false;
-	}
-
-	return item.value.id !== me.id;
-});
-
-const projectUrl = computed(() => settingsStore.settings?.project_url ?? null);
 
 const avatarSrc = computed(() =>
 	item.value?.avatar ? getAssetUrl(`${item.value.avatar}?key=system-medium-cover`) : null,
@@ -287,12 +263,6 @@ async function toggleArchive() {
 	}
 }
 
-async function impersonateAs(mode: 'cookie' | 'session') {
-	if (await impersonate(props.primaryKey, mode, projectUrl.value)) {
-		confirmImpersonate.value = false;
-	}
-}
-
 function revert(values: Record<string, any>) {
 	edits.value = {
 		...edits.value,
@@ -383,56 +353,10 @@ function revert(values: Record<string, any>) {
 				</v-card>
 			</v-dialog>
 
-			<v-dialog
-				v-if="impersonateAllowed"
-				v-model="confirmImpersonate"
-				@esc="confirmImpersonate = false"
-			>
-				<template #activator="{ on }">
-					<v-button
-						v-tooltip.bottom="t('impersonate')"
-						rounded
-						icon
-						secondary
-						@click="on"
-					>
-						<v-icon name="theater_comedy" />
-					</v-button>
-				</template>
-
-				<v-card>
-					<v-card-title>
-						{{ t('impersonate_confirm', { user: title }) }}
-					</v-card-title>
-					<v-card-text>{{ t('impersonate_explain') }}</v-card-text>
-
-					<v-card-actions>
-						<v-button secondary @click="confirmImpersonate = false">
-							{{ t('cancel') }}
-						</v-button>
-						<v-button
-							v-tooltip.bottom="
-								projectUrl
-									? t('impersonate_in_project_website_hint')
-									: t('impersonate_no_project_url')
-							"
-							secondary
-							:disabled="!projectUrl"
-							:loading="impersonating"
-							@click="impersonateAs('cookie')"
-						>
-							{{ t('impersonate_in_project_website') }}
-						</v-button>
-						<v-button
-							kind="warning"
-							:loading="impersonating"
-							@click="impersonateAs('session')"
-						>
-							{{ t('impersonate_in_data_studio') }}
-						</v-button>
-					</v-card-actions>
-				</v-card>
-			</v-dialog>
+			<impersonate-user-button
+				:user-id="isNew ? null : (item?.id ?? null)"
+				:title="title"
+			/>
 
 			<v-button
 				v-tooltip.bottom="saveAllowed ? t('save') : t('not_allowed')"

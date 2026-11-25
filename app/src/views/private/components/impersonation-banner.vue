@@ -3,7 +3,7 @@ import api from '@/api';
 import { useUserStore } from '@/stores/user';
 import { unexpectedError } from '@/utils/unexpected-error';
 import { userName } from '@/utils/user-name';
-import { computed, ref } from 'vue';
+import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -11,12 +11,6 @@ const { t } = useI18n();
 const userStore = useUserStore();
 
 const stopping = ref(false);
-
-const admin = computed(() => {
-	return userStore.impersonator
-		? userName(userStore.impersonator)
-		: null;
-});
 
 async function stop() {
 	stopping.value = true;
@@ -38,7 +32,12 @@ async function stop() {
 		<v-icon name="theater_comedy" />
 
 		<span class="message">
-			{{ t('impersonation_banner', { user: userStore.fullName, admin }) }}
+			{{
+				t('impersonation_banner', {
+					user: userStore.fullName,
+					admin: userName(userStore.impersonator),
+				})
+			}}
 		</span>
 
 		<v-button x-small :loading="stopping" @click="stop">
