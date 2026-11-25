@@ -75,6 +75,7 @@ const ENV_PREFIX_PATTERN = /^[A-Z][A-Z0-9]*_$/;
  * Declare the variables an extension reads, for the API to check at boot and
  * cast as declared, and get back the entry helpers whose `context.env` knows
  * their types.
+ * For bundles only: a standalone extension casts what it reads off `env` itself.
  *
  * ```ts
  * const subscriptionsEnv = defineEnv({
