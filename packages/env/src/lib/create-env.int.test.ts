@@ -2,13 +2,13 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { readConfigurationFromProcess } from '../utils/read-configuration-from-process.js';
 import { createEnv, readEnvRawValues } from './create-env.js';
 import { readConfigurationFromFile } from './read-configuration-from-file.js';
-import { isDirectusVariable } from '../utils/is-directus-variable.js';
+import { isCoreEnvName } from '../utils/is-core-env-name.js';
 import { readFileSync } from 'node:fs';
 
 vi.mock('../utils/get-config-path.js');
 vi.mock('../utils/read-configuration-from-process.js');
 vi.mock('./read-configuration-from-file.js');
-vi.mock('../utils/is-directus-variable.js');
+vi.mock('../utils/is-core-env-name.js');
 vi.mock('node:fs');
 
 vi.mock('../constants/defaults.js', () => ({
@@ -42,7 +42,7 @@ test('Defaults that have a type set is casted', () => {
 
 	vi.mocked(readConfigurationFromProcess).mockReturnValue(processConfigs);
 	vi.mocked(readConfigurationFromFile).mockReturnValue(fileConfigs);
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvName).mockReturnValue(true);
 	vi.mocked(readFileSync).mockReturnValueOnce('file-content');
 	vi.mocked(readFileSync).mockReturnValueOnce('one,two,three');
 	vi.mocked(readFileSync).mockReturnValueOnce('ran,d0m,from-file');
@@ -78,7 +78,7 @@ test('Named-connection USER/PASSWORD stay string, not guessType', () => {
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvName).mockReturnValue(true);
 
 	expect(createEnv()).toEqual({
 		DB_CONNECTION_PREMIUM_PASSWORD: '12345',

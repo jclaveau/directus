@@ -4,7 +4,7 @@ import type { Env } from '../types/env.js';
 import type { EnvSources, EnvValueSource } from '../types/env-sources.js';
 import { getConfigPath } from '../utils/get-config-path.js';
 import { getDefaultType } from '../utils/get-default-type.js';
-import { isDirectusVariable } from '../utils/is-directus-variable.js';
+import { isCoreEnvName } from '../utils/is-core-env-name.js';
 import { isFileKey } from '../utils/is-file-key.js';
 import { readConfigurationFromProcess } from '../utils/read-configuration-from-process.js';
 import { removeFileSuffix } from '../utils/remove-file-suffix.js';
@@ -104,7 +104,10 @@ export const createEnv = (): Env => {
 			? 'file'
 			: 'process';
 
-		if (isFileKey(key) && isDirectusVariable(key) && typeof value === 'string') {
+		const isCoreFileKey = isFileKey(key)
+			&& isCoreEnvName(removeFileSuffix(key));
+
+		if (isCoreFileKey && typeof value === 'string') {
 			try {
 				// get the path to the file
 				const castFlag = getCastFlag(value);
@@ -134,6 +137,7 @@ export const createEnv = (): Env => {
 		const envDeclaration = findEnvDeclaration(key);
 
 		const refusal = envDeclaration
+			&& 'type' in envDeclaration
 			&& checkDeclaredValue(key, value, envDeclaration);
 
 		if (refusal) {

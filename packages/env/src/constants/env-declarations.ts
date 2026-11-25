@@ -1,11 +1,14 @@
 import { DEFAULT_CHUNK_SIZE } from '@directus/constants';
-import type { EnvDeclaration } from '../types/env-declaration.js';
+import { resolve } from 'node:path';
+import { cwd } from 'node:process';
+import type { CoreEnvDeclaration } from '../types/env-declaration.js';
 
 /**
- * Every variable core reads with a known type: its type, its default when it
- * has one, and the values it may take when only some are meant. The defaults
- * and the types the loader casts by are read off this one table, and so is the
- * type of `useEnv()`.
+ * Every variable core reads: its type, its default when it has one, and the
+ * values it may take when only some are meant; one without a type has its value
+ * guessed. The defaults, the types the loader casts by, the names an extension
+ * may not declare and the names read off a `_FILE` are read off this one table
+ * and {@link ENV_PATTERN_DECLARATIONS}, and so is the type of `useEnv()`.
  */
 export const ENV_DECLARATIONS = {
 	HOST: { type: 'string', default: '0.0.0.0' },
@@ -356,24 +359,175 @@ export const ENV_DECLARATIONS = {
 	EXTENSIONS_ROLLDOWN: { type: 'boolean', default: false },
 	EMAIL_SMTP_PASSWORD: { type: 'string' },
 	REDIS_PASSWORD: { type: 'string' },
-} as const satisfies Record<string, EnvDeclaration>;
+
+	// Guessed: a declared type would change what their consumer sees rather than
+	// just how it is parsed.
+	// `auth.ts` gates on `!env['AUTH_PROVIDERS']`, and `string[]` turns the empty
+	// default into `[]`, which is truthy.
+	AUTH_PROVIDERS: { default: '' },
+	// `false` disables them and any other value configures them, which no single
+	// type covers.
+	ROOT_REDIRECT: { default: './admin' },
+	CORS_ORIGIN: { default: false },
+	// `respond.ts` keys off `!== false`; any other value is a size like `8kb`.
+	CACHE_VALUE_MAX_SIZE: { default: false },
+	IP_CUSTOM_HEADER: { default: false },
+	FLOWS_ENV_ALLOW_LIST: { default: false },
+	PRESSURE_LIMITER_MAX_MEMORY_RSS: { default: false },
+	PRESSURE_LIMITER_MAX_MEMORY_HEAP_USED: { default: false },
+	PRESSURE_LIMITER_RETRY_AFTER: { default: false },
+	// express reads a boolean, a number, a string or a list.
+	IP_TRUST_PROXY: { default: true },
+	// Read straight off `process.env` before any casting runs.
+	CONFIG_PATH: { default: resolve(cwd(), '.env') },
+
+	// Guessed: read by core with no type declared yet.
+	ADMIN_EMAIL: {},
+	ASSETS_CONTENT_SECURITY_POLICY: {},
+	CACHE_HEALTHCHECK_THRESHOLD: {},
+	CACHE_SYSTEM_TTL: {},
+	EMAIL_MAILGUN_API_KEY: {},
+	EMAIL_MAILGUN_DOMAIN: {},
+	EMAIL_MAILGUN_HOST: {},
+	EMAIL_SES_CREDENTIALS__ACCESS_KEY_ID: {},
+	EMAIL_SES_CREDENTIALS__SECRET_ACCESS_KEY: {},
+	EMAIL_SES_REGION: {},
+	EMAIL_SMTP_HOST: {},
+	EMAIL_SMTP_IGNORE_TLS: {},
+	EMAIL_SMTP_NAME: {},
+	EMAIL_SMTP_POOL: {},
+	EMAIL_SMTP_PORT: {},
+	EMAIL_SMTP_SECURE: {},
+	EMAIL_SMTP_USER: {},
+	EXTENSIONS_CACHE_TTL: {},
+	EXTENSIONS_LIMIT: {},
+	EXTENSIONS_LOCATION: {},
+	// Read only to refuse it: this build no longer does.
+	EXTENSIONS_PATH: {},
+	FILES_CONTENT_TYPE_ALLOW_LIST: {},
+	FILES_MAX_UPLOAD_SIZE: {},
+	GRAPHQL_SCHEMA_CACHE_CAPACITY: {},
+	LOG_LEVEL: {},
+	LOG_STYLE: {},
+	MARKETPLACE_REGISTRY: {},
+	PASSWORD_RESET_URL_ALLOW_LIST: {},
+	PROJECT_NAME: {},
+	QUERY_LIMIT_MAX: {},
+	REDIS: {},
+	REDIS_DB: {},
+	REDIS_HOST: {},
+	REDIS_KEEP_ALIVE: {},
+	REDIS_PORT: {},
+	REDIS_USERNAME: {},
+	REFRESH_TOKEN_COOKIE_DOMAIN: {},
+	SESSION_COOKIE_DOMAIN: {},
+	SYNCHRONIZATION_NAMESPACE: {},
+	SYNCHRONIZATION_STORE: {},
+	TELEMETRY_AUTHORIZATION: {},
+	UNIX_SOCKET_PATH: {},
+	USER_INVITE_URL_ALLOW_LIST: {},
+	USER_REGISTER_URL_ALLOW_LIST: {},
+	WEBSOCKETS_LOGS_LEVEL: {},
+	WEBSOCKETS_LOGS_STYLE: {},
+
+	// Guessed: set by the platform or the process manager, read by core.
+	NODE_ENV: {},
+	RAILWAY_GIT_COMMIT_SHA: {},
+	RAILWAY_REPLICA_ID: {},
+	RAILWAY_SERVICE_NAME: {},
+	name: {},
+} as const satisfies Record<string, CoreEnvDeclaration>;
 
 /**
  * The variables of a named connection, location or provider, whose names hold
- * a part the deployment chooses: keyed by the pattern of the name.
+ * a part the deployment chooses: keyed by the glob of the name, each `*` one or
+ * more characters. The first glob a name matches declares it, so the typed ones
+ * come before the guessed, and the passthroughs a library reads last.
  */
 export const ENV_PATTERN_DECLARATIONS = {
-	'DB_CONNECTION_.+_PRIORITY': { type: 'number' },
-	'DB_CONNECTION_.+_PORT': { type: 'number' },
-	'DB_CONNECTION_.+_DATABASE': { type: 'string' },
-	'DB_CONNECTION_.+_USER': { type: 'string' },
-	'DB_CONNECTION_.+_PASSWORD': { type: 'string' },
-	'DB_(CONNECTION_.+_)?POOL__(MIN|MAX)': { type: 'number' },
-	'DB_(CONNECTION_.+_)?POOL__.+_MILLIS': { type: 'number' },
-	'PGBOUNCER_.+_ADMIN_HOSTS': { type: 'string[]' },
-	'PGBOUNCER_.+_ADMIN_DATABASE': { type: 'string' },
-	'PGBOUNCER_.+_ADMIN_USER': { type: 'string' },
-	'PGBOUNCER_.+_ADMIN_PASSWORD': { type: 'string' },
-	'AUTH_.+_BIND_PASSWORD': { type: 'string' },
-	'STORAGE_.+_SECRET': { type: 'string' },
-} as const satisfies Record<string, EnvDeclaration>;
+	'DB_CONNECTION_*_PRIORITY': { type: 'number' },
+	'DB_CONNECTION_*_PORT': { type: 'number' },
+	'DB_CONNECTION_*_DATABASE': { type: 'string' },
+	'DB_CONNECTION_*_USER': { type: 'string' },
+	'DB_CONNECTION_*_PASSWORD': { type: 'string' },
+	'DB_POOL__MIN': { type: 'number' },
+	'DB_POOL__MAX': { type: 'number' },
+	'DB_CONNECTION_*_POOL__MIN': { type: 'number' },
+	'DB_CONNECTION_*_POOL__MAX': { type: 'number' },
+	'DB_POOL__*_MILLIS': { type: 'number' },
+	'DB_CONNECTION_*_POOL__*_MILLIS': { type: 'number' },
+	'PGBOUNCER_*_ADMIN_HOSTS': { type: 'string[]' },
+	'PGBOUNCER_*_ADMIN_DATABASE': { type: 'string' },
+	'PGBOUNCER_*_ADMIN_USER': { type: 'string' },
+	'PGBOUNCER_*_ADMIN_PASSWORD': { type: 'string' },
+	'AUTH_*_BIND_PASSWORD': { type: 'string' },
+	'STORAGE_*_SECRET': { type: 'string' },
+
+	'WEBSOCKETS_*_ENABLED': {},
+	'WEBSOCKETS_*_PATH': {},
+	'WEBSOCKETS_*_AUTH': {},
+	'WEBSOCKETS_*_AUTH_TIMEOUT': {},
+	'WEBSOCKETS_*_CONN_LIMIT': {},
+
+	'STORAGE_*_DRIVER': {},
+	'STORAGE_*_ROOT': {},
+	'STORAGE_*_KEY': {},
+	'STORAGE_*_BUCKET': {},
+	'STORAGE_*_REGION': {},
+	'STORAGE_*_ENDPOINT': {},
+	'STORAGE_*_ACL': {},
+	'STORAGE_*_CONTAINER_NAME': {},
+	'STORAGE_*_SERVER_SIDE_ENCRYPTION': {},
+	'STORAGE_*_ACCOUNT_NAME': {},
+	'STORAGE_*_ACCOUNT_KEY': {},
+	'STORAGE_*_KEY_FILENAME': {},
+	'STORAGE_*_HEALTHCHECK_THRESHOLD': {},
+
+	'AUTH_*_DRIVER': {},
+	'AUTH_*_MODE': {},
+	'AUTH_*_LOGIN_TIMEOUT': {},
+	'AUTH_*_CLIENT_ID': {},
+	'AUTH_*_CLIENT_SECRET': {},
+	'AUTH_*_SCOPE': {},
+	'AUTH_*_AUTHORIZE_URL': {},
+	'AUTH_*_ACCESS_URL': {},
+	'AUTH_*_PROFILE_URL': {},
+	'AUTH_*_IDENTIFIER_KEY': {},
+	'AUTH_*_EMAIL_KEY': {},
+	'AUTH_*_FIRST_NAME_KEY': {},
+	'AUTH_*_LAST_NAME_KEY': {},
+	'AUTH_*_ALLOW_PUBLIC_REGISTRATION': {},
+	'AUTH_*_DEFAULT_ROLE_ID': {},
+	'AUTH_*_SYNC_USER_INFO': {},
+	'AUTH_*_ICON': {},
+	'AUTH_*_LABEL': {},
+	'AUTH_*_PARAMS': {},
+	'AUTH_*_ISSUER_URL': {},
+	'AUTH_*_ISSUER_DISCOVERY_MUST_SUCCEED': {},
+	'AUTH_*_CLIENT_HTTP_*': {},
+	'AUTH_*_AUTH_REQUIRE_VERIFIED_EMAIL': {},
+	'AUTH_*_CLIENT_URL': {},
+	'AUTH_*_BIND_DN': {},
+	'AUTH_*_USER_DN': {},
+	'AUTH_*_USER_ATTRIBUTE': {},
+	'AUTH_*_USER_SCOPE': {},
+	'AUTH_*_MAIL_ATTRIBUTE': {},
+	'AUTH_*_FIRST_NAME_ATTRIBUTE': {},
+	'AUTH_*_LAST_NAME_ATTRIBUTE': {},
+	'AUTH_*_GROUP_DN': {},
+	'AUTH_*_GROUP_ATTRIBUTE': {},
+	'AUTH_*_GROUP_SCOPE': {},
+	'AUTH_*_IDP*': {},
+	'AUTH_*_SP*': {},
+	'AUTH_*_REDIRECT_ALLOW_LIST': {},
+
+	// Passthroughs: knex, pino, the http server, argon2, helmet and the rate
+	// limiter each take every variable under their prefix.
+	'DB_*': {},
+	'LOGGER_*': {},
+	'SERVER_*': {},
+	'HASH_*': {},
+	'CONTENT_SECURITY_POLICY_*': {},
+	'HSTS_*': {},
+	'RATE_LIMITER_*': {},
+} as const satisfies Record<string, CoreEnvDeclaration>;

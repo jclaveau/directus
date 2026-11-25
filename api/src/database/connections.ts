@@ -57,7 +57,7 @@ export function getConnectionPriority(name: string): number {
 	const key =
 		name === getBaseConnectionName()
 			? 'DB_BASE_CONNECTION_PRIORITY'
-			: `DB_CONNECTION_${name.toUpperCase()}_PRIORITY`;
+			: `DB_CONNECTION_${name.toUpperCase()}_PRIORITY` as const;
 
 	const priority = useEnv()[key];
 

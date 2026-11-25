@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { getConfigPath } from '../utils/get-config-path.js';
 import { getDefaultType } from '../utils/get-default-type.js';
-import { isDirectusVariable } from '../utils/is-directus-variable.js';
+import { isCoreEnvName } from '../utils/is-core-env-name.js';
 import { isFileKey } from '../utils/is-file-key.js';
 import { readConfigurationFromProcess } from '../utils/read-configuration-from-process.js';
 import { removeFileSuffix } from '../utils/remove-file-suffix.js';
@@ -11,7 +11,7 @@ import { createEnv } from './create-env.js';
 import { readConfigurationFromFile } from './read-configuration-from-file.js';
 
 vi.mock('../utils/get-config-path.js');
-vi.mock('../utils/is-directus-variable.js');
+vi.mock('../utils/is-core-env-name.js');
 vi.mock('../utils/is-file-key.js');
 vi.mock('../utils/read-configuration-from-process.js');
 vi.mock('../utils/remove-file-suffix.js');
@@ -114,8 +114,8 @@ describe('File based configuration', () => {
 			return key === 'PROCESS_FILE';
 		});
 
-		vi.mocked(isDirectusVariable).mockImplementation((key) => {
-			return key === 'PROCESS_FILE';
+		vi.mocked(isCoreEnvName).mockImplementation((name) => {
+			return name === 'PROCESS';
 		});
 
 		vi.mocked(removeFileSuffix).mockReturnValue('PROCESS');
@@ -161,7 +161,7 @@ test('Passthrough file variables that are not Directus configuration flags', () 
 		TEST_FILE: './test/path',
 	});
 
-	vi.mocked(isDirectusVariable).mockImplementation(() => {
+	vi.mocked(isCoreEnvName).mockImplementation(() => {
 		return false;
 	});
 
@@ -186,8 +186,8 @@ test('Throws error if file could not be read', () => {
 		return key === 'TEST_FILE';
 	});
 
-	vi.mocked(isDirectusVariable).mockImplementation((key) => {
-		return key === 'TEST_FILE';
+	vi.mocked(isCoreEnvName).mockImplementation((name) => {
+		return name === 'TEST';
 	});
 
 	vi.mocked(removeFileSuffix).mockReturnValue('TEST');

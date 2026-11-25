@@ -103,8 +103,12 @@ function websocketRootPaths(): string[] {
 	}
 
 	return WEBSOCKET_CONTROLLERS
-		.filter((controller) => toBoolean(env[`WEBSOCKETS_${controller}_ENABLED`]))
-		.map((controller) => rootOf(String(env[`WEBSOCKETS_${controller}_PATH`])));
+		.filter((controller) => {
+			return toBoolean(env[`WEBSOCKETS_${controller}_ENABLED` as const]);
+		})
+		.map((controller) => {
+			return rootOf(String(env[`WEBSOCKETS_${controller}_PATH` as const]));
+		});
 }
 
 /**

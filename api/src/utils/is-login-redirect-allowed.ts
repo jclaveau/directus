@@ -25,7 +25,7 @@ export function isLoginRedirectAllowed(redirect: unknown, provider: string): boo
 
 	const { protocol: redirectProtocol, hostname: redirectDomain } = new URL(redirect);
 
-	const envKey = `AUTH_${provider.toUpperCase()}_REDIRECT_ALLOW_LIST`;
+	const envKey = `AUTH_${provider.toUpperCase()}_REDIRECT_ALLOW_LIST` as const;
 
 	if (envKey in env) {
 		if (isUrlAllowed(redirect, [...toArray(env[envKey] as string), publicUrl])) return true;

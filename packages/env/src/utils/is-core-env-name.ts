@@ -1,10 +1,6 @@
-import { UNDECLARED_DEFAULTS } from '../constants/defaults.js';
 import { findEnvDeclaration } from './find-env-declaration.js';
-import { isDirectusVariable } from './is-directus-variable.js';
 
-/** Whether core declares or reads the variable `name`. */
+/** Whether core declares the variable `name`, literally or by a glob. */
 export const isCoreEnvName = (name: string): boolean => {
-	return findEnvDeclaration(name) !== null
-		|| name in UNDECLARED_DEFAULTS
-		|| isDirectusVariable(name);
+	return findEnvDeclaration(name) !== null;
 };

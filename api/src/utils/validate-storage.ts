@@ -22,7 +22,7 @@ export async function validateStorage(): Promise<void> {
 	}
 
 	const usedStorageDrivers = toArray(env['STORAGE_LOCATIONS']).map(
-		(location) => env[`STORAGE_${location.toUpperCase()}_DRIVER`],
+		(location) => env[`STORAGE_${location.toUpperCase()}_DRIVER` as const],
 	);
 
 	if (usedStorageDrivers.includes('local')) {

@@ -1,4 +1,4 @@
-import { useEnv } from '@directus/env';
+import { type EnvName, useEnv } from '@directus/env';
 import { parse as parseBytesConfiguration } from 'bytes';
 import { validateHeaderName } from 'node:http';
 import { useLogger } from '../logger/index.js';
@@ -34,7 +34,7 @@ const BOOLEANS = ['true', 'false', '1', '0'];
  * Read off `useEnv`, so an unset variable takes its default. `ms` reads a value
  * over 100 characters, 401 digits included, as none.
  */
-export function validateDurationEnv(keys: string[]): void {
+export function validateDurationEnv(keys: EnvName[]): void {
 	const env = useEnv();
 	const logger = useLogger();
 
@@ -59,7 +59,7 @@ export function validateDurationEnv(keys: string[]): void {
  * {@link validateDurationEnv}. Read off `useEnv`, so an unset variable takes its
  * default; declared a number, `ten` fails the boot before it gets here.
  */
-export function validateCountEnv(keys: string[]): void {
+export function validateCountEnv(keys: EnvName[]): void {
 	const env = useEnv();
 	const logger = useLogger();
 
@@ -91,7 +91,7 @@ const SIZE_PATTERN = /^\d+(?:\.\d+)?\s*(?:b|kb|mb|gb|tb|pb)?$/i;
  * {@link validateDurationEnv}. Read off `useEnv`, so an unset variable takes its
  * default.
  */
-export function validateBytesEnv(keys: string[], nonzeroMinimum = 0): void {
+export function validateBytesEnv(keys: EnvName[], nonzeroMinimum = 0): void {
 	const env = useEnv();
 	const logger = useLogger();
 
@@ -127,7 +127,7 @@ export function validateBytesEnv(keys: string[], nonzeroMinimum = 0): void {
  * default.
  */
 export function validateChoiceEnv(
-	key: string,
+	key: EnvName,
 	choices: readonly string[],
 ): void {
 	const env = useEnv();
@@ -184,7 +184,7 @@ export function validateDatabaseClientEnv(keys: string[]): void {
  * boolean is refused too: the variable turns its feature on by being set, so
  * `false` would turn it on under a header named `false`.
  */
-export function validateHeaderNameEnv(key: string): void {
+export function validateHeaderNameEnv(key: EnvName): void {
 	const env = useEnv();
 
 	if (BOOLEANS.includes(String(env[key]).toLowerCase())) {
@@ -220,7 +220,7 @@ const UNREAD_VARIABLE_ADVICE: Record<string, string> = {
  * for one that did.
  */
 export function validateUnreadEnv(): void {
-	const env = useEnv();
+	const env: Record<string, unknown> = useEnv();
 
 	for (const [key, advice] of Object.entries(UNREAD_VARIABLE_ADVICE)) {
 		if (env[key] === undefined) {

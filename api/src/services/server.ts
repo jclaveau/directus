@@ -464,7 +464,9 @@ export class ServerService {
 
 			for (const location of toArray(env['STORAGE_LOCATIONS'])) {
 				const disk = storage.location(location);
-				const envThresholdKey = `STORAGE_${location}_HEALTHCHECK_THRESHOLD`.toUpperCase();
+
+				const envThresholdKey
+					= `STORAGE_${location.toUpperCase()}_HEALTHCHECK_THRESHOLD` as const;
 
 				checks[`storage:${location}:responseTime`] = [
 					{

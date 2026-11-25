@@ -1,4 +1,4 @@
-import { useEnv } from '@directus/env';
+import { type EnvName, useEnv } from '@directus/env';
 import { useLogger } from '../../../logger/index.js';
 import {
 	SHARED_SETTINGS_COLUMNS,
@@ -21,7 +21,7 @@ import {
 } from './sanitize-config.js';
 
 /** The variable each field reads, so a page can say where a value came from. */
-const ENV_KEYS: Record<keyof AutoscaleConfig, string> = {
+const ENV_KEYS: Record<keyof AutoscaleConfig, EnvName> = {
 	enabled: 'PM2_AUTOSCALE_ENABLED',
 	strategy: 'PM2_AUTOSCALE_STRATEGY',
 	appName: 'PM2_AUTOSCALE_APP_NAME',

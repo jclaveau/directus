@@ -59,11 +59,23 @@ export function pgbouncerQueryTimeoutMs(): number {
 	return getMilliseconds(useEnv()['PGBOUNCER_QUERY_TIMEOUT'], 2000);
 }
 
-function envKey(connection: string, suffix: string): string {
+type AdminSuffix =
+	| 'ADMIN_HOSTS'
+	| 'ADMIN_DATABASE'
+	| 'ADMIN_USER'
+	| 'ADMIN_PASSWORD';
+
+function envKey<Suffix extends AdminSuffix>(
+	connection: string,
+	suffix: Suffix,
+): `PGBOUNCER_${string}_${Suffix}` {
 	return `PGBOUNCER_${connection.toUpperCase()}_${suffix}`;
 }
 
-function stringEnv(connection: string, suffix: string): string | null {
+function stringEnv(
+	connection: string,
+	suffix: Exclude<AdminSuffix, 'ADMIN_HOSTS'>,
+): string | null {
 	const value = useEnv()[envKey(connection, suffix)];
 
 	return typeof value === 'string' && value !== ''

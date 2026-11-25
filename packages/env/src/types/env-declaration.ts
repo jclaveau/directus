@@ -12,6 +12,17 @@ export type EnvDeclaration = {
 
 export type EnvDeclarations = Record<string, EnvDeclaration>;
 
+/**
+ * A variable core reads whose value is guessed rather than cast to one type:
+ * `false` or a value, a list or a word, or a passthrough a library reads.
+ */
+export type GuessedEnvDeclaration = { default?: unknown };
+
+/** What core declares a variable as: a type, or a value it guesses. */
+export type CoreEnvDeclaration = EnvDeclaration | GuessedEnvDeclaration;
+
+export type CoreEnvDeclarations = Record<string, CoreEnvDeclaration>;
+
 /** What a value of each type is once cast. */
 export type EnvTypeValue = {
 	string: string;
@@ -22,18 +33,35 @@ export type EnvTypeValue = {
 	json: unknown;
 };
 
-export type DeclaredValue<Declaration extends EnvDeclaration> =
+export type DeclaredValue<Declaration extends CoreEnvDeclaration> =
 	Declaration extends { values: readonly (infer Choice)[] }
 		? Choice
-		: EnvTypeValue[Declaration['type']];
+		: Declaration extends { type: infer DeclaredType extends EnvDeclarationType }
+			? EnvTypeValue[DeclaredType]
+			: unknown;
 
 /**
  * The variables `Declarations` declares, typed: a variable with a default is
  * always set, one without may be `undefined`.
  */
-export type DeclaredEnv<Declarations extends EnvDeclarations> = {
+export type DeclaredEnv<Declarations extends CoreEnvDeclarations> = {
 	-readonly [Name in keyof Declarations]:
 		Declarations[Name] extends { default: unknown }
 			? DeclaredValue<Declarations[Name]>
 			: DeclaredValue<Declarations[Name]> | undefined;
+};
+
+/** The names a glob matches, each `*` standing for one or more characters. */
+export type GlobName<Glob extends string> =
+	Glob extends `${infer Head}*${infer Tail}`
+		? `${Head}${string}${GlobName<Tail>}`
+		: Glob;
+
+/**
+ * The variables `Declarations` declares by the glob of their name, typed: one
+ * index signature per glob, never set by default.
+ */
+export type PatternEnv<Declarations extends CoreEnvDeclarations> = {
+	-readonly [Glob in keyof Declarations & string as GlobName<Glob>]:
+		DeclaredValue<Declarations[Glob]> | undefined;
 };

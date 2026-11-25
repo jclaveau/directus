@@ -1,5 +1,5 @@
 import { type AutoscaleBound, SUPERVISOR_BOUNDS } from '@directus/constants';
-import { useEnv } from '@directus/env';
+import { type EnvName, useEnv } from '@directus/env';
 import { InvalidPayloadError } from '@directus/errors';
 
 /**
@@ -49,7 +49,7 @@ const ENV_FALLBACKS: Record<string, number | null> = {
 	maxMemoryRestartMegabytes: null,
 };
 
-const ENV_VARIABLES: Record<string, string> = {
+const ENV_VARIABLES: Record<string, EnvName> = {
 	listenTimeout: 'PM2_LISTEN_TIMEOUT',
 	killTimeout: 'PM2_KILL_TIMEOUT',
 	minUptime: 'PM2_MIN_UPTIME',
@@ -190,7 +190,7 @@ function megabytesOf(declared: unknown): number | null {
  * say what it was started with.
  */
 function fromEnv(field: string): number | null {
-	const declared = useEnv()[ENV_VARIABLES[field] as string];
+	const declared = useEnv()[ENV_VARIABLES[field] as EnvName];
 
 	if (declared === undefined) {
 		return ENV_FALLBACKS[field] ?? null;
