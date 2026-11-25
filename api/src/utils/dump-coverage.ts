@@ -363,18 +363,18 @@ async function writeDirCoverage(
 export function dumpCoverageAtExit(): void {
 	const coverage = readCoverage();
 
-	if (asyncDumpStarted || coverage === undefined) {
+	if (asyncDumpStarted || coverage === undefined) { // bb-unit-only: a bb command always dumps here
 		return;
 	}
 
 	const { coverageByDir, unownedCount } = splitCoverage(
 		coverage,
 		readExtensionCoverageDirs(),
-		process.env['COVERAGE_DIR'] || undefined,
+		process.env['COVERAGE_DIR'] || undefined, // bb-unit-only: bb sets COVERAGE_DIR
 	);
 
 	// The logger may write asynchronously, and the process ends here.
-	if (unownedCount > 0) {
+	if (unownedCount > 0) { // bb-unit-only: bb sets COVERAGE_DIR
 		process.stderr.write(
 			`Coverage of ${unownedCount} source files not written: no extension `
 			+ 'built with coverage owns them, and COVERAGE_DIR is unset.\n',
@@ -387,6 +387,6 @@ export function dumpCoverageAtExit(): void {
 		const partialPath = join(targetDir, `${COVERAGE_DUMP_NAME}.partial`);
 
 		writeFileSync(partialPath, JSON.stringify(dirCoverage));
-		renameSync(partialPath, join(targetDir, COVERAGE_DUMP_NAME));
+		renameSync(partialPath, join(targetDir, COVERAGE_DUMP_NAME)); // bb-unit-only: runs after the dump read hits
 	}
 }
