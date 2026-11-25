@@ -70,4 +70,22 @@ describe('get auth providers', () => {
 			expect(getAuthProviders()).toEqual(scenario.output);
 		});
 	}
+
+	test('keeps the session providers only when asked', () => {
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
+			AUTH_PROVIDERS: 'google,github,okta,ldap',
+			AUTH_GOOGLE_DRIVER: 'openid',
+			AUTH_GOOGLE_MODE: 'json',
+			AUTH_GITHUB_DRIVER: 'oauth2',
+			AUTH_OKTA_DRIVER: 'saml',
+			AUTH_OKTA_MODE: 'session',
+			AUTH_LDAP_DRIVER: 'ldap',
+		});
+
+		expect(getAuthProviders({ sessionOnly: true })).toEqual([
+			{ name: 'github', driver: 'oauth2' },
+			{ name: 'okta', driver: 'saml' },
+			{ name: 'ldap', driver: 'ldap' },
+		]);
+	});
 });

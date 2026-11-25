@@ -14,8 +14,25 @@ vi.mock('../../utils/get-address.js', () => ({ getAddress: vi.fn() }));
 vi.mock('../../services/index.js', () => ({}));
 vi.mock('../../database/index.js', () => ({ default: vi.fn() }));
 
+vi.mock('@directus/env', async (importOriginal) => {
+	const { useEnv } = await importOriginal<typeof import('@directus/env')>();
+
+	return {
+		useEnv: () => {
+			return { ...useEnv(), WEBSOCKETS_LOGS_CONN_LIMIT: '3' };
+		},
+	};
+});
+
 afterEach(() => {
 	vi.restoreAllMocks();
+});
+
+test('caps its connections at WEBSOCKETS_LOGS_CONN_LIMIT', () => {
+	expect(
+		new LogsController(new EventEmitter() as unknown as HttpServer)
+			.maxConnections,
+	).toBe(3);
 });
 
 describe('a parsed logs message', () => {
