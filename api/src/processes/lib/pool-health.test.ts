@@ -47,7 +47,7 @@ async function freshMirror() {
 	} as never);
 
 	const { useEnv } = await import('@directus/env');
-	vi.mocked(useEnv, { partial: true }).mockReturnValue(env);
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(env as never);
 
 	return await import('./pool-health.js');
 }

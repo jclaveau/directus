@@ -40,7 +40,11 @@ describe('Type extraction', () => {
 
 		const res = cast('array:string:hey,number:1', 'key');
 
-		expect(getCastFlag).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(getCastFlag).mock.calls).toEqual([
+			['array:string:hey,number:1'],
+			['array:string:hey,number:1'],
+		]);
+
 		expect(toArray).toHaveBeenCalledWith('string:hey,number:1');
 		expect(res).toEqual(['string:hey', 'number:1']);
 	});

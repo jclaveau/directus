@@ -20,7 +20,7 @@ beforeEach(() => {
 		OMIT_KEY_FIRST_KEY: 'firstKey',
 		OMIT_KEY_FIRST_KEY_VALUE: 'firstValue',
 		AUTH_SAML_IDP_metadata: 'idp-xml',
-	});
+	} as never);
 });
 
 afterEach(() => {

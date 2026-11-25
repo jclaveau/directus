@@ -30,7 +30,7 @@ afterEach(() => {
 // Grab the retryStrategy the constructor was built with for a given env. URL mode passes
 // it as the second argument; discrete-config mode folds it into the single options object.
 function retryStrategyFor(env: Record<string, unknown>): RetryStrategy {
-	vi.mocked(useEnv, { partial: true }).mockReturnValue(env);
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(env as never);
 	createRedis();
 
 	// `Redis`'s constructor is overloaded seven ways, and `ConstructorParameters`

@@ -42,7 +42,7 @@ test('isLoginRedirectAllowed returns true for allowed URL', () => {
 		[`AUTH_${provider.toUpperCase()}_REDIRECT_ALLOW_LIST`]:
 			'http://external.example.com,https://external.example.com,http://external.example.com:8055/test',
 		PUBLIC_URL: 'http://public.example.com',
-	});
+	} as never);
 
 	expect(isLoginRedirectAllowed('http://public.example.com', provider)).toBe(true);
 	expect(isLoginRedirectAllowed('http://external.example.com', provider)).toBe(true);
@@ -56,7 +56,7 @@ test('isLoginRedirectAllowed returns false for denied URL', () => {
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		[`AUTH_${provider.toUpperCase()}_REDIRECT_ALLOW_LIST`]: 'http://external.example.com',
 		PUBLIC_URL: 'http://public.example.com',
-	});
+	} as never);
 
 	expect(isLoginRedirectAllowed('https://external.example.com', provider)).toBe(false);
 	expect(isLoginRedirectAllowed('http://external.example.com:8055', provider)).toBe(false);
@@ -69,7 +69,7 @@ test('isLoginRedirectAllowed returns true for relative paths', () => {
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		[`AUTH_${provider.toUpperCase()}_REDIRECT_ALLOW_LIST`]: 'http://external.example.com',
 		PUBLIC_URL: 'http://public.example.com',
-	});
+	} as never);
 
 	expect(isLoginRedirectAllowed('/admin/content', provider)).toBe(true);
 	expect(isLoginRedirectAllowed('../admin/content', provider)).toBe(true);
@@ -84,7 +84,7 @@ test('isLoginRedirectAllowed returns false if missing protocol', () => {
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		[`AUTH_${provider.toUpperCase()}_REDIRECT_ALLOW_LIST`]: 'http://example.com',
 		PUBLIC_URL: 'http://example.com',
-	});
+	} as never);
 
 	expect(isLoginRedirectAllowed('//example.com/admin/content', provider)).toBe(false);
 	expect(isLoginRedirectAllowed('//user@password:example.com/', provider)).toBe(false);

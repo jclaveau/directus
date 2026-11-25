@@ -35,7 +35,7 @@ beforeAll(() => {
 
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		PRESENT_TEST_VARIABLE: 'true',
-	});
+	} as never);
 });
 
 beforeEach(() => {
@@ -84,9 +84,9 @@ test.each([
 	},
 ])('refuses the duration $value', ({ value, message }) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ DURATION_TEST_VARIABLE: value });
+		.mockReturnValueOnce({ DURATION_TEST_VARIABLE: value } as never);
 
-	validateDurationEnv(['DURATION_TEST_VARIABLE']);
+	validateDurationEnv(['DURATION_TEST_VARIABLE' as never]);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(message);
 	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
@@ -94,9 +94,9 @@ test.each([
 
 test.each(['0', '5m', '4.1m'])('takes the duration %j', (value) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ DURATION_TEST_VARIABLE: value });
+		.mockReturnValueOnce({ DURATION_TEST_VARIABLE: value } as never);
 
-	validateDurationEnv(['DURATION_TEST_VARIABLE']);
+	validateDurationEnv(['DURATION_TEST_VARIABLE' as never]);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -140,9 +140,9 @@ test.each([
 	},
 ])('refuses the size $value', ({ value, message }) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
+		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: value } as never);
 
-	validateBytesEnv(['BYTES_TEST_VARIABLE']);
+	validateBytesEnv(['BYTES_TEST_VARIABLE' as never]);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(message);
 	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
@@ -150,9 +150,9 @@ test.each([
 
 test.each(['0', '8kb', '512', '1.5mb', '8 KB'])('takes the size %j', (value) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
+		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: value } as never);
 
-	validateBytesEnv(['BYTES_TEST_VARIABLE']);
+	validateBytesEnv(['BYTES_TEST_VARIABLE' as never]);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -160,9 +160,9 @@ test.each(['0', '8kb', '512', '1.5mb', '8 KB'])('takes the size %j', (value) => 
 
 test('refuses a size below the minimum other than 0', () => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: '255' });
+		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: '255' } as never);
 
-	validateBytesEnv(['BYTES_TEST_VARIABLE'], 256);
+	validateBytesEnv(['BYTES_TEST_VARIABLE' as never], 256);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
 		'"BYTES_TEST_VARIABLE" Environment Variable is "255", '
@@ -174,9 +174,9 @@ test('refuses a size below the minimum other than 0', () => {
 
 test.each(['0', '256', '1kb'])('takes the size %j past the minimum', (value) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
+		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: value } as never);
 
-	validateBytesEnv(['BYTES_TEST_VARIABLE'], 256);
+	validateBytesEnv(['BYTES_TEST_VARIABLE' as never], 256);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -205,9 +205,9 @@ test.each([
 	},
 ])('refuses the count $value', ({ value, message }) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ COUNT_TEST_VARIABLE: value });
+		.mockReturnValueOnce({ COUNT_TEST_VARIABLE: value } as never);
 
-	validateCountEnv(['COUNT_TEST_VARIABLE']);
+	validateCountEnv(['COUNT_TEST_VARIABLE' as never]);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(message);
 	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
@@ -215,9 +215,9 @@ test.each([
 
 test.each([0, 1000])('takes the count %j', (value) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ COUNT_TEST_VARIABLE: value });
+		.mockReturnValueOnce({ COUNT_TEST_VARIABLE: value } as never);
 
-	validateCountEnv(['COUNT_TEST_VARIABLE']);
+	validateCountEnv(['COUNT_TEST_VARIABLE' as never]);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -225,9 +225,9 @@ test.each([0, 1000])('takes the count %j', (value) => {
 
 test('refuses a choice outside the list', () => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'every' });
+		.mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'every' } as never);
 
-	validateChoiceEnv('CHOICE_TEST_VARIABLE', ['counts', 'full']);
+	validateChoiceEnv('CHOICE_TEST_VARIABLE' as never, ['counts', 'full']);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
 		'"CHOICE_TEST_VARIABLE" Environment Variable is "every", '
@@ -239,9 +239,9 @@ test('refuses a choice outside the list', () => {
 
 test('takes a choice from the list', () => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'full' });
+		.mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'full' } as never);
 
-	validateChoiceEnv('CHOICE_TEST_VARIABLE', ['counts', 'full']);
+	validateChoiceEnv('CHOICE_TEST_VARIABLE' as never, ['counts', 'full']);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -250,9 +250,9 @@ test('takes a choice from the list', () => {
 // Node throws on every `setHeader` of such a name: every response would fail.
 test('refuses a header name Node cannot write', () => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'x query audit' });
+		.mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'x query audit' } as never);
 
-	validateHeaderNameEnv('HEADER_TEST_VARIABLE');
+	validateHeaderNameEnv('HEADER_TEST_VARIABLE' as never);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
 		'"HEADER_TEST_VARIABLE" Environment Variable is "x query audit", '
@@ -267,9 +267,9 @@ test.each(['false', 'true', 'FALSE', '0', '1'])(
 	'refuses a header name that reads as the boolean %j',
 	(value) => {
 		vi.mocked(useEnv, { partial: true })
-			.mockReturnValueOnce({ HEADER_TEST_VARIABLE: value });
+			.mockReturnValueOnce({ HEADER_TEST_VARIABLE: value } as never);
 
-		validateHeaderNameEnv('HEADER_TEST_VARIABLE');
+		validateHeaderNameEnv('HEADER_TEST_VARIABLE' as never);
 
 		expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
 			`"HEADER_TEST_VARIABLE" Environment Variable is "${value}", `
@@ -283,9 +283,9 @@ test.each(['false', 'true', 'FALSE', '0', '1'])(
 
 test('takes a header name Node can write', () => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'X-Query-Audit' });
+		.mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'X-Query-Audit' } as never);
 
-	validateHeaderNameEnv('HEADER_TEST_VARIABLE');
+	validateHeaderNameEnv('HEADER_TEST_VARIABLE' as never);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();

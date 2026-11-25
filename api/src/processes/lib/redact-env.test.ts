@@ -16,7 +16,7 @@ function reportedEnv(
 	env: Record<string, unknown>,
 	sources: Record<string, string> = {},
 ) {
-	vi.mocked(useEnv, { partial: true }).mockReturnValue(env);
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(env as never);
 	vi.mocked(useEnvSources).mockReturnValue(sources as never);
 
 	return resolveReportedEnv();
