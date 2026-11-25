@@ -1,5 +1,10 @@
 import config, { getUrl, paths } from '@common/config';
-import { CreateCollections, CreateFieldM2O, CreateFieldO2M, CreateItem, DeleteCollection } from '@common/functions';
+import {
+	CreateCollections,
+	CreateFieldO2M,
+	CreateItem,
+	DeleteCollection,
+} from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
@@ -10,13 +15,15 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// A read that EMBEDS rows of another collection through a nested RELATION is purged when
-// that collection is written: `extractFieldsFromChildren` recurses m2o/o2m/a2o with no
-// depth limit, so every touched collection reaches `collectionsInFieldMap` and gets at
-// least a bare tag. A guard, not a regression — #380 suspected this was broken and the
-// measurement refuted it; the staleness there came from a read hook splicing in a field
-// no relation describes, which is the #292 limit asserted in cache-poisoning-read.
-// The boundary this pins down: traversal covers what the AST describes, and only that.
+// A read that EMBEDS rows of another collection through a nested RELATION is
+// purged when that collection is written: `extractFieldsFromChildren` recurses
+// m2o/o2m/a2o with no depth limit, so every touched collection reaches
+// `collectionsInFieldMap` and gets at least a bare tag. A guard, not a
+// regression — #380 suspected this was broken and the measurement refuted it;
+// the staleness there came from a read hook splicing in a field no relation
+// describes, which is the #292 limit asserted in cache-poisoning-read.
+// The boundary this pins down: traversal covers what the AST describes, and
+// only that.
 
 const OWNER = 'pin_owner';
 const OWNED_ITEM = 'pin_owned_item';
@@ -63,24 +70,15 @@ describe(oneLine`
 			});
 
 			// Each level is reachable from the one above, so a single read can embed the
-			// sub-items two relations deep — the shape that loses its tag.
-			await CreateFieldM2O(vendor, {
-				collection: OWNED_ITEM,
-				field: 'owner',
-				otherCollection: OWNER,
-			});
-
+			// sub-items two relations deep. CreateFieldO2M alone: it creates the foreign
+			// key and the relation naming the alias. A CreateFieldM2O first creates that
+			// relation without `one_field`, CreateRelation keeps the existing one, and
+			// `owned_items` is left an alias no relation names, read as a column.
 			await CreateFieldO2M(vendor, {
 				collection: OWNER,
 				field: 'owned_items',
 				otherCollection: OWNED_ITEM,
 				otherField: 'owner',
-			});
-
-			await CreateFieldM2O(vendor, {
-				collection: OWNED_SUB_ITEM,
-				field: 'owned_item',
-				otherCollection: OWNED_ITEM,
 			});
 
 			await CreateFieldO2M(vendor, {
@@ -141,10 +139,14 @@ describe(oneLine`
 		`, async () => {
 			const url = getUrl(vendor, env);
 
-			await request(url).post('/utils/cache/clear').set('Authorization', auth);
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
 
 			const warm = await readOwnerWithSubItems();
-			expect(warm.body.data[0].owned_items[0].owned_sub_items[0].label).toBe('before');
+
+			expect(warm.body.data[0].owned_items[0].owned_sub_items[0].label)
+				.toBe('before');
 
 			await request(url)
 				.patch(`/items/${OWNED_SUB_ITEM}/${subItemId}`)
@@ -161,7 +163,8 @@ describe(oneLine`
 
 			const refetched = await readOwnerWithSubItems();
 
-			expect(refetched.body.data[0].owned_items[0].owned_sub_items[0].label).toBe('after');
+			expect(refetched.body.data[0].owned_items[0].owned_sub_items[0].label)
+				.toBe('after');
 		});
 
 		it(oneLine`
@@ -169,9 +172,9 @@ describe(oneLine`
 		`, async () => {
 			// The bare tag is what a write to that collection purges, so this is the
 			// mechanism behind the refresh asserted above.
-			const url = getUrl(vendor, env);
-
-			await request(url).post('/utils/cache/clear').set('Authorization', auth);
+			await request(getUrl(vendor, env))
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
 
 			const read = await readOwnerWithSubItems();
 			const tags = read.headers[cacheTagsHeader];
