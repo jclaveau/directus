@@ -107,6 +107,10 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// on its own namespace never hears that schema change, and 500s reading
 			// a user through the dropped table.
 			'/tests/db/routes/users/cache-nested-relation-tags.test.ts',
+			// Counts the statements of a user delete, which reads every collection
+			// whose foreign key to `directus_users` has an `ON DELETE` rule: one a
+			// sibling creates meanwhile adds a select (`test_nested_m2o_task`).
+			'/tests/db/routes/users/cache-user-role-writes.test.ts',
 			'/tests/db/websocket/auth-public-connects.test.ts',
 			'/tests/db/websocket/auth-public-pings.test.ts',
 			'/tests/db/websocket/auth-handshake-connects.test.ts',

@@ -208,6 +208,13 @@ CACHE_ENABLED=false
 # pinned to each value on its own — wider purges, never staler. [16]
 # CACHE_SCOPED_MAX_QUERY_CASES=16
 
+# How many rows a delete's ON DELETE rules (CASCADE, SET NULL, SET DEFAULT) may
+# reach before its purge stops naming them one by one. Each one is read before
+# the delete; past it, every collection they reach is purged whole. 0 purges
+# whole whenever a rule reaches a row. A whole number from 0; a value outside
+# ends the boot. [1000]
+# CACHE_SCOPED_MAX_ON_DELETE_ROWS=1000
+
 # How many members one SSCAN of a scoped index set asks Redis for per round trip.
 # Higher is fewer round trips per purge, lower holds Redis for less per command.
 # From 1 to 100000; a value outside ends the boot. The cache page can set it

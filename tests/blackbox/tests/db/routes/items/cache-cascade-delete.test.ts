@@ -5,6 +5,7 @@ import {
 	CreateItem,
 	DeleteCollection,
 	DeleteField,
+	UpdateItem,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
@@ -19,8 +20,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // Scoped purging is driven by ItemsService: snapshot the mutated collection's scope
 // values, then purge its tags. A database-level ON DELETE never goes through the
-// service — no call, no items.delete event, no snapshot, no purge. What each rule
-// leaves behind:
+// service — no call, no items.delete event — so the delete reads the rows each rule
+// will change before it runs, and purges them by key. What each rule changes:
 //   - CASCADE removes the rows underneath, so their entries describe rows that are
 //     gone, and it propagates to their own children.
 //     - Into the same collection too: the service only ever knew the key it was
@@ -90,6 +91,15 @@ describe(oneLine`
 		let walkRoot: number;
 		let cycleRoot: number;
 		let diamondRoot: number;
+		let doomedSliceKey: number;
+		let walkMidKey: number;
+		let walkSharedCascadedKey: number;
+		let walkSharedNulledKey: number;
+		let walkDeepKey: number;
+		let cycleChildKey: number;
+		let diamondLeftKey: number;
+		let diamondRightKey: number;
+		let diamondLeafKey: number;
 
 		const supportsSetDefault = vendorsRejectingSetDefault.includes(vendor) === false;
 
@@ -319,7 +329,7 @@ describe(oneLine`
 
 			selfRoot = selfRoots[0].id;
 
-			await Promise.all([
+			const [, scopedChildren] = await Promise.all([
 				CreateItem(vendor, {
 					collection: SELF,
 					item: [{ label: 'self-branch', owner: 'branch', parent: selfRoot }],
@@ -355,6 +365,8 @@ describe(oneLine`
 				}),
 			]);
 
+			doomedSliceKey = scopedChildren[0].id;
+
 			const [walkRoots, cycleRoots, diamondRoots] = await Promise.all([
 				CreateItem(vendor, {
 					collection: WALK_ROOT,
@@ -374,7 +386,7 @@ describe(oneLine`
 			cycleRoot = cycleRoots[0].id;
 			diamondRoot = diamondRoots[0].id;
 
-			const [mids, lefts, rights] = await Promise.all([
+			const [mids, lefts, rights, cycleChildren] = await Promise.all([
 				CreateItem(vendor, {
 					collection: WALK_MID,
 					item: [{ label: 'walk-mid', root: walkRoot }],
@@ -403,7 +415,7 @@ describe(oneLine`
 				],
 			});
 
-			await Promise.all([
+			const [deeps, leaves] = await Promise.all([
 				CreateItem(vendor, {
 					collection: WALK_DEEP,
 					item: [{ label: 'walk-deep', shared: shared[0].id }],
@@ -417,6 +429,23 @@ describe(oneLine`
 					}],
 				}),
 			]);
+
+			// Closes the cycle row by row: the child the root cascades into is the
+			// root's own peer, so the walk comes back round to the root.
+			await UpdateItem(vendor, {
+				collection: CYCLE_A,
+				id: cycleRoot,
+				item: { peer: cycleChildren[0].id },
+			});
+
+			walkMidKey = mids[0].id;
+			walkSharedCascadedKey = shared[0].id;
+			walkSharedNulledKey = shared[1].id;
+			walkDeepKey = deeps[0].id;
+			cycleChildKey = cycleChildren[0].id;
+			diamondLeftKey = lefts[0].id;
+			diamondRightKey = rights[0].id;
+			diamondLeafKey = leaves[0].id;
 
 			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
@@ -600,9 +629,8 @@ describe(oneLine`
 
 			expect(doomedSliceAfter.headers[cacheStatusHeader]).toBe('MISS');
 
-			// The accepted over-purge: which slices the database changed is unresolvable
-			// once the rows are gone, so every slice of the collection goes.
-			expect(keptSliceAfter.headers[cacheStatusHeader]).toBe('MISS');
+			// The cascaded row was read before the delete, so only its own slice goes.
+			expect(keptSliceAfter.headers[cacheStatusHeader]).toBe('HIT');
 
 			// NO ACTION cannot change a row — the database refuses the delete instead —
 			// so this collection is none of the walk's business.
@@ -610,25 +638,18 @@ describe(oneLine`
 
 			expect(doomedSliceAfter.body.data).toHaveLength(0);
 
-			// Purged without being deleted, which is what separates the over-purge above
-			// from a cascade.
 			expect(keptSliceAfter.body.data).toHaveLength(1);
 			expect(restrictedAfter.body.data).toHaveLength(1);
 
-			// Every collection the rules reach, each named once: a collection purged
-			// both by its own tags and collection-wide would appear twice. The deleted
-			// row names its own key slice on top — the primary key pins every
-			// collection, declared scope fields or not.
+			// Only the collections a rule changed a row of: CHILD, NULLED and
+			// DEFAULTED hold no row of this parent. Each changed row names its key
+			// slice, and its scope slices where its collection declares some.
 			expect(deleted.headers[purgedTagsHeader].split(', ').sort()).toEqual([
-				CHILD,
-				GRANDCHILD,
-				NULLED,
 				PARENT,
 				`${PARENT}:id=${doomedRuleParent}`,
 				SCOPED_CHILD,
-				...(supportsSetDefault
-					? [DEFAULTED]
-					: []),
+				`${SCOPED_CHILD}:id=${doomedSliceKey}`,
+				`${SCOPED_CHILD}:owner=a`,
 			].sort());
 		});
 
@@ -702,8 +723,8 @@ describe(oneLine`
 			// below from a whole-namespace flush.
 			expect(controlAfter.headers[cacheStatusHeader]).toBe('HIT');
 
-			// The service was handed the root key alone, so its snapshot never saw the
-			// slice the branch row lived in — and the branch row went with the root.
+			// The branch row went with the root: the delete read it beforehand, so its
+			// slice is purged with the root's.
 			expect(branchAfter.headers[cacheStatusHeader]).toBe('MISS');
 			expect(branchAfter.body.data).toHaveLength(0);
 		});
@@ -756,8 +777,12 @@ describe(oneLine`
 				WALK_ROOT,
 				`${WALK_ROOT}:id=${walkRoot}`,
 				WALK_MID,
+				`${WALK_MID}:id=${walkMidKey}`,
 				WALK_SHARED,
+				`${WALK_SHARED}:id=${walkSharedCascadedKey}`,
+				`${WALK_SHARED}:id=${walkSharedNulledKey}`,
 				WALK_DEEP,
+				`${WALK_DEEP}:id=${walkDeepKey}`,
 			].sort());
 		});
 
@@ -779,8 +804,6 @@ describe(oneLine`
 			expect(child.headers[cacheStatusHeader]).toBe('MISS');
 			expect(control.headers[cacheStatusHeader]).toBe('MISS');
 
-			// Returning at all is half the assertion: the walk revisits the root
-			// through the cycle, and only the seeded walk set stops it there.
 			const deleted = await request(url)
 				.delete(`/items/${CYCLE_A}/${cycleRoot}`)
 				.set('Authorization', auth);
@@ -794,14 +817,13 @@ describe(oneLine`
 			expect(controlAfter.headers[cacheStatusHeader]).toBe('HIT');
 			expect(childAfter.body.data).toHaveLength(0);
 
-			// Each collection once, the root included: coming back round to it must
-			// not name it a second time. And the root's own key slice is gone with it —
-			// the cycle names the root a collection the delete CHANGED, which purges
-			// every slice it has, so pinning the deleted row on top would be naming
-			// keys the wider purge already covers.
+			// Coming back round to the root names it once: the root and the child,
+			// each by key.
 			expect(deleted.headers[purgedTagsHeader].split(', ').sort()).toEqual([
 				CYCLE_A,
+				`${CYCLE_A}:id=${cycleRoot}`,
 				CYCLE_B,
+				`${CYCLE_B}:id=${cycleChildKey}`,
 			].sort());
 		});
 
@@ -846,8 +868,11 @@ describe(oneLine`
 				DIAMOND_ROOT,
 				`${DIAMOND_ROOT}:id=${diamondRoot}`,
 				DIAMOND_LEFT,
+				`${DIAMOND_LEFT}:id=${diamondLeftKey}`,
 				DIAMOND_RIGHT,
+				`${DIAMOND_RIGHT}:id=${diamondRightKey}`,
 				DIAMOND_LEAF,
+				`${DIAMOND_LEAF}:id=${diamondLeafKey}`,
 			].sort());
 		});
 	});

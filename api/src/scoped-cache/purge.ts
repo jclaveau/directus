@@ -84,7 +84,8 @@ const env = useEnv();
 
 /**
  * The collections a delete on `collection` also changes through the database's own
- * `ON DELETE` rules. It applies them itself, so nothing else ever purges them.
+ * `ON DELETE` rules, for a delete whose changed rows could not all be named
+ * (`rowsChangedByOnDelete` returned null): each is purged whole.
  *   - `CASCADE` deletes the rows, so the walk carries on into their own children.
  *   - `SET NULL` and `SET DEFAULT` leave the rows in place carrying a changed
  *     foreign key — a slice they have left — and stop there, since nothing below
@@ -92,9 +93,6 @@ const env = useEnv();
  *   - a rule reaching back into `collection` reports it like any other: the rows
  *     the database changes there are ones the caller never named, so the snapshot
  *     taken from its keys does not cover them.
- *   - a DIRECT self-relation that only rewrites a foreign key is left out: the
- *     surviving children stay in place, and the delete snapshots them by key like
- *     an update's rows instead — see the collaborator's `selfRelationSurvivorKeys`.
  */
 export function scopedCacheCollectionsChangedByOnDelete(
 	schema: Pick<SchemaOverview, 'relations'>,
@@ -122,17 +120,6 @@ export function scopedCacheCollectionsChangedByOnDelete(
 				// NO ACTION and RESTRICT make the database refuse the delete
 				// instead, so they leave nothing to purge.
 				|| ['CASCADE', 'SET NULL', 'SET DEFAULT'].includes(onDeleteRule) === false
-			) {
-				continue;
-			}
-
-			// Only a DIRECT self-relation is exempt, and only when it rewrites rather
-			// than deletes: its survivors are snapshotted by key like an update's rows
-			// (`selfRelationSurvivorKeys`), so their slices purge precisely.
-			if (
-				parentCollection === collection
-				&& childCollection === collection
-				&& onDeleteRule !== 'CASCADE'
 			) {
 				continue;
 			}

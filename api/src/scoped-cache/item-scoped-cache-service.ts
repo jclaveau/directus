@@ -4,6 +4,7 @@ import type {
 	Item,
 	PrimaryKey,
 	Query,
+	Relation,
 	ScopedCacheFingerprint,
 	ScopedCacheHookDeclarations,
 	ScopedCachePath,
@@ -14,6 +15,7 @@ import type {
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { randomUUID } from 'node:crypto';
+import { getHelpers } from '../database/helpers/index.js';
 import emitter from '../emitter.js';
 import {
 	joinFilterWithCases,
@@ -39,6 +41,7 @@ import {
 import { scopedCacheAstWithQuantifierCases } from './quantifier-cases.js';
 import { ScopedCacheReadPlan } from './read-plan.js';
 import {
+	scopedCacheMaxOnDeleteRows,
 	scopedCachePurgeEnabled,
 } from './config.js';
 import {
@@ -68,6 +71,15 @@ import {
 	type FieldTypesByField,
 } from './pins.js';
 
+
+/**
+ * What a delete's `ON DELETE` rules change, by collection: see
+ * `ItemScopedCacheService.rowsChangedByOnDelete`.
+ */
+export type ScopedCacheOnDeleteRows = {
+	removedKeys: Map<string, PrimaryKey[]>;
+	rewrittenKeys: Map<string, PrimaryKey[]>;
+};
 
 export type ScopedCacheReadInputs = {
 	ast: AST;
@@ -604,53 +616,214 @@ export class ItemScopedCacheService {
 	}
 
 	/**
-	 * The rows a delete REWRITES rather than removes: children reaching the deleted
-	 * keys through a direct self-relation whose `on_delete` sets the fk to null or
-	 * to its default. The database changes them under the delete, so they are
-	 * snapshotted like an update — old slices before, new slices after — and none
-	 * of the slices they sit in stays warm: their key, every scope field, the
-	 * `<fk>=<deleted>` slice they leave and the one they land in.
+	 * The rows the database changes under a delete of `deletedKeys`, through the
+	 * `ON DELETE` rule of every foreign key reaching them, by collection:
 	 *
-	 * A self-relation that CASCADES is not here: its children go with the parent,
-	 * and `scopedCacheCollectionsChangedByOnDelete` takes the whole collection.
-	 * Nothing to read costs no query.
+	 *   task 5 deleted; comment.task CASCADE, task.parent SET NULL,
+	 *   reaction.comment CASCADE
+	 *   → removedKeys   { comment: [8, 9], reaction: [40] }
+	 *     rewrittenKeys { task: [6] }
+	 *
+	 *   - CASCADE removes the rows, so their own children are walked in turn,
+	 *     level by level; a row already met is not walked twice, which ends a
+	 *     cycle.
+	 *   - SET NULL and SET DEFAULT rewrite the rows and leave them in place: the
+	 *     delete snapshots them like an update's, and the walk stops there.
+	 *   - RESTRICT and NO ACTION make the database refuse the delete instead, and a
+	 *     relation with no foreign key (`schema` null) has no rule the database
+	 *     applies: neither changes a row.
+	 *
+	 * `deletedKeys` themselves are left out, and a row both removed and rewritten
+	 * counts as removed. Every row read is locked until the commit, so no child
+	 * joins a deleted parent between this read and the delete. Null when the
+	 * rows cannot all be named: past `CACHE_SCOPED_MAX_ON_DELETE_ROWS`, or a
+	 * foreign key naming a column other than its parent's primary key, or a
+	 * child with no primary key; the last two are told from the schema, before
+	 * any query. Nothing to walk costs no query.
 	 */
-	async selfRelationSurvivorKeys(deletedKeys: PrimaryKey[]): Promise<PrimaryKey[]> {
-		const primaryKeyField = this.schema.collections[this.collection]?.primary;
+	async rowsChangedByOnDelete(
+		deletedKeys: PrimaryKey[],
+	): Promise<ScopedCacheOnDeleteRows | null> {
+		const changedRows: ScopedCacheOnDeleteRows = {
+			removedKeys: new Map(),
+			rewrittenKeys: new Map(),
+		};
 
 		if (
 			!scopedCachePurgeEnabled()
 			|| deletedKeys.length === 0
-			|| primaryKeyField === undefined
+			|| this.onDeleteRelationsOf(this.collection).length === 0
 		) {
-			return [];
+			return changedRows;
 		}
 
-		const rewritingFields = this.schema.relations
-			.filter((relation) => {
-				const rule = relation.schema?.on_delete;
-
-				return relation.collection === this.collection
-					&& relation.related_collection === this.collection
-					&& (rule === 'SET NULL' || rule === 'SET DEFAULT');
-			})
-			.map((relation) => relation.field);
-
-		if (rewritingFields.length === 0) {
-			return [];
+		if (!this.onDeleteRowsAreNameable()) {
+			return null;
 		}
 
-		const rows: Record<string, PrimaryKey>[] = await this.knex
-			.select(primaryKeyField)
-			.from(this.collection)
-			.where((builder) => {
-				for (const field of rewritingFields) {
-					builder.orWhereIn(field, deletedKeys);
+		const supportsRowLocks = getHelpers(this.knex)
+			.capabilities
+			.supportsRowLocks();
+
+		const rowCeiling = scopedCacheMaxOnDeleteRows();
+		const removedKeysByName = new Map<string, Map<string, PrimaryKey>>();
+		const rewrittenKeysByName = new Map<string, Map<string, PrimaryKey>>();
+		let walkedRowCount = 0;
+
+		if (supportsRowLocks) {
+			const rootPrimaryKey = this.schema.collections[this.collection]!.primary;
+
+			await this.knex
+				.select(rootPrimaryKey)
+				.from(this.collection)
+				.whereIn(rootPrimaryKey, deletedKeys)
+				.forUpdate();
+		}
+
+		removedKeysByName.set(this.collection, new Map(deletedKeys.map((key) => {
+			return [String(key), key];
+		})));
+
+		let pendingParents = new Map([[this.collection, deletedKeys]]);
+
+		while (pendingParents.size > 0) {
+			const nextParents = new Map<string, PrimaryKey[]>();
+
+			for (const [parentCollection, parentKeys] of pendingParents) {
+				for (const relation of this.onDeleteRelationsOf(parentCollection)) {
+					const childCollection = relation.collection;
+
+					const childPrimaryKey =
+						this.schema.collections[childCollection]!.primary;
+
+					const remainingRows = rowCeiling - walkedRowCount;
+
+					const childQuery = this.knex
+						.select(childPrimaryKey)
+						.from(childCollection)
+						.whereIn(relation.field, parentKeys)
+						.limit(remainingRows + 1);
+
+					if (supportsRowLocks) {
+						childQuery.forUpdate();
+					}
+
+					const childRows: Item[] = await childQuery;
+
+					// Past the ceiling, rows beyond the limit stay unread.
+					if (childRows.length > remainingRows) {
+						return null;
+					}
+
+					const isCascade = relation.schema!.on_delete === 'CASCADE';
+
+					const keysByName = isCascade
+						? removedKeysByName
+						: rewrittenKeysByName;
+
+					const knownKeys = keysByName.get(childCollection) ?? new Map();
+
+					keysByName.set(childCollection, knownKeys);
+
+					for (const childRow of childRows) {
+						const childKey = childRow[childPrimaryKey] as PrimaryKey;
+
+						if (knownKeys.has(String(childKey))) {
+							continue;
+						}
+
+						knownKeys.set(String(childKey), childKey);
+						walkedRowCount += 1;
+
+						if (isCascade) {
+							nextParents.set(childCollection, [
+								...nextParents.get(childCollection) ?? [],
+								childKey,
+							]);
+						}
+					}
 				}
-			})
-			.whereNotIn(primaryKeyField, deletedKeys);
+			}
 
-		return [...new Set(rows.map((row) => row[primaryKeyField]!))];
+			pendingParents = nextParents;
+		}
+
+		for (const [collection, keysByName] of rewrittenKeysByName) {
+			const survivingKeys = [...keysByName]
+				.filter(([keyName]) => {
+					return !removedKeysByName.get(collection)?.has(keyName);
+				})
+				.map(([, key]) => key);
+
+			if (survivingKeys.length > 0) {
+				changedRows.rewrittenKeys.set(collection, survivingKeys);
+			}
+		}
+
+		for (const deletedKey of deletedKeys) {
+			removedKeysByName.get(this.collection)!.delete(String(deletedKey));
+		}
+
+		for (const [collection, keysByName] of removedKeysByName) {
+			if (keysByName.size > 0) {
+				changedRows.removedKeys.set(collection, [...keysByName.values()]);
+			}
+		}
+
+		return changedRows;
+	}
+
+	/**
+	 * Whether every foreign key the walk from `this.collection` reaches names its
+	 * parent's primary key, from a child that has one: the walk reads children
+	 * by their foreign key and names them by their primary key.
+	 */
+	private onDeleteRowsAreNameable(): boolean {
+		const walkedCollections = new Set([this.collection]);
+		const pendingCollections = [this.collection];
+
+		while (pendingCollections.length > 0) {
+			const parentCollection = pendingCollections.shift()!;
+
+			const parentPrimaryKey =
+				this.schema.collections[parentCollection]?.primary;
+
+			for (const relation of this.onDeleteRelationsOf(parentCollection)) {
+				const childCollection = relation.collection;
+
+				if (
+					this.schema.collections[childCollection]?.primary === undefined
+					|| relation.schema!.foreign_key_column !== parentPrimaryKey
+				) {
+					return false;
+				}
+
+				if (
+					relation.schema!.on_delete === 'CASCADE'
+					&& !walkedCollections.has(childCollection)
+				) {
+					walkedCollections.add(childCollection);
+					pendingCollections.push(childCollection);
+				}
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * The foreign keys into `parentCollection` whose `ON DELETE` rule changes the
+	 * rows holding them.
+	 */
+	private onDeleteRelationsOf(parentCollection: string): Relation[] {
+		return this.schema.relations.filter((relation) => {
+			const onDeleteRule = relation.schema?.on_delete;
+
+			return relation.related_collection === parentCollection
+				&& (onDeleteRule === 'CASCADE'
+					|| onDeleteRule === 'SET NULL'
+					|| onDeleteRule === 'SET DEFAULT');
+		});
 	}
 
 	/**

@@ -17,6 +17,7 @@ enum PostgresErrorCodes {
 	FOREIGN_KEY_VIOLATION = '23503',
 	NOT_NULL_VIOLATION = '23502',
 	NUMERIC_VALUE_OUT_OF_RANGE = '22003',
+	RESTRICT_VIOLATION = '23001',
 	UNIQUE_VIOLATION = '23505',
 	VALUE_LIMIT_VIOLATION = '22001',
 }
@@ -54,6 +55,9 @@ export function extractError(
 		case PostgresErrorCodes.NOT_NULL_VIOLATION:
 			return notNullViolation();
 		case PostgresErrorCodes.FOREIGN_KEY_VIOLATION:
+			return foreignKeyViolation(context);
+		// Postgres 18 raises it for a RESTRICT rule, where NO ACTION raises 23503.
+		case PostgresErrorCodes.RESTRICT_VIOLATION:
 			return foreignKeyViolation(context);
 		default:
 			return getPoolExhaustedError(error) ?? error;
@@ -178,7 +182,11 @@ export function extractError(
 		// the detail text ("is still referenced" vs "is not present").
 		let stillReferenced;
 
-		if (context?.operation === 'delete') {
+		// A RESTRICT rule only ever refuses a still-referenced parent.
+		if (
+			context?.operation === 'delete'
+			|| error.code === PostgresErrorCodes.RESTRICT_VIOLATION
+		) {
 			stillReferenced = true;
 		}
 		else if (context?.operation === 'create') {

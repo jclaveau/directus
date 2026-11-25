@@ -15,6 +15,7 @@ import {
 	validateBooleanEnv,
 	validateBytesEnv,
 	validateChoiceEnv,
+	validateCountEnv,
 	validateDurationEnv,
 	validateEnv,
 	validateHeaderNameEnv,
@@ -207,6 +208,45 @@ test.each(['0', '256', '1kb'])('takes the size %j past the minimum', (value) => 
 	vi.mocked(useEnv).mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
 
 	validateBytesEnv(['BYTES_TEST_VARIABLE'], 256);
+
+	expect(mockLogger.error).not.toHaveBeenCalled();
+	expect(process.exit).not.toHaveBeenCalled();
+});
+
+test.each([
+	{
+		value: -1,
+		message: '"COUNT_TEST_VARIABLE" Environment Variable is "-1", '
+			+ 'which is not a whole number of 0 or more.',
+	},
+	{
+		value: 2.5,
+		message: '"COUNT_TEST_VARIABLE" Environment Variable is "2.5", '
+			+ 'which is not a whole number of 0 or more.',
+	},
+	{
+		value: Number.NaN,
+		message: '"COUNT_TEST_VARIABLE" Environment Variable is "NaN", '
+			+ 'which is not a whole number of 0 or more.',
+	},
+	{
+		value: 'ten',
+		message: '"COUNT_TEST_VARIABLE" Environment Variable is "ten", '
+			+ 'which is not a whole number of 0 or more.',
+	},
+])('refuses the count $value', ({ value, message }) => {
+	vi.mocked(useEnv).mockReturnValueOnce({ COUNT_TEST_VARIABLE: value });
+
+	validateCountEnv(['COUNT_TEST_VARIABLE']);
+
+	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(message);
+	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
+});
+
+test.each([0, 1000])('takes the count %j', (value) => {
+	vi.mocked(useEnv).mockReturnValueOnce({ COUNT_TEST_VARIABLE: value });
+
+	validateCountEnv(['COUNT_TEST_VARIABLE']);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
