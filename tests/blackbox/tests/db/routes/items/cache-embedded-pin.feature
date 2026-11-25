@@ -68,14 +68,14 @@ Feature: A read pins every collection it embeds through a nested relation
       | id         | owned_item | label  |
       | <sub-item> | <item>     | before |
     Then these requests get these responses:
-      | request                             | response                                 |
-      | method: GET                         | code: 200                                |+
-      | path: /items/pin_owner              | headers:                                 |
-      | query:                              |   x-cache-status: MISS                   |
-      |   fields:                           |   x-scoped-cache-tags:                   |
-      |     - '*'                           |   - pin_owner:space=<run>                |
-      |     - owned_items.*                 |   - pin_owned_item:owner=<owner>         |
-      |     - owned_items.owned_sub_items.* |   - pin_owned_sub_item:owned_item=<item> |
-      |   filter:                           |                                          |
-      |     space:                          |                                          |
-      |       _eq: <run>                    |                                          |
+      | request                             | response                  |
+      | method: GET                         | code: 200                 |+
+      | path: /items/pin_owner              | headers:                  |
+      | query:                              |   x-cache-status: MISS    |
+      |   fields:                           |   x-scoped-cache-tags:    |
+      |     - '*'                           |   - pin_owned_item        |
+      |     - owned_items.*                 |   - pin_owned_sub_item    |
+      |     - owned_items.owned_sub_items.* |   - pin_owner:space=<run> |
+      |   filter:                           |                           |
+      |     space:                          |                           |
+      |       _eq: <run>                    |                           |
