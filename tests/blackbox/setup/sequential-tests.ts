@@ -202,6 +202,9 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// Reads the whole schema back against a snapshot taken a moment before:
 			// a sibling creating its collections in between is a drift.
 			'/tests/db/app/schema-diff-cli.test.ts',
+			// Two spawned instances, and sockets whose silence is the claim: a kick
+			// that never comes is told apart from one still on its way by a wait.
+			'/tests/db/routes/auth/impersonate.test.ts',
 		],
 		// If specified, only run these tests sequentially
 		only: [

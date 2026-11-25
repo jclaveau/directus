@@ -131,8 +131,9 @@ describe('findingVerdict', () => {
 	test('qualifies the verdict with its reason', () => {
 		expect(findingVerdict(finding())).toBe('stale');
 
-		expect(findingVerdict(finding({ verdict: 'unreplayable', reason: 'user_gone' })))
-			.toBe('unreplayable:user_gone');
+		expect(
+			findingVerdict(finding({ verdict: 'unreplayable', reason: 'user_inactive' })),
+		).toBe('unreplayable:user_inactive');
 	});
 });
 

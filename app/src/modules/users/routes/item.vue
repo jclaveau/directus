@@ -17,6 +17,7 @@ import type { User } from '@directus/types';
 import { computed, ref, toRefs } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
+import ImpersonateUserButton from '../components/impersonate-user-button.vue';
 import UsersNavigation from '../components/navigation.vue';
 import UserInfoSidebarDetail from '../components/user-info-sidebar-detail.vue';
 
@@ -351,6 +352,11 @@ function revert(values: Record<string, any>) {
 					</v-card-actions>
 				</v-card>
 			</v-dialog>
+
+			<impersonate-user-button
+				:user-id="isNew ? null : (item?.id ?? null)"
+				:title="title"
+			/>
 
 			<v-button
 				v-tooltip.bottom="saveAllowed ? t('save') : t('not_allowed')"

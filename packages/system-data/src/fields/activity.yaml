@@ -27,6 +27,14 @@ fields:
           value: login
           foreground: 'var(--purple)'
           background: 'var(--purple-25)'
+        - text: $t:field_options.directus_activity.impersonate
+          value: impersonate
+          foreground: 'var(--theme--warning)'
+          background: 'var(--warning-25)'
+        - text: $t:field_options.directus_activity.impersonate_end
+          value: impersonate_end
+          foreground: 'var(--theme--warning)'
+          background: 'var(--warning-25)'
     width: half
 
   - field: collection
@@ -45,6 +53,10 @@ fields:
     width: half
 
   - field: user
+    display: user
+    width: half
+
+  - field: impersonator
     display: user
     width: half
 

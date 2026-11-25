@@ -63,6 +63,7 @@ import { useLogger } from '../logger/index.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { actorFields } from '../utils/actor-fields.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { resolveMutationBatching } from '../utils/resolve-mutation-batching.js';
 import {
@@ -1124,11 +1125,8 @@ implements AbstractService<Item> {
 				const activityIds = await activityService.createMany(
 					postPrepared.map((p) => ({
 						action: Action.CREATE,
-						user: this.accountability!.user,
+						...actorFields(this.accountability),
 						collection: this.collection,
-						ip: this.accountability!.ip,
-						user_agent: this.accountability!.userAgent,
-						origin: this.accountability!.origin,
 						item: p.primaryKey,
 					})),
 					{ bypassEmitAction: holdActionEvent },
@@ -3840,11 +3838,8 @@ implements AbstractService<Item> {
 				updatedRows.map(({ key }) => {
 					return {
 						action: Action.UPDATE,
-						user: this.accountability!.user,
+						...actorFields(this.accountability),
 						collection: this.collection,
-						ip: this.accountability!.ip,
-						user_agent: this.accountability!.userAgent,
-						origin: this.accountability!.origin,
 						item: key,
 					};
 				}),
@@ -5078,11 +5073,8 @@ implements AbstractService<Item> {
 				await activityService.createMany(
 					keys.map((key) => ({
 						action: Action.DELETE,
-						user: this.accountability!.user,
+						...actorFields(this.accountability),
 						collection: this.collection,
-						ip: this.accountability!.ip,
-						user_agent: this.accountability!.userAgent,
-						origin: this.accountability!.origin,
 						item: key,
 					})),
 					{

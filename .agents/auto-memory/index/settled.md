@@ -46,3 +46,4 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [PR #698 autoreview state](../project_directus_pr698_autoreview_state.md) — MERGED 0bb994cabd: answerOnce + success after busboy close; predating mid-body-error points reported only
 - [Predating #614 review points](../project_directus_predating_review_points.md) — 9 + C2 + D4 fixed test-first in #625, MERGED into #614; follow-up #633
 - [Schema diff mixed relation (closed, watch)](../project_directus_schema_diff_mixed_relation.md) — validate-diff picks the 400 message off `diff[0]` only; not-a-bug 2026-10-16, reopen option B if it surfaces
+- [Impersonation #502 settled design](../project_directus_impersonation_502_settled.md) — cookie mode first (planner students, no app_access), bot impersonator not null ("Cache audit bot", role Bots), logout ends both, impersonator_session FK cascade, skip provider.refresh, kick selectors, credential guard = no-logout invariant; do NOT re-raise

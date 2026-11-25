@@ -1,5 +1,12 @@
+import { Action } from '@directus/constants';
 import { useEnv } from '@directus/env';
-import { ErrorCode, InvalidPayloadError, isDirectusError } from '@directus/errors';
+import {
+	ErrorCode,
+	ForbiddenError,
+	InvalidPayloadError,
+	isDirectusError,
+	RouteNotFoundError,
+} from '@directus/errors';
 import type { Accountability } from '@directus/types';
 import type { Request } from 'express';
 import { Router } from 'express';
@@ -14,9 +21,11 @@ import { DEFAULT_AUTH_PROVIDER, REFRESH_COOKIE_OPTIONS, SESSION_COOKIE_OPTIONS }
 import { useLogger } from '../logger/index.js';
 import { respond } from '../middleware/respond.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
+import { ActivityService } from '../services/activity.js';
 import { AuthenticationService } from '../services/authentication.js';
 import { UsersService } from '../services/users.js';
 import type { AuthenticationMode } from '../types/auth.js';
+import { actorFields } from '../utils/actor-fields.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getAuthProviders } from '../utils/get-auth-providers.js';
 import { getIPFromReq } from '../utils/get-ip-from-req.js';
@@ -142,7 +151,11 @@ router.post(
 		}
 
 		if (mode === 'session') {
-			res.cookie(env['SESSION_COOKIE_NAME'] as string, accessToken, SESSION_COOKIE_OPTIONS);
+			res.cookie(
+				env['SESSION_COOKIE_NAME'] as string,
+				accessToken,
+				SESSION_COOKIE_OPTIONS,
+			);
 		}
 
 		res.locals['payload'] = { data: payload };
@@ -244,6 +257,143 @@ router.post(
 
 		const service = new UsersService({ accountability, schema: req.schema });
 		await service.resetPassword(req.body.token, req.body.password);
+		return next();
+	}),
+	respond,
+);
+
+
+const IMPERSONATION_MODES: AuthenticationMode[] = ['json', 'cookie', 'session'];
+
+router.use('/impersonate', (req, _res, next) => {
+	if (env['IMPERSONATION_ENABLED'] !== true) {
+		throw new RouteNotFoundError({ path: req.path });
+	}
+
+	return next();
+});
+
+router.post(
+	'/impersonate',
+	asyncHandler(async (req, res, next) => {
+		const { accountability } = req;
+
+		// Whoever the impersonation runs as, it never opens another
+		if (accountability?.impersonator) {
+			throw new ForbiddenError({ reason: 'impersonation_nested' });
+		}
+
+		if (accountability?.admin !== true || !accountability.user) {
+			throw new ForbiddenError();
+		}
+
+		if (typeof req.body.user !== 'string') {
+			throw new InvalidPayloadError({ reason: '"user" field is required' });
+		}
+
+		const mode = req.body.mode ?? 'cookie';
+
+		if (!IMPERSONATION_MODES.includes(mode)) {
+			throw new InvalidPayloadError({
+				reason: `"mode" must be one of ${IMPERSONATION_MODES.join(', ')}`,
+			});
+		}
+
+		const result = await new AuthenticationService({
+			accountability,
+			schema: req.schema,
+		}).impersonate(req.body.user, { impersonator: accountability.user, mode });
+
+		const { accessToken, refreshToken, expires, id } = result;
+
+		await new ActivityService({ schema: req.schema }).createOne({
+			action: Action.IMPERSONATE,
+			...actorFields(accountability),
+			collection: 'directus_users',
+			item: id,
+		});
+
+		logger.info(
+			`[impersonation] ${accountability.user} impersonates ${id} in ${mode} mode`,
+		);
+
+		const payload: { expires: number; access_token?: string } = { expires };
+
+		if (mode === 'json') {
+			payload.access_token = accessToken;
+		}
+
+		if (mode === 'cookie') {
+			res.cookie(
+				env['REFRESH_TOKEN_COOKIE_NAME'] as string,
+				refreshToken,
+				REFRESH_COOKIE_OPTIONS,
+			);
+
+			payload.access_token = accessToken;
+		}
+
+		if (mode === 'session') {
+			res.cookie(
+				env['SESSION_COOKIE_NAME'] as string,
+				accessToken,
+				SESSION_COOKIE_OPTIONS,
+			);
+		}
+
+		res.locals['payload'] = { data: payload };
+
+		return next();
+	}),
+	respond,
+);
+
+router.delete(
+	'/impersonate',
+	asyncHandler(async (req, res, next) => {
+		const { accountability } = req;
+
+		if (!accountability?.impersonator || !accountability.session) {
+			throw new InvalidPayloadError({ reason: 'Not impersonating in session mode' });
+		}
+
+		// The IMPERSONATE_END row is written where the session ends, whoever
+		// ends it.
+		const { accessToken, expires } = await new AuthenticationService({
+			accountability,
+			schema: req.schema,
+		}).stopImpersonation(accountability.session);
+
+		logger.info(
+			`[impersonation] ${accountability.impersonator} stops impersonating `
+			+ `${accountability.user}`,
+		);
+
+		res.cookie(
+			env['SESSION_COOKIE_NAME'] as string,
+			accessToken,
+			SESSION_COOKIE_OPTIONS,
+		);
+
+		res.locals['payload'] = { data: { expires } };
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
+	'/impersonate',
+	asyncHandler(async (req, res, next) => {
+		const impersonator = req.accountability?.impersonator
+			? await new UsersService({ schema: req.schema }).readOne(
+				req.accountability.impersonator,
+				{ fields: ['id', 'first_name', 'last_name'] },
+			)
+			: null;
+
+		res.locals['payload'] = { data: { impersonator } };
+
 		return next();
 	}),
 	respond,

@@ -3,15 +3,15 @@ import type { AbstractServiceOptions, PrimaryKey } from '@directus/types';
 import type { Knex } from 'knex';
 import { authenticator } from 'otplib';
 import getDatabase from '../database/index.js';
-import { ItemsService } from './items.js';
+import { UsersService } from './users.js';
 
 export class TFAService {
 	knex: Knex;
-	itemsService: ItemsService;
+	usersService: UsersService;
 
 	constructor(options: AbstractServiceOptions) {
 		this.knex = options.knex || getDatabase();
-		this.itemsService = new ItemsService('directus_users', options);
+		this.usersService = new UsersService(options);
 	}
 
 	async verifyOTP(key: PrimaryKey, otp: string, secret?: string): Promise<boolean> {
@@ -59,10 +59,10 @@ export class TFAService {
 			throw new InvalidPayloadError({ reason: `"otp" is invalid` });
 		}
 
-		await this.itemsService.updateOne(key, { tfa_secret: secret });
+		await this.usersService.setTfaSecret(key, secret);
 	}
 
 	async disableTFA(key: PrimaryKey): Promise<void> {
-		await this.itemsService.updateOne(key, { tfa_secret: null });
+		await this.usersService.setTfaSecret(key, null);
 	}
 }

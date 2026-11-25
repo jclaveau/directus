@@ -1,4 +1,8 @@
-import { InvalidQueryError } from '@directus/errors';
+import {
+	InvalidCredentialsError,
+	InvalidPayloadError,
+	InvalidQueryError,
+} from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -84,6 +88,43 @@ describe('users controller /me/track/page', () => {
 		);
 
 		expect(next).toHaveBeenCalledWith();
+	});
+
+	test("under impersonation the target's last page stays theirs", async () => {
+		const next = vi.fn();
+
+		const layer = router.stack.find((l: any) => l.route?.path === '/me/track/page');
+
+		await layer!.route!.stack[0]!.handle(
+			{
+				accountability: { user: 'jane', impersonator: 'admin' },
+				schema: {},
+				body: { last_page: '/content' },
+			} as any,
+			{ locals: {} } as any,
+			next,
+		);
+
+		expect(updateOne).not.toHaveBeenCalled();
+		expect(next).toHaveBeenCalledWith();
+	});
+
+	test.each([
+		[
+			'no user',
+			{ accountability: {}, body: { last_page: '/x' } },
+			InvalidCredentialsError,
+		],
+		['no page', { accountability: { user: 'jane' }, body: {} }, InvalidPayloadError],
+	])('refuses %s', async (_, req, error) => {
+		const next = vi.fn();
+
+		const layer = router.stack.find((l: any) => l.route?.path === '/me/track/page');
+
+		await layer!.route!.stack[0]!.handle(req as any, { locals: {} } as any, next);
+
+		expect(next.mock.calls[0]![0]).toBeInstanceOf(error);
+		expect(updateOne).not.toHaveBeenCalled();
 	});
 });
 

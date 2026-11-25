@@ -10,7 +10,16 @@ import {
 import jwt from 'jsonwebtoken';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	onTestFinished,
+	vi,
+	type MockInstance,
+} from 'vitest';
 import { clearSystemCache } from '../cache.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { getDatabaseClient } from '../database/index.js';
@@ -464,6 +473,46 @@ describe('Integration Tests', () => {
 					});
 				});
 
+				describe('under impersonation, whatever the target may do', () => {
+					const service = new UsersService({
+						knex: db,
+						schema,
+						accountability: {
+							user: 'user-id-14',
+							role: 'admin',
+							admin: true,
+							impersonator: 'admin-id',
+						} as Accountability,
+					});
+
+					it.each([
+						'password',
+						'email',
+						'token',
+						'tfa_secret',
+						'role',
+						'status',
+						'provider',
+						'external_identifier',
+						'auth_data',
+					])('%s is refused before anything runs', async (field) => {
+						await expect(
+							service.updateMany(['user-id-14'], { [field]: 'test' }),
+						).rejects.toThrow(
+							new ForbiddenError({ reason: 'impersonation_credentials' }),
+						);
+
+						expect(superUpdateGroupsSpy).not.toHaveBeenCalled();
+						expect(clearUserSessionsSpy).not.toBeCalled();
+					});
+
+					it('any other field goes through', async () => {
+						await service.updateMany(['user-id-14'], { first_name: 'Jane' });
+
+						expect(superUpdateGroupsSpy).toHaveBeenCalled();
+					});
+				});
+
 				describe.each([
 					['admin users', { role: 'admin', admin: true } as Accountability],
 					['null accountability', null],
@@ -890,6 +939,78 @@ describe('Integration Tests', () => {
 					}));
 				},
 			);
+
+			it('is refused under impersonation before any lookup', async () => {
+				const getUserByEmail = vi.spyOn(
+					UsersService.prototype as any,
+					'getUserByEmail',
+				);
+
+				const service = new UsersService({
+					knex: db,
+					schema,
+					accountability: {
+						role: 'test',
+						admin: true,
+						impersonator: 'admin-id',
+					} as Accountability,
+				});
+
+				await expect(service.inviteUser('user@example.com', 'invite-role', null))
+					.rejects
+					.toThrow(new ForbiddenError({ reason: 'impersonation_credentials' }));
+
+				expect(getUserByEmail).not.toHaveBeenCalled();
+			});
+		});
+
+		describe('setTfaSecret', () => {
+			let superUpdateOneSpy: MockInstance;
+
+			beforeEach(() => {
+				superUpdateOneSpy = vi.spyOn(ItemsService.prototype, 'updateOne')
+					.mockResolvedValue('user-id-3');
+			});
+
+			afterEach(() => {
+				superUpdateOneSpy.mockRestore();
+			});
+
+			it('writes the secret where updateMany would refuse it', async () => {
+				const service = new UsersService({
+					knex: db,
+					schema,
+					accountability: { user: 'user-id-3', role: 'test' } as Accountability,
+				});
+
+				await service.setTfaSecret('user-id-3', 'secret');
+
+				expect(superUpdateOneSpy)
+					.toHaveBeenCalledWith('user-id-3', { tfa_secret: 'secret' });
+
+				expect(superUpdateGroupsSpy).not.toHaveBeenCalled();
+			});
+
+			it.each([['a secret', 'secret'], ['a reset', null]])(
+				'%s is refused under impersonation: the factor is the target\'s',
+				async (_, secret) => {
+					const service = new UsersService({
+						knex: db,
+						schema,
+						accountability: {
+							user: 'user-id-3',
+							role: 'test',
+							impersonator: 'admin-id',
+						} as Accountability,
+					});
+
+					await expect(service.setTfaSecret('user-id-3', secret))
+						.rejects
+						.toThrow(new ForbiddenError({ reason: 'impersonation_credentials' }));
+
+					expect(superUpdateOneSpy).not.toHaveBeenCalled();
+				},
+			);
 		});
 
 		describe('acceptInvite', () => {
@@ -1162,12 +1283,13 @@ describe('Integration Tests', () => {
 				tracker.on.select('directus_comments').response([]);
 				tracker.on.select('directus_notifications').response([]);
 				tracker.on.select('directus_versions').response([]);
-				tracker.on.delete('directus_sessions').response(1);
+				tracker.on.delete('directus_sessions').response([]);
 
 				await service.deleteMany(['user-id-41']);
 
+				// Its sessions, and the impersonations it runs
 				expect(tracker.history.delete[0]?.bindings)
-					.toStrictEqual(['user-id-41']);
+					.toStrictEqual(['user-id-41', 'user-id-41']);
 			});
 
 			it('keeps the caller\'s own session when it changes a password', async () => {
@@ -1179,7 +1301,7 @@ describe('Integration Tests', () => {
 				]);
 
 				tracker.on.update('directus_users').response(1);
-				tracker.on.delete('directus_sessions').response(1);
+				tracker.on.delete('directus_sessions').response([]);
 
 				await new UsersService({
 					knex: db,
@@ -1194,6 +1316,7 @@ describe('Integration Tests', () => {
 				}], { onRequireUserIntegrityCheck: vi.fn() });
 
 				expect(tracker.history.delete[0]?.bindings).toStrictEqual([
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000044',
 					'8e2b4c10-5d3a-4f6e-9a7b-000000000044',
 					'session-token-1',
 				]);

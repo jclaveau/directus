@@ -183,7 +183,7 @@ Feature: A user's role, status and deletion purge the cache as today
       | 1       | directus_panels        | 1      | 0      | 0      | 0      |
       | 1       | directus_presets       | 1      | 0      | 0      | 0      |
       | 1       | directus_roles         | 1      | 0      | 0      | 0      |
-      | 1       | directus_sessions      | 1      | 0      | 0      | 1      |
+      | 1       | directus_sessions      | 2      | 0      | 0      | 1      |
       | 1       | directus_shares        | 1      | 0      | 0      | 0      |
       | 1       | directus_users         | 3      | 0      | 0      | 1      |
       | 1       | directus_versions      | 2      | 0      | 0      | 0      |

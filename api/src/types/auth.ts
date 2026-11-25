@@ -27,6 +27,9 @@ export interface Session {
 	token: string;
 	expires: Date;
 	share: string;
+	impersonator: string | null;
+	impersonator_session: string | null;
+	next_token: string | null;
 }
 
 export type DirectusTokenPayload = {
@@ -36,6 +39,7 @@ export type DirectusTokenPayload = {
 	app_access: boolean | number;
 	admin_access: boolean | number;
 	share?: string;
+	impersonator?: string;
 };
 
 export type ShareData = {
@@ -48,3 +52,11 @@ export type ShareData = {
 };
 
 export type AuthenticationMode = 'json' | 'cookie' | 'session';
+
+export type ImpersonationResult = {
+	accessToken: string;
+	expires: number;
+	id: string;
+	/** Absent in `json` mode: a stateless token cannot be renewed. */
+	refreshToken?: string;
+};

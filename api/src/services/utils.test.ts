@@ -87,6 +87,9 @@ vi.mock('../permissions/modules/validate-access/validate-access.js');
 vi.mock('../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js');
 vi.mock('../cache.js');
 vi.mock('../cache-audit-runs.js');
+
+// A factory: the service reaches the auth drivers and, through them, the app.
+vi.mock('./authentication.js', () => ({ AuthenticationService: class {} }));
 vi.mock('../schedules/cache-audit.js');
 vi.mock('../cache-events.js');
 

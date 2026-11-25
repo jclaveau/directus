@@ -1,3 +1,4 @@
+import { useEnv } from '@directus/env';
 import type { PrimaryKey } from '@directus/types';
 import emitter from '../../emitter.js';
 import { ItemsService, MetaService } from '../../services/index.js';
@@ -37,6 +38,20 @@ export class ItemsHandler {
 				'items',
 				'INVALID_COLLECTION',
 				'The provided collection does not exists or is not accessible.',
+				uid,
+			);
+		}
+
+		// The HTTP write guard never sees a socket: the same rule, here.
+		if (
+			accountability?.impersonator
+			&& message.action !== 'read'
+			&& useEnv()['IMPERSONATION_WRITES'] !== true
+		) {
+			throw new WebSocketError(
+				'items',
+				'FORBIDDEN',
+				'An impersonation is read-only: impersonation_read_only',
 				uid,
 			);
 		}
