@@ -154,3 +154,104 @@ describe('Alterations', () => {
 		});
 	});
 });
+
+describe('save', () => {
+	it('saves an o2m alias once the relation naming it is saved', async () => {
+		const savedOrder: string[] = [];
+		const fieldsStore = useFieldsStore();
+		const relationsStore = useRelationsStore();
+
+		vi.spyOn(fieldsStore, 'upsertField')
+			.mockImplementation(async (collection, field) => {
+			savedOrder.push(`field ${collection}.${field}`);
+			return undefined as any;
+		});
+
+		vi.spyOn(relationsStore, 'upsertRelation')
+			.mockImplementation(async (collection, field) => {
+			savedOrder.push(`relation ${collection}.${field}`);
+			return undefined as any;
+		});
+
+		vi.spyOn(fieldsStore, 'hydrate').mockResolvedValue();
+
+		const fieldDetailStore = useFieldDetailStore();
+
+		fieldDetailStore.$patch({
+			collection: 'pin_owner',
+			editing: '+',
+			fieldUpdates: {
+				field: 'owned_items',
+				type: 'alias',
+				meta: { special: ['o2m'] },
+			},
+			relations: {
+				o2m: {
+					collection: 'pin_item',
+					field: 'owner',
+					related_collection: 'pin_owner',
+					meta: { one_field: 'owned_items' },
+				},
+			},
+		});
+
+		await fieldDetailStore.save();
+
+		expect(savedOrder).toEqual([
+			'relation pin_item.owner',
+			'field pin_owner.+',
+		]);
+	});
+
+	it('saves an m2o, then its relation, then its reverse o2m alias', async () => {
+		const savedOrder: string[] = [];
+		const fieldsStore = useFieldsStore();
+		const relationsStore = useRelationsStore();
+
+		vi.spyOn(fieldsStore, 'upsertField')
+			.mockImplementation(async (collection, field) => {
+			savedOrder.push(`field ${collection}.${field}`);
+			return undefined as any;
+		});
+
+		vi.spyOn(relationsStore, 'upsertRelation')
+			.mockImplementation(async (collection, field) => {
+			savedOrder.push(`relation ${collection}.${field}`);
+			return undefined as any;
+		});
+
+		vi.spyOn(fieldsStore, 'hydrate').mockResolvedValue();
+
+		const fieldDetailStore = useFieldDetailStore();
+
+		fieldDetailStore.$patch({
+			collection: 'pin_item',
+			editing: '+',
+			fieldUpdates: { field: 'owner', type: 'uuid' },
+			relations: {
+				m2o: {
+					collection: 'pin_item',
+					field: 'owner',
+					related_collection: 'pin_owner',
+					meta: { one_field: 'owned_items' },
+				},
+			},
+			fields: {
+				corresponding: {
+					collection: 'pin_owner',
+					field: 'owned_items',
+					type: 'alias',
+					meta: { special: ['o2m'] },
+				},
+			},
+		});
+
+		await fieldDetailStore.save();
+
+		expect(savedOrder).toEqual([
+			'field pin_item.+',
+			'relation pin_item.owner',
+			'field pin_owner.owned_items',
+		]);
+	});
+});

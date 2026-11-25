@@ -2,7 +2,7 @@ import type { Diff } from 'deep-diff';
 import { describe, expect, it } from 'vitest';
 import type { SnapshotField } from '@directus/types';
 
-import { isNestedMetaUpdate } from './apply-diff.js';
+import { isNestedMetaUpdate, isRelationalAlias } from './apply-diff.js';
 
 describe('isNestedMetaUpdate', () => {
 	it.each([
@@ -24,5 +24,25 @@ describe('isNestedMetaUpdate', () => {
 		{ kind: 'D', path: ['meta', 'options', 'option_b'], lhs: {} },
 	] as Diff<SnapshotField>[])('Returns true when diff path is nested in meta', (diff) => {
 		expect(isNestedMetaUpdate(diff)).toBe(true);
+	});
+});
+
+describe('isRelationalAlias', () => {
+	it.each([
+		{ type: 'alias', special: ['o2m'], relationalAlias: true },
+		{ type: 'alias', special: ['alias', 'no-data'], relationalAlias: false },
+		{ type: 'integer', special: ['m2o'], relationalAlias: false },
+		{ type: 'alias', special: null, relationalAlias: false },
+	])('reads $type of special $special as $relationalAlias', ({
+	type,
+	special,
+	relationalAlias,
+}) => {
+		expect(isRelationalAlias({
+			collection: 'pin_owner',
+			field: 'owned_items',
+			type,
+			meta: { special },
+		} as any)).toBe(relationalAlias);
 	});
 });
