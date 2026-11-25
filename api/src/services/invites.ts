@@ -9,9 +9,10 @@ import type {
 import { ItemsService } from './items.js';
 
 /**
- * An invite of a user to a role, one row per inviter: the `inviter` column is the
- * inviter, or null from a service naming none (#746). The roles wait
- * here until the user accepts, which turns them into memberships. A request
+ * An invite of an email to a role, one row per inviter: the `inviter` column
+ * is the inviter, or null from a service naming none (#746). The roles wait
+ * here until the invite is accepted, which turns them into memberships of the
+ * account it creates, or of the logged-in user. A request
  * writes them through `/users/invite` only, which checks the inviter's
  * permissions on this collection: written straight, only an admin's request
  * writes one, whatever the permissions say.

@@ -350,9 +350,10 @@ router.post(
 	respond,
 );
 
+// A logged-in user accepts into their account, sending no password.
 const acceptInviteSchema = Joi.object({
 	token: Joi.string().required(),
-	password: Joi.string().required(),
+	password: Joi.string(),
 });
 
 router.post(

@@ -2,6 +2,7 @@ import { useEnv } from '@directus/env';
 import { ForbiddenError, InvalidPayloadError, RecordNotUniqueError } from '@directus/errors';
 import type {
 	AbstractServiceOptions,
+	Accountability,
 	ActionEventParams,
 	Item,
 	MutationOptions,
@@ -25,6 +26,7 @@ import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
+import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 // eslint-disable-next-line max-len
 import { fetchGlobalAccessForRoles } from '../permissions/modules/fetch-global-access/lib/fetch-global-access-for-roles.js';
@@ -61,6 +63,15 @@ class SingleRoleFieldError extends InvalidPayloadError {
 
 // Bounds the bind parameters of one update and the rows one cache snapshot holds.
 const UNLINK_CHUNK_SIZE = 10_000;
+
+class UnheldPolicyInviteError extends InvalidPayloadError {
+	constructor(roleName: string, policyName: string) {
+		super({
+			reason: `You can't invite into role ${JSON.stringify(roleName)}: it grants`
+				+ ` policy ${JSON.stringify(policyName)} you don't hold`,
+		});
+	}
+}
 
 class AdminRoleInviteError extends InvalidPayloadError {
 	constructor(invitedRole: string) {
@@ -459,6 +470,8 @@ export class UsersService extends ItemsService {
 						);
 					}
 				}
+
+				await this.deleteInvitesLeftTwice(trx, keys);
 			}
 
 			await new ItemsService('directus_users', {
@@ -496,15 +509,58 @@ export class UsersService extends ItemsService {
 	}
 
 	/**
-	 * An invite is a row of `directus_invites` per user, role and inviter: the
+	 * A deleted inviter's invites keep waiting, their inviter set to null: of
+	 * the invites of one email and role left with a null inviter, only the
+	 * oldest stays, as the unique index counts one null inviter.
+	 */
+	private async deleteInvitesLeftTwice(
+		trx: Knex,
+		deletedUsers: PrimaryKey[],
+	): Promise<void> {
+		const inviteRows: { id: string; email: string; role: string }[] = await trx
+			.select('id', 'email', 'role')
+			.from('directus_invites')
+			.whereIn('inviter', deletedUsers)
+			.orWhere((noInviterQuery) => {
+				noInviterQuery
+					.whereNull('inviter')
+					.whereIn(
+						trx.raw('LOWER(??)', ['email']),
+						trx.select(trx.raw('LOWER(??)', ['email']))
+							.from('directus_invites')
+							.whereIn('inviter', deletedUsers),
+					);
+			})
+			.orderBy(['date_created', 'id']);
+
+		const keptInvites = new Set<string>();
+
+		const invitesLeftTwice = inviteRows.filter(({ email, role }) => {
+			const invitedRole = JSON.stringify([email.toLowerCase(), role]);
+			const isLeftTwice = keptInvites.has(invitedRole);
+
+			keptInvites.add(invitedRole);
+
+			return isLeftTwice;
+		});
+
+		if (invitesLeftTwice.length > 0) {
+			await new InvitesService({ knex: trx, schema: this.schema })
+				.deleteMany(invitesLeftTwice.map(({ id }) => id));
+		}
+	}
+
+	/**
+	 * An invite is a row of `directus_invites` per email, role and inviter: the
 	 * inviter, or null from a service naming none (an extension, a flow).
 	 * A re-invite by the same inviter replaces its own rows; one by another
-	 * inviter adds its own. No membership is written until the user accepts:
-	 * the roles wait in the invites, changing no permission and no cache.
+	 * inviter adds its own. No user and no membership is written until the
+	 * invite is accepted: the roles wait in the invites, changing no permission
+	 * and no cache. Inviting the email of an account proposes it the roles.
 	 *
 	 * Anyone allowed to create the invite rows invites, admin or not: the
-	 * permissions on `directus_invites` say which roles. No invite gives a role
-	 * reaching admin access.
+	 * permissions on `directus_invites` say which roles, and a non-admin gives
+	 * no policy they don't hold. No invite gives a role reaching admin access.
 	 */
 	async inviteUser(
 		email: string | string[],
@@ -523,10 +579,15 @@ export class UsersService extends ItemsService {
 		}
 
 		const invitedRoles = [...new Set(roles)];
-
-		await this.refuseAdminRoleInvites(invitedRoles);
-
 		const emails = toArray(email);
+
+		this.validateEmail(emails);
+		await this.refuseAdminRoleInvites(invitedRoles);
+		await this.validateInvitePermission(emails, invitedRoles);
+
+		if (opts.preMutationError) {
+			throw opts.preMutationError;
+		}
 
 		const mailService = new MailService({
 			schema: this.schema,
@@ -534,82 +595,91 @@ export class UsersService extends ItemsService {
 		});
 
 		for (const email of emails) {
-			// Check if user is known
-			const user = await this.getUserByEmail(email);
-			const isNewUser = isEmpty(user);
-
-			if (!isNewUser && user.status !== 'invited') {
-				if (opts.preMutationError) {
-					throw opts.preMutationError;
-				}
-
-				continue;
-			}
-
 			await transaction(this.knex, async (trx) => {
-				// Create user first to verify uniqueness if unknown
-				const invitedUser = isNewUser
-					? await new UsersService({
-						knex: trx,
-						schema: this.schema,
-						accountability: this.accountability,
-					}).createOne({ email, status: 'invited' }, opts)
-					: user.id;
-
-				await this.validateInvitePermission(trx, invitedUser, invitedRoles);
-
-				if (opts.preMutationError) {
-					throw opts.preMutationError;
-				}
-
-				await this.writeInviteRows(trx, invitedUser, invitedRoles, isNewUser);
+				await this.writeInviteRows(trx, email, invitedRoles);
 			});
 
-			// Send invite for new and already invited users
-			if (isEmpty(user) || user.status === 'invited') {
-				const subjectLine = subject ?? "You've been invited";
-
-				mailService
-					.send({
-						to: user?.email ?? email,
-						subject: subjectLine,
-						template: {
-							name: 'user-invitation',
-							data: {
-								url: this.inviteUrl(user?.email ?? email, url),
-								email: user?.email ?? email,
-							},
+			mailService
+				.send({
+					to: email,
+					subject: subject ?? "You've been invited",
+					template: {
+						name: 'user-invitation',
+						data: {
+							url: this.inviteUrl(email, url),
+							email,
 						},
-					})
-					.catch((error) => {
-						logger.error(error, `Could not send user invitation mail`);
-					});
-			}
+					},
+				})
+				.catch((error) => {
+					logger.error(error, `Could not send user invitation mail`);
+				});
 		}
 	}
 
 	// The rows are written as code, past the guard refusing a non-admin's
 	// direct write: the inviter's permissions are checked here instead.
 	private async validateInvitePermission(
-		trx: Knex,
-		invitedUser: PrimaryKey,
+		emails: string[],
 		invitedRoles: string[],
 	): Promise<void> {
 		if (!this.accountability || this.accountability.admin === true) {
 			return;
 		}
 
-		for (const role of invitedRoles) {
-			await processPayload(
-				{
-					accountability: this.accountability,
-					action: 'create',
-					collection: 'directus_invites',
-					payload: { user: invitedUser, role },
-					nested: [],
-				},
-				{ knex: trx, schema: this.schema },
-			);
+		await this.refuseUnheldPolicyInvites(this.accountability, invitedRoles);
+
+		for (const email of emails) {
+			for (const role of invitedRoles) {
+				await processPayload(
+					{
+						accountability: this.accountability,
+						action: 'create',
+						collection: 'directus_invites',
+						payload: { email, role },
+						nested: [],
+					},
+					{ knex: this.knex, schema: this.schema },
+				);
+			}
+		}
+	}
+
+	// A role gives the policies attached to it or to a parent: a non-admin
+	// inviter gives only those they hold, through their roles or their own.
+	private async refuseUnheldPolicyInvites(
+		inviterAccountability: Accountability,
+		invitedRoles: string[],
+	): Promise<void> {
+		const heldPolicies = new Set(await fetchPolicies(
+			inviterAccountability,
+			{ knex: this.knex, schema: this.schema },
+		));
+
+		for (const invitedRole of invitedRoles) {
+			const givenPolicies: { id: string; name: string }[] = await this.knex
+				.select('directus_policies.id', 'directus_policies.name')
+				.from('directus_access')
+				.join('directus_policies', 'directus_policies.id', 'directus_access.policy')
+				.whereIn(
+					'directus_access.role',
+					await fetchRolesTree(invitedRole, this.knex),
+				)
+				.orderBy('directus_policies.name');
+
+			const unheldPolicy = givenPolicies.find(({ id }) => !heldPolicies.has(id));
+
+			if (unheldPolicy === undefined) {
+				continue;
+			}
+
+			const { name: roleName } = await this.knex
+				.select('name')
+				.from('directus_roles')
+				.where({ id: invitedRole })
+				.first();
+
+			throw new UnheldPolicyInviteError(roleName, unheldPolicy.name);
 		}
 	}
 
@@ -627,29 +697,27 @@ export class UsersService extends ItemsService {
 		}
 	}
 
-	// The invites of this inviter become `invitedRoles`; another's stay.
+	// The invites of this inviter become `invitedRoles`; another's stay. An
+	// email matches in any case, as a login does.
 	private async writeInviteRows(
 		trx: Knex,
-		invitedUser: PrimaryKey,
+		email: string,
 		invitedRoles: string[],
-		isNewUser: boolean,
 	): Promise<void> {
 		const inviter = this.accountability?.user ?? null;
 
-		const inviterInvites: { id: string; role: string }[] = isNewUser
-			? []
-			: await trx
-				.select('id', 'role')
-				.from('directus_invites')
-				.where({ user: invitedUser })
-				.where((inviterQuery) => {
-					if (inviter === null) {
-						inviterQuery.whereNull('inviter');
-					}
-					else {
-						inviterQuery.where('inviter', inviter);
-					}
-				});
+		const inviterInvites: { id: string; role: string }[] = await trx
+			.select('id', 'role')
+			.from('directus_invites')
+			.whereRaw('LOWER(??) = ?', ['email', email.toLowerCase()])
+			.where((inviterQuery) => {
+				if (inviter === null) {
+					inviterQuery.whereNull('inviter');
+				}
+				else {
+					inviterQuery.where('inviter', inviter);
+				}
+			});
 
 		const addedRoles = invitedRoles.filter((role) => {
 			return !inviterInvites.some((invite) => invite.role === role);
@@ -664,7 +732,7 @@ export class UsersService extends ItemsService {
 		if (addedRoles.length > 0) {
 			await invitesService.createMany(
 				addedRoles.map((role) => {
-					return { user: invitedUser, role, inviter: inviter };
+					return { email, role, inviter };
 				}),
 				{},
 			);
@@ -675,7 +743,14 @@ export class UsersService extends ItemsService {
 		}
 	}
 
-	async acceptInvite(token: string, password: string): Promise<void> {
+	/**
+	 * The invited email and its invites, oldest first; refuses a token of
+	 * another scope, or of an email no longer invited.
+	 */
+	async readInvite(token: string): Promise<{
+		email: string;
+		inviteRows: { id: string; role: string }[];
+	}> {
 		const { email, scope } = verifyJWT(token, getSecret()) as {
 			email: string;
 			scope: string;
@@ -686,37 +761,72 @@ export class UsersService extends ItemsService {
 				reason: 'Not an invite token',
 			});
 
-		const user = await this.getUserByEmail(email);
+		const inviteRows: { id: string; role: string }[] = await this.knex
+			.select('id', 'role')
+			.from('directus_invites')
+			.whereRaw('LOWER(??) = ?', ['email', email.toLowerCase()])
+			.orderBy(['date_created', 'id']);
 
-		if (user?.status !== 'invited') {
+		if (inviteRows.length === 0) {
 			throw new InvalidPayloadError({ reason: `Email address ${email} hasn't been invited` });
 		}
 
-		await transaction(this.knex, async (trx) => {
-			await new UsersService({ knex: trx, schema: this.schema })
-				.updateOne(user.id, { password, status: 'active' });
+		return { email, inviteRows };
+	}
 
-			await this.grantInvitedRoles(trx, user.id);
+	/**
+	 * A logged-in user accepts the roles into their account, sending no
+	 * password. Otherwise the invite creates the account of its email, with
+	 * the password sent: an invite token never sets the password of an
+	 * existing account, which has to log in first.
+	 */
+	async acceptInvite(token: string, password?: string | null): Promise<void> {
+		const { email, inviteRows } = await this.readInvite(token);
+		const loggedInUser = this.accountability?.user ?? null;
+
+		if (loggedInUser !== null && password !== undefined && password !== null) {
+			throw new InvalidPayloadError({
+				reason: 'A password creates a new account: log out to create the'
+					+ ` account of ${JSON.stringify(email)}, or send no password to`
+					+ ' add the invited roles to your account',
+			});
+		}
+
+		if (loggedInUser === null && await this.getUserByEmail(email) !== undefined) {
+			throw new InvalidPayloadError({
+				reason: `Email address ${JSON.stringify(email)} has an account: log`
+					+ ' in to it, then accept the invite',
+			});
+		}
+
+		if (loggedInUser === null && (password === undefined || password === null)) {
+			throw new InvalidPayloadError({
+				reason: 'A password is required to create the account of'
+					+ ` ${JSON.stringify(email)}`,
+			});
+		}
+
+		await transaction(this.knex, async (trx) => {
+			const acceptingUser = loggedInUser ?? await new UsersService({
+				knex: trx,
+				schema: this.schema,
+			}).createOne({ email, password, status: 'active' });
+
+			await this.grantInvitedRoles(trx, acceptingUser, inviteRows);
 		});
 	}
 
 	/**
-	 * The invites of the accepting user become their memberships, written as
-	 * code: one per role, in invite order after the roles already held, but for
-	 * a role the user already holds by hand. The membership write clears the
-	 * permissions and response caches once.
+	 * The invites accepted become the user's memberships, written as code: one
+	 * per role, in invite order after the roles already held, but for a role
+	 * the user already holds by hand, then the invites go. The membership write
+	 * clears the permissions and response caches once.
 	 */
-	private async grantInvitedRoles(trx: Knex, acceptingUser: PrimaryKey) {
-		const inviteRows: { id: string; role: string }[] = await trx
-			.select('id', 'role')
-			.from('directus_invites')
-			.where({ user: acceptingUser })
-			.orderBy(['date_created', 'id']);
-
-		if (inviteRows.length === 0) {
-			return;
-		}
-
+	async grantInvitedRoles(
+		trx: Knex,
+		acceptingUser: PrimaryKey,
+		inviteRows: { id: string; role: string }[],
+	): Promise<void> {
 		const heldMemberships: {
 			role: string;
 			managed_by: string | null;

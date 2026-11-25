@@ -29,12 +29,13 @@ export const inviteUser =
  * Accept your invite. The invite user endpoint sends the email a link to the Admin App.
  *
  * @param token Accept invite token.
- * @param password Password for the user.
+ * @param password Password of the account created; leave it out when logged
+ * in, to add the invited roles to your account.
  *
  * @returns Nothing
  */
 export const acceptUserInvite =
-	<Schema>(token: string, password: string): RestCommand<void, Schema> =>
+	<Schema>(token: string, password?: string): RestCommand<void, Schema> =>
 	() => ({
 		path: `/users/invite/accept`,
 		method: 'POST',

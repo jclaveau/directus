@@ -438,7 +438,8 @@ export function globalResolvers(gql: GraphQLService, schemaComposer: SchemaCompo
 			type: GraphQLBoolean,
 			args: {
 				token: new GraphQLNonNull(GraphQLString),
-				password: new GraphQLNonNull(GraphQLString),
+				// A logged-in user accepts into their account, sending no password.
+				password: GraphQLString,
 			},
 			resolve: async (_, args) => {
 				const service = new UsersService({

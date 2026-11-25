@@ -1,6 +1,9 @@
 post:
   summary: Accept User Invite
-  description: Accepts and enables an invited user using a JWT invitation token.
+  description: >-
+    Accepts an invite using a JWT invitation token: logged out, creates the
+    account of the invited email with the password sent; logged in, adds the
+    invited roles to the logged-in account, sending no password.
   operationId: acceptInvite
   requestBody:
     required: true
@@ -15,7 +18,8 @@ post:
               description: Accept invite token.
             password:
               type: string
-              description: Password of the user.
+              description: >-
+                Password of the account created; sent only when logged out.
               format: password
               example: d1r3ctu5
   responses:
