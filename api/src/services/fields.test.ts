@@ -202,7 +202,7 @@ describe('Services / Fields', () => {
 			const service = new FieldsService({ knex: db, schema, accountability: null });
 			const fieldRead = await service.readOne('test', 'owned_items');
 
-			expect(fieldRead.meta).not.toHaveProperty('relation_alias');
+			expect(fieldRead['meta']).not.toHaveProperty('relation_alias');
 		});
 	});
 
