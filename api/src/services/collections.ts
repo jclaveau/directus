@@ -372,7 +372,9 @@ export class CollectionsService {
 
 		if (env['DB_EXCLUDE_TABLES']) {
 			return collections.filter(
-				(collection) => env['DB_EXCLUDE_TABLES'].includes(collection.collection) === false,
+				(collection) => {
+					return !env['DB_EXCLUDE_TABLES'].includes(collection.collection);
+				},
 			);
 		}
 
