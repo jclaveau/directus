@@ -319,10 +319,9 @@ test.each([
 
 	tracker.on.select('directus_sessions').responseOnce(impersonatedSession);
 
-	tracker.on.select('directus_sessions')
+	tracker.on.delete('directus_sessions')
 		.response([{ token: 'imp-token', user: 'jane', impersonator: 'admin' }]);
 
-	tracker.on.delete('directus_sessions').response([]);
 	tracker.on.insert('directus_activity').response([]);
 
 	vi.mocked(fetchGlobalAccess)
@@ -339,7 +338,7 @@ test.each([
 		env.IMPERSONATION_ENABLED = true;
 	}
 
-	expect(tracker.history.delete[0]!.bindings).toEqual(['imp-token']);
+	expect(tracker.history.delete[0]!.bindings).toEqual(['imp-token', 'imp-token']);
 	expect(tracker.history.update).toHaveLength(0);
 
 	expect(tracker.history.insert.map((query) => query.sql))
@@ -374,10 +373,9 @@ test('refresh of an impersonated session ends with its impersonator', async () =
 		impersonator_status: 'suspended',
 	});
 
-	tracker.on.select('directus_sessions')
+	tracker.on.delete('directus_sessions')
 		.response([{ token: 'imp-token', user: 'jane', impersonator: 'admin' }]);
 
-	tracker.on.delete('directus_sessions').response([]);
 	tracker.on.insert('directus_activity').response([]);
 
 	await expect(
@@ -385,7 +383,7 @@ test('refresh of an impersonated session ends with its impersonator', async () =
 	).rejects.toThrow(InvalidCredentialsError);
 
 	// The row is ended, not left to refresh for the rest of its TTL
-	expect(tracker.history.delete[0]!.bindings).toEqual(['imp-token']);
+	expect(tracker.history.delete[0]!.bindings).toEqual(['imp-token', 'imp-token']);
 	expect(tracker.history.update).toHaveLength(0);
 });
 
@@ -420,20 +418,17 @@ test('refresh ends the session of a user no longer active', async () => {
 		.select('directus_sessions')
 		.responseOnce({ ...session, user_status: 'suspended' });
 
-	// endSessions reads the rows it ends
+	// endSessions gets the rows it ends back from the delete
 	tracker.on
-		.select('directus_sessions')
+		.delete('directus_sessions')
 		.response([{ token: 'old-token', impersonator: null }]);
-
-	tracker.on.delete('directus_sessions').response([]);
 
 	await expect(
 		new AuthenticationService({ knex: db, schema }).refresh('old-token'),
 	).rejects.toThrow(UserSuspendedError);
 
-	expect(tracker.history.delete[0]!.bindings).toEqual(
-		expect.arrayContaining(['old-token']),
-	);
+	expect(tracker.history.delete[0]!.bindings)
+		.toEqual(['old-token', 'old-token']);
 });
 
 test('refresh refuses a token with no row', async () => {

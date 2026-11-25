@@ -2,6 +2,7 @@ import { Action } from '@directus/constants';
 import knex from 'knex';
 import { createTracker, MockClient, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { getDatabaseClient } from '../database/index.js';
 import {
 	endSessions,
 	hashSessionToken,
@@ -10,6 +11,10 @@ import {
 
 const publish = vi.hoisted(() => vi.fn());
 vi.mock('../bus/index.js', () => ({ useBus: () => ({ publish }) }));
+
+vi.mock('../database/index.js', () => {
+	return { getDatabaseClient: vi.fn().mockReturnValue('postgres') };
+});
 
 let db: knex.Knex;
 let tracker: Tracker;
@@ -24,7 +29,7 @@ const row = {
 };
 
 beforeEach(() => {
-	db = knex.default({ client: MockClient });
+	db = knex.default({ client: MockClient, dialect: 'pg' });
 	tracker = createTracker(db);
 });
 
@@ -34,14 +39,23 @@ afterEach(() => {
 });
 
 test('ends the named tokens, returns their rows and tells the sockets', async () => {
-	tracker.on.select('directus_sessions').response([row]);
-	tracker.on.delete('directus_sessions').response(1);
+	tracker.on.delete('directus_sessions').response([row]);
 
 	const ended = await endSessions(db, { tokens: ['t1', 'gone'] });
 
 	expect(ended).toEqual([row]);
-	expect(tracker.history.delete[0]!.bindings).toEqual(['t1']);
-	expect(tracker.history.insert).toHaveLength(0);
+
+	// One statement: the rows come back from the delete itself.
+	expect(tracker.history.all).toHaveLength(1);
+
+	expect(tracker.history.delete[0]!.sql).toBe(
+		'delete from "directus_sessions" where ("token" in ($1, $2)'
+		+ ' or "impersonator_session" in ($3, $4))'
+		+ ' returning "token", "user", "impersonator", "ip", "user_agent", "origin"',
+	);
+
+	expect(tracker.history.delete[0]!.bindings)
+		.toEqual(['t1', 'gone', 't1', 'gone']);
 
 	// Hashed: the bus is pub/sub, and only the ended session is named.
 	expect(publish).toHaveBeenCalledWith(SESSION_ENDED_CHANNEL, {
@@ -53,25 +67,22 @@ test('ends the named tokens, returns their rows and tells the sockets', async ()
 
 test('ends the impersonations opened from the named sessions too', async () => {
 	// The admin's own row and the session-mode impersonation it opened
-	tracker.on.select('directus_sessions').response([
+	tracker.on.delete('directus_sessions').response([
 		{ ...row, token: 'admin-session', user: 'admin' },
 		{ ...row, token: 'imp', user: 'u1', impersonator: 'admin' },
 	]);
 
-	tracker.on.delete('directus_sessions').response(2);
 	tracker.on.insert('directus_activity').response([]);
 
 	const ended = await endSessions(db, { tokens: ['admin-session'] });
 
-	expect(tracker.history.select[0]!.sql).toMatch(
-		/\("token" in \(\?\) or "impersonator_session" in \(\?\)\)/,
-	);
-
-	expect(tracker.history.select[0]!.bindings)
+	expect(tracker.history.delete[0]!.bindings)
 		.toEqual(['admin-session', 'admin-session']);
 
-	expect(ended.map((each) => each.token)).toEqual(['admin-session', 'imp']);
-	expect(tracker.history.delete[0]!.bindings).toEqual(['admin-session', 'imp']);
+	expect(ended).toEqual([
+		{ ...row, token: 'admin-session', user: 'admin' },
+		{ ...row, token: 'imp', user: 'u1', impersonator: 'admin' },
+	]);
 
 	// The trail and the kick name the impersonation, not only the session
 	expect(tracker.history.insert[0]!.bindings)
@@ -85,19 +96,18 @@ test('ends the impersonations opened from the named sessions too', async () => {
 });
 
 test('ends every session of the users and every impersonation as them', async () => {
-	tracker.on.select('directus_sessions').response([{ ...row, token: 'other' }]);
-	tracker.on.delete('directus_sessions').response(1);
+	tracker.on.delete('directus_sessions').response([{ ...row, token: 'other' }]);
 
 	await endSessions(db, { users: ['u1', 'u2'], exceptToken: 'mine' });
 
-	expect(tracker.history.select[0]!.sql).toMatch(
-		/\("user" in \(\?, \?\) or "impersonator" in \(\?, \?\)\) and not "token" = \?/,
+	expect(tracker.history.delete[0]!.sql).toBe(
+		'delete from "directus_sessions" where ("user" in ($1, $2)'
+		+ ' or "impersonator" in ($3, $4)) and not "token" = $5'
+		+ ' returning "token", "user", "impersonator", "ip", "user_agent", "origin"',
 	);
 
-	expect(tracker.history.select[0]!.bindings)
+	expect(tracker.history.delete[0]!.bindings)
 		.toEqual(['u1', 'u2', 'u1', 'u2', 'mine']);
-
-	expect(tracker.history.delete[0]!.bindings).toEqual(['other']);
 
 	// Sockets have no row to match on: the users name them, the kept session
 	// is spared by its hash.
@@ -109,7 +119,7 @@ test('ends every session of the users and every impersonation as them', async ()
 });
 
 test('writes the trail for every impersonated row it ends', async () => {
-	tracker.on.select('directus_sessions').response([
+	tracker.on.delete('directus_sessions').response([
 		row,
 		{
 			token: 'imp',
@@ -121,7 +131,6 @@ test('writes the trail for every impersonated row it ends', async () => {
 		},
 	]);
 
-	tracker.on.delete('directus_sessions').response(2);
 	tracker.on.insert('directus_activity').response([]);
 
 	await endSessions(db, { tokens: ['t1', 'imp'] });
@@ -142,16 +151,16 @@ test('writes the trail for every impersonated row it ends', async () => {
 	);
 });
 
-test('deletes nothing and tells nobody when no row matches', async () => {
-	tracker.on.select('directus_sessions').response([]);
+test('writes no trail and tells nobody when no row matches', async () => {
+	tracker.on.delete('directus_sessions').response([]);
 
 	expect(await endSessions(db, { tokens: ['gone'] })).toEqual([]);
-	expect(tracker.history.delete).toHaveLength(0);
+	expect(tracker.history.insert).toHaveLength(0);
 	expect(publish).not.toHaveBeenCalled();
 });
 
 test('still names the users to the sockets when they hold no row', async () => {
-	tracker.on.select('directus_sessions').response([]);
+	tracker.on.delete('directus_sessions').response([]);
 
 	await endSessions(db, { users: ['u1'] });
 
@@ -160,4 +169,31 @@ test('still names the users to the sockets when they hold no row', async () => {
 		users: ['u1'],
 		exceptTokens: [],
 	});
+});
+
+test('reads the rows first on mysql, where knex drops returning', async () => {
+	vi.mocked(getDatabaseClient).mockReturnValueOnce('mysql');
+	tracker.on.select('directus_sessions').response([row]);
+	tracker.on.delete('directus_sessions').response(1);
+
+	expect(await endSessions(db, { tokens: ['t1', 'gone'] })).toEqual([row]);
+
+	expect(tracker.history.select[0]!.sql).toBe(
+		'select "token", "user", "impersonator", "ip", "user_agent", "origin"'
+		+ ' from "directus_sessions" where ("token" in ($1, $2)'
+		+ ' or "impersonator_session" in ($3, $4))',
+	);
+
+	expect(tracker.history.delete[0]!.sql)
+		.toBe('delete from "directus_sessions" where "token" in ($1)');
+
+	expect(tracker.history.delete[0]!.bindings).toEqual(['t1']);
+});
+
+test('deletes nothing on mysql when no row matches', async () => {
+	vi.mocked(getDatabaseClient).mockReturnValueOnce('mysql');
+	tracker.on.select('directus_sessions').response([]);
+
+	expect(await endSessions(db, { tokens: ['gone'] })).toEqual([]);
+	expect(tracker.history.delete).toHaveLength(0);
 });

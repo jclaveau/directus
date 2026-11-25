@@ -3,6 +3,7 @@ import type { PrimaryKey } from '@directus/types';
 import type { Knex } from 'knex';
 import { createHash } from 'node:crypto';
 import { useBus } from '../bus/index.js';
+import { getDatabaseClient } from '../database/index.js';
 
 export type SessionSelector =
 	/** The rows named, and every impersonation this user runs, any mode */
@@ -29,6 +30,15 @@ export type SessionEndedEvent = {
 	exceptTokens: string[];
 };
 
+const ENDED_SESSION_COLUMNS = [
+	'token',
+	'user',
+	'impersonator',
+	'ip',
+	'user_agent',
+	'origin',
+];
+
 export const SESSION_ENDED_CHANNEL = 'session.ended';
 
 export function hashSessionToken(token: string): string {
@@ -47,9 +57,7 @@ export async function endSessions(
 	knex: Knex,
 	selector: SessionSelector,
 ): Promise<EndedSession[]> {
-	const query = knex
-		.select('token', 'user', 'impersonator', 'ip', 'user_agent', 'origin')
-		.from('directus_sessions');
+	const query = knex('directus_sessions');
 
 	if ('tokens' in selector) {
 		// A session-mode impersonation goes with the session it was opened from;
@@ -75,13 +83,25 @@ export async function endSessions(
 		}
 	}
 
-	const ended: EndedSession[] = await query;
+	let ended: EndedSession[];
+
+	// TODO(#610): knex drops `.returning()` on mysql, so MariaDB reads the rows
+	// first and deletes them by token: a row added between the two is left.
+	if (getDatabaseClient(knex) === 'mysql') {
+		ended = await query.select(ENDED_SESSION_COLUMNS);
+
+		if (ended.length > 0) {
+			await knex('directus_sessions')
+				.whereIn('token', ended.map((row) => row.token))
+				.delete();
+		}
+	}
+	else {
+		// One statement: the rows come back from the delete itself.
+		ended = await query.delete().returning(ENDED_SESSION_COLUMNS);
+	}
 
 	if (ended.length > 0) {
-		await knex('directus_sessions')
-			.whereIn('token', ended.map((row) => row.token))
-			.delete();
-
 		const impersonations = ended.filter((row) => row.impersonator !== null);
 
 		if (impersonations.length > 0) {

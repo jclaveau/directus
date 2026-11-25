@@ -291,20 +291,24 @@ test('logout under impersonation ends the impersonator\'s row too', async () => 
 		{ ...jane, impersonator: 'admin', impersonator_session: 'admin-session' },
 	]);
 
-	tracker.on.select('directus_sessions').response([
+	tracker.on.delete('directus_sessions').response([
 		{ token: 'imp-token', user: 'jane', impersonator: 'admin' },
 		{ token: 'admin-session', user: 'admin', impersonator: null },
 	]);
 
-	tracker.on.delete('directus_sessions').response([]);
 	tracker.on.insert('directus_activity').response([]);
 
 	await new AuthenticationService({ knex: db, schema }).logout('imp-token');
 
 	expect(getAuthProvider).not.toHaveBeenCalled();
 
-	expect(tracker.history.delete[0]!.bindings)
-		.toEqual(['imp-token', 'admin-session']);
+	expect(tracker.history.delete[0]!.bindings).toEqual([
+		'imp-token',
+		'admin-session',
+		'imp-token',
+		'admin-session',
+		'admin',
+	]);
 });
 
 test('logout ends the row rotated under the caller too', async () => {
@@ -312,20 +316,17 @@ test('logout ends the row rotated under the caller too', async () => {
 		{ ...jane, impersonator: null, impersonator_session: null, next_token: 'next' },
 	]);
 
-	tracker.on.select('directus_sessions').response([
+	tracker.on.delete('directus_sessions').response([
 		{ token: 'old', user: 'jane', impersonator: null },
 		{ token: 'next', user: 'jane', impersonator: null },
 	]);
 
-	tracker.on.delete('directus_sessions').response([]);
 	vi.mocked(getAuthProvider).mockReturnValue({ logout: vi.fn() } as never);
 
 	await new AuthenticationService({ knex: db, schema }).logout('old');
 
-	expect(tracker.history.select[1]!.bindings)
+	expect(tracker.history.delete[0]!.bindings)
 		.toEqual(['old', 'next', 'old', 'next', 'jane']);
-
-	expect(tracker.history.delete[0]!.bindings).toEqual(['old', 'next']);
 });
 
 test('a logout ends every impersonation the caller runs, any mode', async () => {
@@ -333,24 +334,20 @@ test('a logout ends every impersonation the caller runs, any mode', async () => 
 		{ ...admin, impersonator: null, impersonator_session: null, next_token: null },
 	]);
 
-	tracker.on.select('directus_sessions').response([
+	tracker.on.delete('directus_sessions').response([
 		{ token: 'admin-session', user: 'admin', impersonator: null },
 		{ token: 'cookie-imp', user: 'jane', impersonator: 'admin' },
 	]);
 
-	tracker.on.delete('directus_sessions').response([]);
 	tracker.on.insert('directus_activity').response([]);
 	vi.mocked(getAuthProvider).mockReturnValue({ logout: vi.fn() } as never);
 
 	await new AuthenticationService({ knex: db, schema }).logout('admin-session');
 
-	expect(tracker.history.select[1]!.sql).toMatch(/or "impersonator" = \?\)/);
-
-	expect(tracker.history.select[1]!.bindings)
-		.toEqual(['admin-session', 'admin-session', 'admin']);
+	expect(tracker.history.delete[0]!.sql).toMatch(/or "impersonator" = \?\)/);
 
 	expect(tracker.history.delete[0]!.bindings)
-		.toEqual(['admin-session', 'cookie-imp']);
+		.toEqual(['admin-session', 'admin-session', 'admin']);
 });
 
 test('a plain logout ends its row and tells the provider', async () => {
@@ -361,17 +358,16 @@ test('a plain logout ends its row and tells the provider', async () => {
 		{ ...jane, impersonator: null, impersonator_session: null },
 	]);
 
-	tracker.on.select('directus_sessions')
+	tracker.on.delete('directus_sessions')
 		.response([{ token: 'own-token', user: 'jane', impersonator: null }]);
-
-	tracker.on.delete('directus_sessions').response([]);
 
 	await new AuthenticationService({ knex: db, schema }).logout('own-token');
 
 	expect(provider.logout)
 		.toHaveBeenCalledWith(expect.objectContaining({ id: 'jane' }));
 
-	expect(tracker.history.delete[0]!.bindings).toEqual(['own-token']);
+	expect(tracker.history.delete[0]!.bindings)
+		.toEqual(['own-token', 'own-token', 'jane']);
 });
 
 test('Stop ends the impersonated row and re-signs the impersonator', async () => {
@@ -389,17 +385,16 @@ test('Stop ends the impersonated row and re-signs the impersonator', async () =>
 		status: 'active',
 	});
 
-	tracker.on.select('directus_sessions')
+	tracker.on.delete('directus_sessions')
 		.response([{ token: 'imp-token', user: 'jane', impersonator: 'admin' }]);
 
-	tracker.on.delete('directus_sessions').response([]);
 	tracker.on.insert('directus_activity').response([]);
 
 	const result = await new AuthenticationService({ knex: db, schema })
 		.stopImpersonation('imp-token');
 
 	expect(result.expires).toBe(24 * 60 * 60_000);
-	expect(tracker.history.delete[0]!.bindings).toEqual(['imp-token']);
+	expect(tracker.history.delete[0]!.bindings).toEqual(['imp-token', 'imp-token']);
 
 	const claims = jwt.verify(result.accessToken, 'super-secure-secret');
 
@@ -422,18 +417,18 @@ test('Stop follows the row rotated under it within the grace period', async () =
 		status: 'active',
 	});
 
-	tracker.on.select('directus_sessions').response([
+	tracker.on.delete('directus_sessions').response([
 		{ token: 'imp-token', user: 'jane', impersonator: 'admin' },
 		{ token: 'imp-next', user: 'jane', impersonator: 'admin' },
 	]);
 
-	tracker.on.delete('directus_sessions').response([]);
 	tracker.on.insert('directus_activity').response([]);
 
 	await new AuthenticationService({ knex: db, schema })
 		.stopImpersonation('imp-token');
 
-	expect(tracker.history.delete[0]!.bindings).toEqual(['imp-token', 'imp-next']);
+	expect(tracker.history.delete[0]!.bindings)
+		.toEqual(['imp-token', 'imp-next', 'imp-token', 'imp-next']);
 });
 
 test('Stop refuses a session that is not an impersonation', async () => {
@@ -461,10 +456,8 @@ test('Stop gives no cookie back once the impersonator\'s row is gone', async () 
 
 	tracker.on.select((raw) => raw.sql.includes('inner join')).response(undefined);
 
-	tracker.on.select('directus_sessions')
+	tracker.on.delete('directus_sessions')
 		.response([{ token: 'imp-token', user: 'jane', impersonator: 'admin' }]);
-
-	tracker.on.delete('directus_sessions').response([]);
 	tracker.on.insert('directus_activity').response([]);
 
 	await expect(

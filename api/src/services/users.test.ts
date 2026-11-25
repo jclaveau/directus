@@ -1283,12 +1283,13 @@ describe('Integration Tests', () => {
 				tracker.on.select('directus_comments').response([]);
 				tracker.on.select('directus_notifications').response([]);
 				tracker.on.select('directus_versions').response([]);
-				tracker.on.delete('directus_sessions').response(1);
+				tracker.on.delete('directus_sessions').response([]);
 
 				await service.deleteMany(['user-id-41']);
 
+				// Its sessions, and the impersonations it runs
 				expect(tracker.history.delete[0]?.bindings)
-					.toStrictEqual(['user-id-41']);
+					.toStrictEqual(['user-id-41', 'user-id-41']);
 			});
 
 			it('keeps the caller\'s own session when it changes a password', async () => {
@@ -1300,7 +1301,7 @@ describe('Integration Tests', () => {
 				]);
 
 				tracker.on.update('directus_users').response(1);
-				tracker.on.delete('directus_sessions').response(1);
+				tracker.on.delete('directus_sessions').response([]);
 
 				await new UsersService({
 					knex: db,
@@ -1315,6 +1316,7 @@ describe('Integration Tests', () => {
 				}], { onRequireUserIntegrityCheck: vi.fn() });
 
 				expect(tracker.history.delete[0]?.bindings).toStrictEqual([
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000044',
 					'8e2b4c10-5d3a-4f6e-9a7b-000000000044',
 					'session-token-1',
 				]);
