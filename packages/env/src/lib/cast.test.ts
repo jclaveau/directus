@@ -29,26 +29,20 @@ describe('Type extraction', () => {
 		expect(toString).toHaveBeenCalledWith('value');
 	});
 
-	test('Uses cast flag for array with nested cast flags if exists', () => {
+	test('keeps the items of an array as strings, cast flags included', () => {
 		vi.mocked(getCastFlag).mockImplementation((val) => {
 			if (String(val).startsWith('array')) return 'array';
 			if (String(val).startsWith('string')) return 'string';
 			return 'number';
 		});
 
-		vi.mocked(toString).mockReturnValue('hey');
-		vi.mocked(toNumber).mockReturnValue(1);
 		vi.mocked(toArray).mockReturnValue(['string:hey', 'number:1']);
 
 		const res = cast('array:string:hey,number:1', 'key');
 
-		expect(getCastFlag).toHaveBeenNthCalledWith(1, 'array:string:hey,number:1');
-		expect(getCastFlag).toHaveBeenCalledWith('string:hey');
-		expect(getCastFlag).toHaveBeenCalledWith('number:1');
-		expect(toString).toHaveBeenCalledWith('hey');
+		expect(getCastFlag).toHaveBeenCalledTimes(1);
 		expect(toArray).toHaveBeenCalledWith('string:hey,number:1');
-		expect(toNumber).toHaveBeenCalledWith('1');
-		expect(res).toEqual(['hey', 1]);
+		expect(res).toEqual(['string:hey', 'number:1']);
 	});
 
 	test('Uses type map entry if cast flag does not exist', () => {
@@ -106,11 +100,9 @@ describe('Casting', () => {
 			return null;
 		});
 
-		vi.mocked(guessType).mockReturnValue('number');
-		vi.mocked(toNumber).mockImplementation((v) => v);
 		vi.mocked(toArray).mockReturnValue([1, 2, 3]);
 
-		expect(cast('array:value')).toEqual([1, 2, 3]);
+		expect(cast('array:value')).toEqual(['1', '2', '3']);
 	});
 
 	test('Filters empty strings values out of the array', () => {

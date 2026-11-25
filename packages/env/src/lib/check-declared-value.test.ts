@@ -13,7 +13,8 @@ describe('checkDeclaredValue', () => {
 		['json', '{"a":1}'],
 		['json', { a: 1 }],
 		['string', '0123'],
-		['array', 'a,b'],
+		['string[]', 'a,b'],
+		['string[]', 'array:a,b'],
 	] as const)('takes a %s set to %j', (type, value) => {
 		expect(checkDeclaredValue('VARIABLE_NAME', value, { type }))
 			.toBe(null);
@@ -36,6 +37,12 @@ describe('checkDeclaredValue', () => {
 			'string:5432',
 			'"VARIABLE_NAME" is declared number, but its "string:" prefix'
 				+ ' casts it to string.',
+		],
+		[
+			'string[]',
+			'json:["a"]',
+			'"VARIABLE_NAME" is declared string[], but its "json:" prefix'
+				+ ' casts it to json.',
 		],
 	] as const)('refuses a %s set to %j', (type, value, refusal) => {
 		expect(checkDeclaredValue('VARIABLE_NAME', value, { type }))

@@ -47,7 +47,7 @@ afterEach(() => {
 describe('Casting of default configuration', () => {
 	test('Default config with default type gets casted', () => {
 		vi.mocked(getDefaultType).mockImplementation((key) => {
-			if (key === 'DEFAULT_ARRAY') return 'array';
+			if (key === 'DEFAULT_ARRAY') return 'string[]';
 			return null;
 		});
 

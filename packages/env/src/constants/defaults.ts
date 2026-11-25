@@ -8,7 +8,7 @@ import { ENV_DECLARATIONS } from './env-declarations.js';
  * because a declared type would change what their consumer sees rather than
  * just how it is parsed:
  *
- * - `AUTH_PROVIDERS` — `auth.ts` gates on `!env['AUTH_PROVIDERS']`, and `'array'`
+ * - `AUTH_PROVIDERS` — `auth.ts` gates on `!env['AUTH_PROVIDERS']`, and `'string[]'`
  *   turns the empty default into `[]`, which is truthy.
  * - `CACHE_VALUE_MAX_SIZE`, `ROOT_REDIRECT`, `CORS_ORIGIN`, `IP_CUSTOM_HEADER`,
  *   `FLOWS_ENV_ALLOW_LIST`, `PRESSURE_LIMITER_MAX_MEMORY_RSS`,

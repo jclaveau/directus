@@ -443,7 +443,7 @@ export class ExportService {
 				schema: this.schema,
 			});
 
-			const storage: string = toArray(env['STORAGE_LOCATIONS'] as string[])[0]!;
+			const storage: string = toArray(env['STORAGE_LOCATIONS'])[0]!;
 
 			const title = `export-${collection}-${getDateFormatted()}`;
 			const filename = `${title}.${format}`;

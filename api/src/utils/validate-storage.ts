@@ -21,7 +21,7 @@ export async function validateStorage(): Promise<void> {
 		}
 	}
 
-	const usedStorageDrivers = toArray(env['STORAGE_LOCATIONS'] as string[]).map(
+	const usedStorageDrivers = toArray(env['STORAGE_LOCATIONS']).map(
 		(location) => env[`STORAGE_${location.toUpperCase()}_DRIVER`],
 	);
 

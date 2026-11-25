@@ -7,7 +7,7 @@ import { getConfigFromEnv } from '../utils/get-config-from-env.js';
 export const registerLocations = async (storage: StorageManager) => {
 	const env = useEnv();
 
-	const locations = toArray(env['STORAGE_LOCATIONS'] as string[]);
+	const locations = toArray(env['STORAGE_LOCATIONS']);
 
 	const tus = {
 		enabled: RESUMABLE_UPLOADS.ENABLED,

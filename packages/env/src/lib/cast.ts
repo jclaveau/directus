@@ -1,13 +1,16 @@
 import { toArray, toBoolean } from '@directus/utils/values';
 import type { EnvDeclaration } from '../types/env-declaration.js';
-import type { EnvType } from '../types/env-type.js';
+import type { EnvDeclarationType, EnvType } from '../types/env-type.js';
 import { getDefaultType } from '../utils/get-default-type.js';
 import { guessType } from '../utils/guess-type.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
 import { toNumber, toString } from '../utils/lodash-es-used.js';
 import { tryJson } from '../utils/try-json.js';
 
-const castToType = (value: unknown, type: EnvType): unknown => {
+const castToType = (
+	value: unknown,
+	type: EnvType | EnvDeclarationType,
+): unknown => {
 	switch (type) {
 		case 'string':
 			return toString(value);
@@ -18,9 +21,10 @@ const castToType = (value: unknown, type: EnvType): unknown => {
 		case 'regex':
 			return new RegExp(String(value));
 		case 'array':
+		case 'string[]':
 			return toArray(value)
-				.map((v) => cast(v))
-				.filter((v) => v !== '');
+				.map((item) => String(item))
+				.filter((item) => item !== '');
 		case 'json':
 			return tryJson(value);
 	}

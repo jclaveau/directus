@@ -55,7 +55,7 @@ test('Defaults that have a type set is casted', () => {
 		PROCESS1: 'test-process',
 		PROCESS2: ['one', 'two'],
 		PROCESS3: ['one', 'two', 'three'],
-		PROCESS4: ['hey', 1],
+		PROCESS4: ['string:hey', 'number:1'],
 		PROCESS5: 'file-content',
 		PROCESS6: ['one', 'two', 'three'],
 		PROCESS7: 'ran,d0m',

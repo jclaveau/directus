@@ -10,7 +10,7 @@ export type {
 	EnvTypeValue,
 } from './types/env-declaration.js';
 export type { EnvSources, EnvValueSource } from './types/env-sources.js';
-export type { EnvType } from './types/env-type.js';
+export type { EnvDeclarationType, EnvType } from './types/env-type.js';
 export type { Env } from './types/env.js';
 export { findEnvDeclaration } from './utils/find-env-declaration.js';
 export { isDirectusVariable } from './utils/is-directus-variable.js';

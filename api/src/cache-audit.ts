@@ -412,7 +412,7 @@ class CacheAudit {
 		this.replay = options.replay ?? loopbackReplayer();
 
 		this.ignore = [
-			...((useEnv()['CACHE_AUDIT_IGNORE_PATHS'] as string[] | undefined) ?? []),
+			...useEnv()['CACHE_AUDIT_IGNORE_PATHS'],
 			...(options.ignore ?? []),
 		].map((glob) => glob.split('/').slice(1));
 	}

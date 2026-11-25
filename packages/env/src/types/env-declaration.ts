@@ -1,11 +1,11 @@
-import type { EnvType } from './env-type.js';
+import type { EnvDeclarationType } from './env-type.js';
 
 /**
  * What a variable is declared as: the type its value is cast to, the default it
  * takes when unset, and the only values it may take when `values` lists them.
  */
 export type EnvDeclaration = {
-	type: EnvType;
+	type: EnvDeclarationType;
 	default?: unknown;
 	values?: readonly string[];
 };
@@ -18,7 +18,7 @@ export type EnvTypeValue = {
 	number: number;
 	boolean: boolean;
 	regex: RegExp;
-	array: unknown[];
+	'string[]': string[];
 	json: unknown;
 };
 

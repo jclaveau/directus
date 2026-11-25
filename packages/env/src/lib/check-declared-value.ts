@@ -69,7 +69,11 @@ export const checkDeclaredValue = (
 	const quotedName = JSON.stringify(name);
 	const castFlag = getCastFlag(value);
 
-	if (castFlag !== null && castFlag !== envDeclaration.type) {
+	const declaredFlag = envDeclaration.type === 'string[]'
+		? 'array'
+		: envDeclaration.type;
+
+	if (castFlag !== null && castFlag !== declaredFlag) {
 		return `${quotedName} is declared ${envDeclaration.type}, but its`
 			+ ` ${JSON.stringify(`${castFlag}:`)} prefix casts it to ${castFlag}.`;
 	}

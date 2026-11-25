@@ -65,7 +65,7 @@ export const multipartHandler: RequestHandler = (req, res, routeNext) => { // bb
 	 * the row in directus_files async during the upload of the actual file.
 	 */
 
-	let disk: string = toArray(env['STORAGE_LOCATIONS'] as string[])[0]!;
+	let disk: string = toArray(env['STORAGE_LOCATIONS'])[0]!;
 	let payload: any = {};
 	let fileCount = 0;
 
@@ -93,7 +93,7 @@ export const multipartHandler: RequestHandler = (req, res, routeNext) => { // bb
 			return busboy.emit('error', new InvalidPayloadError({ reason: `File is missing filename` }));
 		}
 
-		const allowedPatterns = toArray(env['FILES_MIME_TYPE_ALLOW_LIST'] as string | string[]);
+		const allowedPatterns = toArray(env['FILES_MIME_TYPE_ALLOW_LIST']);
 		const mimeTypeAllowed = allowedPatterns.some((pattern) => minimatch(mimeType, pattern));
 
 		if (mimeTypeAllowed === false) {

@@ -2,7 +2,7 @@ import type {
 	EnvDeclaration,
 	EnvDeclarations,
 } from '../types/env-declaration.js';
-import type { EnvType } from '../types/env-type.js';
+import type { EnvDeclarationType } from '../types/env-type.js';
 import {
 	ENV_DECLARATIONS,
 	ENV_PATTERN_DECLARATIONS,
@@ -18,5 +18,5 @@ export const DECLARATION_PATTERNS: [RegExp, EnvDeclaration][] = Object.entries({
 } as EnvDeclarations)
 	.map(([name, envDeclaration]) => [new RegExp(`^${name}$`), envDeclaration]);
 
-export const TYPE_MAP_REGEX: [RegExp, EnvType][] = DECLARATION_PATTERNS
+export const TYPE_MAP_REGEX: [RegExp, EnvDeclarationType][] = DECLARATION_PATTERNS
 	.map(([namePattern, envDeclaration]) => [namePattern, envDeclaration.type]);
