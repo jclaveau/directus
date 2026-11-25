@@ -161,6 +161,46 @@ describe('Services / Fields', () => {
 		});
 	});
 
+	describe('columnInfo', () => {
+		it('leaves the relation_alias column of directus_fields out', async () => {
+			const service = new FieldsService({ knex: db, schema });
+
+			vi.spyOn(service.schemaInspector, 'columnInfo').mockResolvedValueOnce([
+				{ table: 'directus_fields', name: 'id' },
+				{ table: 'directus_fields', name: 'relation_alias' },
+				{ table: 'test', name: 'relation_alias' },
+			] as any);
+
+			expect(await service.columnInfo()).toEqual([
+				{ table: 'directus_fields', name: 'id' },
+				{ table: 'test', name: 'relation_alias' },
+			]);
+		});
+	});
+
+	describe('readOne of a field row', () => {
+		it('leaves the relation_alias column out of the meta', async () => {
+			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValueOnce(
+				undefined as any,
+			);
+
+			tracker.on.select('directus_fields').response([
+				{
+					id: 3,
+					collection: 'test',
+					field: 'owned_items',
+					special: 'o2m',
+					relation_alias: 'owned_items',
+				},
+			]);
+
+			const service = new FieldsService({ knex: db, schema, accountability: null });
+			const fieldRead = await service.readOne('test', 'owned_items');
+
+			expect(fieldRead.meta).not.toHaveProperty('relation_alias');
+		});
+	});
+
 	// Last, since the spies below survive clearAllMocks and would otherwise leak the
 	// stubbed columnInfo into readOne (which needs the real one to throw).
 	describe('readAll', () => {
