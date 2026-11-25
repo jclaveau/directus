@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => {
 		SERVE_APP: false,
 		EXTENSIONS_SANDBOX_MEMORY: 128,
 		EXTENSIONS_SANDBOX_TIMEOUT: 10000,
+		TEMP_PATH: '/nonexistent-temp-path',
 	};
 
 	return {
@@ -528,4 +529,12 @@ test.each([
 		reloadFailure,
 		'Failed to reload the extensions on a change in the extension packages',
 	);
+});
+
+test('answers no chunk for one the temp folder does not hold', async () => {
+	const manager = new ExtensionManager();
+
+	Object.assign(manager, { appExtensionChunks: ['missing.js'] });
+
+	expect(await manager.getAppExtensionChunk('missing.js')).toBe(null);
 });
