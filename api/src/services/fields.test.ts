@@ -10,6 +10,7 @@ import emitter from '../emitter.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { FieldsService } from './fields.js';
 import { ItemsService } from './items.js';
+import { PayloadService } from './payload.js';
 import { RelationsService } from './relations.js';
 
 vi.mock('../../src/database/index', () => ({
@@ -182,6 +183,10 @@ describe('Services / Fields', () => {
 		it('leaves the relation_alias column out of the meta', async () => {
 			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValueOnce(
 				undefined as any,
+			);
+
+			vi.spyOn(PayloadService.prototype, 'processValues').mockImplementationOnce(
+				async (_action, fieldRow) => fieldRow as any,
 			);
 
 			tracker.on.select('directus_fields').response([

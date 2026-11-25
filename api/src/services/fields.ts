@@ -208,7 +208,10 @@ export class FieldsService {
 			return omit(aliasRow, RELATION_ALIAS_COLUMN);
 		});
 
-		let aliasFields = [...((await this.payloadService.processValues('read', aliasRows)) as FieldMeta[])];
+		let aliasFields = [...(await this.payloadService.processValues(
+			'read',
+			aliasRows,
+		)) as FieldMeta[]];
 
 		if (collection) {
 			aliasFields.push(...systemFieldRows.filter((fieldMeta) => fieldMeta.collection === collection));
