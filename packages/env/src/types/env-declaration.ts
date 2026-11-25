@@ -31,6 +31,10 @@ export type EnvTypeValue = {
 	regex: RegExp;
 	'string[]': string[];
 	json: unknown;
+	'false | number': false | number;
+	'false | string': false | string;
+	'false | string[]': false | string[];
+	'boolean | number | string | string[]': boolean | number | string | string[];
 };
 
 export type DeclaredValue<Declaration extends CoreEnvDeclaration> =

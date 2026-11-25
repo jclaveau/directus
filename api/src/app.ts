@@ -215,8 +215,8 @@ export default async function createApp(): Promise<express.Application> {
 				sampleInterval,
 				maxEventLoopUtilization: env['PRESSURE_LIMITER_MAX_EVENT_LOOP_UTILIZATION'],
 				maxEventLoopDelay: env['PRESSURE_LIMITER_MAX_EVENT_LOOP_DELAY'],
-				maxMemoryRss: env['PRESSURE_LIMITER_MAX_MEMORY_RSS'] as number,
-				maxMemoryHeapUsed: env['PRESSURE_LIMITER_MAX_MEMORY_HEAP_USED'] as number,
+				maxMemoryRss: env['PRESSURE_LIMITER_MAX_MEMORY_RSS'],
+				maxMemoryHeapUsed: env['PRESSURE_LIMITER_MAX_MEMORY_HEAP_USED'],
 				error: new ServiceUnavailableError({
 					service: 'api',
 					reason: UNDER_PRESSURE_REASON,

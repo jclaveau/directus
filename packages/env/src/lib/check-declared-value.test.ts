@@ -15,6 +15,16 @@ describe('checkDeclaredValue', () => {
 		['string', '0123'],
 		['string[]', 'a,b'],
 		['string[]', 'array:a,b'],
+		['false | number', 'false'],
+		['false | number', false],
+		['false | number', '2147483648'],
+		['false | number', 'number:2147483648'],
+		['false | string', '10mb'],
+		['false | string[]', 'array:PORT'],
+		['number', 'Infinity'],
+		['boolean | number | string | string[]', '*'],
+		['boolean | number | string | string[]', '1'],
+		['boolean | number | string | string[]', 'array:*'],
 	] as const)('takes a %s set to %j', (type, value) => {
 		expect(checkDeclaredValue('VARIABLE_NAME', value, { type }))
 			.toBe(null);
@@ -31,6 +41,22 @@ describe('checkDeclaredValue', () => {
 				+ ' use true, false, 1 or 0.',
 		],
 		['regex', '(', '"VARIABLE_NAME" is "(", which is not a regex.'],
+		[
+			'false | number',
+			'2gb',
+			'"VARIABLE_NAME" is "2gb", which is neither false nor a number.',
+		],
+		[
+			'false | number',
+			true,
+			'"VARIABLE_NAME" is true, which is neither false nor a number.',
+		],
+		[
+			'boolean | number | string | string[]',
+			'json:["*"]',
+			'"VARIABLE_NAME" is declared boolean | number | string | string[],'
+				+ ' but its "json:" prefix casts it to json.',
+		],
 		['json', '{"secret":', '"VARIABLE_NAME" is not JSON.'],
 		[
 			'number',

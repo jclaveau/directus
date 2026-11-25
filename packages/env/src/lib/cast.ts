@@ -7,6 +7,13 @@ import { getCastFlag } from '../utils/has-cast-prefix.js';
 import { toNumber, toString } from '../utils/lodash-es-used.js';
 import { tryJson } from '../utils/try-json.js';
 
+/** The type of the value a `false | <type>` variable takes when not `false`. */
+export const DISABLED_BY_FALSE_TYPES = {
+	'false | number': 'number',
+	'false | string': 'string',
+	'false | string[]': 'string[]',
+} as const;
+
 const castToType = (
 	value: unknown,
 	type: EnvType | EnvDeclarationType,
@@ -27,6 +34,23 @@ const castToType = (
 				.filter((item) => item !== '');
 		case 'json':
 			return tryJson(value);
+		case 'false | number':
+		case 'false | string':
+		case 'false | string[]':
+			return value === false || value === 'false'
+				? false
+				: castToType(value, DISABLED_BY_FALSE_TYPES[type]);
+
+		case 'boolean | number | string | string[]': {
+			const guessedType = guessType(value);
+
+			return castToType(
+				value,
+				guessedType === 'json'
+					? 'string'
+					: guessedType,
+			);
+		}
 	}
 };
 

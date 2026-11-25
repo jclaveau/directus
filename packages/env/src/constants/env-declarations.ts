@@ -365,26 +365,31 @@ export const ENV_DECLARATIONS = {
 	// Read straight off `process.env` before any casting runs.
 	CONFIG_PATH: { type: 'string', default: resolve(cwd(), '.env') },
 
-	// Guessed: a declared type would change what their consumer sees rather than
-	// just how it is parsed.
-	// `false` disables them and any other value configures them, which no single
-	// type covers.
-	ROOT_REDIRECT: { default: './admin' },
-	CORS_ORIGIN: { default: false },
+	// `false` disables them; any other value is of the type after `false |`.
+	ROOT_REDIRECT: { type: 'false | string', default: './admin' },
 	// `respond.ts` keys off `!== false`; any other value is a size like `8kb`.
-	CACHE_VALUE_MAX_SIZE: { default: false },
-	IP_CUSTOM_HEADER: { default: false },
-	FLOWS_ENV_ALLOW_LIST: { default: false },
-	PRESSURE_LIMITER_MAX_MEMORY_RSS: { default: false },
-	PRESSURE_LIMITER_MAX_MEMORY_HEAP_USED: { default: false },
-	PRESSURE_LIMITER_RETRY_AFTER: { default: false },
-	// express reads a boolean, a number, a string or a list.
-	IP_TRUST_PROXY: { default: true },
-	// Read only as the prefix of `getConfigFromEnv`, which hands helmet the
-	// directives under it: the bare name holds none.
-	ASSETS_CONTENT_SECURITY_POLICY: {},
-	// `false` disables the probe and a number spaces it in ms.
-	REDIS_KEEP_ALIVE: {},
+	CACHE_VALUE_MAX_SIZE: { type: 'false | string', default: false },
+	IP_CUSTOM_HEADER: { type: 'false | string', default: false },
+	FLOWS_ENV_ALLOW_LIST: { type: 'false | string[]', default: false },
+	PRESSURE_LIMITER_MAX_MEMORY_RSS: { type: 'false | number', default: false },
+	PRESSURE_LIMITER_MAX_MEMORY_HEAP_USED: {
+		type: 'false | number',
+		default: false,
+	},
+	// The `Retry-After` header, as written.
+	PRESSURE_LIMITER_RETRY_AFTER: { type: 'false | string', default: false },
+	// Unset keeps node-redis's 5000ms probe; a number spaces it in ms.
+	REDIS_KEEP_ALIVE: { type: 'false | number' },
+	// express and cors read a boolean, a hop count, an address or a list:
+	// `CORS_ORIGIN=*` stays the string cors matches every origin with.
+	CORS_ORIGIN: {
+		type: 'boolean | number | string | string[]',
+		default: false,
+	},
+	IP_TRUST_PROXY: {
+		type: 'boolean | number | string | string[]',
+		default: true,
+	},
 
 	ADMIN_EMAIL: { type: 'string' },
 	CACHE_HEALTHCHECK_THRESHOLD: { type: 'number' },
@@ -469,7 +474,7 @@ export const ENV_PATTERN_DECLARATIONS = {
 	'WEBSOCKETS_*_PATH': {},
 	'WEBSOCKETS_*_AUTH': {},
 	'WEBSOCKETS_*_AUTH_TIMEOUT': {},
-	'WEBSOCKETS_*_CONN_LIMIT': {},
+	'WEBSOCKETS_*_CONN_LIMIT': { type: 'number' },
 
 	'STORAGE_*_DRIVER': {},
 	'STORAGE_*_ROOT': {},
@@ -529,6 +534,7 @@ export const ENV_PATTERN_DECLARATIONS = {
 	'LOGGER_*': {},
 	'SERVER_*': {},
 	'HASH_*': {},
+	'ASSETS_CONTENT_SECURITY_POLICY_*': {},
 	'CONTENT_SECURITY_POLICY_*': {},
 	'HSTS_*': {},
 	'RATE_LIMITER_*': {},

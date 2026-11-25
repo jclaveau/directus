@@ -19,7 +19,7 @@ vi.mock('@directus/env', async (importOriginal) => {
 
 	return {
 		useEnv: () => {
-			return { ...useEnv(), WEBSOCKETS_LOGS_CONN_LIMIT: '3' };
+			return { ...useEnv(), WEBSOCKETS_LOGS_CONN_LIMIT: 3 };
 		},
 	};
 });

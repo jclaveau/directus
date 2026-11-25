@@ -18,8 +18,11 @@ test('finds a typed glob before a guessed one', () => {
 	expect(findEnvDeclaration('DB_POOL__MIN')).toEqual({ type: 'number' });
 });
 
-test('finds a declaration whose value is guessed', () => {
-	expect(findEnvDeclaration('ROOT_REDIRECT')).toEqual({ default: './admin' });
+test('finds a literal declaration with its default', () => {
+	expect(findEnvDeclaration('ROOT_REDIRECT')).toEqual({
+		type: 'false | string',
+		default: './admin',
+	});
 });
 
 test('finds a guessed declaration by the glob of its name', () => {

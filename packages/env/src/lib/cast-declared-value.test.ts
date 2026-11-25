@@ -15,3 +15,32 @@ test('a declaration casts a value without its prefix', () => {
 test('a boolean declaration reads "1" as true', () => {
 	expect(castDeclaredValue('1', { type: 'boolean' })).toBe(true);
 });
+
+test.each([
+	['false | number', 'false', false],
+	['false | number', false, false],
+	['false | number', '2147483648', 2147483648],
+	['false | string', 'false', false],
+	['false | string', '10mb', '10mb'],
+	['false | string[]', 'false', false],
+	['false | string[]', 'PUBLIC_URL, PORT', ['PUBLIC_URL', 'PORT']],
+	['boolean | number | string | string[]', 'true', true],
+	['boolean | number | string | string[]', 'false', false],
+	['boolean | number | string | string[]', '1', 1],
+	['boolean | number | string | string[]', '*', '*'],
+	[
+		'boolean | number | string | string[]',
+		'127.0.0.1,128.1.0.3',
+		['127.0.0.1', '128.1.0.3'],
+	],
+] as const)('a %s declaration casts %j to %j', (type, value, castValue) => {
+	expect(castDeclaredValue(value, { type })).toEqual(castValue);
+});
+
+test('an array: prefix wins over the CORS_ORIGIN guess', () => {
+	expect(cast('array:*', 'CORS_ORIGIN')).toEqual(['*']);
+});
+
+test('a WEBSOCKETS_*_CONN_LIMIT reads Infinity as a number', () => {
+	expect(cast('Infinity', 'WEBSOCKETS_REST_CONN_LIMIT')).toBe(Infinity);
+});

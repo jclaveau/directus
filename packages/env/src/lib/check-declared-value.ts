@@ -3,9 +3,35 @@ import type { EnvDeclaration } from '../types/env-declaration.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
 import { toNumber } from '../utils/lodash-es-used.js';
 import { castDeclaredValue, stripCastFlag } from './cast.js';
+import type { EnvDeclarationType } from '../types/env-type.js';
 
 /** What a boolean is spelled as, in a variable or in a configuration file. */
 const BOOLEAN_SPELLINGS: unknown[] = ['true', 'false', '1', '0', true, false, 1, 0];
+
+/** The `type:` prefixes a value of each declared type may carry. */
+const DECLARED_CAST_FLAGS: Record<EnvDeclarationType, readonly string[]> = {
+	'string': ['string'],
+	'number': ['number'],
+	'regex': ['regex'],
+	'string[]': ['array'],
+	'json': ['json'],
+	'boolean': ['boolean'],
+	'false | number': ['number'],
+	'false | string': ['string'],
+	'false | string[]': ['array'],
+	'boolean | number | string | string[]': [
+		'boolean',
+		'number',
+		'string',
+		'array',
+	],
+};
+
+const isNumberValue = (bareValue: unknown): boolean => {
+	return (typeof bareValue === 'number' || typeof bareValue === 'string')
+		&& String(bareValue).trim() !== ''
+		&& !Number.isNaN(toNumber(bareValue));
+};
 
 /** Why `value`, its cast prefix taken off, is not of `envDeclaration`'s type. */
 const readTypeRefusal = (
@@ -17,11 +43,16 @@ const readTypeRefusal = (
 
 	switch (envDeclaration.type) {
 		case 'number':
-			return (typeof bareValue === 'number' || typeof bareValue === 'string')
-				&& String(bareValue).trim() !== ''
-				&& !Number.isNaN(toNumber(bareValue))
+			return isNumberValue(bareValue)
 				? null
 				: `${quotedName} is ${quotedValue}, which is not a number.`;
+		case 'false | number':
+			return bareValue === false
+				|| bareValue === 'false'
+				|| isNumberValue(bareValue)
+				? null
+				: `${quotedName} is ${quotedValue}, which is neither false`
+					+ ' nor a number.';
 		case 'boolean':
 			return BOOLEAN_SPELLINGS.includes(bareValue)
 				? null
@@ -69,11 +100,9 @@ export const checkDeclaredValue = (
 	const quotedName = JSON.stringify(name);
 	const castFlag = getCastFlag(value);
 
-	const declaredFlag = envDeclaration.type === 'string[]'
-		? 'array'
-		: envDeclaration.type;
+	const declaredFlags = DECLARED_CAST_FLAGS[envDeclaration.type];
 
-	if (castFlag !== null && castFlag !== declaredFlag) {
+	if (castFlag !== null && !declaredFlags.includes(castFlag)) {
 		return `${quotedName} is declared ${envDeclaration.type}, but its`
 			+ ` ${JSON.stringify(`${castFlag}:`)} prefix casts it to ${castFlag}.`;
 	}

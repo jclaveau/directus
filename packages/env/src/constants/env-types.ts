@@ -15,4 +15,8 @@ export const ENV_DECLARATION_TYPES = [
 	'string[]',
 	'json',
 	'boolean',
+	'false | number',
+	'false | string',
+	'false | string[]',
+	'boolean | number | string | string[]',
 ] as const;

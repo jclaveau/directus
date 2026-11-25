@@ -28,7 +28,7 @@ vi.mock('@directus/env', async (importOriginal) => {
 				QUERY_AUDIT_HEADER: 'X-Query-Audit',
 				QUERY_AUDIT_LEVEL: 'counts',
 				QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
-				WEBSOCKETS_REST_CONN_LIMIT: '2',
+				WEBSOCKETS_REST_CONN_LIMIT: 2,
 			};
 		},
 	};

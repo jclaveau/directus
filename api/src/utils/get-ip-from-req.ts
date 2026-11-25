@@ -29,7 +29,9 @@ export function getIPFromReq(req: IncomingMessage | Request): string | null {
 	const env = useEnv();
 	const logger = useLogger();
 
-	let ip = 'ip' in req ? req.ip : proxyAddr(req, getTrustValue(env['IP_TRUST_PROXY'] as any));
+	let ip = 'ip' in req
+		? req.ip
+		: proxyAddr(req, getTrustValue(env['IP_TRUST_PROXY']));
 
 	if (env['IP_CUSTOM_HEADER']) {
 		const customIPHeaderName = (env['IP_CUSTOM_HEADER'] as string).toLowerCase();
