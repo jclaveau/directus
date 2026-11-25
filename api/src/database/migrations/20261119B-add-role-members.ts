@@ -379,7 +379,10 @@ async function readInvitedRoleByEmail(
 		const accountRows: { email: string }[] = await knex
 			.select('email')
 			.from('directus_users')
-			.whereIn(knex.raw('lower(??)', ['email']), emailsChunk);
+			.whereRaw(
+				`lower(??) in (${emailsChunk.map(() => '?').join(', ')})`,
+				['email', ...emailsChunk],
+			);
 
 		for (const { email } of accountRows) {
 			accountEmails.add(email.toLowerCase());

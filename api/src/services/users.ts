@@ -524,12 +524,13 @@ export class UsersService extends ItemsService {
 			.orWhere((noInviterQuery) => {
 				noInviterQuery
 					.whereNull('inviter')
-					.whereIn(
-						trx.raw('LOWER(??)', ['email']),
+					// knex wraps the sub-query binding in its parentheses.
+					.whereRaw('LOWER(??) in ?', [
+						'email',
 						trx.select(trx.raw('LOWER(??)', ['email']))
 							.from('directus_invites')
 							.whereIn('inviter', deletedUsers),
-					);
+					]);
 			})
 			.orderBy(['date_created', 'id']);
 

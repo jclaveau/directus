@@ -1557,7 +1557,8 @@ describe('Integration Tests', () => {
 					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits },
 				);
 
-				expect(deleteManySpy).toHaveBeenCalledExactlyOnceWith(['invite-id-31']);
+				expect(deleteManySpy)
+					.toHaveBeenCalledExactlyOnceWith(['invite-id-31'], undefined);
 			});
 
 			it('refuses a logged-in user sending a password', async () => {
