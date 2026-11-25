@@ -108,7 +108,10 @@ class SynchronizationManagerRedis implements SynchronizationManager {
 		const env = useEnv();
 		const config = getConfigFromEnv('REDIS');
 
-		this.client = new Redis(env['REDIS'] ?? config);
+		this.client = env['REDIS'] === undefined
+			? new Redis(config)
+			: new Redis(env['REDIS']);
+
 		this.namespace = env['SYNCHRONIZATION_NAMESPACE'] ?? 'directus-sync';
 
 		this.client.defineCommand('setGreaterThan', {
