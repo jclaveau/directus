@@ -67,6 +67,12 @@ describe.each(vendors)('%s', (vendor) => {
 					'the commit fails naming directus_fields_relation_alias_foreign',
 					async () => {
 						await expect(sqlRun).rejects.toMatchObject({
+							message: 'insert into directus_fields'
+								+ ' (collection, field, special)'
+								+ " values ('fk_owner', 'owned_items', 'o2m')"
+								+ ' - insert or update on table "directus_fields"'
+								+ ' violates foreign key constraint'
+								+ ' "directus_fields_relation_alias_foreign"',
 							constraint: 'directus_fields_relation_alias_foreign',
 						});
 					},

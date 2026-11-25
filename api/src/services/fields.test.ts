@@ -242,5 +242,43 @@ describe('Services / Fields', () => {
 				limit: -1,
 			});
 		});
+
+		it('leaves the relation_alias column out of an alias meta', async () => {
+			vi.spyOn(ItemsService.prototype, 'readByQuery')
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
+
+			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
+
+			vi.spyOn(PayloadService.prototype, 'processValues').mockImplementationOnce(
+				async (_action, aliasRows) => aliasRows as any,
+			);
+
+			tracker.on.select('directus_fields').response([
+				{
+					id: 3,
+					collection: 'test',
+					field: 'owned_items',
+					special: 'o2m',
+					relation_alias: 'owned_items',
+				},
+			]);
+
+			const service = new FieldsService({ knex: db, schema });
+
+			expect(await service.readAll('test')).toEqual([
+				{
+					collection: 'test',
+					field: 'owned_items',
+					type: 'alias',
+					schema: null,
+					meta: {
+						id: 3,
+						collection: 'test',
+						field: 'owned_items',
+						special: 'o2m',
+					},
+				},
+			]);
+		});
 	});
 });
