@@ -231,7 +231,7 @@ function describeUsers(userRows: UserRow[]): string { // bb-unit-only: bb migrat
 		.join(', ');
 }
 
-async function createInvitesUniqueIndex(knex: Knex): Promise<void> { // bb-unit-only: bb migrates an empty database
+async function createInvitesUniqueIndex(knex: Knex): Promise<void> {
 	// TODO(#610): MariaDB indexes no expression, so two invites of the same
 	// email in another case, or with a null inviter, still pass there.
 	if (String(knex.client.dialect).startsWith('mysql')) { // bb-out-of-scope: #610 MySQL
