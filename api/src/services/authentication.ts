@@ -184,6 +184,7 @@ export class AuthenticationService {
 				// back to a limiter that refuses nothing. See `rate-limiter.ts`.
 				if (error instanceof RateLimiterRes && error.remainingPoints === 0) {
 					// Not UsersService: it would refuse suspending the last admin.
+					// eslint-disable-next-line no-restricted-syntax
 					await new ItemsService('directus_users', {
 						knex: this.knex,
 						schema: this.schema,
