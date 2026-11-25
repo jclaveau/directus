@@ -87,14 +87,14 @@ export function providerMemberships(
 }
 
 /**
- * Replace the memberships the provider granted, and only those: an invite's
- * (`invite`), another provider's, or one given by hand stays. A row whose role
- * is still mapped stays too, so a login mapping the same roles again, in any
- * order, writes nothing and clears no cache.
+ * Replace the memberships the provider granted, and only those: another
+ * provider's, or one given by hand or by an invite (`managed_by` null),
+ * stays. A row whose role is still mapped stays too, so a login mapping the
+ * same roles again, in any order, writes nothing and clears no cache.
  *
  * A new row goes after the user's other roles, its `sort` one past the
  * highest (C3 of #749), read from the same select as the provider's rows.
- * user-1 holds sort 1 (hand) and 3 (invite); login maps [sso-a, sso-b]
+ * user-1 holds sort 1 (hand) and 3 (accepted invite); login maps [sso-a, sso-b]
  * → sso-a sort 4, sso-b sort 5
  *
  * The new rows go in before the old ones go, in one transaction: a user moved
