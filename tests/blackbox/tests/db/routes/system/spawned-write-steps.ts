@@ -390,14 +390,19 @@ function sendRequest(instanceUrl: string, requestCell: RequestCell) {
 		POST: () => request(instanceUrl).post(path),
 	}[method]();
 
-	const authorization = token === undefined
-		? AUTH
-		: `Bearer ${token}`;
-
 	pendingRequest
 		.query(query)
-		.set(headers)
-		.set('Authorization', authorization);
+		.set(headers);
+
+	// `as: public` sends no credentials at all.
+	if (token !== 'public') {
+		pendingRequest.set(
+			'Authorization',
+			token === undefined
+				? AUTH
+				: `Bearer ${token}`,
+		);
+	}
 
 	if (uploadMetadata !== undefined) {
 		pendingRequest.set('Upload-Metadata', uploadMetadataHeader(uploadMetadata));

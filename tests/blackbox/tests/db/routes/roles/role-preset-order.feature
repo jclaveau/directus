@@ -246,8 +246,8 @@ Feature: The presets of several member roles apply parents first, then leaves
       | <access-1> | <staff> | <p-staff> |
       | <access-2> | <press> | <p-press> |
     And the rows of directus_users:
-      | id      | email                   | token       | status  |
-      | <alice> | alice-<run>@example.com | alice-<run> | invited |
+      | id      | email                   | token       |
+      | <alice> | alice-<run>@example.com | alice-<run> |
     And the rows of directus_role_members:
       | id         | user    | role    | sort |
       | <member-1> | <alice> | <staff> | 1    |
@@ -259,13 +259,13 @@ Feature: The presets of several member roles apply parents first, then leaves
       |   email: alice-<run>@example.com           |                        |
       |   roles:                                   |                        |
       |     - <press>                              |                        |
-      | method: POST                               | code: 204              |+
+      | as: alice-<run>                            | code: 204              |+
+      | method: POST                               |                        |
       | path: /users/invite/accept                 |                        |
       | payload:                                   |                        |
       |   token: !jwt                              |                        |
       |     email: alice-<run>@example.com         |                        |
       |     scope: invite                          |                        |
-      |   password: accepted-password              |                        |
       | as: alice-<run>                            | code: 200              |+
       | method: POST                               |                        |
       | path: /items/role_order_notes              |                        |

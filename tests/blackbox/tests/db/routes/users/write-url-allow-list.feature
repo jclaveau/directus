@@ -6,7 +6,8 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
     `https://allowed.test/reset` for password resets. A URL is allowed when
     its origin and path match an entry, whatever its query.
   - Mails are sent without being awaited, so a scenario reads the user it
-    writes, never the mail.
+    writes, never the mail. An invitation is a row of `directus_invites` per
+    email and role, read through the graphql `invites` query.
   - Public registration is a setting every user shares: the feature puts the
     registration settings back as it found them once its scenarios ran.
     Registration is rate limited per IP, so each one names its own
@@ -15,7 +16,7 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
     to the scenario, and any other `<name>` for a uuid of its own. A response
     cell states the keys it checks.
 
-  Scenario: an invitation to an allowed URL creates the invited user
+  Scenario: an invitation to an allowed URL writes the invite of its email
     Given these requests are sent:
       | request               | response  |
       | method: POST          | code: 200 |+
@@ -24,21 +25,23 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |   id: <invitee-role>  |           |
       |   name: invitee-<run> |           |
     Then these requests get these responses:
-      | request                                  | response                       |
-      | method: POST                             | code: 204                      |+
-      | path: /users/invite                      |                                |
-      | payload:                                 |                                |
-      |   email: allowed-<run>@example.com       |                                |
-      |   roles:                                 |                                |
-      |     - <invitee-role>                     |                                |
-      |   invite_url: >-                         |                                |
-      |     https://allowed.test/accept?via=mail |                                |
-      | method: GET                              | code: 200                      |+
-      | path: /users                             | body:                          |
-      | query:                                   |   data:                        |
-      |   fields: status,invites.role            |     - status: invited          |
-      |   filter[email][_eq]: >-                 |       invites:                 |
-      |     allowed-<run>@example.com            |         - role: <invitee-role> |
+      | request                                  | response                     |
+      | method: POST                             | code: 204                    |+
+      | path: /users/invite                      |                              |
+      | payload:                                 |                              |
+      |   email: allowed-<run>@example.com       |                              |
+      |   roles:                                 |                              |
+      |     - <invitee-role>                     |                              |
+      |   invite_url: >-                         |                              |
+      |     https://allowed.test/accept?via=mail |                              |
+      | method: POST                             | code: 200                    |+
+      | path: /graphql/system                    | body:                        |
+      | payload:                                 |   data:                      |
+      |   query: >-                              |     invites:                 |
+      |     { invites(filter:                    |       - role:                |
+      |     {email: {_eq:                        |           id: <invitee-role> |
+      |     "allowed-<run>@example.com"}})       |                              |
+      |     { role { id } } }                    |                              |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_access    | 1      | 0      | 0      | 0      |
@@ -48,7 +51,7 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       | 1       | directus_roles     | 1      | 0      | 0      | 0      |
       | 1       | directus_users     | 3      | 1      | 0      | 0      |
 
-  Scenario: an invited user invited again to the same role stays as they were
+  Scenario: an email invited again to the same role keeps its one invite
     Given these requests are sent:
       | request                          | response  |
       | method: POST                     | code: 200 |+
@@ -63,33 +66,35 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |   roles:                         |           |
       |     - <same-role>                |           |
     Then these requests get these responses:
-      | request                          | response                    |
-      | method: POST                     | code: 204                   |+
-      | path: /users/invite              |                             |
-      | payload:                         |                             |
-      |   email: again-<run>@example.com |                             |
-      |   roles:                         |                             |
-      |     - <same-role>                |                             |
-      | method: POST                     | code: 204                   |+
-      | path: /users/invite              |                             |
-      | payload:                         |                             |
-      |   email: again-<run>@example.com |                             |
-      |   roles:                         |                             |
-      |     - <same-role>                |                             |
-      |   invite_url: >-                 |                             |
-      |     https://allowed.test/accept  |                             |
-      | method: GET                      | code: 200                   |+
-      | path: /users                     | body:                       |
-      | query:                           |   data:                     |
-      |   fields: status,invites.role    |     - status: invited       |
-      |   filter[email][_eq]: >-         |       invites:              |
-      |     again-<run>@example.com      |         - role: <same-role> |
+      | request                          | response                  |
+      | method: POST                     | code: 204                 |+
+      | path: /users/invite              |                           |
+      | payload:                         |                           |
+      |   email: again-<run>@example.com |                           |
+      |   roles:                         |                           |
+      |     - <same-role>                |                           |
+      | method: POST                     | code: 204                 |+
+      | path: /users/invite              |                           |
+      | payload:                         |                           |
+      |   email: again-<run>@example.com |                           |
+      |   roles:                         |                           |
+      |     - <same-role>                |                           |
+      |   invite_url: >-                 |                           |
+      |     https://allowed.test/accept  |                           |
+      | method: POST                     | code: 200                 |+
+      | path: /graphql/system            | body:                     |
+      | payload:                         |   data:                   |
+      |   query: >-                      |     invites:              |
+      |     { invites(filter:            |       - role:             |
+      |     {email: {_eq:                |           id: <same-role> |
+      |     "again-<run>@example.com"}}) |                           |
+      |     { role { id } } }            |                           |
     And on postgres the requests ran these statements:
       | request | table            | select | insert | update | delete |
       | 1       | directus_invites | 1      | 0      | 0      | 0      |
       | 1       | directus_users   | 2      | 0      | 0      | 0      |
 
-  Scenario: an invitation of an active user leaves the user as they were
+  Scenario: an invitation of an active user proposes its role, leaving the roles held
     Given these requests are sent:
       | request                           | response  |
       | method: POST                      | code: 200 |+
@@ -109,19 +114,27 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |   roles:                          |           |
       |     - role: <kept-role>           |           |
     Then these requests get these responses:
-      | request                           | response                    |
-      | method: POST                      | code: 204                   |+
-      | path: /users/invite               |                             |
-      | payload:                          |                             |
-      |   email: active-<run>@example.com |                             |
-      |   roles:                          |                             |
-      |     - <offered-role>              |                             |
-      | method: GET                       | code: 200                   |+
-      | path: /users                      | body:                       |
-      | query:                            |   data:                     |
-      |   fields: status,roles.role       |     - status: active        |
-      |   filter[email][_eq]: >-          |       roles:                |
-      |     active-<run>@example.com      |         - role: <kept-role> |
+      | request                           | response                     |
+      | method: POST                      | code: 204                    |+
+      | path: /users/invite               |                              |
+      | payload:                          |                              |
+      |   email: active-<run>@example.com |                              |
+      |   roles:                          |                              |
+      |     - <offered-role>              |                              |
+      | method: GET                       | code: 200                    |+
+      | path: /users                      | body:                        |
+      | query:                            |   data:                      |
+      |   fields: status,roles.role       |     - status: active         |
+      |   filter[email][_eq]: >-          |       roles:                 |
+      |     active-<run>@example.com      |         - role: <kept-role>  |
+      | method: POST                      | code: 200                    |+
+      | path: /graphql/system             | body:                        |
+      | payload:                          |   data:                      |
+      |   query: >-                       |     invites:                 |
+      |     { invites(filter:             |       - role:                |
+      |     {email: {_eq:                 |           id: <offered-role> |
+      |     "active-<run>@example.com"}}) |                              |
+      |     { role { id } } }             |                              |
     And on postgres the requests ran these statements:
       | request | table           | select | insert | update | delete |
       | 1       | directus_access | 1      | 0      | 0      | 0      |

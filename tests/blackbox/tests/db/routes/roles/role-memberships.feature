@@ -10,12 +10,13 @@ Feature: A user holds several roles, each one a membership
   - A role changes what its user may do: only an admin, or code, writes a
     membership. A request of anyone else is refused, whatever the permissions
     say; `/users/invite` writes invites, never a membership.
-  - An invitation is a row of `directus_invites` per inviter and role, shown
-    by the user's `invites` field; a re-invite by the same inviter replaces
-    its rows. No membership is written until the user accepts: accepting
-    turns the invites into memberships, one per role, after the roles held,
-    then deletes them. A deleted inviter leaves their invites, naming no
-    user. A write of the status alone leaves the invites pending.
+  - An invitation is a row of `directus_invites` per email, role and
+    inviter, read through the graphql `invites` query; a re-invite by the
+    same inviter replaces its rows. No membership is written until the
+    invitation is accepted: accepting turns the invites of its email into
+    memberships, one per role, after the roles held, then deletes them. A
+    deleted inviter leaves their invites, naming no inviter, once per email
+    and role. An account created by a write leaves the invites pending.
   - `managed_by` names what manages a membership: `auth:<provider>` or an
     extension; a request neither sets it nor changes such a membership. An
     admin deletes one whose provider maps no role: no login replaces it.
@@ -27,8 +28,9 @@ Feature: A user holds several roles, each one a membership
   - A Given states the database rows a scenario starts from, written straight
     into the database; the feature's collection is created before it runs.
   - A request authenticates as the admin, unless it names the token it sends
-    `as`. `<run>` stands for a value unique to the scenario, and any other
-    `<name>` for a uuid of its own. A response cell states the keys it checks.
+    `as`; `as: public` sends none. `<run>` stands for a value unique to the
+    scenario, and any other `<name>` for a uuid of its own. A response cell
+    states the keys it checks.
 
   Scenario: a member of two roles reads what either role's policy allows
     Given the rows of membership_notes:
@@ -169,58 +171,69 @@ Feature: A user holds several roles, each one a membership
       | <member-1> | <inviter-a> | <inviter-role> | 1    |
       | <member-2> | <inviter-b> | <inviter-role> | 1    |
     Then these requests get these responses:
-      | request                                       | response                   |
-      | as: inviter-a-<run>                           | code: 204                  |+
-      | method: POST                                  |                            |
-      | path: /users/invite                           |                            |
-      | payload:                                      |                            |
-      |   email: to-<run>@example.com                 |                            |
-      |   roles:                                      |                            |
-      |     - <role-a>                                |                            |
-      | as: inviter-a-<run>                           | code: 204                  |+
-      | method: POST                                  |                            |
-      | path: /users/invite                           |                            |
-      | payload:                                      |                            |
-      |   email: to-<run>@example.com                 |                            |
-      |   roles:                                      |                            |
-      |     - <role-b>                                |                            |
-      | as: inviter-b-<run>                           | code: 204                  |+
-      | method: POST                                  |                            |
-      | path: /users/invite                           |                            |
-      | payload:                                      |                            |
-      |   email: to-<run>@example.com                 |                            |
-      |   roles:                                      |                            |
-      |     - <role-b>                                |                            |
-      | method: GET                                   | code: 200                  |+
-      | path: /users                                  | body:                      |
-      | query:                                        |   data:                    |
-      |   fields: roles.role,invites.role             |     - roles: []            |
-      |   filter[email][_eq]: to-<run>@example.com    |       invites:             |
-      |                                               |         - role: <role-b>   |
-      |                                               |         - role: <role-b>   |
-      | method: POST                                  | code: 204                  |+
-      | path: /users/invite/accept                    |                            |
-      | payload:                                      |                            |
-      |   token: !jwt                                 |                            |
-      |     email: to-<run>@example.com               |                            |
-      |     scope: invite                             |                            |
-      |   password: accepted-password                 |                            |
-      | method: GET                                   | code: 200                  |+
-      | path: /users                                  | body:                      |
-      | query:                                        |   data:                    |
-      |   fields: roles.role,roles.managed_by,invites |     - roles:               |
-      |   filter[email][_eq]: to-<run>@example.com    |         - role: <role-b>   |
-      |                                               |           managed_by: null |
-      |                                               |       invites: []          |
+      | request                                    | response                   |
+      | as: inviter-a-<run>                        | code: 204                  |+
+      | method: POST                               |                            |
+      | path: /users/invite                        |                            |
+      | payload:                                   |                            |
+      |   email: to-<run>@example.com              |                            |
+      |   roles:                                   |                            |
+      |     - <role-a>                             |                            |
+      | as: inviter-a-<run>                        | code: 204                  |+
+      | method: POST                               |                            |
+      | path: /users/invite                        |                            |
+      | payload:                                   |                            |
+      |   email: to-<run>@example.com              |                            |
+      |   roles:                                   |                            |
+      |     - <role-b>                             |                            |
+      | as: inviter-b-<run>                        | code: 204                  |+
+      | method: POST                               |                            |
+      | path: /users/invite                        |                            |
+      | payload:                                   |                            |
+      |   email: to-<run>@example.com              |                            |
+      |   roles:                                   |                            |
+      |     - <role-b>                             |                            |
+      | method: POST                               | code: 200                  |+
+      | path: /graphql/system                      | body:                      |
+      | payload:                                   |   data:                    |
+      |   query: >-                                |     invites:               |
+      |     { invites(filter:                      |       - role:              |
+      |     {email: {_eq:                          |           id: <role-b>     |
+      |     "to-<run>@example.com"}}               |       - role:              |
+      |     )                                      |           id: <role-b>     |
+      |     { role { id } } }                      |                            |
+      | as: public                                 | code: 204                  |+
+      | method: POST                               |                            |
+      | path: /users/invite/accept                 |                            |
+      | payload:                                   |                            |
+      |   token: !jwt                              |                            |
+      |     email: to-<run>@example.com            |                            |
+      |     scope: invite                          |                            |
+      |   password: accepted-password              |                            |
+      | method: GET                                | code: 200                  |+
+      | path: /users                               | body:                      |
+      | query:                                     |   data:                    |
+      |   fields: roles.role,roles.managed_by      |     - roles:               |
+      |   filter[email][_eq]: to-<run>@example.com |         - role: <role-b>   |
+      |                                            |           managed_by: null |
+      | method: POST                               | code: 200                  |+
+      | path: /graphql/system                      | body:                      |
+      | payload:                                   |   data:                    |
+      |   query: >-                                |     invites: []            |
+      |     { invites(filter:                      |                            |
+      |     {email: {_eq:                          |                            |
+      |     "to-<run>@example.com"}}               |                            |
+      |     )                                      |                            |
+      |     { id } }                               |                            |
 
-  Scenario: an accepted invite gives its roles after the held ones, but one held by hand
+  Scenario: a logged-in accept gives the roles after the held ones, but one held by hand
     Given the rows of directus_roles:
       | id      | name        |
       | <staff> | staff-<run> |
       | <press> | press-<run> |
     And the rows of directus_users:
-      | id      | email                   | status  |
-      | <alice> | alice-<run>@example.com | invited |
+      | id      | email                   | token       |
+      | <alice> | alice-<run>@example.com | alice-<run> |
     And the rows of directus_role_members:
       | id         | user    | role    | sort |
       | <member-1> | <alice> | <staff> | 1    |
@@ -233,13 +246,13 @@ Feature: A user holds several roles, each one a membership
       |   roles:                                         |                          |
       |     - <press>                                    |                          |
       |     - <staff>                                    |                          |
-      | method: POST                                     | code: 204                |+
+      | as: alice-<run>                                  | code: 204                |+
+      | method: POST                                     |                          |
       | path: /users/invite/accept                       |                          |
       | payload:                                         |                          |
       |   token: !jwt                                    |                          |
       |     email: alice-<run>@example.com               |                          |
       |     scope: invite                                |                          |
-      |   password: accepted-password                    |                          |
       | method: GET                                      | code: 200                |+
       | path: /users/<alice>                             | body:                    |
       | query:                                           |   data:                  |
@@ -259,7 +272,7 @@ Feature: A user holds several roles, each one a membership
       | query:                                           |   data:                  |
       |   fields: roles.role                             |     roles: []            |
 
-  Scenario: an invite outlives its deleted inviter, naming no user
+  Scenario: a deleted inviter leaves one invite per email and role, naming no inviter
     Given the rows of directus_policies:
       | id        | name          | app_access | admin_access |
       | <inviter> | inviter-<run> | true       | true         |
@@ -267,69 +280,68 @@ Feature: A user holds several roles, each one a membership
       | id      | name        |
       | <staff> | staff-<run> |
     And the rows of directus_users:
-      | id      | email                   | token       | status  |
-      | <alice> | alice-<run>@example.com | alice-<run> | active  |
-      | <carol> | carol-<run>@example.com | carol-<run> | active  |
-      | <bob>   | bob-<run>@example.com   | bob-<run>   | invited |
+      | id      | email                   | token       |
+      | <alice> | alice-<run>@example.com | alice-<run> |
+      | <carol> | carol-<run>@example.com | carol-<run> |
     And the rows of directus_access:
       | id         | user    | policy    |
       | <access-1> | <alice> | <inviter> |
       | <access-2> | <carol> | <inviter> |
     And the rows of directus_invites:
-      | id         | user  | role    | inviter      | date_created         |
-      | <invite-1> | <bob> | <staff> | <alice>      | 2026-01-01T00:00:00Z |
-      | <invite-2> | <bob> | <staff> | <carol>      | 2026-01-02T00:00:00Z |
+      | id         | email                 | role    | inviter | date_created |
+      | <invite-1> | bob-<run>@example.com | <staff> | <alice> | 2026-01-01   |
+      | <invite-2> | bob-<run>@example.com | <staff> | <carol> | 2026-01-02   |
     Then these requests get these responses:
-      | request                                   | response                   |
-      | method: DELETE                            | code: 204                  |+
-      | path: /users/<alice>                      |                            |
-      | method: DELETE                            | code: 204                  |+
-      | path: /users/<carol>                      |                            |
-      | method: GET                               | code: 200                  |+
-      | path: /users/<bob>                        | body:                      |
-      | query:                                    |   data:                    |
-      |   fields: invites.id,invites.inviter      |     invites:               |
-      |   deep: >-                                |       - id: <invite-1>     |
-      |     {"invites":{"_sort":                  |         inviter: null      |
-      |     ["date_created"]}}                    |                            |
-      |                                           |       - id: <invite-2>     |
-      |                                           |         inviter: null      |
-      | method: POST                              | code: 204                  |+
-      | path: /users/invite/accept                |                            |
-      | payload:                                  |                            |
-      |   token: !jwt                             |                            |
-      |     email: bob-<run>@example.com          |                            |
-      |     scope: invite                         |                            |
-      |   password: accepted-password             |                            |
-      | method: GET                               | code: 200                  |+
-      | path: /users/<bob>                        | body:                      |
-      | query:                                    |   data:                    |
-      |   fields: roles.role,invites              |     roles:                 |
-      |                                           |       - role: <staff>      |
-      |                                           |     invites: []            |
+      | request                                     | response                |
+      | method: DELETE                              | code: 204               |+
+      | path: /users/<alice>                        |                         |
+      | method: DELETE                              | code: 204               |+
+      | path: /users/<carol>                        |                         |
+      | method: POST                                | code: 200               |+
+      | path: /graphql/system                       | body:                   |
+      | payload:                                    |   data:                 |
+      |   query: >-                                 |     invites:            |
+      |     { invites(filter:                       |       - id: <invite-1>  |
+      |     {email: {_eq:                           |         inviter: null   |
+      |     "bob-<run>@example.com"}}, sort:        |                         |
+      |     ["date_created"])                       |                         |
+      |     { id inviter { id } } }                 |                         |
+      | as: public                                  | code: 204               |+
+      | method: POST                                |                         |
+      | path: /users/invite/accept                  |                         |
+      | payload:                                    |                         |
+      |   token: !jwt                               |                         |
+      |     email: bob-<run>@example.com            |                         |
+      |     scope: invite                           |                         |
+      |   password: accepted-password               |                         |
+      | method: GET                                 | code: 200               |+
+      | path: /users                                | body:                   |
+      | query:                                      |   data:                 |
+      |   fields: roles.role                        |     - roles:            |
+      |   filter[email][_eq]: bob-<run>@example.com |         - role: <staff> |
 
-  Scenario: a user activated by a write of their status keeps their invites pending
+  Scenario: an account created by a write for an invited email keeps the invites pending
     Given the rows of directus_roles:
       | id      | name        |
       | <staff> | staff-<run> |
-    And the rows of directus_users:
-      | id    | email                 | status  |
-      | <bob> | bob-<run>@example.com | invited |
     And the rows of directus_invites:
-      | id       | user  | role    | inviter      |
-      | <invite> | <bob> | <staff> | null         |
+      | id       | email                 | role    | inviter |
+      | <invite> | bob-<run>@example.com | <staff> | null    |
     Then these requests get these responses:
-      | request                      | response              |
-      | method: PATCH                | code: 200             |+
-      | path: /users/<bob>           |                       |
-      | payload:                     |                       |
-      |   status: active             |                       |
-      | method: GET                  | code: 200             |+
-      | path: /users/<bob>           | body:                 |
-      | query:                       |   data:               |
-      |   fields: roles,invites.role |     roles: []         |
-      |                              |     invites:          |
-      |                              |       - role: <staff> |
+      | request                        | response              |
+      | method: POST                   | code: 200             |+
+      | path: /users                   | body:                 |
+      | payload:                       |   data:               |
+      |   email: bob-<run>@example.com |     roles: []         |
+      | method: POST                   | code: 200             |+
+      | path: /graphql/system          | body:                 |
+      | payload:                       |   data:               |
+      |   query: >-                    |     invites:          |
+      |     { invites(filter:          |       - id: <invite>  |
+      |     {email: {_eq:              |         role:         |
+      |     "bob-<run>@example.com"}}  |           id: <staff> |
+      |     )                          |                       |
+      |     { id role { id } } }       |                       |
 
   Scenario: a user who is no admin is refused a role write, whatever the permissions say
     Given the rows of directus_policies:
@@ -370,12 +382,10 @@ Feature: A user holds several roles, each one a membership
       | method: GET                        | code: 200                             |+
       | path: /users                       | body:                                 |
       | query:                             |   data:                               |
-      |   fields: email,roles,invites      |     - email: target-<run>@example.com |
+      |   fields: email,roles              |     - email: target-<run>@example.com |
       |   filter[email][_contains]: <run>  |       roles: []                       |
-      |   sort: email                      |       invites: []                     |
-      |                                    |     - email: writer-<run>@example.com |
+      |   sort: email                      |     - email: writer-<run>@example.com |
       |                                    |       roles: []                       |
-      |                                    |       invites: []                     |
 
   Scenario: a request setting managed_by is refused
     Given the rows of directus_roles:
