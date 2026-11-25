@@ -101,6 +101,36 @@ test('accepts the same name another extension declares as the same type', () => 
 	expect(env).toEqual({ SUBSCRIPTIONS_SHARED: 7 });
 });
 
+test('refuses a name another extension declares with another default', () => {
+	const env: Record<string, unknown> = {};
+
+	const envDeclarers: ExtensionEnvDeclarers = new Map([[
+		'ACME_TTL',
+		{
+			extensionName: 'acme',
+			envDeclaration: { type: 'number', default: 10 },
+		},
+	]]);
+
+	expect(() => {
+		applyExtensionEnv({
+			extensionName: 'beta',
+			extensionEnvs: [{
+				prefix: 'ACME_',
+				vars: { ACME_TTL: { type: 'number', default: 60 } },
+			}],
+			envDeclarers,
+			rawValues: {},
+			env,
+		});
+	}).toThrow(new Error(
+		'Extension "beta" declares "ACME_TTL" default 60,'
+		+ ' which extension "acme" declares 10.',
+	));
+
+	expect(env).toEqual({});
+});
+
 test('finds the names set under a declared prefix that nobody declares', () => {
 	expect(findUndeclaredEnv({
 		rawNames: [

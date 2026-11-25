@@ -19,7 +19,7 @@ export type ExtensionEnvDeclarers = Map<
  * declared, from the values they were set to or from their defaults. Throws,
  * naming the variable and the extension, on a value that does not fit, on a
  * name core declares, and on a name another extension declares as another
- * type; nothing is written then.
+ * type or with another default; nothing is written then.
  */
 export function applyExtensionEnv({
 	extensionName,
@@ -68,6 +68,23 @@ export function applyExtensionEnv({
 						+ ` ${otherDeclarer.envDeclaration.type}.`,
 				);
 			}
+			else if (
+				otherDeclarer !== undefined
+				&& otherDeclarer.extensionName !== extensionName
+				&& 'default' in envDeclaration
+				&& 'default' in otherDeclarer.envDeclaration
+				&& JSON.stringify(envDeclaration.default)
+				!== JSON.stringify(otherDeclarer.envDeclaration.default)
+			) {
+				refusals.push(
+					`Extension ${quotedExtension} declares ${quotedName}`
+						+ ` default ${JSON.stringify(envDeclaration.default)},`
+						+ ' which extension'
+						+ ` ${JSON.stringify(otherDeclarer.extensionName)} declares`
+						+ ` ${JSON.stringify(otherDeclarer.envDeclaration.default)}.`,
+				);
+			}
+
 			const declaredValue = name in rawValues
 				? rawValues[name]
 				: envDeclaration.default;
