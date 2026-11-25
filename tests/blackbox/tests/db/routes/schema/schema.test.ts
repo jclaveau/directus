@@ -683,17 +683,12 @@ describe('Schema Snapshots', () => {
 					parseSnapshot(vendor, snapshot);
 					await CreateCollection(vendor, { collection: otherCollection });
 
-					await CreateFieldM2O(vendor, {
-						collection,
-						field: 'other_id',
-						otherCollection,
-					});
-
 					await CreateFieldO2M(vendor, {
 						collection: otherCollection,
 						field: 'o2m',
 						otherCollection: collection,
 						otherField: 'other_id',
+						otherMeta: { special: ['m2o'] },
 					});
 
 					// Action

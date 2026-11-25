@@ -636,9 +636,6 @@ export async function CreateFieldO2M(vendor: Vendor, options: OptionsCreateField
 		fieldOptions.meta.special.push('o2m');
 	}
 
-	// Action
-	const field = await CreateField(vendor, fieldOptions);
-
 	const otherFieldOptions: OptionsCreateField = {
 		collection: options.otherCollection,
 		field: options.otherField,
@@ -658,6 +655,9 @@ export async function CreateFieldO2M(vendor: Vendor, options: OptionsCreateField
 	};
 
 	const relation = await CreateRelation(vendor, relationOptions);
+
+	// Action
+	const field = await CreateField(vendor, fieldOptions);
 
 	return { field, otherField, relation };
 }
@@ -713,9 +713,6 @@ export async function CreateFieldM2M(vendor: Vendor, options: OptionsCreateField
 		fieldOptions.meta.special.push('m2m');
 	}
 
-	// Action
-	const field = await CreateField(vendor, fieldOptions);
-
 	const otherFieldOptions: OptionsCreateField = {
 		collection: options.otherCollection,
 		field: options.otherField,
@@ -729,8 +726,6 @@ export async function CreateFieldM2M(vendor: Vendor, options: OptionsCreateField
 	} else if (!otherFieldOptions.meta.special.includes('m2m')) {
 		otherFieldOptions.meta.special.push('m2m');
 	}
-
-	const otherField = await CreateField(vendor, otherFieldOptions);
 
 	const junctionCollectionOptions: OptionsCreateCollection = {
 		collection: options.junctionCollection,
@@ -787,6 +782,11 @@ export async function CreateFieldM2M(vendor: Vendor, options: OptionsCreateField
 
 	const otherRelation = await CreateRelation(vendor, otherRelationOptions);
 
+	// Action
+	const field = await CreateField(vendor, fieldOptions);
+
+	const otherField = await CreateField(vendor, otherFieldOptions);
+
 	return { field, otherField, junctionCollection, junctionField, otherJunctionField, relation, otherRelation };
 }
 
@@ -833,9 +833,6 @@ export async function CreateFieldM2A(vendor: Vendor, options: OptionsCreateField
 	} else if (!fieldOptions.meta.special.includes('m2a')) {
 		fieldOptions.meta.special.push('m2a');
 	}
-
-	// Action
-	const field = await CreateField(vendor, fieldOptions);
 
 	const junctionCollectionOptions: OptionsCreateCollection = {
 		collection: options.junctionCollection,
@@ -899,6 +896,9 @@ export async function CreateFieldM2A(vendor: Vendor, options: OptionsCreateField
 	};
 
 	const itemRelation = await CreateRelation(vendor, itemRelationOptions);
+
+	// Action
+	const field = await CreateField(vendor, fieldOptions);
 
 	return {
 		field,

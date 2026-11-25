@@ -190,16 +190,6 @@ async function seedCollections(): Promise<void> {
 		}),
 	});
 
-	await sendRequest(`/fields/${DECK}`, {
-		method: 'POST',
-		body: JSON.stringify({
-			field: 'cards',
-			type: 'alias',
-			meta: { special: ['o2m'] },
-			schema: null,
-		}),
-	});
-
 	await sendRequest('/relations', {
 		method: 'POST',
 		body: JSON.stringify({
@@ -208,6 +198,16 @@ async function seedCollections(): Promise<void> {
 			related_collection: DECK,
 			meta: { one_field: 'cards' },
 			schema: { on_delete: 'SET NULL' },
+		}),
+	});
+
+	await sendRequest(`/fields/${DECK}`, {
+		method: 'POST',
+		body: JSON.stringify({
+			field: 'cards',
+			type: 'alias',
+			meta: { special: ['o2m'] },
+			schema: null,
 		}),
 	});
 }
