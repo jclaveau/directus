@@ -198,21 +198,6 @@ fields:
       - m2m
     width: full
 
-  # The roles an invite gives once the user accepts it.
-  - field: invites
-    interface: list-o2m
-    readonly: true
-    options:
-      enableCreate: false
-      enableSelect: false
-      template: '{{ role.name }}'
-    display: related-values
-    display_options:
-      template: '{{ role.name }}'
-    special:
-      - o2m
-    width: full
-
   - field: policies
     interface: list-m2m
     options:

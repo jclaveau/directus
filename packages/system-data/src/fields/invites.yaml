@@ -8,12 +8,11 @@ fields:
     readonly: true
     width: half
 
-  - field: user
+  # Compared in lower case, as a login compares it.
+  - field: email
     hidden: true
     readonly: true
     width: half
-    special:
-      - m2o
 
   - field: role
     hidden: true
@@ -23,7 +22,7 @@ fields:
       - m2o
 
   # Set by the invite code: a `user-created` special would overwrite the null
-  # of an invite naming no user.
+  # of an invite made by code.
   - field: inviter
     hidden: true
     readonly: true

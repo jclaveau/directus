@@ -1300,7 +1300,7 @@ system_fields_locked: System fields are locked and can't be edited
 directus_collection:
   directus_access: Policy attachments
   directus_role_members: Role memberships
-  directus_invites: Invites of users to roles, one per inviter
+  directus_invites: Invites of emails to roles, one per inviter
   directus_activity: Accountability logs for all events
   directus_cache_stats_descriptors: Per-key cache-entry descriptors (telemetry)
   directus_cache_stats_events: Cache hit/miss/latency events (telemetry)
@@ -1415,7 +1415,6 @@ fields:
     status_suspended: Suspended
     status_archived: Archived
     role: Role
-    invites: Pending Roles
     token: Token
     provider: Provider
     external_identifier: External Identifier

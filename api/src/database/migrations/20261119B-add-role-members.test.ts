@@ -1,4 +1,5 @@
 import { createInspector } from '@directus/schema';
+import { oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { createTracker, MockClient, type Tracker } from 'knex-mock-client';
 import { randomUUID } from 'node:crypto';
@@ -215,7 +216,7 @@ describe('the migration', () => {
 		);
 	});
 
-	test('up records invites, one per user, role and inviter', async () => {
+	test('up records invites, one per email, role and inviter', async () => {
 		vi.mocked(createInspector).mockReturnValue({
 			foreignKeys: vi.fn().mockResolvedValue([]),
 		} as any);
@@ -226,13 +227,11 @@ describe('the migration', () => {
 
 		expect(tracker.history.any.map(({ sql }) => sql)).toEqual(
 			expect.arrayContaining([
-				'create table "directus_invites" ("id" uuid, "user" uuid not null,'
-				+ ' "role" uuid not null, "inviter" uuid null,'
+				'create table "directus_invites" ("id" uuid,'
+				+ ' "email" varchar(255) not null, "role" uuid not null,'
+				+ ' "inviter" uuid null,'
 				+ ' "date_created" timestamptz default CURRENT_TIMESTAMP,'
 				+ ' constraint "directus_invites_pkey" primary key ("id"))',
-				'alter table "directus_invites" add constraint'
-				+ ' "directus_invites_user_foreign" foreign key ("user")'
-				+ ' references "directus_users" ("id") on delete CASCADE',
 				'alter table "directus_invites" add constraint'
 				+ ' "directus_invites_role_foreign" foreign key ("role")'
 				+ ' references "directus_roles" ("id") on delete CASCADE',
@@ -240,15 +239,290 @@ describe('the migration', () => {
 				+ ' "directus_invites_inviter_foreign" foreign key'
 				+ ' ("inviter") references "directus_users" ("id")'
 				+ ' on delete SET NULL',
-				'alter table "directus_invites" add constraint'
-				+ ' "directus_invites_user_role_inviter_unique"'
-				+ ' unique ("user", "role", "inviter")',
+				'create unique index "directus_invites_email_role_inviter_unique"'
+				+ ' on "directus_invites" (lower("email"), "role",'
+				+ ' coalesce("inviter", \'00000000-0000-0000-0000-000000000000\'))',
 			]),
 		);
 	});
 
+	test(oneLine`
+		up turns an invited user into the invite to its role, then deletes it
+	`, async () => {
+		vi.mocked(randomUUID)
+			.mockReturnValueOnce('00000000-0000-4000-8000-000000000001')
+			.mockReturnValueOnce('00000000-0000-4000-8000-000000000002');
+
+		vi.mocked(createInspector).mockReturnValue({
+			foreignKeys: vi.fn().mockResolvedValue([
+				{
+					table: 'directus_sessions',
+					column: 'user',
+					foreign_key_table: 'directus_users',
+				},
+				{
+					table: 'directus_files',
+					column: 'folder',
+					foreign_key_table: 'directus_folders',
+				},
+			]),
+		} as any);
+
+		tracker.on.select('directus_users').response([
+			{
+				id: 'user-1',
+				email: 'Ann@example.com',
+				role: 'role-a',
+				provider: 'default',
+				status: 'invited',
+			},
+			{
+				id: 'user-2',
+				email: 'bob@example.com',
+				role: 'role-b',
+				provider: 'default',
+				status: 'active',
+			},
+		]);
+
+		tracker.on.select('directus_sessions').response([]);
+		tracker.on.insert(/^insert into "directus_(role_members|invites)"/).response([]);
+		tracker.on.delete('directus_users').response(1);
+
+		await up(db);
+
+		expect(tracker.history.select.map(({ sql, bindings }) => [sql, bindings]))
+			.toEqual(expect.arrayContaining([
+				[
+					'select "id", "email", "role", "provider", "status"'
+					+ ' from "directus_users" where "role" is not null'
+					+ ' or "status" = ?',
+					['invited'],
+				],
+				[
+					'select distinct "user" from "directus_sessions"'
+					+ ' where "user" in (?)',
+					['user-1'],
+				],
+			]));
+
+		expect(tracker.history.insert.map(({ sql, bindings }) => [sql, bindings]))
+			.toEqual([
+				[
+					'insert into "directus_role_members"'
+					+ ' ("id", "managed_by", "role", "sort", "user")'
+					+ ' values (?, ?, ?, ?, ?)',
+					['00000000-0000-4000-8000-000000000001', null, 'role-b', 1, 'user-2'],
+				],
+				[
+					'insert into "directus_invites"'
+					+ ' ("email", "id", "inviter", "role") values (?, ?, ?, ?)',
+					[
+						'Ann@example.com',
+						'00000000-0000-4000-8000-000000000002',
+						null,
+						'role-a',
+					],
+				],
+			]);
+
+		expect(tracker.history.delete.map(({ sql, bindings }) => [sql, bindings]))
+			.toEqual([
+				['delete from "directus_users" where "id" in (?)', ['user-1']],
+			]);
+	});
+
+	test(oneLine`
+		up refuses invited users another record references, naming each, and
+		changes nothing
+	`, async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			foreignKeys: vi.fn().mockResolvedValue([
+				{
+					table: 'directus_sessions',
+					column: 'user',
+					foreign_key_table: 'directus_users',
+				},
+				{
+					table: 'articles',
+					column: 'author',
+					foreign_key_table: 'directus_users',
+				},
+			]),
+		} as any);
+
+		tracker.on.select('directus_users').response([
+			{
+				id: 'user-1',
+				email: 'ann@example.com',
+				role: 'role-a',
+				provider: 'default',
+				status: 'invited',
+			},
+			{
+				id: 'user-2',
+				email: 'bob@example.com',
+				role: 'role-a',
+				provider: 'default',
+				status: 'invited',
+			},
+			{
+				id: 'user-3',
+				email: 'cleo@example.com',
+				role: 'role-a',
+				provider: 'default',
+				status: 'invited',
+			},
+		]);
+
+		tracker.on.select('directus_sessions').response([{ user: 'user-3' }]);
+		tracker.on.select('articles').response([{ author: 'user-1' }]);
+
+		await expect(up(db)).rejects.toThrow(new Error(
+			'Cannot move the invited users into invites: users'
+			+ ' "user-1" ("ann@example.com"), "user-3" ("cleo@example.com")'
+			+ ' are referenced by other records; remove those references first',
+		));
+
+		expect(tracker.history.insert).toEqual([]);
+		expect(tracker.history.delete).toEqual([]);
+		expect(tracker.history.any).toEqual([]);
+	});
+
+	test(oneLine`
+		up refuses an invited user with no role or no email, changing nothing
+	`, async () => {
+		vi.mocked(createInspector).mockReturnValue({
+			foreignKeys: vi.fn().mockResolvedValue([]),
+		} as any);
+
+		tracker.on.select('directus_users').response([
+			{
+				id: 'user-1',
+				email: 'ann@example.com',
+				role: null,
+				provider: 'default',
+				status: 'invited',
+			},
+			{
+				id: 'user-2',
+				email: null,
+				role: 'role-a',
+				provider: 'default',
+				status: 'invited',
+			},
+			{
+				id: 'user-3',
+				email: 'cleo@example.com',
+				role: 'role-a',
+				provider: 'default',
+				status: 'invited',
+			},
+		]);
+
+		await expect(up(db)).rejects.toThrow(new Error(
+			'Cannot move the invited users into invites: users'
+			+ ' "user-1" ("ann@example.com"), "user-2" (null)'
+			+ ' have no email or no role; give them one or delete them first',
+		));
+
+		expect(tracker.history.select).toHaveLength(1);
+		expect(tracker.history.any).toEqual([]);
+	});
+
+	test(oneLine`
+		down turns each invited email back into an invited user of its role
+	`, async () => {
+		vi.mocked(randomUUID)
+			.mockReturnValueOnce('00000000-0000-4000-8000-000000000001');
+
+		tracker.on.select('directus_role_members').response([]);
+
+		tracker.on.select('directus_invites').response([
+			{ email: 'Ann@example.com', role: 'role-a' },
+			{ email: 'ann@example.com', role: 'role-a' },
+		]);
+
+		tracker.on.select('directus_users').response([]);
+		tracker.on.insert('directus_users').response([]);
+
+		await down(db);
+
+		expect(tracker.history.select.map(({ sql, bindings }) => [sql, bindings]))
+			.toEqual(expect.arrayContaining([
+				[
+					'select "email", "role" from "directus_invites"'
+					+ ' order by "date_created" asc, "id" asc',
+					[],
+				],
+				[
+					'select "email" from "directus_users"'
+					+ ' where lower("email") in (?)',
+					['ann@example.com'],
+				],
+			]));
+
+		expect(tracker.history.insert.map(({ sql, bindings }) => [sql, bindings]))
+			.toEqual([
+				[
+					'insert into "directus_users" ("email", "id", "role", "status")'
+					+ ' values (?, ?, ?, ?)',
+					[
+						'Ann@example.com',
+						'00000000-0000-4000-8000-000000000001',
+						'role-a',
+						'invited',
+					],
+				],
+			]);
+	});
+
+	test(oneLine`
+		down refuses an email invited to several roles, changing nothing
+	`, async () => {
+		tracker.on.select('directus_role_members').response([]);
+
+		tracker.on.select('directus_invites').response([
+			{ email: 'ann@example.com', role: 'role-a' },
+			{ email: 'bob@example.com', role: 'role-a' },
+			{ email: 'Ann@example.com', role: 'role-b' },
+		]);
+
+		await expect(down(db)).rejects.toThrow(new Error(
+			'Cannot roll back the multi-role migration: emails "ann@example.com"'
+			+ ' are invited to several roles; delete the extra invites first',
+		));
+
+		expect(tracker.history.insert).toEqual([]);
+		expect(tracker.history.update).toEqual([]);
+		expect(tracker.history.any).toEqual([]);
+	});
+
+	test(oneLine`
+		down refuses an invited email holding an account, changing nothing
+	`, async () => {
+		tracker.on.select('directus_role_members').response([]);
+
+		tracker.on.select('directus_invites').response([
+			{ email: 'ann@example.com', role: 'role-a' },
+			{ email: 'bob@example.com', role: 'role-a' },
+		]);
+
+		tracker.on.select('directus_users').response([{ email: 'Bob@example.com' }]);
+
+		await expect(down(db)).rejects.toThrow(new Error(
+			'Cannot roll back the multi-role migration: emails "bob@example.com"'
+			+ ' are invited and hold an account; delete their invites first',
+		));
+
+		expect(tracker.history.insert).toEqual([]);
+		expect(tracker.history.update).toEqual([]);
+		expect(tracker.history.any).toEqual([]);
+	});
+
 	test('down drops the invites', async () => {
 		tracker.on.select('directus_role_members').response([]);
+		tracker.on.select('directus_invites').response([]);
 
 		await down(db);
 
@@ -264,6 +538,7 @@ describe('the migration', () => {
 			{ user: 'user-2', role: 'role-c' },
 		]);
 
+		tracker.on.select('directus_invites').response([]);
 		tracker.on.update('directus_users').response(1);
 
 		await down(db);
@@ -280,6 +555,7 @@ describe('the migration', () => {
 
 	test('down sets the role of the users of a deleted role to null', async () => {
 		tracker.on.select('directus_role_members').response([]);
+		tracker.on.select('directus_invites').response([]);
 
 		await down(db);
 
@@ -298,6 +574,7 @@ describe('the migration', () => {
 			{ user: 'user-1', role: 'role-b' },
 		]);
 
+		tracker.on.select('directus_invites').response([]);
 		tracker.on.update('directus_users').response(1);
 
 		await down(db);
@@ -530,6 +807,7 @@ describe('the stored paths to a user\'s role', () => {
 
 	test('down keeps a preset of no, several or a null membership', async () => {
 		tracker.on.select('directus_role_members').response([]);
+		tracker.on.select('directus_invites').response([]);
 
 		tracker.on.select('directus_permissions').response([
 			{
@@ -568,6 +846,7 @@ describe('the stored paths to a user\'s role', () => {
 
 	test('down moves them back to the role column', async () => {
 		tracker.on.select('directus_role_members').response([]);
+		tracker.on.select('directus_invites').response([]);
 
 		tracker.on.select('directus_permissions').response([
 			{
