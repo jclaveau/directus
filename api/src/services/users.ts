@@ -11,7 +11,7 @@ import type {
 	User,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
-import { getSimpleHash, toArray, validatePayload } from '@directus/utils';
+import { getSimpleHash, oneLine, toArray, validatePayload } from '@directus/utils';
 import { FailedValidationError, joiValidationErrorItemToErrorExtensions } from '@directus/validation';
 import Joi from 'joi';
 import jwt from 'jsonwebtoken';
@@ -22,6 +22,14 @@ import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
+import {
+	_fetchGlobalAccessForRoles,
+} from
+	'../permissions/modules/fetch-global-access/lib/fetch-global-access-for-roles.js';
+import { _fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+import {
+	validateAccess,
+} from '../permissions/modules/validate-access/validate-access.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
 import { getSecret } from '../utils/get-secret.js';
 import isUrlAllowed from '../utils/is-url-allowed.js';
@@ -30,9 +38,12 @@ import { chunk, isEmpty } from '../utils/lodash-es-used.js';
 import { stall } from '../utils/stall.js';
 import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { Url } from '../utils/url.js';
-import { ItemsService } from './items.js';
+import { emitActionEvents, ItemsService } from './items.js';
 import { MailService } from './mail/index.js';
 import { SettingsService } from './settings.js';
+import {
+	refusePermissionModelWrite,
+} from '../utils/refuse-permission-model-write.js';
 
 const env = useEnv();
 const logger = useLogger();
@@ -226,6 +237,16 @@ export class UsersService extends ItemsService {
 			opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 		}
 
+		// A user created with no role is granted nothing. Checked here: the
+		// ItemsService below never calls this service's hooks.
+		const setsRole = data.some((payload) => {
+			return payload['role'] !== null && payload['role'] !== undefined;
+		});
+
+		if (setsRole) {
+			refusePermissionModelWrite(this.accountability);
+		}
+
 		// Use generic ItemsService to avoid calling `UserService.createOne` to avoid additional work of validating emails,
 		// as this requires one query per email if done in `createOne`
 		const itemsService = new ItemsService(this.collection, {
@@ -318,6 +339,14 @@ export class UsersService extends ItemsService {
 		}
 
 		return await super.updateGroups(groups, opts);
+	}
+
+	protected override async validateGroupsToUpdate(
+		groups: UpdateGroup<Item>[],
+	): Promise<void> {
+		if (groups.some(({ data }) => 'role' in data)) {
+			refusePermissionModelWrite(this.accountability);
+		}
 	}
 
 	protected override requiredIntegrityChecks(
@@ -461,6 +490,10 @@ export class UsersService extends ItemsService {
 			opts.preMutationError = err;
 		}
 
+		const inviterIsAdmin = !this.accountability || this.accountability.admin;
+
+		await this.refuseAdminRoleInvite(role);
+
 		const emails = toArray(email);
 
 		const mailService = new MailService({
@@ -473,7 +506,12 @@ export class UsersService extends ItemsService {
 			const user = await this.getUserByEmail(email);
 
 			// Create user first to verify uniqueness if unknown
-			if (isEmpty(user)) {
+			const movesInvitedRole = user?.status === 'invited' && user.role !== role;
+
+			if (!inviterIsAdmin && (isEmpty(user) || movesInvitedRole)) {
+				await this.writeInvitedRole(email, role, user?.id ?? null, opts);
+			}
+			else if (isEmpty(user)) {
 				await this.createOne({ email, role, status: 'invited' }, opts);
 
 				// For known users update role if changed
@@ -505,6 +543,69 @@ export class UsersService extends ItemsService {
 					});
 			}
 		}
+	}
+
+	private async refuseAdminRoleInvite(role: string): Promise<void> {
+		const roleTree = await _fetchRolesTree(role, this.knex);
+
+		const roleAccess = await _fetchGlobalAccessForRoles(
+			{ roles: roleTree, ip: null },
+			this.knex,
+		);
+
+		if (roleAccess.admin) {
+			throw new InvalidPayloadError({
+				reason: oneLine`Role ${JSON.stringify(role)} grants admin access: an
+					admin is made by an admin, never through an invite`,
+			});
+		}
+	}
+
+	// A non-admin may not write a role (#763): the inviter's own write checks
+	// the user it invites, then code writes the role. An invited user can't log
+	// in until they accept.
+	private async writeInvitedRole(
+		email: string,
+		role: string,
+		invitedKey: PrimaryKey | null,
+		opts: MutationOptions,
+	): Promise<void> {
+		const heldActionEvents: ActionEventParams[] = [];
+
+		const holdingOpts: MutationOptions = {
+			...opts,
+			bypassEmitAction: opts.bypassEmitAction ?? ((actionEvent) => {
+				heldActionEvents.push(actionEvent);
+			}),
+		};
+
+		await transactionHoldingActions(this.knex, heldActionEvents, async (trx) => {
+			let userKey = invitedKey;
+
+			if (userKey === null) {
+				userKey = await new UsersService({
+					knex: trx,
+					schema: this.schema,
+					accountability: this.accountability,
+				}).createOne({ email, status: 'invited' }, holdingOpts);
+			}
+			else {
+				await validateAccess({
+					accountability: this.accountability!,
+					action: 'update',
+					collection: 'directus_users',
+					primaryKeys: [userKey],
+				}, { schema: this.schema, knex: trx });
+			}
+
+			await new UsersService({
+				knex: trx,
+				schema: this.schema,
+				accountability: null,
+			}).updateOne(userKey, { role }, holdingOpts);
+		});
+
+		await emitActionEvents(heldActionEvents, opts);
 	}
 
 	async acceptInvite(token: string, password: string): Promise<void> {

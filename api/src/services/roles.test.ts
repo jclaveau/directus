@@ -1,6 +1,8 @@
+import { InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { MutationOptions } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -184,6 +186,7 @@ describe('Integration Tests', () => {
 
 		describe('deleteMany', () => {
 			db.isTransaction = false;
+			tracker.on.select('directus_users').response(undefined);
 
 			const accessDeleteRoleAccessSpy = vi
 				.spyOn(AccessService.prototype, 'deleteRoleAccess')
@@ -224,16 +227,7 @@ describe('Integration Tests', () => {
 					opts,
 				);
 
-				expect(usersUpdateByQuerySpy).toHaveBeenCalledWith(
-					{
-						filter: { role: { _in: keys } },
-					},
-					{
-						status: 'suspended',
-						role: null,
-					},
-					opts,
-				);
+				expect(usersUpdateByQuerySpy).not.toHaveBeenCalled();
 
 				expect(rolesUpdateByQuerySpy).toHaveBeenCalledWith(
 					{
@@ -246,6 +240,47 @@ describe('Integration Tests', () => {
 				expect(itemsDeleteManySpy).toHaveBeenCalledWith(keys, {
 					userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
 					bypassEmitAction: expect.any(Function),
+				});
+			});
+
+			it('refuses deleting a role a user belongs to', async () => {
+				const database = knex.default({ client: MockClient });
+
+				createTracker(database).on.select('directus_users')
+					.response({ role: 'role-id-13' });
+
+				await expect(new RolesService({ knex: database, schema })
+					.deleteMany(['role-id-14', 'role-id-13']))
+					.rejects.toEqual(new InvalidPayloadError({
+						reason: oneLine`Role "role-id-13" can't be deleted while users
+							belong to it`,
+					}));
+
+				expect(accessDeleteRoleAccessSpy).not.toHaveBeenCalled();
+				expect(itemsDeleteManySpy).not.toHaveBeenCalled();
+			});
+
+			it('cleans an empty role up as code', async () => {
+				await new RolesService({
+					knex: db,
+					schema,
+					accountability: { role: 'role-id-1', admin: false } as any,
+				}).deleteMany(['role-id-15']);
+
+				expect(accessDeleteRoleAccessSpy.mock.contexts[0]).toMatchObject({
+					accountability: null,
+				});
+
+				expect(presetsDeleteByQuerySpy.mock.contexts[0]).toMatchObject({
+					accountability: null,
+				});
+
+				expect(rolesUpdateByQuerySpy.mock.contexts[0]).toMatchObject({
+					accountability: null,
+				});
+
+				expect(itemsDeleteManySpy.mock.contexts[0]).toMatchObject({
+					accountability: { role: 'role-id-1', admin: false },
 				});
 			});
 
@@ -307,6 +342,7 @@ describe('Integration Tests', () => {
 			it('fires the actions of its cascade once it committed', async () => {
 				const database = knex.default({ client: MockClient });
 				const databaseTracker = createTracker(database);
+				databaseTracker.on.select('directus_users').response(undefined);
 				const emittedActions: unknown[] = [];
 
 				vi.spyOn(emitter, 'emitAction').mockImplementation(async (event) => {
@@ -375,6 +411,7 @@ describe('Integration Tests', () => {
 			it('clears the caches once the parent transaction has committed', async () => {
 				const database = knex.default({ client: MockClient });
 				const databaseTracker = createTracker(database);
+				databaseTracker.on.select('directus_users').response(undefined);
 				const transactionStates: string[][] = [];
 
 				vi.mocked(clearSystemCache).mockImplementationOnce(async () => {

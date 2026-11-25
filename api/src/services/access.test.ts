@@ -1558,7 +1558,7 @@ describe('Services / Access', () => {
 			]);
 		});
 
-		it('refuses a non-admin with access setting managed_by', async () => {
+		it('answers a non-admin with access setting managed_by a 403', async () => {
 			const database = knex.default({ client: MockClient });
 
 			createTracker(database);
@@ -1578,13 +1578,10 @@ describe('Services / Access', () => {
 				managed_by: '@scalabus/subscriptions',
 				policy: 'policy-id-7',
 				user: 'user-id-1',
-			}])).rejects.toThrow(new InvalidPayloadError({
-				reason: '"managed_by" is set by the extension granting the access,'
-					+ ' not by a request',
-			}));
+			}])).rejects.toThrow(new ForbiddenError());
 		});
 
-		it('refuses a non-admin with access moving a managed access', async () => {
+		it('answers a non-admin with access moving a managed access a 403', async () => {
 			const database = knex.default({ client: MockClient });
 
 			createTracker(database).on
@@ -1610,13 +1607,10 @@ describe('Services / Access', () => {
 				schema,
 			}).updateOne('6f1c2a4e-0000-4000-8000-000000000007', {
 				policy: 'policy-id-1',
-			})).rejects.toThrow(new InvalidPayloadError({
-				reason: 'Access "6f1c2a4e-0000-4000-8000-000000000007" is managed by'
-					+ ' "@scalabus/subscriptions", which alone changes it',
-			}));
+			})).rejects.toThrow(new ForbiddenError());
 		});
 
-		it('refuses a non-admin with access deleting a managed access', async () => {
+		it('answers a non-admin deleting a managed access a 403', async () => {
 			const database = knex.default({ client: MockClient });
 
 			createTracker(database).on
@@ -1641,10 +1635,7 @@ describe('Services / Access', () => {
 				knex: database,
 				schema,
 			}).deleteMany(['6f1c2a4e-0000-4000-8000-000000000007']))
-				.rejects.toThrow(new InvalidPayloadError({
-				reason: 'Access "6f1c2a4e-0000-4000-8000-000000000007" is managed by'
-					+ ' "@scalabus/subscriptions", which alone changes it',
-			}));
+				.rejects.toThrow(new ForbiddenError());
 		});
 
 		it('lets an extension delete a managed access', async () => {
@@ -1693,7 +1684,7 @@ describe('Services / Access', () => {
 
 			await expect(new AccessService({
 				accountability: {
-					admin: false,
+					admin: true,
 					app: true,
 					ip: null,
 					role: null,

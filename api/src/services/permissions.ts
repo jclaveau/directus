@@ -20,10 +20,25 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import { uniq } from '../utils/lodash-es-used.js';
 import { withMeta, withoutMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
+import {
+	refusePermissionModelWrite,
+} from '../utils/refuse-permission-model-write.js';
 
 export class PermissionsService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
 		super('directus_permissions', options);
+	}
+
+	protected override async validateRowsToCreate(): Promise<void> {
+		refusePermissionModelWrite(this.accountability);
+	}
+
+	protected override async validateGroupsToUpdate(): Promise<void> {
+		refusePermissionModelWrite(this.accountability);
+	}
+
+	protected override async validateKeysToDelete(): Promise<void> {
+		refusePermissionModelWrite(this.accountability);
 	}
 
 	private async clearCaches(opts?: MutationOptions) {

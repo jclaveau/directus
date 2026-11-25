@@ -12,11 +12,26 @@ import {
 	clearCachesAfterCommit,
 	clearPermissionsCacheAfterCommit,
 } from '../utils/clear-caches-after-commit.js';
+import {
+	refusePermissionModelWrite,
+} from '../utils/refuse-permission-model-write.js';
 import { ItemsService } from './items.js';
 
 export class PoliciesService extends ItemsService<Policy> {
 	constructor(options: AbstractServiceOptions) {
 		super('directus_policies', options);
+	}
+
+	protected override async validateRowsToCreate(): Promise<void> {
+		refusePermissionModelWrite(this.accountability);
+	}
+
+	protected override async validateGroupsToUpdate(): Promise<void> {
+		refusePermissionModelWrite(this.accountability);
+	}
+
+	protected override async validateKeysToDelete(): Promise<void> {
+		refusePermissionModelWrite(this.accountability);
 	}
 
 	private async clearCaches(opts?: MutationOptions) {
