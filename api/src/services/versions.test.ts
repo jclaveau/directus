@@ -488,6 +488,7 @@ describe('Services / Versions', () => {
 				ip: '10.0.0.1',
 				user_agent: 'test-agent',
 				origin: 'https://app.example.com',
+				impersonator: null,
 				item: '1',
 			}], {});
 
@@ -547,6 +548,7 @@ describe('Services / Versions', () => {
 				ip: null,
 				user_agent: null,
 				origin: null,
+				impersonator: null,
 				item: '1',
 			}], {});
 

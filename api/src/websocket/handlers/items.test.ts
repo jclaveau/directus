@@ -54,7 +54,10 @@ describe('WebSocket heartbeat handler', () => {
 
 	describe('under impersonation', () => {
 		function impersonated(action: string) {
-			(getSchema as Mock).mockImplementation(() => ({ collections: { test: [] } }));
+			(getSchema as Mock).mockImplementation(function () {
+				return { collections: { test: [] } };
+			});
+
 			const fakeClient = mockClient();
 			(fakeClient as any).accountability = { user: 'jane', impersonator: 'admin' };
 
@@ -77,7 +80,9 @@ describe('WebSocket heartbeat handler', () => {
 				deleteOne: vi.fn(),
 			};
 
-			(ItemsService as Mock).mockImplementation(() => service);
+			(ItemsService as Mock).mockImplementation(function () {
+				return service;
+			});
 
 			const fakeClient = impersonated(action);
 
@@ -96,7 +101,9 @@ describe('WebSocket heartbeat handler', () => {
 
 		test('read goes through', async () => {
 			const readOne = vi.fn();
-			(ItemsService as Mock).mockImplementation(() => ({ readOne }));
+			(ItemsService as Mock).mockImplementation(function () {
+				return { readOne };
+			});
 
 			const fakeClient = impersonated('read');
 
@@ -112,8 +119,9 @@ describe('WebSocket heartbeat handler', () => {
 			env['IMPERSONATION_WRITES'] = true;
 			const createOne = vi.fn();
 
-			(ItemsService as Mock)
-				.mockImplementation(() => ({ createOne, readOne: vi.fn() }));
+			(ItemsService as Mock).mockImplementation(function () {
+				return { createOne, readOne: vi.fn() };
+			});
 
 			impersonated('create');
 

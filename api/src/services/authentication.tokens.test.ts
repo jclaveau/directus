@@ -135,6 +135,8 @@ beforeEach(() => {
 
 afterEach(() => {
 	tracker.reset();
+	// vitest 4: restoreAllMocks leaves the calls of a vi.fn, counted on.
+	vi.clearAllMocks();
 	vi.restoreAllMocks();
 });
 
