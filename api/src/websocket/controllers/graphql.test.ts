@@ -1,5 +1,5 @@
 import { oneLine } from '@directus/utils';
-import { execute, subscribe, type ExecutionArgs } from 'graphql';
+import { execute, GraphQLError, subscribe, type ExecutionArgs } from 'graphql';
 import { makeServer, type ServerOptions } from 'graphql-ws';
 import { EventEmitter } from 'node:events';
 import type { Server as HttpServer } from 'node:http';
@@ -103,6 +103,28 @@ describe('GraphQLSubscriptionController', () => {
 
 		expect(options.execute!(args)).toBe(service);
 		expect(options.subscribe!(args)).toBe(service);
+	});
+
+	test(oneLine`
+		a mutation sent by an impersonated client is refused on subscribe
+	`, () => {
+		new GraphQLSubscriptionController(new EventEmitter() as unknown as HttpServer);
+
+		const options = vi.mocked(makeServer).mock.lastCall![0] as ServerOptions;
+
+		const errors = options.onSubscribe!(
+			{
+				extra: {
+					client: { accountability: { user: 'jane', impersonator: 'admin' } },
+				},
+			} as any,
+			'operation-1',
+			{ query: 'mutation { delete_articles_item(id: 1) { id } }' },
+		);
+
+		expect(errors).toEqual([
+			new GraphQLError('An impersonation is read-only: impersonation_read_only'),
+		]);
 	});
 
 	test(oneLine`
