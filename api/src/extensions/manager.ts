@@ -60,6 +60,7 @@ import {
 	applyExtensionEnv,
 	type ExtensionEnvDeclarers,
 	findUndeclaredEnv,
+	restoreCoreEnv,
 } from './lib/apply-extension-env.js';
 import { getRegistryRootPath } from './lib/get-registry-root-path.js';
 import { getExtensionsSettings } from './lib/get-extensions-settings.js';
@@ -1224,6 +1225,12 @@ export class ExtensionManager {
 		const unregisterFunctions = Array.from(this.unregisterFunctionMap.values());
 
 		await Promise.all(unregisterFunctions.map((fn) => fn()));
+
+		restoreCoreEnv({
+			envDeclarers: this.envDeclarers,
+			rawValues: useEnvRawValues(),
+			env,
+		});
 
 		this.envDeclarers.clear();
 		this.extensionEnvPrefixes.clear();

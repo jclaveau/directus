@@ -563,3 +563,91 @@ test('fails the boot on a variable a code bundle misdeclares', async () => {
 	expect(exitSpy).toHaveBeenCalledWith(1);
 	expect(hookConfig).not.toHaveBeenCalled();
 });
+
+test('gives core its guess back on a reload without the bundle', async () => {
+	mocks.extensions = {
+		module: new Map([
+			[
+				'subscriptions',
+				{
+					type: 'bundle',
+					name: 'subscriptions',
+					path: '/extensions/subscriptions',
+					entrypoint: { app: 'app.js', api: 'api.js' },
+					entriesFrom: 'code',
+					entries: [],
+				},
+			],
+		]),
+		registry: new Map(),
+	};
+
+	mocks.settings = [
+		{
+			id: 'subscriptions-id',
+			source: 'module',
+			folder: 'subscriptions',
+			bundle: null,
+			enabled: true,
+		},
+		{
+			id: 'trials-id',
+			source: 'module',
+			folder: 'trials',
+			bundle: 'subscriptions-id',
+			enabled: true,
+		},
+	];
+
+	mocks.rawValues = { SUBSCRIPTIONS_CODE: '123' };
+
+	mocks.importCodeBundles.mockResolvedValue({
+		codeBundles: [
+			{
+				source: 'module',
+				folder: 'subscriptions',
+				name: 'subscriptions',
+				apiPath: '/extensions/subscriptions/api.js',
+				entries: [
+					{
+						type: 'hook',
+						name: 'trials',
+						config: vi.fn(),
+						env: {
+							prefix: 'SUBSCRIPTIONS_',
+							vars: {
+								SUBSCRIPTIONS_CODE: { type: 'string' },
+								SUBSCRIPTIONS_TRIAL_DAYS: { type: 'number', default: 14 },
+							},
+						},
+					},
+				],
+			},
+		],
+		failures: [],
+	});
+
+	mocks.pathExists.mockResolvedValue(false);
+
+	const manager = new ExtensionManager();
+
+	await manager.initialize({ schedule: false, watch: false });
+
+	mocks.extensions = { module: new Map(), registry: new Map() };
+	mocks.settings = [];
+
+	mocks.importCodeBundles.mockResolvedValue({
+		codeBundles: [],
+		failures: [],
+	});
+
+	await manager.reload();
+
+	expect(mocks.env).toEqual({
+		SERVE_APP: true,
+		TEMP_PATH: '/tmp/directus-test',
+		EXTENSIONS_SANDBOX_MEMORY: 128,
+		EXTENSIONS_SANDBOX_TIMEOUT: 10000,
+		SUBSCRIPTIONS_CODE: 123,
+	});
+});

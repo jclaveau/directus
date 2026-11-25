@@ -1,4 +1,5 @@
 import {
+	cast,
 	castDeclaredValue,
 	checkDeclaredValue,
 	CORE_ENV_PREFIXES,
@@ -67,7 +68,6 @@ export function applyExtensionEnv({
 						+ ` ${otherDeclarer.envDeclaration.type}.`,
 				);
 			}
-
 			const declaredValue = name in rawValues
 				? rawValues[name]
 				: envDeclaration.default;
@@ -96,6 +96,31 @@ export function applyExtensionEnv({
 	}
 
 	Object.assign(env, declaredValues);
+}
+
+/**
+ * Give each variable the extensions declared back the value core cast it to,
+ * so `env` reads as a boot without them: core's guess at the value it was set
+ * to, or nothing when it was not set. A name core declares is never one, since
+ * `applyExtensionEnv` refuses it.
+ */
+export function restoreCoreEnv({
+	envDeclarers,
+	rawValues,
+	env,
+}: {
+	envDeclarers: ExtensionEnvDeclarers;
+	rawValues: Record<string, unknown>;
+	env: Record<string, unknown>;
+}): void {
+	for (const declaredName of envDeclarers.keys()) {
+		if (declaredName in rawValues) {
+			env[declaredName] = cast(rawValues[declaredName], declaredName);
+		}
+		else {
+			Reflect.deleteProperty(env, declaredName);
+		}
+	}
 }
 
 /**
