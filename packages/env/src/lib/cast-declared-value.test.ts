@@ -27,6 +27,7 @@ test.each([
 	['boolean | number | string | string[]', 'true', true],
 	['boolean | number | string | string[]', 'false', false],
 	['boolean | number | string | string[]', '1', 1],
+	['boolean | number | string | string[]', '0', 0],
 	['boolean | number | string | string[]', '*', '*'],
 	[
 		'boolean | number | string | string[]',
