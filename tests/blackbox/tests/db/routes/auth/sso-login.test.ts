@@ -19,6 +19,7 @@ defineSsoFeature(
 			AUTH_PROVIDERS: 'mockoauth,mockopenid',
 
 			AUTH_MOCKOAUTH_DRIVER: 'oauth2',
+			AUTH_MOCKOAUTH_REQUIRE_VERIFIED_EMAIL: 'false',
 			AUTH_MOCKOAUTH_MODE: 'json',
 			AUTH_MOCKOAUTH_CLIENT_ID: SSO_CLIENT_ID,
 			AUTH_MOCKOAUTH_CLIENT_SECRET: 'sso-blackbox-secret',
@@ -38,6 +39,7 @@ defineSsoFeature(
 				})}`,
 
 			AUTH_MOCKOPENID_DRIVER: 'openid',
+			AUTH_MOCKOPENID_REQUIRE_VERIFIED_EMAIL: 'false',
 			AUTH_MOCKOPENID_MODE: 'json',
 			AUTH_MOCKOPENID_CLIENT_ID: SSO_CLIENT_ID,
 			AUTH_MOCKOPENID_CLIENT_SECRET: 'sso-blackbox-secret',
