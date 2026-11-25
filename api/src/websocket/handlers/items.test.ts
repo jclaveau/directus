@@ -101,6 +101,7 @@ describe('WebSocket heartbeat handler', () => {
 
 		test('read goes through', async () => {
 			const readOne = vi.fn();
+
 			(ItemsService as Mock).mockImplementation(function () {
 				return { readOne };
 			});
