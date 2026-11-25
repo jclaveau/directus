@@ -1,18 +1,20 @@
-import { useEnv } from '@directus/env';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { getAuthProvider, registerAuthProviders } from './auth.js';
 import { OAuth2AuthDriver, OpenIDAuthDriver } from './auth/drivers/index.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 
-const mockedLogger = vi.hoisted(() => {
-	return { error: vi.fn(), warn: vi.fn() };
+const mockedDeps = vi.hoisted(() => {
+	return {
+		logger: { error: vi.fn(), warn: vi.fn() },
+		env: { AUTH_PROVIDERS: 'sso', AUTH_DISABLE_DEFAULT: true },
+	};
 });
 
-vi.mock('@directus/env');
+vi.mock('@directus/env', () => ({ useEnv: () => mockedDeps.env }));
 vi.mock('./utils/get-config-from-env.js');
 vi.mock('./utils/get-schema.js', () => ({ getSchema: vi.fn() }));
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
-vi.mock('./logger/index.js', () => ({ useLogger: () => mockedLogger }));
+vi.mock('./logger/index.js', () => ({ useLogger: () => mockedDeps.logger }));
 
 vi.mock('./auth/drivers/index.js', () => {
 	return {
@@ -28,11 +30,6 @@ beforeEach(() => {
 	vi.spyOn(process, 'exit').mockImplementation(() => {
 		throw new Error('process.exit');
 	});
-
-	vi.mocked(useEnv).mockReturnValue({
-		AUTH_PROVIDERS: 'sso',
-		AUTH_DISABLE_DEFAULT: true,
-	});
 });
 
 afterEach(() => {
@@ -46,7 +43,7 @@ test('an oauth2 provider without the key fails the boot', async () => {
 
 	await expect(registerAuthProviders()).rejects.toThrow('process.exit');
 
-	expect(mockedLogger.error).toHaveBeenCalledExactlyOnceWith(
+	expect(mockedDeps.logger.error).toHaveBeenCalledExactlyOnceWith(
 		'"AUTH_SSO_REQUIRE_VERIFIED_EMAIL" is true by default, but provider'
 		+ ' "sso" (oauth2) can\'t tell a verified email:'
 		+ ' set "AUTH_SSO_EMAIL_VERIFIED_KEY",'
@@ -62,7 +59,7 @@ test('a REQUIRE_VERIFIED_EMAIL that is not a boolean fails the boot', async () =
 
 	await expect(registerAuthProviders()).rejects.toThrow('process.exit');
 
-	expect(mockedLogger.error).toHaveBeenCalledExactlyOnceWith(
+	expect(mockedDeps.logger.error).toHaveBeenCalledExactlyOnceWith(
 		'"AUTH_SSO_REQUIRE_VERIFIED_EMAIL" Environment Variable is "yes",'
 		+ ' which is not a boolean. Use one of true, false, 1, 0.',
 	);
@@ -75,7 +72,7 @@ test('an openid provider boots, requiring a verified email', async () => {
 
 	await registerAuthProviders();
 
-	expect(mockedLogger.error).not.toHaveBeenCalled();
+	expect(mockedDeps.logger.error).not.toHaveBeenCalled();
 
 	expect(OpenIDAuthDriver).toHaveBeenCalledExactlyOnceWith(
 		{ knex: undefined, schema: undefined },
