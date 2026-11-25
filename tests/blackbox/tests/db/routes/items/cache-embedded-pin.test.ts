@@ -7,6 +7,7 @@ defineSpawnedWriteFeature(
 			CACHE_ENABLED: 'true',
 			CACHE_STATUS_HEADER: 'x-cache-status',
 			CACHE_TAGS_HEADER: 'x-scoped-cache-tags',
+			CACHE_PURGED_TAGS_HEADER: 'x-scoped-cache-purged-tags',
 			CACHE_AUTO_PURGE: 'true',
 			CACHE_AUTO_PURGE_MODE: 'scoped',
 			CACHE_STORE: 'redis',
