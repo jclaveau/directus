@@ -1,3 +1,5 @@
+import { InvalidPayloadError } from '@directus/errors';
+import { oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
 import {
@@ -18,6 +20,8 @@ const mockedDeps = vi.hoisted(() => {
 		logger: { warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 		createOne: vi.fn(),
 		updateOne: vi.fn(),
+		readInvite: vi.fn(),
+		grantInvitedRoles: vi.fn(),
 		profileGroups: [] as string[],
 	};
 });
@@ -94,6 +98,8 @@ vi.mock('../../services/users.js', () => {
 			return {
 				createOne: mockedDeps.createOne,
 				updateOne: mockedDeps.updateOne,
+				readInvite: mockedDeps.readInvite,
+				grantInvitedRoles: mockedDeps.grantInvitedRoles,
 			};
 		}),
 	};
@@ -317,5 +323,109 @@ describe('OpenIDAuthDriver getUserID', () => {
 			));
 
 		expect(mockedDeps.createOne).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		a first login with an invite creates the user, public registration off,
+		and grants the invited roles
+	`, async () => {
+		knexTracker.on.select('directus_users').response(undefined);
+
+		mockedDeps.readInvite.mockResolvedValue({
+			email: 'ada@example.com',
+			inviteRows: [{ id: 'invite-1', role: 'role-invited' }],
+		});
+
+		mockedDeps.createOne.mockResolvedValue('user-1');
+
+		await new OpenIDAuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'oidc',
+				issuerUrl: 'https://idp.example.com',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				defaultRoleId: 'role-default',
+				allowPublicRegistration: false,
+			},
+		).getUserID({
+			code: 'code',
+			codeVerifier: 'verifier',
+			state: 'state',
+			invite: 'invite-token',
+		});
+
+		expect(mockedDeps.readInvite).toHaveBeenCalledExactlyOnceWith('invite-token');
+		expect(mockedDeps.createOne).toHaveBeenCalledOnce();
+
+		expect(mockedDeps.grantInvitedRoles).toHaveBeenCalledExactlyOnceWith(
+			expect.anything(),
+			'user-1',
+			[{ id: 'invite-1', role: 'role-invited' }],
+		);
+	});
+
+	test('a known user logging in with an invite gets its roles', async () => {
+		knexTracker.on.select('directus_users').response({ id: 'user-1' });
+
+		mockedDeps.readInvite.mockResolvedValue({
+			email: 'ada@example.com',
+			inviteRows: [{ id: 'invite-1', role: 'role-invited' }],
+		});
+
+		await new OpenIDAuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'oidc',
+				issuerUrl: 'https://idp.example.com',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				defaultRoleId: 'role-default',
+			},
+		).getUserID({
+			code: 'code',
+			codeVerifier: 'verifier',
+			state: 'state',
+			invite: 'invite-token',
+		});
+
+		expect(mockedDeps.createOne).not.toHaveBeenCalled();
+
+		expect(mockedDeps.grantInvitedRoles).toHaveBeenCalledExactlyOnceWith(
+			expect.anything(),
+			'user-1',
+			[{ id: 'invite-1', role: 'role-invited' }],
+		);
+	});
+
+	test('a refused invite creates no user and grants no role', async () => {
+		knexTracker.on.select('directus_users').response(undefined);
+
+		mockedDeps.readInvite.mockRejectedValue(new InvalidPayloadError({
+			reason: 'Email address ada@example.com hasn\'t been invited',
+		}));
+
+		await expect(new OpenIDAuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'oidc',
+				issuerUrl: 'https://idp.example.com',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				defaultRoleId: 'role-default',
+				allowPublicRegistration: true,
+			},
+		).getUserID({
+			code: 'code',
+			codeVerifier: 'verifier',
+			state: 'state',
+			invite: 'invite-token',
+		})).rejects.toThrow(new InvalidPayloadError({
+			reason: 'Email address ada@example.com hasn\'t been invited',
+		}));
+
+		expect(knexTracker.history.all).toEqual([]);
+		expect(mockedDeps.createOne).not.toHaveBeenCalled();
+		expect(mockedDeps.grantInvitedRoles).not.toHaveBeenCalled();
 	});
 });

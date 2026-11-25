@@ -33,6 +33,7 @@ import { getIPFromReq } from '../../utils/get-ip-from-req.js';
 import { getSecret } from '../../utils/get-secret.js';
 import { isLoginRedirectAllowed } from '../../utils/is-login-redirect-allowed.js';
 import { verifyJWT } from '../../utils/jwt.js';
+import { transaction } from '../../utils/transaction.js';
 import { Url } from '../../utils/url.js';
 import { LocalAuthDriver } from './local.js';
 import {
@@ -160,6 +161,11 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			throw new InvalidCredentialsError();
 		}
 
+		// Read before the provider is asked: a refused invite creates no user.
+		const invite = payload['invite'] === undefined
+			? null
+			: await this.usersService.readInvite(payload['invite']);
+
 		const { plainCodeChallenge } = this.config;
 
 		let tokenSet;
@@ -275,11 +281,17 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 				});
 			}
 
+			if (invite !== null) {
+				await transaction(this.knex, async (trx) => {
+					await this.usersService.grantInvitedRoles(trx, userId, invite.inviteRows);
+				});
+			}
+
 			return userId;
 		}
 
-		// Is public registration allowed?
-		if (!allowPublicRegistration) {
+		// Is public registration allowed? An invite allows its own.
+		if (!allowPublicRegistration && invite === null) {
 			logger.warn(`[OAuth2] User doesn't exist, and public registration not allowed for provider "${provider}"`);
 			throw new InvalidCredentialsError();
 		}
@@ -303,13 +315,26 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 		);
 
 		try {
-			await this.usersService.createOne({
-				...createdUser,
-				roles: providerMemberships(
-					provider,
-					providerRoles,
-					Boolean(this.config['roleMapping']),
-				),
+			await transaction(this.knex, async (trx) => {
+				const createdUserId = await new UsersService({
+					knex: trx,
+					schema: this.schema,
+				}).createOne({
+					...createdUser,
+					roles: providerMemberships(
+						provider,
+						providerRoles,
+						Boolean(this.config['roleMapping']),
+					),
+				});
+
+				if (invite !== null) {
+					await this.usersService.grantInvitedRoles(
+						trx,
+						createdUserId,
+						invite.inviteRows,
+					);
+				}
 			});
 		} catch (e) {
 			if (isDirectusError(e, ErrorCode.RecordNotUnique)) {
@@ -394,12 +419,22 @@ export function createOAuth2AuthRouter(providerName: string): Router {
 			const codeVerifier = provider.generateCodeVerifier();
 			const prompt = !!req.query['prompt'];
 			const redirect = req.query['redirect'];
+			const invite = req.query['invite'];
 
 			if (isLoginRedirectAllowed(redirect, providerName) === false) {
 				throw new InvalidPayloadError({ reason: `URL "${redirect}" can't be used to redirect after login` });
 			}
 
-			const token = jwt.sign({ verifier: codeVerifier, redirect, prompt }, getSecret(), {
+			if (invite !== undefined && typeof invite !== 'string') {
+				throw new InvalidPayloadError({
+					reason: '"invite" must be one invite token',
+				});
+			}
+
+			// The invite rides the signed state: the callback accepts it.
+			const statePayload = { verifier: codeVerifier, redirect, prompt, invite };
+
+			const token = jwt.sign(statePayload, getSecret(), {
 				expiresIn: '5m',
 				issuer: 'directus',
 			});
@@ -435,13 +470,14 @@ export function createOAuth2AuthRouter(providerName: string): Router {
 					verifier: string;
 					redirect?: string;
 					prompt: boolean;
+					invite?: string;
 				};
 			} catch (e: any) {
 				logger.warn(e, `[OAuth2] Couldn't verify OAuth2 cookie`);
 				throw new InvalidCredentialsError();
 			}
 
-			const { verifier, redirect, prompt } = tokenData;
+			const { verifier, redirect, prompt, invite } = tokenData;
 
 			const accountability: Accountability = createDefaultAccountability({
 				ip: getIPFromReq(req),
@@ -471,12 +507,18 @@ export function createOAuth2AuthRouter(providerName: string): Router {
 						code: req.query['code'],
 						codeVerifier: verifier,
 						state: req.query['state'],
+						invite,
 					},
 					{ session: authMode === 'session' },
 				);
 			} catch (error: any) {
-				// Prompt user for a new refresh_token if invalidated
-				if (isDirectusError(error, ErrorCode.InvalidToken) && !prompt) {
+				// Prompt user for a new refresh_token if invalidated; a refused
+				// invite token is no refresh_token to renew.
+				const isRenewable = isDirectusError(error, ErrorCode.InvalidToken)
+					&& !prompt
+					&& invite === undefined;
+
+				if (isRenewable) {
 					return res.redirect(`./?${redirect ? `redirect=${redirect}&` : ''}prompt=true`);
 				}
 
