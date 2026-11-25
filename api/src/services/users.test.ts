@@ -1552,9 +1552,10 @@ describe('Integration Tests', () => {
 				expect(getUserByEmailSpy).not.toBeCalled();
 				expect(superCreateOneSpy).not.toBeCalled();
 
-				expect(createManySpy).toHaveBeenCalledExactlyOnceWith([
-					{ user: 'user-id-31', role: 'role-a', sort: 1 },
-				]);
+				expect(createManySpy).toHaveBeenCalledExactlyOnceWith(
+					[{ user: 'user-id-31', role: 'role-a', sort: 1 }],
+					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits },
+				);
 
 				expect(deleteManySpy).toHaveBeenCalledExactlyOnceWith(['invite-id-31']);
 			});

@@ -296,12 +296,12 @@ describe('the migration', () => {
 				[
 					'select "id", "email", "role", "provider", "status"'
 					+ ' from "directus_users" where "role" is not null'
-					+ ' or "status" = ?',
+					+ ' or "status" = $1',
 					['invited'],
 				],
 				[
 					'select distinct "user" from "directus_sessions"'
-					+ ' where "user" in (?)',
+					+ ' where "user" in ($1)',
 					['user-1'],
 				],
 			]));
@@ -311,12 +311,12 @@ describe('the migration', () => {
 				[
 					'insert into "directus_role_members"'
 					+ ' ("id", "managed_by", "role", "sort", "user")'
-					+ ' values (?, ?, ?, ?, ?)',
+					+ ' values ($1, $2, $3, $4, $5)',
 					['00000000-0000-4000-8000-000000000001', null, 'role-b', 1, 'user-2'],
 				],
 				[
 					'insert into "directus_invites"'
-					+ ' ("email", "id", "inviter", "role") values (?, ?, ?, ?)',
+					+ ' ("email", "id", "inviter", "role") values ($1, $2, $3, $4)',
 					[
 						'Ann@example.com',
 						'00000000-0000-4000-8000-000000000002',
@@ -328,7 +328,7 @@ describe('the migration', () => {
 
 		expect(tracker.history.delete.map(({ sql, bindings }) => [sql, bindings]))
 			.toEqual([
-				['delete from "directus_users" where "id" in (?)', ['user-1']],
+				['delete from "directus_users" where "id" in ($1)', ['user-1']],
 			]);
 	});
 
@@ -457,7 +457,7 @@ describe('the migration', () => {
 				],
 				[
 					'select "email" from "directus_users"'
-					+ ' where lower("email") in (?)',
+					+ ' where lower("email") in ($1)',
 					['ann@example.com'],
 				],
 			]));
@@ -466,7 +466,7 @@ describe('the migration', () => {
 			.toEqual([
 				[
 					'insert into "directus_users" ("email", "id", "role", "status")'
-					+ ' values (?, ?, ?, ?)',
+					+ ' values ($1, $2, $3, $4)',
 					[
 						'Ann@example.com',
 						'00000000-0000-4000-8000-000000000001',
