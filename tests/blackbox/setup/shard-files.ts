@@ -220,6 +220,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/files/tus-resumable-upload.test.ts': 12_000,
 	'/tests/db/routes/files/files-disk-name.test.ts': 10_000,
 	'/tests/db/routes/auth/sso-login.test.ts': 8_000,
+	'/tests/db/routes/auth/sso-login-invite.test.ts': 5_000,
 	'/tests/db/routes/items/write-payload-partials.test.ts': 1_600,
 	'/tests/db/routes/items/nested-write-cycles.test.ts': 1_600,
 	'/tests/db/routes/items/write-unique-value.test.ts': 1_600,

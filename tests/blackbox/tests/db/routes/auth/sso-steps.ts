@@ -15,6 +15,7 @@ import {
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
+import { yamlSchemaFor } from '../system/singular-write-steps';
 import { spawn, type ChildProcess } from 'child_process';
 import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { load as loadYaml } from 'js-yaml';
@@ -28,6 +29,7 @@ import {
 
 type LoginCell = {
 	login: string;
+	invite?: string;
 	profile: IdentityProfile;
 	remember_session?: string;
 	remember_token?: string;
@@ -44,6 +46,7 @@ type RequestCell = {
 
 const LOGIN_CELL_KEYS = [
 	'login',
+	'invite',
 	'profile',
 	'remember_session',
 	'remember_token',
@@ -78,7 +81,9 @@ export const SSO_CLIENT_ID = 'sso-blackbox-client';
  * responses:`, against an instance of its own trusting the `mockoauth` (OAuth2)
  * and `mockopenid` (OpenID) providers this file starts. A row is a request to
  * that instance, or a `login: <provider>` walking the code flow with `profile`
- * as the provider's answer. A scenario may end with the statements its
+ * as the provider's answer, an `invite` token riding the login as the
+ * invitation link sends it; `!jwt` signs its claims with the instance's
+ * secret. A scenario may end with the statements its
  * requests ran on postgres. With `spawnsPeer`, a second instance on the same
  * env takes the requests sent `on: peer`; a request sent `as` a token
  * authenticates with it instead of as the admin.
@@ -93,6 +98,7 @@ export function defineSsoFeature(
 		beforeFeature?: (vendor: Vendor) => Promise<void>;
 		afterFeature?: (vendor: Vendor) => Promise<void>;
 		spawnsPeer?: boolean;
+		keysByName?: Record<string, string>;
 	} = {},
 ) {
 	const feature = loadFeature(featurePath);
@@ -105,7 +111,7 @@ export function defineSsoFeature(
 				mockoauth: new MockIdentityProvider(SSO_CLIENT_ID, false),
 				mockopenid: new MockIdentityProvider(SSO_CLIENT_ID, true),
 			},
-			keysByName: {},
+			keysByName: { ...hooks.keysByName },
 		};
 
 		let instance: ChildProcess;
@@ -194,7 +200,8 @@ export function defineSsoFeature(
 	});
 }
 
-// A `<name>` stands for what a `remember_session: name` row stored.
+// A `<name>` stands for what a `remember_session: name` row stored, or for
+// a value the feature names in `keysByName`.
 function withKeys(cell: string, ssoInstance: SsoInstance) {
 	return cell.replaceAll(/<([\w-]+)>/g, (_placeholder, name: string) => {
 		return ssoInstance.keysByName[name] ?? `<${name}>`;
@@ -220,8 +227,13 @@ async function logIn(
 
 	provider.nextProfile = loginCell.profile;
 
+	const loginQuery = loginCell.invite === undefined
+		? {}
+		: { invite: loginCell.invite };
+
 	const loginStart = await request(instanceUrl)
-		.get(`/auth/login/${loginCell.login}`);
+		.get(`/auth/login/${loginCell.login}`)
+		.query(loginQuery);
 
 	expect(loginStart.statusCode).toBe(302);
 
@@ -284,8 +296,10 @@ async function sendRows(
 	const receivedResponses: Response[] = [];
 
 	for (const { request: requestText, response: responseText } of table) {
-		const requestCell = loadYaml(withKeys(requestText, ssoInstance)) as
-			LoginCell | RequestCell;
+		const requestCell = loadYaml(
+			withKeys(requestText, ssoInstance),
+			{ schema: yamlSchemaFor(vendor) },
+		) as LoginCell | RequestCell;
 
 		cellOfKnownKeys(
 			'request',
@@ -306,7 +320,7 @@ async function sendRows(
 			headers: response.headers,
 		})
 			.toMatchObject(responseCellOf<object>(
-				loadYaml(responseText),
+				loadYaml(withKeys(responseText, ssoInstance)),
 				RESPONSE_CELL_KEYS,
 				'sso-steps.ts',
 			));
