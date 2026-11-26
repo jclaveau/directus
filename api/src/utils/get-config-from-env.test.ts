@@ -5,6 +5,7 @@ import { getConfigFromEnv } from './get-config-from-env.js';
 vi.mock('@directus/env');
 
 beforeEach(() => {
+	// getConfigFromEnv reads any prefix: these names are ones no declaration has.
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		CASING_KEY: 'key',
 		CASING_KEY_value: 'value',

@@ -16,6 +16,8 @@ function reportedEnv(
 	env: Record<string, unknown>,
 	sources: Record<string, string> = {},
 ) {
+	// The cases hold values as a raw env does, PORT's number default among them,
+	// which the declared types refuse.
 	vi.mocked(useEnv, { partial: true }).mockReturnValue(env as never);
 	vi.mocked(useEnvSources).mockReturnValue(sources as never);
 

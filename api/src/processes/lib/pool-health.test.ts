@@ -1,3 +1,4 @@
+import type { Env } from '@directus/env';
 import { beforeEach, expect, test, vi } from 'vitest';
 import type { PoolHealth } from './pool-health.js';
 
@@ -28,7 +29,7 @@ const publish = vi.fn<Publish>(async () => {});
 const subscribe = vi.fn<Subscribe>(async () => {});
 const onResubscribe = vi.fn<(callback: () => void) => void>();
 
-let env: Record<string, unknown> = {};
+let env: Partial<Env> = {};
 let redisAvailable = true;
 
 /**
@@ -47,7 +48,7 @@ async function freshMirror() {
 	} as never);
 
 	const { useEnv } = await import('@directus/env');
-	vi.mocked(useEnv, { partial: true }).mockReturnValue(env as never);
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(env);
 
 	return await import('./pool-health.js');
 }

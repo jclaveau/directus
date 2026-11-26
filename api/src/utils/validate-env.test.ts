@@ -34,8 +34,8 @@ beforeAll(() => {
 	vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
-		PRESENT_TEST_VARIABLE: 'true',
-	} as never);
+		PUBLIC_URL: 'true',
+	});
 });
 
 beforeEach(() => {
@@ -51,7 +51,7 @@ afterEach(() => {
 });
 
 test('should not have any error when key is present', () => {
-	validateEnv(['PRESENT_TEST_VARIABLE']);
+	validateEnv(['PUBLIC_URL']);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -69,24 +69,24 @@ test('should have error when key is missing', () => {
 test.each([
 	{
 		value: '-5m',
-		message: '"DURATION_TEST_VARIABLE" Environment Variable is "-5m", '
+		message: '"CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX" Environment Variable is "-5m", '
 			+ 'which is not a duration of 0 or more.',
 	},
 	{
 		value: 'five minutes',
-		message: '"DURATION_TEST_VARIABLE" Environment Variable is '
+		message: '"CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX" Environment Variable is '
 			+ '"five minutes", which is not a duration of 0 or more.',
 	},
 	{
 		value: `1${'0'.repeat(400)}`,
-		message: '"DURATION_TEST_VARIABLE" Environment Variable is '
+		message: '"CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX" Environment Variable is '
 			+ `"1${'0'.repeat(400)}", which is not a duration of 0 or more.`,
 	},
 ])('refuses the duration $value', ({ value, message }) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ DURATION_TEST_VARIABLE: value } as never);
+		.mockReturnValueOnce({ CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: value });
 
-	validateDurationEnv(['DURATION_TEST_VARIABLE' as never]);
+	validateDurationEnv(['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX']);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(message);
 	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
@@ -94,9 +94,9 @@ test.each([
 
 test.each(['0', '5m', '4.1m'])('takes the duration %j', (value) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ DURATION_TEST_VARIABLE: value } as never);
+		.mockReturnValueOnce({ CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: value });
 
-	validateDurationEnv(['DURATION_TEST_VARIABLE' as never]);
+	validateDurationEnv(['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX']);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -105,44 +105,44 @@ test.each(['0', '5m', '4.1m'])('takes the duration %j', (value) => {
 test.each([
 	{
 		value: '-1kb',
-		message: '"BYTES_TEST_VARIABLE" Environment Variable is "-1kb", '
+		message: '"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is "-1kb", '
 			+ 'which is not a size of 0 or more.',
 	},
 	{
 		value: 'eight kilobytes',
-		message: '"BYTES_TEST_VARIABLE" Environment Variable is '
+		message: '"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is '
 			+ '"eight kilobytes", which is not a size of 0 or more.',
 	},
 	{
 		value: '16k',
-		message: '"BYTES_TEST_VARIABLE" Environment Variable is "16k", '
+		message: '"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is "16k", '
 			+ 'which is not a size of 0 or more.',
 	},
 	{
 		value: '8KiB',
-		message: '"BYTES_TEST_VARIABLE" Environment Variable is "8KiB", '
+		message: '"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is "8KiB", '
 			+ 'which is not a size of 0 or more.',
 	},
 	{
 		value: '8,192',
-		message: '"BYTES_TEST_VARIABLE" Environment Variable is "8,192", '
+		message: '"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is "8,192", '
 			+ 'which is not a size of 0 or more.',
 	},
 	{
 		value: '12abc',
-		message: '"BYTES_TEST_VARIABLE" Environment Variable is "12abc", '
+		message: '"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is "12abc", '
 			+ 'which is not a size of 0 or more.',
 	},
 	{
 		value: '1e3',
-		message: '"BYTES_TEST_VARIABLE" Environment Variable is "1e3", '
+		message: '"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is "1e3", '
 			+ 'which is not a size of 0 or more.',
 	},
 ])('refuses the size $value', ({ value, message }) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: value } as never);
+		.mockReturnValueOnce({ QUERY_AUDIT_HEADER_MAX_SIZE: value });
 
-	validateBytesEnv(['BYTES_TEST_VARIABLE' as never]);
+	validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE']);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(message);
 	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
@@ -150,9 +150,9 @@ test.each([
 
 test.each(['0', '8kb', '512', '1.5mb', '8 KB'])('takes the size %j', (value) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: value } as never);
+		.mockReturnValueOnce({ QUERY_AUDIT_HEADER_MAX_SIZE: value });
 
-	validateBytesEnv(['BYTES_TEST_VARIABLE' as never]);
+	validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE']);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -160,12 +160,12 @@ test.each(['0', '8kb', '512', '1.5mb', '8 KB'])('takes the size %j', (value) => 
 
 test('refuses a size below the minimum other than 0', () => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: '255' } as never);
+		.mockReturnValueOnce({ QUERY_AUDIT_HEADER_MAX_SIZE: '255' });
 
-	validateBytesEnv(['BYTES_TEST_VARIABLE' as never], 256);
+	validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE'], 256);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
-		'"BYTES_TEST_VARIABLE" Environment Variable is "255", '
+		'"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is "255", '
 			+ 'which is neither 0 nor a size of 256 bytes or more.',
 	);
 
@@ -174,9 +174,9 @@ test('refuses a size below the minimum other than 0', () => {
 
 test.each(['0', '256', '1kb'])('takes the size %j past the minimum', (value) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ BYTES_TEST_VARIABLE: value } as never);
+		.mockReturnValueOnce({ QUERY_AUDIT_HEADER_MAX_SIZE: value });
 
-	validateBytesEnv(['BYTES_TEST_VARIABLE' as never], 256);
+	validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE'], 256);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -185,29 +185,30 @@ test.each(['0', '256', '1kb'])('takes the size %j past the minimum', (value) => 
 test.each([
 	{
 		value: -1,
-		message: '"COUNT_TEST_VARIABLE" Environment Variable is "-1", '
+		message: '"CACHE_SCOPED_MAX_ON_DELETE_ROWS" Environment Variable is "-1", '
 			+ 'which is not a whole number of 0 or more.',
 	},
 	{
 		value: 2.5,
-		message: '"COUNT_TEST_VARIABLE" Environment Variable is "2.5", '
+		message: '"CACHE_SCOPED_MAX_ON_DELETE_ROWS" Environment Variable is "2.5", '
 			+ 'which is not a whole number of 0 or more.',
 	},
 	{
 		value: Number.NaN,
-		message: '"COUNT_TEST_VARIABLE" Environment Variable is "NaN", '
+		message: '"CACHE_SCOPED_MAX_ON_DELETE_ROWS" Environment Variable is "NaN", '
 			+ 'which is not a whole number of 0 or more.',
 	},
 	{
 		value: 'ten',
-		message: '"COUNT_TEST_VARIABLE" Environment Variable is "ten", '
+		message: '"CACHE_SCOPED_MAX_ON_DELETE_ROWS" Environment Variable is "ten", '
 			+ 'which is not a whole number of 0 or more.',
 	},
 ])('refuses the count $value', ({ value, message }) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ COUNT_TEST_VARIABLE: value } as never);
+		// @ts-expect-error a raw env can hold "ten", the declared number refuses it
+		.mockReturnValueOnce({ CACHE_SCOPED_MAX_ON_DELETE_ROWS: value });
 
-	validateCountEnv(['COUNT_TEST_VARIABLE' as never]);
+	validateCountEnv(['CACHE_SCOPED_MAX_ON_DELETE_ROWS']);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(message);
 	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
@@ -215,9 +216,9 @@ test.each([
 
 test.each([0, 1000])('takes the count %j', (value) => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ COUNT_TEST_VARIABLE: value } as never);
+		.mockReturnValueOnce({ CACHE_SCOPED_MAX_ON_DELETE_ROWS: value });
 
-	validateCountEnv(['COUNT_TEST_VARIABLE' as never]);
+	validateCountEnv(['CACHE_SCOPED_MAX_ON_DELETE_ROWS']);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -225,12 +226,12 @@ test.each([0, 1000])('takes the count %j', (value) => {
 
 test('refuses a choice outside the list', () => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'every' } as never);
+		.mockReturnValueOnce({ QUERY_AUDIT_LEVEL: 'every' });
 
-	validateChoiceEnv('CHOICE_TEST_VARIABLE' as never, ['counts', 'full']);
+	validateChoiceEnv('QUERY_AUDIT_LEVEL', ['counts', 'full']);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
-		'"CHOICE_TEST_VARIABLE" Environment Variable is "every", '
+		'"QUERY_AUDIT_LEVEL" Environment Variable is "every", '
 			+ 'which is not one of counts, full.',
 	);
 
@@ -239,9 +240,9 @@ test('refuses a choice outside the list', () => {
 
 test('takes a choice from the list', () => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'full' } as never);
+		.mockReturnValueOnce({ QUERY_AUDIT_LEVEL: 'full' });
 
-	validateChoiceEnv('CHOICE_TEST_VARIABLE' as never, ['counts', 'full']);
+	validateChoiceEnv('QUERY_AUDIT_LEVEL', ['counts', 'full']);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -250,12 +251,12 @@ test('takes a choice from the list', () => {
 // Node throws on every `setHeader` of such a name: every response would fail.
 test('refuses a header name Node cannot write', () => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'x query audit' } as never);
+		.mockReturnValueOnce({ QUERY_AUDIT_HEADER: 'x query audit' });
 
-	validateHeaderNameEnv('HEADER_TEST_VARIABLE' as never);
+	validateHeaderNameEnv('QUERY_AUDIT_HEADER');
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
-		'"HEADER_TEST_VARIABLE" Environment Variable is "x query audit", '
+		'"QUERY_AUDIT_HEADER" Environment Variable is "x query audit", '
 			+ 'which is not a valid header name.',
 	);
 
@@ -267,12 +268,12 @@ test.each(['false', 'true', 'FALSE', '0', '1'])(
 	'refuses a header name that reads as the boolean %j',
 	(value) => {
 		vi.mocked(useEnv, { partial: true })
-			.mockReturnValueOnce({ HEADER_TEST_VARIABLE: value } as never);
+			.mockReturnValueOnce({ QUERY_AUDIT_HEADER: value });
 
-		validateHeaderNameEnv('HEADER_TEST_VARIABLE' as never);
+		validateHeaderNameEnv('QUERY_AUDIT_HEADER');
 
 		expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
-			`"HEADER_TEST_VARIABLE" Environment Variable is "${value}", `
+			`"QUERY_AUDIT_HEADER" Environment Variable is "${value}", `
 				+ 'which reads as a boolean, not a header name: leave it unset '
 				+ 'to send none.',
 		);
@@ -283,9 +284,9 @@ test.each(['false', 'true', 'FALSE', '0', '1'])(
 
 test('takes a header name Node can write', () => {
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'X-Query-Audit' } as never);
+		.mockReturnValueOnce({ QUERY_AUDIT_HEADER: 'X-Query-Audit' });
 
-	validateHeaderNameEnv('HEADER_TEST_VARIABLE' as never);
+	validateHeaderNameEnv('QUERY_AUDIT_HEADER');
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();

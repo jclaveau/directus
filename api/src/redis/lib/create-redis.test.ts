@@ -1,4 +1,4 @@
-import { useEnv } from '@directus/env';
+import { useEnv, type Env } from '@directus/env';
 import { Redis, type RedisOptions } from 'ioredis';
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -29,8 +29,8 @@ afterEach(() => {
 
 // Grab the retryStrategy the constructor was built with for a given env. URL mode passes
 // it as the second argument; discrete-config mode folds it into the single options object.
-function retryStrategyFor(env: Record<string, unknown>): RetryStrategy {
-	vi.mocked(useEnv, { partial: true }).mockReturnValue(env as never);
+function retryStrategyFor(env: Partial<Env>): RetryStrategy {
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(env);
 	createRedis();
 
 	// `Redis`'s constructor is overloaded seven ways, and `ConstructorParameters`
@@ -165,6 +165,7 @@ describe('createRedis', () => {
 		test('Falls back to defaults on malformed knobs', () => {
 			const retry = retryStrategyFor({
 				REDIS: 'x',
+				// @ts-expect-error a raw env can hold "nope", the declared number refuses it
 				REDIS_RETRY_BASE_DELAY: 'nope',
 				REDIS_RETRY_MAX_ATTEMPTS: -1,
 			});

@@ -489,6 +489,7 @@ test('casts the variables a code bundle declares, and warns of a typo', async ()
 
 test('fails the boot on a variable a code bundle misdeclares', async () => {
 	const exitSpy = vi.spyOn(process, 'exit')
+		// process.exit returns never: the stub returns so the test goes on.
 		.mockImplementation(() => undefined as never);
 
 	const hookConfig = vi.fn();
