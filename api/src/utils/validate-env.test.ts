@@ -569,6 +569,20 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 		expect(process.exit).not.toHaveBeenCalled();
 	});
 
+	test('leaves an auth driver that is no feature to the auth setup', () => {
+		vi.mocked(useEnv).mockReturnValue({
+			AUTH_PROVIDERS: 'corp,own',
+			AUTH_CORP_DRIVER: 'shares',
+			AUTH_OWN_DRIVER: 'constructor',
+			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
+		});
+
+		validateOutOfScopeFeaturesEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
 	test('refuses the GraphQL websocket on a server serving websockets', () => {
 		vi.mocked(useEnv).mockReturnValue({
 			WEBSOCKETS_ENABLED: true,
