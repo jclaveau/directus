@@ -37,6 +37,9 @@ vi.mock('./files.js', () => {
 	};
 });
 
+vi.mock('./notifications.js', () => ({ NotificationsService: vi.fn() }));
+vi.mock('./users.js', () => ({ UsersService: vi.fn() }));
+
 import { ExportService } from './import-export.js';
 
 describe('ExportService.exportToFile batch limit', () => {

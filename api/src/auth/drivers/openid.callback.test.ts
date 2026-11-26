@@ -38,6 +38,8 @@ vi.mock('../../services/authentication.js', () => {
 	};
 });
 
+vi.mock('../../services/users.js', () => ({ UsersService: vi.fn() }));
+
 afterEach(() => {
 	delete mockEnv['AUTH_SSO_MODE'];
 	vi.clearAllMocks();

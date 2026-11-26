@@ -25,6 +25,9 @@ vi.mock('knex', () => {
 		},
 		{
 			client: { constructor: { name: 'Client_MySQL2' } },
+			on: vi.fn(function (this: unknown) {
+				return this;
+			}),
 			raw: vi.fn(),
 			select: () => {
 				return { first: async () => ({ collation: 'utf8mb4_unicode_ci' }) };

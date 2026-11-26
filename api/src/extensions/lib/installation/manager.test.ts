@@ -29,7 +29,7 @@ vi.mock('@directus/extensions-registry', () => {
 
 vi.mock('@directus/storage-driver-local', () => {
 	return {
-		default: vi.fn(() => {
+		default: vi.fn(function () {
 			return { write: vi.fn(), list: async function* () {} };
 		}),
 	};

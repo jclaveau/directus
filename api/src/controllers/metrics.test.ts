@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import { ForbiddenError } from '@directus/errors';
 import { expect, test, vi } from 'vitest';
 
@@ -9,25 +10,30 @@ vi.mock('../metrics/index.js', () => ({ useMetrics: () => undefined }));
 
 import router from './metrics.js';
 
-test.each([
-	{ authorization: 'Metrics good-token', error: undefined },
-	{
-		authorization: 'Metrics bad-token',
-		error: new ForbiddenError({
-			reason: 'Invalid metrics authorization token',
-		}),
-	},
-])('a request bearing $authorization gets past the guard: $error', async ({
-	authorization,
-	error,
-}) => {
+test('a request bearing a token METRICS_TOKENS lists gets through', async () => {
 	const next = vi.fn();
 
 	await (router.stack[0] as any).route.stack[0].handle(
-		{ headers: { authorization } },
+		{ headers: { authorization: 'Metrics good-token' } },
 		{},
 		next,
 	);
 
-	expect(next).toHaveBeenCalledWith(error);
+	expect(next).toHaveBeenCalledWith();
+});
+
+test(oneLine`
+	a request bearing a token METRICS_TOKENS does not list is refused
+`, async () => {
+	const next = vi.fn();
+
+	await (router.stack[0] as any).route.stack[0].handle(
+		{ headers: { authorization: 'Metrics bad-token' } },
+		{},
+		next,
+	);
+
+	expect(next).toHaveBeenCalledWith(new ForbiddenError({
+		reason: 'Invalid metrics authorization token',
+	}));
 });
