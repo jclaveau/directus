@@ -109,7 +109,7 @@ jobs:
             || { echo "subscriptions examples not loaded"; exit 1; }
 
           export PACKAGE_FILE_LOCATION="$PWD/preview-extensions"
-          PUBLIC_URL="$URL" node directus/cli.js start > /tmp/directus.log 2>&1 &
+          PUBLIC_URL="$URL" node directus/cli.js start >> /tmp/directus.log 2>&1 &
 
           for _ in $(seq 1 60); do
             curl -sf http://localhost:8055/server/health >/dev/null 2>&1 && break
