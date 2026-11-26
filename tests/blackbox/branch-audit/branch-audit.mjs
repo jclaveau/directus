@@ -28,8 +28,10 @@
 // - otherwise a gap: a blackbox scenario should reach it.
 //
 // Exits 1 when a tag is malformed or covers nothing, blackbox runs all a tag
-// covers, or the unit tests leave a unit-only counter unrun. Gaps alone never
-// fail it.
+// covers, the unit tests leave a unit-only counter unrun, or the tags drift
+// from OUT_OF_SCOPE_FEATURES in api/src/utils/out-of-scope-features.ts: a
+// feature whose issue no tag names, or a tag naming a feature with another
+// issue than the list gives it. Gaps alone never fail it.
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -602,7 +604,73 @@ if (outOfScopeRows.size > 0) {
 	);
 }
 
-const failures = [...tagErrors, ...unitFailures];
+const FEATURES_PATH = 'api/src/utils/out-of-scope-features.ts';
+const FEATURE_ENTRY = /^\t'([a-z0-9-]+)': '(#\d+)',$/;
+const driftFailures = [];
+
+// The `'<feature>': '#<issue>',` lines of OUT_OF_SCOPE_FEATURES at --head.
+const featureLines = sourceLinesAt(options.head, FEATURES_PATH);
+
+const LIST_OPENING = 'export const OUT_OF_SCOPE_FEATURES';
+const listStart = featureLines.findIndex((line) => line.startsWith(LIST_OPENING));
+
+const listEnd = featureLines.indexOf('};', listStart);
+
+const issueByFeature = new Map(featureLines
+	.slice(listStart + 1, listEnd)
+	.map((line) => FEATURE_ENTRY.exec(line))
+	.filter((match) => match !== null)
+	.map(([, featureName, issue]) => [featureName, issue]));
+
+if (listStart === -1 || issueByFeature.size !== listEnd - listStart - 1) {
+	driftFailures.push(`${FEATURES_PATH} at ${options.head}: no `
+		+ 'OUT_OF_SCOPE_FEATURES list of `\'<feature>\': \'#<issue>\',` lines '
+		+ 'to check the tags against.');
+}
+
+const outOfScopeTags = [...headTags.values()]
+	.flat()
+	.filter(({ kind }) => kind === 'out-of-scope');
+
+const taggedIssues = new Set(outOfScopeTags
+	.map(({ text }) => /^#\d+/.exec(text)[0]));
+
+for (const [featureName, issue] of issueByFeature) {
+	if (!taggedIssues.has(issue)) {
+		driftFailures.push(`Out-of-scope feature ${JSON.stringify(featureName)} `
+			+ `(${issue}): no \`bb-out-of-scope: ${issue}\` tag in api/src.`);
+	}
+}
+
+for (const tag of outOfScopeTags) {
+	const [tagIssue] = /^#\d+/.exec(tag.text);
+	const tagWords = tag.text.toLowerCase().split(/[^a-z0-9-]+/);
+
+	for (const [featureName, issue] of issueByFeature) {
+		if (tagWords.includes(featureName) && tagIssue !== issue) {
+			driftFailures.push(`Tag on ${tag.path}:${tag.line} names `
+				+ `${JSON.stringify(featureName)} with ${tagIssue}, `
+				+ `but ${FEATURES_PATH} gives it ${issue}.`);
+		}
+	}
+}
+
+report.push(
+	'',
+	`### Out-of-scope features: ${issueByFeature.size} refused`,
+	'',
+	'| feature | issue | tagged |',
+	'|---|---|---|',
+	...[...issueByFeature].map(([featureName, issue]) => {
+		const taggedCell = taggedIssues.has(issue)
+			? 'yes'
+			: 'no';
+
+		return `| ${featureName} | ${issue} | ${taggedCell} |`;
+	}),
+);
+
+const failures = [...tagErrors, ...unitFailures, ...driftFailures];
 
 if (failures.length > 0) {
 	report.push('', '### Failures', '', ...failures.map((text) => `- ${text}`));
