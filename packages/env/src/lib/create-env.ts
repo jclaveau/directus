@@ -13,43 +13,6 @@ import { readConfigurationFromFile } from './read-configuration-from-file.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
 
 /**
- * What `toBoolean` reads as a boolean, spelled the ways an environment spells
- * one.
- */
-const BOOLEANS = ['true', 'false', '1', '0'];
-
-/**
- * Refuse a variable cast to boolean that is not one, whichever layer supplied
- * it.
- *
- * `toBoolean` reads anything outside {@link BOOLEANS} as `false`, so a
- * deployment that meant `TRUE` turns a feature off and says nothing. Checked
- * here, on the raw value, because once cast a typo and a deliberate `false` are
- * the same value. Thrown while the env is built, which is at import, so the
- * process ends before it listens.
- */
-const refuseNonBoolean = (key: string, value: unknown): void => {
-	const castFlag = getCastFlag(value);
-
-	if ((castFlag ?? getDefaultType(key)) !== 'boolean') {
-		return;
-	}
-
-	const rawValue = typeof value === 'string' && castFlag
-		? value.substring(castFlag.length + 1)
-		: value;
-
-	if (BOOLEANS.includes(String(rawValue))) {
-		return;
-	}
-
-	throw new Error(
-		`${JSON.stringify(key)} Environment Variable is ${JSON.stringify(rawValue)}, `
-			+ `which is not a boolean. Use one of ${BOOLEANS.join(', ')}.`,
-	);
-};
-
-/**
  * Which layer supplied each variable's final value, recorded as the layers are
  * applied. Knowing a value is worth little without knowing which layer won it —
  * reproducing the loader's inputs by hand to find out is exactly what the
@@ -96,22 +59,12 @@ export const createEnv = (): Env => {
 
 				// override key value pair
 				key = removeFileSuffix(key);
-
-				const declaredType = castFlag ?? getDefaultType(key);
-
-				// A secret is written with a trailing newline, which no boolean or
-				// number parses with; a string, a password, keeps its exact bytes.
-				value = castPrefix + (declaredType && declaredType !== 'string'
-					? fileContent.trim()
-					: fileContent);
-
+				value = castPrefix + fileContent;
 				source = 'secret-file';
 			} catch {
 				throw new Error(`Failed to read value from file "${value}", defined in environment variable "${key}".`);
 			}
 		}
-
-		refuseNonBoolean(key, value);
 
 		output[key] = cast(value, key);
 		sources[key] = source;
