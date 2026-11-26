@@ -1,6 +1,6 @@
 import { useEnv } from '@directus/env';
 import type { AbstractServiceOptions, Accountability, SchemaOverview } from '@directus/types';
-import { toArray, toBoolean } from '@directus/utils';
+import { toBoolean } from '@directus/utils';
 import { version } from 'directus/version';
 import type { Knex } from 'knex';
 import { Readable } from 'node:stream';
@@ -464,7 +464,7 @@ export class ServerService {
 
 			const checks: Record<string, HealthCheck[]> = {};
 
-			for (const location of toArray(env['STORAGE_LOCATIONS'])) {
+			for (const location of env['STORAGE_LOCATIONS']) {
 				const disk = storage.location(location);
 
 				const envThresholdKey

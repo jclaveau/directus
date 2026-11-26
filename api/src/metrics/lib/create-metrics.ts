@@ -1,5 +1,4 @@
 import { useEnv } from '@directus/env';
-import { toArray } from '@directus/utils/values';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import type { MetricObjectWithValues, MetricValue } from 'prom-client';
@@ -357,7 +356,7 @@ export function createMetrics() {
 
 		const storage = await getStorage();
 
-		for (const location of toArray(env['STORAGE_LOCATIONS'])) {
+		for (const location of env['STORAGE_LOCATIONS']) {
 			const disk = storage.location(location);
 
 			const metric = getStorageErrorMetric(location);

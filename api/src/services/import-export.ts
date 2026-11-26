@@ -15,7 +15,7 @@ import type {
 	Query,
 	SchemaOverview,
 } from '@directus/types';
-import { parseJSON, toArray } from '@directus/utils';
+import { parseJSON } from '@directus/utils';
 import { createTmpFile } from '@directus/utils/node';
 import { queue } from 'async';
 import destroyStream from 'destroy';
@@ -443,7 +443,7 @@ export class ExportService {
 				schema: this.schema,
 			});
 
-			const storage: string = toArray(env['STORAGE_LOCATIONS'])[0]!;
+			const storage: string = env['STORAGE_LOCATIONS'][0]!;
 
 			const title = `export-${collection}-${getDateFormatted()}`;
 			const filename = `${title}.${format}`;

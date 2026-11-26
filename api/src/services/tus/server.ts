@@ -7,7 +7,6 @@ import { useEnv } from '@directus/env';
 import type { Driver, TusDriver } from '@directus/storage';
 import { supportsTus } from '@directus/storage';
 import type { Accountability, File, SchemaOverview } from '@directus/types';
-import { toArray } from '@directus/utils';
 import { Server, EVENTS } from '@tus/server';
 import { RESUMABLE_UPLOADS } from '../../constants.js';
 import { getStorage } from '../../storage/index.js';
@@ -27,7 +26,7 @@ type Context = {
 async function createTusStore(context: Context) { // bb-out-of-scope: #709 file storage
 	const env = useEnv();
 	const storage = await getStorage();
-	const location = toArray(env['STORAGE_LOCATIONS'])[0]!;
+	const location = env['STORAGE_LOCATIONS'][0]!;
 	const driver: Driver | TusDriver = storage.location(location);
 
 	if (!supportsTus(driver)) {

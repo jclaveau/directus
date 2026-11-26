@@ -18,7 +18,7 @@ import type {
 	UpdateGroup,
 } from '@directus/types';
 import type { Driver } from '@directus/storage';
-import { oneLine, toArray } from '@directus/utils';
+import { oneLine } from '@directus/utils';
 import type { AxiosResponse } from 'axios';
 import type { Knex } from 'knex';
 import encodeURL from 'encodeurl';
@@ -362,7 +362,7 @@ export class FilesService extends ItemsService<File> {
 
 		const payload = {
 			filename_download: filename,
-			storage: toArray(env['STORAGE_LOCATIONS'])[0]!,
+			storage: env['STORAGE_LOCATIONS'][0]!,
 			type: fileResponse.headers['content-type'] as string,
 			title: formatTitle(filename),
 			...(body || {}),

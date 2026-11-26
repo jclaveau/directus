@@ -2,7 +2,7 @@ import { useEnv } from '@directus/env';
 import { ErrorCode, InvalidPayloadError, isDirectusError } from '@directus/errors';
 import formatTitle from '@directus/format-title';
 import type { BusboyFileStream, PrimaryKey } from '@directus/types';
-import { oneLine, toArray } from '@directus/utils';
+import { oneLine } from '@directus/utils';
 import bytes from 'bytes';
 import type { RequestHandler } from 'express';
 import express from 'express';
@@ -65,7 +65,7 @@ export const multipartHandler: RequestHandler = (req, res, routeNext) => { // bb
 	 * the row in directus_files async during the upload of the actual file.
 	 */
 
-	let disk: string = toArray(env['STORAGE_LOCATIONS'])[0]!;
+	let disk: string = env['STORAGE_LOCATIONS'][0]!;
 	let payload: any = {};
 	let fileCount = 0;
 
@@ -93,7 +93,7 @@ export const multipartHandler: RequestHandler = (req, res, routeNext) => { // bb
 			return busboy.emit('error', new InvalidPayloadError({ reason: `File is missing filename` }));
 		}
 
-		const allowedPatterns = toArray(env['FILES_MIME_TYPE_ALLOW_LIST']);
+		const allowedPatterns = env['FILES_MIME_TYPE_ALLOW_LIST'];
 		const mimeTypeAllowed = allowedPatterns.some((pattern) => minimatch(mimeType, pattern));
 
 		if (mimeTypeAllowed === false) {

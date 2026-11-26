@@ -1,5 +1,4 @@
 import { useEnv } from '@directus/env';
-import { toArray } from '@directus/utils';
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
@@ -21,7 +20,7 @@ export async function validateStorage(): Promise<void> {
 		}
 	}
 
-	const usedStorageDrivers = toArray(env['STORAGE_LOCATIONS']).map(
+	const usedStorageDrivers = env['STORAGE_LOCATIONS'].map(
 		(location) => env[`STORAGE_${location.toUpperCase()}_DRIVER` as const],
 	);
 
