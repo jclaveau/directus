@@ -57,7 +57,6 @@ export function getBaseDbConfig(): Record<string, any> {
 		],
 		omitKey: [
 			'DB_BATCH_INSERT_CHUNK_SIZE',
-			'DB_MSSQL_TRUST_BATCH_RETURNING',
 			'DB_CONNECTIONS',
 			'DB_PUBLIC_SHARE_CONNECTION_NAME',
 		],
@@ -107,14 +106,13 @@ const CONNECTION_FIELD_ENV_SUFFIX: Record<string, string> = {
 	database: 'DATABASE',
 	user: 'USER',
 	password: 'PASSWORD',
-	connectString: 'CONNECT_STRING',
 	connectionString: 'CONNECTION_STRING',
 	socketPath: 'SOCKET_PATH',
 };
 
 /**
  * The env key of a connection field under a prefix, e.g.
- * (`DB_`, 'connectString') → `DB_CONNECT_STRING`.
+ * (`DB_`, 'connectionString') → `DB_CONNECTION_STRING`.
  */
 export function connectionFieldEnvKey(prefix: string, field: string): string {
 	return `${prefix}${CONNECTION_FIELD_ENV_SUFFIX[field]}`;
@@ -132,24 +130,12 @@ export function requiredConnectionFields(config: Record<string, any>): string[] 
 	const {
 		client,
 		connectionString,
-		connectString,
 		socketPath,
-		type,
 	} = config;
 
 	switch (client) {
 		case 'sqlite3':
 			fields.push('filename');
-			break;
-
-		case 'oracledb':
-			if (connectString) { // bb-out-of-scope: #610 non-Postgres
-				fields.push('user', 'password', 'connectString');
-			}
-			else {
-				fields.push('host', 'port', 'database', 'user', 'password');
-			}
-
 			break;
 
 		case 'cockroachdb':
@@ -168,13 +154,6 @@ export function requiredConnectionFields(config: Record<string, any>): string[] 
 				fields.push('database', 'user', 'password', 'socketPath');
 			}
 			else {
-				fields.push('host', 'port', 'database', 'user', 'password');
-			}
-
-			break;
-
-		case 'mssql':
-			if (!type || type === 'default') { // bb-out-of-scope: #610 non-Postgres
 				fields.push('host', 'port', 'database', 'user', 'password');
 			}
 

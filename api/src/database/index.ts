@@ -8,7 +8,7 @@ import knex from 'knex';
 import { performance } from 'node:perf_hooks';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
-import { isArray, merge, toArray } from '../utils/lodash-es-used.js';
+import { isArray, toArray } from '../utils/lodash-es-used.js';
 import { nodeId } from '../utils/node-id.js';
 import { trackTransactionsOf } from '../utils/transaction.js';
 import { validateEnv } from '../utils/validate-env.js';
@@ -146,32 +146,11 @@ export function constructDatabase(
 		};
 	}
 
-	if (client === 'oracledb') { // bb-out-of-scope: #610 non-Postgres
-		poolConfig.afterCreate = (conn: any, callback: any) => {
-			logger.trace('Setting OracleDB NLS_DATE_FORMAT and NLS_TIMESTAMP_FORMAT');
-
-			// enforce proper ISO standard 2024-12-10T10:54:00.123Z for datetime/timestamp
-			conn.execute('ALTER SESSION SET NLS_TIMESTAMP_FORMAT = \'YYYY-MM-DD"T"HH24:MI:SS.FF3"Z"\'');
-
-			// enforce 2024-12-10 date formet
-			conn.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD'");
-
-			callback(null, conn);
-		};
-	}
-
 	if (client === 'mysql') { // bb-out-of-scope: #610 non-Postgres
 		// Remove the conflicting `filename` option, defined by default in the Docker Image
 		if (isObject(knexConfig.connection)) delete knexConfig.connection['filename'];
 
 		Object.assign(knexConfig, { client: 'mysql2' });
-	}
-
-	if (client === 'mssql') { // bb-out-of-scope: #610 non-Postgres
-		// This brings MS SQL in line with the other DB vendors. We shouldn't do any automatic
-		// timezone conversion on the database level, especially not when other database vendors don't
-		// act the same
-		merge(knexConfig, { connection: { options: { useUTC: false } } });
 	}
 
 	const dbInstance = knex.default(knexConfig);
@@ -231,11 +210,7 @@ export async function hasDatabaseConnection(database?: Knex): Promise<boolean> {
 	database = database ?? getDatabase();
 
 	try {
-		if (getDatabaseClient(database) === 'oracle') { // bb-out-of-scope: #610 non-Postgres
-			await database.raw('select 1 from DUAL');
-		} else {
-			await database.raw('SELECT 1');
-		}
+		await database.raw('SELECT 1');
 
 		return true;
 	} catch {
@@ -248,11 +223,7 @@ export async function validateDatabaseConnection(database?: Knex): Promise<void>
 	const logger = useLogger();
 
 	try {
-		if (getDatabaseClient(database) === 'oracle') { // bb-out-of-scope: #610 non-Postgres
-			await database.raw('select 1 from DUAL');
-		} else {
-			await database.raw('SELECT 1');
-		}
+		await database.raw('SELECT 1');
 	} catch (error: any) {
 		logger.error(`Can't connect to the database.`);
 		logger.error(error);
@@ -272,11 +243,6 @@ export function getDatabaseClient(database?: Knex): DatabaseClient {
 			return 'cockroachdb'; // bb-out-of-scope: #610 non-Postgres
 		case 'Client_SQLite3':
 			return 'sqlite';
-		case 'Client_Oracledb':
-		case 'Client_Oracle':
-			return 'oracle'; // bb-out-of-scope: #610 non-Postgres
-		case 'Client_MSSQL':
-			return 'mssql'; // bb-out-of-scope: #610 non-Postgres
 		case 'Client_Redshift':
 			return 'redshift'; // bb-out-of-scope: #610 non-Postgres
 	}

@@ -7,9 +7,7 @@ vi.mock('../../index.js', () => ({ default: vi.fn(), getDatabaseClient: vi.fn(()
 
 import { SchemaHelperCockroachDb } from './dialects/cockroachdb.js';
 import { SchemaHelperDefault } from './dialects/default.js';
-import { SchemaHelperMSSQL } from './dialects/mssql.js';
 import { SchemaHelperMySQL } from './dialects/mysql.js';
-import { SchemaHelperOracle } from './dialects/oracle.js';
 import { SchemaHelperPostgres } from './dialects/postgres.js';
 import { SchemaHelperSQLite } from './dialects/sqlite.js';
 
@@ -18,7 +16,7 @@ const FIELD = 'slug';
 
 // A minimal knex stand-in: `raw` and `schema.alterTable` capture the emitted DDL, and the
 // query-builder chain (`select(...).from(...).where(...).first()`) returns `firstResult` so the
-// catalog-check dialects (mysql/oracle) can be steered through both branches.
+// catalog-check dialect (mysql) can be steered through both branches.
 function makeKnex(firstResult: unknown = undefined) {
 	const table = { dropUnique: vi.fn(), dropIndex: vi.fn() };
 
@@ -142,32 +140,6 @@ describe('dropUniqueIfExists / dropIndexIfExists', () => {
 		});
 	});
 
-	describe('mssql', () => {
-		it('drops the unique index with the required ON <table> clause', async () => {
-			const { knex, emitted } = makeCompilingKnex('mssql');
-
-			const helper = new SchemaHelperMSSQL(knex);
-
-			await helper.dropUniqueIfExists(knex, COLLECTION, FIELD);
-
-			expect(emitted).toEqual([
-				'DROP INDEX IF EXISTS [articles_slug_unique] ON [articles]',
-			]);
-		});
-
-		it('drops an index with the required ON <table> clause', async () => {
-			const { knex, emitted } = makeCompilingKnex('mssql');
-
-			const helper = new SchemaHelperMSSQL(knex);
-
-			await helper.dropIndexIfExists(knex, COLLECTION, FIELD);
-
-			expect(emitted).toEqual([
-				'DROP INDEX IF EXISTS [articles_slug_index] ON [articles]',
-			]);
-		});
-	});
-
 	describe('sqlite', () => {
 		it('drops the backing index for a unique (no DROP CONSTRAINT)', async () => {
 			const { knex, emitted } = makeCompilingKnex('sqlite3');
@@ -196,7 +168,6 @@ describe('dropUniqueIfExists / dropIndexIfExists', () => {
 
 	describe.each([
 		['mysql', SchemaHelperMySQL],
-		['oracle', SchemaHelperOracle],
 	])('%s (catalog existence check)', (_name, Helper) => {
 		it('drops the unique only when the catalog reports it exists', async () => {
 			const { knex, table } = makeKnex({ index_name: 'present' });

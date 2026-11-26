@@ -5,8 +5,6 @@ import MySQLSchemaInspector from './dialects/mysql.js';
 import PostgresSchemaInspector from './dialects/postgres.js';
 import CockroachDBSchemaInspector from './dialects/cockroachdb.js';
 import SqliteSchemaInspector from './dialects/sqlite.js';
-import OracleDBSchemaInspector from './dialects/oracledb.js';
-import MSSQLSchemaInspector from './dialects/mssql.js';
 
 export * from './types/column.js';
 export * from './types/foreign-key.js';
@@ -30,13 +28,6 @@ export const createInspector = (knex: Knex) => {
 			break;
 		case 'Client_SQLite3':
 			constructor = SqliteSchemaInspector;
-			break;
-		case 'Client_Oracledb':
-		case 'Client_Oracle':
-			constructor = OracleDBSchemaInspector;
-			break;
-		case 'Client_MSSQL':
-			constructor = MSSQLSchemaInspector;
 			break;
 
 		default:

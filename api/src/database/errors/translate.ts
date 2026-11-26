@@ -1,9 +1,7 @@
 import getDatabase, { getDatabaseClient } from '../index.js';
 import emitter from '../../emitter.js';
 import { useLogger } from '../../logger/index.js';
-import { extractError as mssql } from './dialects/mssql.js';
 import { extractError as mysql } from './dialects/mysql.js';
-import { extractError as oracle } from './dialects/oracle.js';
 import { extractError as postgres } from './dialects/postgres.js';
 import { extractError as sqlite } from './dialects/sqlite.js';
 import type { Knex } from 'knex';
@@ -42,12 +40,6 @@ export async function extractDatabaseError(
 			break;
 		case 'sqlite':
 			translated = sqlite(error, data, context); // bb-out-of-scope: #610 non-Postgres
-			break;
-		case 'oracle':
-			translated = oracle(error); // bb-out-of-scope: #610 non-Postgres
-			break;
-		case 'mssql':
-			translated = await mssql(error, data); // bb-out-of-scope: #610 non-Postgres
 			break;
 		default:
 			translated = error;

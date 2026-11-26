@@ -14,7 +14,6 @@ export type Credentials = {
 	user?: string;
 	password?: string;
 	ssl?: boolean;
-	options__encrypt?: boolean;
 };
 export default function createDBConnection(client: Driver, credentials: Credentials): Knex<any, unknown[]> {
 	let connection: any = {};
@@ -39,15 +38,6 @@ export default function createDBConnection(client: Driver, credentials: Credenti
 		if (client === 'pg' || client === 'cockroachdb') { // bb-out-of-scope: #610 non-Postgres
 			const { ssl } = credentials as Credentials;
 			connection.ssl = ssl;
-		}
-
-		if (client === 'mssql') { // bb-out-of-scope: #610 non-Postgres
-			const { options__encrypt } = credentials as Credentials;
-
-			connection = {
-				...connection,
-				encrypt: options__encrypt,
-			};
 		}
 	}
 

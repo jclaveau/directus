@@ -5,8 +5,6 @@ export const drivers: Record<Driver, string> = {
 	cockroachdb: 'CockroachDB (Beta)',
 	mysql2: 'MySQL / MariaDB / Aurora',
 	sqlite3: 'SQLite',
-	mssql: 'Microsoft SQL Server',
-	oracledb: 'Oracle Database',
 };
 
 export function getDriverForClient(client: string): Driver | null {

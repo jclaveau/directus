@@ -839,9 +839,6 @@ catalogs:
     ora:
       specifier: 9.4.1
       version: 9.4.1
-    oracledb:
-      specifier: 7.0.1
-      version: 7.0.1
     otplib:
       specifier: 12.0.1
       version: 12.0.1
@@ -971,9 +968,6 @@ catalogs:
     tar:
       specifier: 7.5.22
       version: 7.5.22
-    tedious:
-      specifier: 18.6.2
-      version: 18.6.2
     tinymce:
       specifier: 6.8.6
       version: 6.8.6
@@ -1617,18 +1611,12 @@ importers:
       nodemailer-mailgun-transport:
         specifier: 'catalog:'
         version: 2.1.5(debug@4.3.7(supports-color@10.2.2))(lodash@4.18.1)(supports-color@10.2.2)(underscore@1.13.8)
-      oracledb:
-        specifier: 'catalog:'
-        version: 7.0.1
       pg:
         specifier: 'catalog:'
         version: 8.22.0
       sqlite3:
         specifier: 'catalog:'
         version: 6.0.1
-      tedious:
-        specifier: 'catalog:'
-        version: 18.6.2(supports-color@10.2.2)
 
   app:
     devDependencies:
@@ -6412,6 +6400,9 @@ packages:
   '@smithy/core@3.35.0':
     resolution: {integrity: sha512-zRMhfkByhT2snNdr1si24vJitU6Cr9ix2MikUfWmkAgp4jrNP0GcKSP5YvwQ+TlI8AZXER5QOGJn3JsVtSD9/A==}
     engines: {node: '>=18.0.0'}
+    deprecated: |-
+      Deprecated due to a bug in custom logger data redaction. Upgrade to the latest version. If you used a custom logger with this
+        version, review your logs and rotate any credentials or other secrets. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -10812,10 +10803,6 @@ packages:
   ora@9.4.1:
     resolution: {integrity: sha512-6VlU9MLXbjVQD04AZCMX28hVtA5bUoadvUqO76MUCVA0ilwJbMiHsITRPfyVm6p/BC0Av/BXMujx39WCe1LEqw==}
     engines: {node: '>=20'}
-
-  oracledb@7.0.1:
-    resolution: {integrity: sha512-xlM0Ceh6A5stQLAdEfKf3pgCSkbOjQLo2ZPEi3+kXklz+KbZD3fLi/nsTSbQeZZNFBSFDNxdn1Ek3+bxG40M8w==}
-    engines: {node: '>=14.17'}
 
   otplib@12.0.1:
     resolution: {integrity: sha512-xDGvUOQjop7RDgxTQ+o4pOol0/3xSZzawTiPKRrHnQWAy0WjhNs/5HdIDJCrqC4MBynmjXgULc6YfioaxZeFgg==}
@@ -22258,9 +22245,6 @@ snapshots:
       log-symbols: 7.0.1
       stdin-discarder: 0.3.2
       string-width: 8.2.1
-
-  oracledb@7.0.1:
-    optional: true
 
   otplib@12.0.1:
     dependencies:

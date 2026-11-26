@@ -1,5 +1,4 @@
 import {
-	ContainsNullValuesError,
 	DatabasePoolExhaustedError,
 	InvalidForeignKeyError,
 	NotNullViolationError,
@@ -86,34 +85,6 @@ describe('client dispatch', () => {
 		const result = await translateDatabaseError(
 			{
 				message: 'SQLITE_CONSTRAINT: NOT NULL constraint failed: articles.title',
-			} as SQLError,
-			{},
-		);
-
-		expect(result).toBeInstanceOf(NotNullViolationError);
-	});
-
-	it('routes oracle errors through the oracle extractor', async () => {
-		vi.mocked(getDatabaseClient).mockReturnValue('oracle');
-
-		const result = await translateDatabaseError(
-			{
-				errorNum: 2296,
-				message: 'ORA-02296: cannot enable ("ARTICLES"."TITLE") - null values',
-			} as SQLError,
-			{},
-		);
-
-		expect(result).toBeInstanceOf(ContainsNullValuesError);
-	});
-
-	it('routes mssql errors through the mssql extractor', async () => {
-		vi.mocked(getDatabaseClient).mockReturnValue('mssql');
-
-		const result = await translateDatabaseError(
-			{
-				number: 515,
-				message: `Column 'title' does not allow nulls in [articles].`,
 			} as SQLError,
 			{},
 		);
