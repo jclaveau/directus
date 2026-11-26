@@ -38,7 +38,14 @@ logout call the provider that opened the session.
   (oauth2 without IDENTIFIER_KEY, openid without the identifier claim), an unverified
   email is refused (401 InvalidCredentialsError) before `fetchUserId`, also for a known
   user. Finding 2 (boolean env read only off process.env, `_FILE` "true\n" = false):
-  jean asks for it in the env layer (`createEnv`/`cast`), placement still open.
+  jean asks for it in the env layer (`createEnv`/`cast`).
+- **Finding 2 placement = own PR (jean "go", 2026-11-26):** branch
+  `v11.10.1-feat/env-strict-boolean` off hhh-dev, worktree `env-strict-boolean`; every
+  boolean-typed key refuses anything but true/false/1/0 from any source, `_FILE` values
+  trimmed unless string-typed; not part of #772 (draft PR of `multi-identity`); PR body
+  planned with `Related: #772`. Same subject as issue #477 (wide `toBoolean` fix,
+  [[project_directus_shared_settings_source_of_truth]]); jean was not recorded asking
+  for a link to it.
 
 **Why:** today one provider per user (`authentication.ts:142`), one email, one auth_data.
 **How to apply:** do not re-raise linking or S3 placement; see [[project_directus_pr749_c_rulings]].

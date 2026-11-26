@@ -19,5 +19,7 @@ CACHE_SCOPED_INDEX_TTL_FACTOR=0.5
 - Pattern: `api/src/utils/validate-env.ts` (`validateDurationEnv`, …) and `validateCacheSettingsEnv()` in `api/src/cache-settings.ts`, called in `app.ts` before `validateDatabaseConnection`. Ending the process after listen would pass the healthcheck and crash-loop behind it.
 - A boolean-typed var (TYPE_MAP or `boolean:` prefix) is refused by `@directus/env` `createEnv` itself, from every source (process, config file, `_FILE` secret), lowercased and trimmed first, so `TRUE` and `" true\n"` read as true and `yes`, `on`, `""` are refused: it throws at import, node exits 1 before listen. `validateBooleanEnv` was removed (env-strict-boolean PR).
 
+- A type rule (boolean spelling) belongs in the env layer (`createEnv`/`cast`), which sees the raw value from process env, config file and `_FILE` secret; a `validateBooleanEnv` call reading `process.env` misses the last two. jean, 2026-11-26 (#772 review): "shouldn't this be handled by the env layer?", then its own PR.
+
 **Why:** jean, 2026-09-30 (PR #583): a silent fallback hides a misconfiguration; a failed deploy with a precise message is the expected behaviour. Tighter bounds that now refuse previously-running values (e.g. `CACHE_AUDIT_MAX_DURATION` > 24h) were accepted as "fine".
 **How to apply:** any new or touched env var with a validity rule gets a boot-time check of this shape; review findings proposing "fall back to default on bad value" are wrong for this fork. Related: [[project_directus_pr583_cache_settings]], [[project_directus_env_type_map]].
