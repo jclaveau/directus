@@ -31,6 +31,7 @@ vi.mock('../logger');
 let mockLogger: Logger<never>;
 
 beforeAll(() => {
+	// process.exit returns never: the stub returns so the test goes on.
 	vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({

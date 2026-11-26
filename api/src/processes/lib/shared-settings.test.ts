@@ -40,6 +40,7 @@ type Subscribe = (
 const publish = vi.fn<Publish>(async () => {});
 const subscribe = vi.fn<Subscribe>(async () => {});
 
+// The services are mocked: no read reaches the schema past its collections.
 const options = { schema: { collections: {} } } as never;
 
 /** A connection the dialect's own table reads as complete. */
@@ -61,6 +62,7 @@ async function settingsHolding(stored: unknown) {
 			: { [SHARED_SETTINGS_COLUMNS.autoscale]: stored },
 	);
 
+	// A stub of the query chain the module calls, not a whole Knex.
 	vi.mocked(getDatabase).mockReturnValue({
 		select: () => ({ from: () => ({ first }) }),
 	} as never);
@@ -68,7 +70,7 @@ async function settingsHolding(stored: unknown) {
 
 async function busReady() {
 	const { useBus } = await import('../../bus/index.js');
-	vi.mocked(useBus).mockReturnValue({ publish, subscribe } as never);
+	vi.mocked(useBus, { partial: true }).mockReturnValue({ publish, subscribe });
 }
 
 beforeEach(() => {
@@ -138,6 +140,7 @@ test('reads every column in a single statement', async () => {
 	});
 
 	const select = vi.fn(() => ({ from: () => ({ first }) }));
+	// A stub of the query chain the module calls, not a whole Knex.
 	vi.mocked(getDatabase).mockReturnValue({ select } as never);
 
 	await expect(readAllSharedSettings()).resolves.toEqual({
@@ -175,6 +178,7 @@ test('locks the row it reads through a transaction', async () => {
 test('reads the autoscale pair where the cache column is missing', async () => {
 	const { default: getDatabase } = await import('../../database/index.js');
 
+	// A stub of the query chain the module calls, not a whole Knex.
 	vi.mocked(getDatabase).mockReturnValue({
 		select: (selectedColumns: string | string[]) => {
 			return {
@@ -208,6 +212,7 @@ test('reads the autoscale pair where the cache column is missing', async () => {
 test('rethrows a failed read while the cache column exists', async () => {
 	const { default: getDatabase } = await import('../../database/index.js');
 
+	// A stub of the query chain the module calls, not a whole Knex.
 	vi.mocked(getDatabase).mockReturnValue({
 		select: (selectedColumns: string | string[]) => {
 			return {

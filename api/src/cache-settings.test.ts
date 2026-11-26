@@ -19,6 +19,9 @@ import {
 } from './cache-settings.js';
 import { buildResponseCache, clearCacheTargets } from './cache.js';
 import emitter from './emitter.js';
+import {
+	createDefaultAccountability,
+} from './permissions/utils/create-default-accountability.js';
 import { useLogger } from './logger/index.js';
 import {
 	onSharedSettingsChanged,
@@ -51,7 +54,10 @@ vi.mock('./processes/lib/shared-settings.js', async (importOriginal) => {
 
 beforeEach(async () => {
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: true });
-	vi.mocked(useLogger).mockReturnValue({ warn: vi.fn(), error: vi.fn() } as never);
+
+	vi.mocked(useLogger, { partial: true })
+		.mockReturnValue({ warn: vi.fn(), error: vi.fn() });
+
 	vi.mocked(readSharedSettings).mockResolvedValue(null);
 
 	await refreshCacheSettings();
@@ -688,7 +694,7 @@ test('refuses a switch-on from a caller who is not an admin', async () => {
 
 	await expect(flushBeforeEnabling(
 		{ cache_settings: { response: true } },
-		{ accountability: { user: 'editor', admin: false } as never },
+		{ accountability: createDefaultAccountability({ user: 'editor' }) },
 	))
 		.rejects
 		.toThrowError(ForbiddenError);
@@ -700,13 +706,14 @@ test('refuses a switch-on from a caller who is not an admin', async () => {
 // fires this filter again.
 test('clears nothing for a write that was cleared ahead', async () => {
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({ CACHE_ENABLED: false });
+	// Only the transaction's identity is read: a bare object stands for it.
 	const settingsTrx = {} as never;
 	markEnablingFlushed(settingsTrx);
 
 	await flushBeforeEnabling(
 		{ cache_settings: { response: true } },
 		{
-			accountability: { user: 'admin', admin: true } as never,
+			accountability: createDefaultAccountability({ user: 'admin', admin: true }),
 			database: settingsTrx,
 		},
 	);
@@ -722,7 +729,9 @@ test('clears nothing for a write the guard refuses for another column', async ()
 			cache_settings: { response: true },
 			autoscale_settings: { workers: 8 },
 		},
-		{ accountability: { user: 'admin', admin: true } as never },
+		{
+			accountability: createDefaultAccountability({ user: 'admin', admin: true }),
+		},
 	))
 		.rejects
 		.toThrowError(`'workers' is not a field of the autoscale configuration`);
@@ -764,13 +773,15 @@ test('clears ahead of the create as well as the update', async () => {
 
 	await expect(vi.mocked(emitter.onFilter).mock.calls[0]![1](
 		[{ data: { cache_settings: { response: true } } }],
-		{} as never,
+		{},
+		// The filter reads only the accountability of its context.
 		{ accountability: null } as never,
 	)).resolves.toEqual([{ data: { cache_settings: { response: true } } }]);
 
 	await expect(vi.mocked(emitter.onFilter).mock.calls[1]![1](
 		[{ data: { cache_settings: { response: true } }, keys: [1] }],
-		{} as never,
+		{},
+		// The filter reads only the accountability of its context.
 		{ accountability: null } as never,
 	)).resolves.toEqual([
 		{ data: { cache_settings: { response: true } }, keys: [1] },
@@ -811,7 +822,8 @@ test('hands the filter the caller the event carries', async () => {
 
 	await expect(vi.mocked(emitter.onFilter).mock.calls[1]![1](
 		[{ data: { cache_settings: { response: true } }, keys: [1] }],
-		{} as never,
+		{},
+		// The filter reads only the accountability of its context.
 		{ accountability: { user: 'editor', admin: false } } as never,
 	))
 		.rejects
@@ -828,13 +840,15 @@ test('passes a write an earlier filter cancelled through', async () => {
 
 	await expect(vi.mocked(emitter.onFilter).mock.calls[0]![1](
 		null,
-		{} as never,
+		{},
+		// The filter reads only the accountability of its context.
 		{ accountability: null } as never,
 	)).resolves.toBeNull();
 
 	await expect(vi.mocked(emitter.onFilter).mock.calls[1]![1](
 		null,
-		{} as never,
+		{},
+		// The filter reads only the accountability of its context.
 		{ accountability: null } as never,
 	)).resolves.toBeNull();
 

@@ -138,7 +138,8 @@ test('checks the create as well as the update', async () => {
 	expect(() => {
 		return vi.mocked(emitter.onFilter).mock.calls[0]![1](
 			[{ data: { autoscale_settings: { enabled: 'TRUE' } } }],
-			{} as never,
+			{},
+			// The guard reads nothing of its context.
 			{} as never,
 		);
 	}).toThrowError(`'enabled' has to be a boolean`);
@@ -146,7 +147,8 @@ test('checks the create as well as the update', async () => {
 	expect(() => {
 		return vi.mocked(emitter.onFilter).mock.calls[1]![1](
 			[{ data: { autoscale_settings: { enabled: 'TRUE' } }, keys: [1] }],
-			{} as never,
+			{},
+			// The guard reads nothing of its context.
 			{} as never,
 		);
 	}).toThrowError(`'enabled' has to be a boolean`);
@@ -185,13 +187,15 @@ test('passes a write an earlier filter cancelled through', async () => {
 
 	expect(vi.mocked(emitter.onFilter).mock.calls[0]![1](
 		null,
-		{} as never,
+		{},
+		// The guard reads nothing of its context.
 		{} as never,
 	)).toBeNull();
 
 	expect(vi.mocked(emitter.onFilter).mock.calls[1]![1](
 		null,
-		{} as never,
+		{},
+		// The guard reads nothing of its context.
 		{} as never,
 	)).toBeNull();
 });
@@ -249,7 +253,8 @@ test('checks the cache fields a write carries once its filters ran', async () =>
 	expect(() => {
 		return vi.mocked(emitter.onFilter).mock.calls[1]![1](
 			[{ data: { cache_ttl: 'abc' }, keys: [1] }],
-			{} as never,
+			{},
+			// The guard reads nothing of its context.
 			{} as never,
 		);
 	}).toThrowError(new InvalidPayloadError({
@@ -260,7 +265,8 @@ test('checks the cache fields a write carries once its filters ran', async () =>
 	expect(() => {
 		return vi.mocked(emitter.onFilter).mock.calls[0]![1](
 			[{ data: { cache_audit_schedule: 'hourly' } }],
-			{} as never,
+			{},
+			// The guard reads nothing of its context.
 			{} as never,
 		);
 	}).toThrowError(new InvalidPayloadError({

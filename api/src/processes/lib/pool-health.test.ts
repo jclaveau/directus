@@ -41,11 +41,11 @@ async function freshMirror() {
 
 	const { useBus } = await import('../../bus/index.js');
 
-	vi.mocked(useBus).mockReturnValue({
+	vi.mocked(useBus, { partial: true }).mockReturnValue({
 		publish,
 		subscribe,
 		onResubscribe,
-	} as never);
+	});
 
 	const { useEnv } = await import('@directus/env');
 	vi.mocked(useEnv, { partial: true }).mockReturnValue(env);

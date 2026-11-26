@@ -52,6 +52,7 @@ function runner(cpuPercents: number[], releaseCpuThreshold = 40): AutoscaleRunne
 		state: {
 			at: 0,
 			config: { releaseCpuThreshold } as AutoscaleConfig,
+			// The drill reads neither: empty stand-ins, not a whole config.
 			sources: {} as never,
 			withoutSharedSettings: {} as never,
 			workers: cpuPercents.length,

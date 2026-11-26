@@ -1262,6 +1262,7 @@ describe('Integration Tests', () => {
 				const updatedKeys = await service.updateMany([1, 2], { name: 'after' }, {
 					allowFilterCancel: true,
 					onHookAddedRows: hookAddedSpy,
+					// upsertMany's own option, absent from the public overloads.
 				} as never);
 
 				expect(updatedKeys).toEqual([1, null]);
@@ -1740,7 +1741,8 @@ describe('Integration Tests', () => {
 
 				await expect(new ItemsService('test', { knex: db, schema: stringKeySchema })
 					.updateOne(
-						undefined as never,
+						// @ts-expect-error a caller can pass no key, which PrimaryKey refuses
+						undefined,
 						{ id: 'k5', children: { create: [{}] } },
 					))
 					.rejects
