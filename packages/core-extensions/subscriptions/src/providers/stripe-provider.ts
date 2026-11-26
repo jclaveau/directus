@@ -131,8 +131,9 @@ export function createStripeProvider(
 			return subscriptionId;
 		},
 
-		/** Both metadata name the row: the session's for its expiry. */
 		/**
+		 * Both metadata name the row: the session's for its expiry.
+		 *
 		 * The in-page form first; Stripe refusing its session sends the payer to
 		 * the hosted page. Stripe down there too answers 503.
 		 */

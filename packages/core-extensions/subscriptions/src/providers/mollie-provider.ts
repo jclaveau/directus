@@ -216,8 +216,7 @@ export function createMollieProvider(
 		/**
 		 * A customer per checkout, then its first payment: once paid, it holds
 		 * the mandate `startPaidCheckout` bills the subscription on.
-		 */
-		/**
+		 *
 		 * The in-page form first; Mollie refusing its session (a beta) sends the
 		 * payer to the hosted page. Mollie down there too answers 503.
 		 */
