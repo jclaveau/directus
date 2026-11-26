@@ -118,6 +118,7 @@ export function defineEnv<const Declarations extends EnvDeclarations>(
 	return {
 		prefix,
 		vars,
+		// as: the typed env context is a narrower view of the one core passes
 		defineHook: (name, config) => {
 			return stampEnv(defineHook(name, config as HookConfig));
 		},

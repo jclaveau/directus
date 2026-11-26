@@ -11,7 +11,8 @@ type DeclaredDefaults<Declarations extends CoreEnvDeclarations> = {
 
 /** The default of every variable {@link ENV_DECLARATIONS} gives one. */
 export const DEFAULTS = Object.fromEntries(
+	// as: a const object widened to its declared shape
 	Object.entries(ENV_DECLARATIONS as CoreEnvDeclarations)
 		.filter(([, envDeclaration]) => 'default' in envDeclaration)
 		.map(([name, envDeclaration]) => [name, envDeclaration.default]),
-) as DeclaredDefaults<typeof ENV_DECLARATIONS>;
+) as DeclaredDefaults<typeof ENV_DECLARATIONS>; // fromEntries loses keys

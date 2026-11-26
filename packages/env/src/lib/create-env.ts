@@ -155,5 +155,5 @@ export const createEnv = (): Env => {
 		throw new Error(refusals.join('\n'));
 	}
 
-	return output as Env;
+	return output as Env; // keys checked above, one by one
 };

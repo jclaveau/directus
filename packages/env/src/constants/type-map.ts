@@ -24,7 +24,7 @@ export const globPattern = (glob: string): RegExp => {
 export const DECLARATION_PATTERNS: [RegExp, CoreEnvDeclaration][] = Object.entries({
 	...ENV_DECLARATIONS,
 	...ENV_PATTERN_DECLARATIONS,
-} as CoreEnvDeclarations)
+} as CoreEnvDeclarations) // const objects widened to the declared shape
 	.map(([nameGlob, envDeclaration]) => [globPattern(nameGlob), envDeclaration]);
 
 export const TYPE_MAP_REGEX: [RegExp, EnvDeclarationType][] = DECLARATION_PATTERNS

@@ -119,6 +119,7 @@ export const checkDeclaredValue = (
 
 	const castValue = castDeclaredValue(value, envDeclaration);
 
+	// as: includes takes only a string; any other value is simply not found
 	if (envDeclaration.values.includes(castValue as string)) {
 		return null;
 	}
