@@ -88,3 +88,128 @@ test('Named-connection USER/PASSWORD stay string, not guessType', () => {
 		DEFAULT_ARRAY: 'one,two,three',
 	});
 });
+
+// `toBoolean` reads anything but these four spellings as false, so a deployment
+// that meant `TRUE` would turn the feature off and get no line saying it did.
+test('Refuses a boolean variable from the process that is not one', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		CACHE_ENABLED: 'TRUE',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isDirectusVariable).mockReturnValue(true);
+
+	expect(() => createEnv()).toThrow(
+		new Error(
+			'"CACHE_ENABLED" Environment Variable is "TRUE", which is not a boolean. '
+				+ 'Use one of true, false, 1, 0.',
+		),
+	);
+});
+
+test('Refuses a boolean variable from the config file that is not one', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({
+		CACHE_ENABLED: 'yes',
+	});
+
+	vi.mocked(isDirectusVariable).mockReturnValue(true);
+
+	expect(() => createEnv()).toThrow(
+		new Error(
+			'"CACHE_ENABLED" Environment Variable is "yes", which is not a boolean. '
+				+ 'Use one of true, false, 1, 0.',
+		),
+	);
+});
+
+test('Refuses a boolean variable from a secret file that is not one', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		CACHE_ENABLED_FILE: './file.txt',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(readFileSync).mockReturnValueOnce('on\n');
+
+	expect(() => createEnv()).toThrow(
+		new Error(
+			'"CACHE_ENABLED" Environment Variable is "on", which is not a boolean. '
+				+ 'Use one of true, false, 1, 0.',
+		),
+	);
+});
+
+test('Refuses a value cast to boolean that is not one', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		UNMAPPED_FLAG: 'boolean:TRUE',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isDirectusVariable).mockReturnValue(true);
+
+	expect(() => createEnv()).toThrow(
+		new Error(
+			'"UNMAPPED_FLAG" Environment Variable is "TRUE", which is not a boolean. '
+				+ 'Use one of true, false, 1, 0.',
+		),
+	);
+});
+
+// Docker and Kubernetes write a secret with a trailing newline.
+test('Trims a secret file holding a boolean', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		CACHE_ENABLED_FILE: './file.txt',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(readFileSync).mockReturnValueOnce('true\n');
+
+	expect(createEnv()).toEqual({
+		CACHE_ENABLED: true,
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
+});
+
+// A password is its bytes, trailing newline included.
+test('Keeps a secret file holding a string as it is', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		DB_PASSWORD_FILE: './file.txt',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(readFileSync).mockReturnValueOnce(' p4ss\n');
+
+	expect(createEnv()).toEqual({
+		DB_PASSWORD: ' p4ss\n',
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
+});
+
+test.each([
+	{ value: 'true', expected: true },
+	{ value: 'false', expected: false },
+	{ value: '1', expected: true },
+	{ value: '0', expected: false },
+	{ value: true, expected: true },
+	{ value: false, expected: false },
+])('Takes $value for a boolean variable', ({ value, expected }) => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({
+		CACHE_ENABLED: value,
+	});
+
+	vi.mocked(isDirectusVariable).mockReturnValue(true);
+
+	expect(createEnv()).toEqual({
+		CACHE_ENABLED: expected,
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
+});
