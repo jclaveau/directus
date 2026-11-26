@@ -98,6 +98,7 @@ test('install refuses a version the registry returns no tarball for', async () =
 });
 
 test('install uploads into the EXTENSIONS_LOCATION disk', async () => {
+	// as: an empty stream stands in for the downloaded tarball
 	vi.mocked(download).mockResolvedValueOnce(new ReadableStream() as any);
 
 	vi.mocked(readFile).mockResolvedValueOnce(JSON.stringify({

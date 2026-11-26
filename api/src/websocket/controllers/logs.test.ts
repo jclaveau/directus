@@ -29,6 +29,7 @@ afterEach(() => {
 });
 
 test('caps its connections at WEBSOCKETS_LOGS_CONN_LIMIT', () => {
+	// as: the controller only listens to the server's upgrade event
 	expect(
 		new LogsController(new EventEmitter() as unknown as HttpServer)
 			.maxConnections,
@@ -36,6 +37,7 @@ test('caps its connections at WEBSOCKETS_LOGS_CONN_LIMIT', () => {
 });
 
 test('leaves its connections uncapped with no <prefix>_CONN_LIMIT', () => {
+	// as: the controller only listens to the server's upgrade event
 	expect(
 		new LogsController(new EventEmitter() as unknown as HttpServer)
 			.getEnvironmentConfig('WEBSOCKETS_UNSET')

@@ -229,6 +229,7 @@ describe('the storage check', () => {
 			};
 		});
 
+		// as: the metrics read only the storage's location
 		vi.mocked(getStorage).mockResolvedValue({ location } as any);
 
 		await createMetrics().generate();

@@ -48,8 +48,10 @@ test('auth_logout in cookie mode clears both cookies it was sent', async () => {
 	const schemaComposer = new SchemaComposer();
 	const clearCookie = vi.fn();
 
+	// as any: the stubs carry only what the resolvers read
 	globalResolvers({ schema: {} } as any, schemaComposer as any);
 
+	// as any: the resolve info is not read
 	const resolved = await schemaComposer.Mutation.getFieldConfig(
 		'auth_logout',
 	).resolve!(
@@ -81,8 +83,10 @@ test('auth_logout in session mode ends the session of its cookie', async () => {
 	const schemaComposer = new SchemaComposer();
 	const clearCookie = vi.fn();
 
+	// as any: the stubs carry only what the resolvers read
 	globalResolvers({ schema: {} } as any, schemaComposer as any);
 
+	// as any: the resolve info is not read
 	const resolved = await schemaComposer.Mutation.getFieldConfig(
 		'auth_logout',
 	).resolve!(

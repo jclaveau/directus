@@ -44,6 +44,7 @@ test('Does nothing if no storage drivers are configured in Env', async () => {
 
 test('Ignores environment variables that do not start with STORAGE_ and end with _DRIVER', async () => {
 	// Both names are ones no declaration has: the test is that they are skipped.
+	// as never: names no declaration matches, on purpose
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		[`NOSTORAGE_${randWord().toUpperCase()}_DRIVER`]: randWord(),
 		[`STORAGE_${randWord().toUpperCase()}_NODRIVER`]: randWord(),

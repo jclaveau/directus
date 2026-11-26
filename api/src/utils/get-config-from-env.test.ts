@@ -6,6 +6,7 @@ vi.mock('@directus/env');
 
 beforeEach(() => {
 	// getConfigFromEnv reads any prefix: these names are ones no declaration has.
+	// as never: made-up names and a lower-case key, which no declaration matches
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		CASING_KEY: 'key',
 		CASING_KEY_value: 'value',

@@ -50,6 +50,7 @@ describe('ExportService.exportToFile batch limit', () => {
 			.mockResolvedValueOnce([{ count: 50 }])
 			.mockResolvedValueOnce([{ id: 1 }]);
 
+		// as: the export reads neither knex nor the schema, both mocked
 		await new ExportService({
 			knex: {} as any,
 			accountability: null,

@@ -65,7 +65,8 @@ test('Only the halves this node is configured to report are reported', () => {
 	// Anything that is not a list at all reports nothing.
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({
-			PROCESSES_REPORT_DETAILS: 'stats' as unknown as string[],
+			// @ts-expect-error a bare string where string[] is declared
+			PROCESSES_REPORT_DETAILS: 'stats',
 		});
 
 	expect(reportedProcessDetails()).toEqual([]);

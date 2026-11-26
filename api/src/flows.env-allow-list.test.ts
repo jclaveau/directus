@@ -21,6 +21,7 @@ describe('the variables a flow reads as $env', () => {
 		vi.resetModules();
 		const { getFlowManager } = await import('./flows.js');
 
+		// as any: envs is the flow manager's private field
 		expect((getFlowManager() as any).envs).toEqual({
 			PUBLIC_URL: 'http://localhost:8055',
 		});
@@ -31,6 +32,7 @@ describe('the variables a flow reads as $env', () => {
 		vi.resetModules();
 		const { getFlowManager } = await import('./flows.js');
 
+		// as any: envs is the flow manager's private field
 		expect((getFlowManager() as any).envs).toEqual({});
 	});
 });

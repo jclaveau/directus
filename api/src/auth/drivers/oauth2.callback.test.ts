@@ -72,6 +72,7 @@ describe('the oauth2 callback with a redirect', () => {
 
 		const res = { cookie: vi.fn(), clearCookie: vi.fn(), redirect: vi.fn() };
 
+		// as: express types no layer's route, the test calls its handler
 		await (createOAuth2AuthRouter('sso').stack as any[])
 			.find((layer) => {
 				return layer.route?.path === '/callback' && layer.route.methods.get;

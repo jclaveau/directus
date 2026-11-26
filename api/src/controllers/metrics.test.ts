@@ -13,6 +13,7 @@ import router from './metrics.js';
 test('a request bearing a token METRICS_TOKENS lists gets through', async () => {
 	const next = vi.fn();
 
+	// as: express types no layer's route, the test calls its handler
 	await (router.stack[0] as any).route.stack[0].handle(
 		{ headers: { authorization: 'Metrics good-token' } },
 		{},

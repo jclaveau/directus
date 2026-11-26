@@ -72,6 +72,7 @@ describe('the openid callback with a redirect', () => {
 
 		const res = { cookie: vi.fn(), clearCookie: vi.fn(), redirect: vi.fn() };
 
+		// as: express types no layer's route, the test calls its handler
 		await (createOpenIDAuthRouter('sso').stack as any[])
 			.find((layer) => {
 				return layer.route?.path === '/callback' && layer.route.methods.get;
@@ -99,6 +100,7 @@ test('an openid cookie that fails to verify redirects to the login', async () =>
 
 	const res = { cookie: vi.fn(), clearCookie: vi.fn(), redirect: vi.fn() };
 
+	// as: express types no layer's route, the test calls its handler
 	await (createOpenIDAuthRouter('sso').stack as any[])
 		.find((layer) => {
 			return layer.route?.path === '/callback' && layer.route.methods.get;

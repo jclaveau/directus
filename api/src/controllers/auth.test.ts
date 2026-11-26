@@ -40,6 +40,7 @@ test('logout clears the refresh and session cookies it was sent', async () => {
 	const clearCookie = vi.fn();
 	const next = vi.fn();
 
+	// as any: request and response stubs carry only what the handler reads
 	await router.stack.find(
 		(l: any) => l.route?.path === '/logout' && l.route.methods['post'],
 	)!.route!.stack[0]!.handle(

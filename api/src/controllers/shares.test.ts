@@ -80,6 +80,7 @@ describe('shares controller', () => {
 		const cookie = vi.fn();
 		const locals = {};
 
+		// as any: request and response stubs carry only what the handler reads
 		await router.stack.find(
 			(l: any) => l.route?.path === '/auth' && l.route.methods['post'],
 		)!.route!.stack[0]!.handle(

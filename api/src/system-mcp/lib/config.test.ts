@@ -48,7 +48,8 @@ test('Only the configured subsystems are exposed', () => {
 
 	// Anything that is not a list at all exposes nothing.
 	vi.mocked(useEnv, { partial: true })
-		.mockReturnValue({ SYSTEM_MCP_TOOLS: 'cache' as unknown as string[] });
+		// @ts-expect-error a bare string where string[] is declared
+		.mockReturnValue({ SYSTEM_MCP_TOOLS: 'cache' });
 
 	expect(systemMcpToolGroups()).toEqual([]);
 
@@ -101,7 +102,8 @@ test('No browser origin is allowed until one is named', () => {
 	// Not a list at all is not an allowlist.
 	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({
-			SYSTEM_MCP_ALLOWED_ORIGINS: 'https://ok.example' as unknown as string[],
+			// @ts-expect-error a bare string where string[] is declared
+			SYSTEM_MCP_ALLOWED_ORIGINS: 'https://ok.example',
 		});
 
 	expect(systemMcpAllowsOrigin('https://ok.example')).toBe(false);

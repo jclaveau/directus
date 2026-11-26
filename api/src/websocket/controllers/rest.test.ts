@@ -39,6 +39,7 @@ afterEach(() => {
 });
 
 test('caps its connections at WEBSOCKETS_REST_CONN_LIMIT', () => {
+	// as: the controller only listens to the server's upgrade event
 	expect(
 		new WebSocketController(new EventEmitter() as unknown as HttpServer)
 			.maxConnections,

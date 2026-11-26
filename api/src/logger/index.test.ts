@@ -21,6 +21,7 @@ import { createExpressLogger } from './index.js';
 test('leaves a path LOG_HTTP_IGNORE_PATHS names out of the http log', () => {
 	createExpressLogger();
 
+	// as: pino-http types autoLogging as boolean | options, the test reads options
 	const { autoLogging } = vi.mocked(pinoHttp).mock.calls[0]![0] as any;
 
 	expect([

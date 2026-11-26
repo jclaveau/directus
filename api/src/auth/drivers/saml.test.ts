@@ -155,6 +155,7 @@ describe('createSAMLAuthRouter /logout', () => {
 		const { createSAMLAuthRouter } = await import('./saml.js');
 		const logout = vi.fn();
 
+		// as any: provider and service stubs carry only what the route calls
 		vi.mocked(getAuthProvider).mockReturnValue({
 			sp: {
 				createLogoutRequest: vi.fn(() => {
@@ -171,6 +172,7 @@ describe('createSAMLAuthRouter /logout', () => {
 		const clearCookie = vi.fn();
 		const redirect = vi.fn();
 
+		// as any: request and response stubs carry only what the handler reads
 		await createSAMLAuthRouter('saml').stack.find(
 			(l: any) => l.route?.path === '/logout' && l.route.methods['post'],
 		)!.route!.stack[0]!.handle(
@@ -214,6 +216,7 @@ describe('createSAMLAuthRouter /acs', () => {
 
 		useEnv()['AUTH_SAML_MODE'] = 'cookie';
 
+		// as any: provider and service stubs carry only what the route calls
 		vi.mocked(getAuthProvider).mockReturnValue({
 			sp: {
 				parseLoginResponse: vi.fn(async () => {
@@ -238,6 +241,7 @@ describe('createSAMLAuthRouter /acs', () => {
 		const cookie = vi.fn();
 		const redirect = vi.fn();
 
+		// as any: request and response stubs carry only what the handler reads
 		await createSAMLAuthRouter('saml').stack.find(
 			(l: any) => l.route?.path === '/acs' && l.route.methods['post'],
 		)!.route!.stack[1]!.handle(

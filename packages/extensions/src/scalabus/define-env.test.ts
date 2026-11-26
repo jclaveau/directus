@@ -144,4 +144,16 @@ describe('defineBundleApi with an env', () => {
 			});
 		}).toThrow(new Error('Bundle entries repeat the name "audit"'));
 	});
+
+	test('refuses a bundle env whose prefix is malformed', () => {
+		expect(() => {
+			return defineBundleApi({
+				env: { prefix: '', vars: { PORT: { type: 'number' } } },
+				entries: [defineHook('audit', () => {})],
+			});
+		}).toThrow(new Error(
+			'Env prefix "" must be upper case, with one "_" at its end, like'
+				+ ' "SUBSCRIPTIONS_"',
+		));
+	});
 });
