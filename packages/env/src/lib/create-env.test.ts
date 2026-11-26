@@ -65,7 +65,7 @@ describe('Casting of default configuration', () => {
 			DEFAULT_ARRAY: ['one', 'two', 'three'],
 		});
 
-		expect(getDefaultType).toHaveBeenCalledTimes(2);
+		expect(getDefaultType).toHaveBeenCalledTimes(4);
 		expect(cast).toHaveBeenCalledTimes(3);
 	});
 
@@ -81,7 +81,7 @@ describe('Casting of default configuration', () => {
 			DEFAULT_ARRAY: 'one,two,three',
 		});
 
-		expect(getDefaultType).toHaveBeenCalledTimes(2);
+		expect(getDefaultType).toHaveBeenCalledTimes(4);
 		expect(cast).toHaveBeenCalledTimes(2);
 	});
 });

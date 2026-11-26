@@ -61,9 +61,7 @@ import {
 	seedCacheSettings,
 	validateCacheSettingsEnv,
 } from './cache-settings.js';
-import { PROCESSES_BOOLEAN_ENV } from './processes/lib/boolean-env.js';
 import {
-	validateBooleanEnv,
 	validateBytesEnv,
 	validateChoiceEnv,
 	validateCountEnv,
@@ -132,11 +130,6 @@ export default async function createApp(): Promise<express.Application> {
 	const env = useEnv();
 	const logger = useLogger();
 	const helmet = await import('helmet');
-
-	// Before anything is built on the value: a variable this reads as false
-	// turns its feature off silently, and every line after here would run as
-	// though the deployment had asked for that.
-	validateBooleanEnv(PROCESSES_BOOLEAN_ENV);
 
 	// Ending the process after the listen would pass the deployment's healthcheck
 	// and crash-loop behind it.
