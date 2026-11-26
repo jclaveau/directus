@@ -56,8 +56,8 @@ test('Ignores environment variables that do not start with STORAGE_ and end with
 
 test('Only registers driver once per library', async () => {
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
-		[`STORAGE_${randWord().toUpperCase()}_DRIVER` as const]: sample.name,
-		[`STORAGE_${randWord().toUpperCase()}_DRIVER` as const]: sample.name,
+		STORAGE_LOCAL_DRIVER: sample.name,
+		STORAGE_REMOTE_DRIVER: sample.name,
 	});
 
 	await registerDrivers(mockStorage);
@@ -67,7 +67,7 @@ test('Only registers driver once per library', async () => {
 
 test('Gets storage driver for name', async () => {
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
-		[`STORAGE_${randWord().toUpperCase()}_DRIVER` as const]: sample.name,
+		STORAGE_LOCAL_DRIVER: sample.name,
 	});
 
 	await registerDrivers(mockStorage);
@@ -77,7 +77,7 @@ test('Gets storage driver for name', async () => {
 
 test('Registers storage driver to manager', async () => {
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
-		[`STORAGE_${randWord().toUpperCase()}_DRIVER` as const]: sample.name,
+		STORAGE_LOCAL_DRIVER: sample.name,
 	});
 
 	await registerDrivers(mockStorage);
