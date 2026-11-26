@@ -17,6 +17,12 @@ export function validateEnv(requiredKeys: string[]): void {
 }
 
 /**
+ * What `toBoolean` reads as a boolean, spelled the ways an environment spells
+ * one.
+ */
+const BOOLEANS = ['true', 'false', '1', '0'];
+
+/**
  * Refuse a duration variable that is not a duration of 0 or more, at boot,
  * before the server listens, so a deployment carrying one fails its healthcheck
  * and the one before keeps the traffic.
