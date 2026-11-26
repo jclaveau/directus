@@ -70,6 +70,7 @@ type Row = { request: string; response: string };
 export type ScenarioKeys = {
 	run: string;
 	keysByName: Record<string, string>;
+	knownKeys?: () => Record<string, string>;
 };
 
 type SpawnedFeatureOptions = {
@@ -133,7 +134,8 @@ export function defineSpawnedWriteFeature(
 				scenario(title, ({ given, then, and }) => {
 					const scenarioKeys: ScenarioKeys = {
 						run: randomUUID(),
-						keysByName: { ...featureOptions.knownKeys?.() },
+						keysByName: {},
+						knownKeys: featureOptions.knownKeys,
 					};
 
 					const receivedResponses: Response[] = [];
@@ -196,7 +198,10 @@ export function withKeys(cell: string, scenarioKeys: ScenarioKeys) {
 			return scenarioKeys.run;
 		}
 
-		scenarioKeys.keysByName[name] ??= randomUUID();
+		// A scenario is bound before `beforeFeature` runs, so a known key is read
+		// when a step meets it.
+		scenarioKeys.keysByName[name] ??= scenarioKeys.knownKeys?.()[name]
+			?? randomUUID();
 
 		return scenarioKeys.keysByName[name];
 	});
