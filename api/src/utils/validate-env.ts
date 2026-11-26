@@ -336,6 +336,9 @@ export function validateMarketplaceEnabledEnv(): void {
 	}
 }
 
+/** The out-of-scope features an `AUTH_<NAME>_DRIVER` turns on, by its value. */
+const OUT_OF_SCOPE_AUTH_DRIVERS = ['ldap', 'oauth2', 'openid', 'saml'];
+
 /**
  * Refuse a deployment turning on an out-of-scope feature it did not name in
  * `OUT_OF_SCOPE_FEATURES_ALLOWED`, at boot like {@link validateDurationEnv}:
@@ -369,7 +372,7 @@ export function validateOutOfScopeFeaturesEnv(): void {
 		const driverKey = `AUTH_${trimmedName.toUpperCase()}_DRIVER`;
 		const driverName = String(env[driverKey]);
 
-		if (driverName in OUT_OF_SCOPE_FEATURES) {
+		if (OUT_OF_SCOPE_AUTH_DRIVERS.includes(driverName)) {
 			usedFeatures.push({
 				key: driverKey,
 				value: driverName,
