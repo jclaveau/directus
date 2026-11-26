@@ -12,6 +12,7 @@ import type {
 } from '@directus/types';
 import type { Knex } from 'knex';
 import type { ExtensionEnv } from './define-env.js';
+import { refuseInvalidExtensionEnv } from './refuse-invalid-extension-env.js';
 
 export const BUNDLE_ENTRIES_FORMAT = 'scalabus/1';
 
@@ -199,6 +200,7 @@ export function defineBundleApi(
 	}
 
 	refuseRepeatedNames(bundleApi.entries);
+	refuseInvalidExtensionEnv(bundleApi.env);
 
 	const bundleEnv: ExtensionEnv = {
 		prefix: bundleApi.env.prefix,

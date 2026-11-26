@@ -21,6 +21,7 @@ import {
 	type MigrationEntry,
 	type OperationApiEntry,
 } from './define-entry.js';
+import { refuseInvalidExtensionEnv } from './refuse-invalid-extension-env.js';
 
 /** The variables an extension declares, every one named under `prefix`. */
 export interface ExtensionEnv<
@@ -69,8 +70,6 @@ export interface ExtensionEnvHelpers<Declarations extends EnvDeclarations>
 	defineMigration: (name: string, config: MigrationConfig) => MigrationEntry;
 }
 
-const ENV_PREFIX_PATTERN = /^[A-Z][A-Z0-9]*_$/;
-
 /**
  * Declare the variables an extension reads, for the API to check at boot and
  * cast as declared, and get back the entry helpers whose `context.env` knows
@@ -93,21 +92,7 @@ export function defineEnv<const Declarations extends EnvDeclarations>(
 ): ExtensionEnvHelpers<Declarations> {
 	const { prefix, vars } = extensionEnv;
 
-	if (!ENV_PREFIX_PATTERN.test(prefix)) {
-		throw new Error(
-			`Env prefix ${JSON.stringify(prefix)} must be upper case, with one "_"`
-				+ ' at its end, like "SUBSCRIPTIONS_"',
-		);
-	}
-
-	for (const name of Object.keys(vars)) {
-		if (!name.startsWith(prefix)) {
-			throw new Error(
-				`Env variable ${JSON.stringify(name)} is not named under its`
-					+ ` prefix ${JSON.stringify(prefix)}`,
-			);
-		}
-	}
+	refuseInvalidExtensionEnv(extensionEnv);
 
 	const declaredEnv: ExtensionEnv = { prefix, vars };
 
