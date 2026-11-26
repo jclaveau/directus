@@ -47,11 +47,14 @@ describe('refuseOutOfScopeFeature', () => {
 			OUT_OF_SCOPE_FEATURES_ALLOWED: ['shares'],
 		});
 
-		// An error instance makes `toThrow` compare the whole message.
-		expect(() => refuseOutOfScopeFeature('comments')).toThrow(new Error(
-			'Service "comments" is unavailable. It is out of the tested scope'
-				+ ' (#647): add "comments" to OUT_OF_SCOPE_FEATURES_ALLOWED to run it'
-				+ ' untested.',
-		));
+		expect(() => refuseOutOfScopeFeature('comments')).toThrow(
+			expect.objectContaining({
+				status: 503,
+				code: 'SERVICE_UNAVAILABLE',
+				message: 'Service "comments" is unavailable. It is out of the tested'
+					+ ' scope (#647): add "comments" to OUT_OF_SCOPE_FEATURES_ALLOWED'
+					+ ' to run it untested.',
+			}),
+		);
 	});
 });
