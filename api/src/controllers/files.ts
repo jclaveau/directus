@@ -250,7 +250,7 @@ const importSchema = Joi.object({
 
 router.post(
 	'/import',
-	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #709 file storage
+	asyncHandler(async (req, res, next) => {
 		const { error } = importSchema.validate(req.body);
 
 		if (error) {
@@ -406,7 +406,7 @@ router.patch(
 router.delete(
 	'/',
 	validateBatch('delete'),
-	asyncHandler(async (req, _res, next) => { // bb-out-of-scope: #709 file storage
+	asyncHandler(async (req, _res, next) => {
 		const service = new FilesService({
 			accountability: req.accountability,
 			schema: req.schema,

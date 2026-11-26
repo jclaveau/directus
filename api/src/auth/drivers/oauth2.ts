@@ -71,13 +71,13 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 
 		const roleMapping = this.config['roleMapping'];
 
-		if (roleMapping) { // bb-out-of-scope: #753 provider roles
+		if (roleMapping) {
 			this.roleMap = roleMapping;
 		}
 
 		// role mapping will fail on login if AUTH_<provider>_ROLE_MAPPING is an array instead of an object.
 		// This happens if the 'json:' prefix is missing from the variable declaration. To save the user from exhaustive debugging, we'll try to fail early here.
-		if (roleMapping instanceof Array) { // bb-out-of-scope: #753 provider roles
+		if (roleMapping instanceof Array) {
 			logger.error(
 				"[OAuth2] Expected a JSON-Object as role mapping, got an Array instead. Make sure you declare the variable with 'json:' prefix.",
 			);
@@ -225,7 +225,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			};
 
 			// Make sure a user's role gets updated if their oauth group or role mapping changes
-			if (this.config['roleMapping']) { // bb-out-of-scope: #753 provider roles
+			if (this.config['roleMapping']) {
 				emitPayload['role'] = role;
 			}
 
@@ -324,7 +324,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 	}
 }
 
-const handleError = (e: any) => { // bb-out-of-scope: #622 OAuth2 login
+const handleError = (e: any) => {
 	const logger = useLogger();
 
 	if (e instanceof errors.OPError) {

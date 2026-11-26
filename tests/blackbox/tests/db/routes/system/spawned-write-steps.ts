@@ -76,6 +76,7 @@ type SpawnedFeatureOptions = {
 	envOverrides: Record<string, string>;
 	beforeFeature?: (vendor: Vendor, instanceUrl: string) => Promise<void>;
 	afterFeature?: (vendor: Vendor, instanceUrl: string) => Promise<void>;
+	knownKeys?: () => Record<string, string>;
 };
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -88,7 +89,8 @@ const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
  * tables run row after row. `beforeFeature` and `afterFeature` get the
  * instance's url, so a collection they create or drop is in the schema the
  * instance holds: the main instance shares no bus with it and never hears of
- * a collection the instance created.
+ * a collection the instance created. `knownKeys` names what a `<name>` stands
+ * for from a scenario's start, such as the url of a server the feature runs.
  */
 export function defineSpawnedWriteFeature(
 	featurePath: string,
@@ -131,7 +133,7 @@ export function defineSpawnedWriteFeature(
 				scenario(title, ({ given, then, and }) => {
 					const scenarioKeys: ScenarioKeys = {
 						run: randomUUID(),
-						keysByName: {},
+						keysByName: { ...featureOptions.knownKeys?.() },
 					};
 
 					const receivedResponses: Response[] = [];

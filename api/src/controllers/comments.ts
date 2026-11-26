@@ -87,7 +87,7 @@ router.search('/', validateBatch('read'), readHandler, respond);
 
 router.get(
 	'/:pk',
-	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #647 comments
+	asyncHandler(async (req, res, next) => {
 		const service = new CommentsService({
 			accountability: req.accountability,
 			schema: req.schema,
@@ -183,7 +183,7 @@ router.patch(
 router.delete(
 	'/',
 	validateBatch('delete'),
-	asyncHandler(async (req, _res, next) => { // bb-out-of-scope: #647 comments
+	asyncHandler(async (req, _res, next) => {
 		const service = new CommentsService({
 			accountability: req.accountability,
 			schema: req.schema,

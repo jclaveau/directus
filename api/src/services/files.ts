@@ -323,7 +323,7 @@ export class FilesService extends ItemsService<File> {
 	/**
 	 * Import a single file from an external URL
 	 */
-	async importOne(importURL: string, body: Partial<File>): Promise<PrimaryKey> { // bb-out-of-scope: #709 file storage
+	async importOne(importURL: string, body: Partial<File>): Promise<PrimaryKey> {
 		if (this.accountability) {
 			await validateAccess(
 				{
@@ -672,7 +672,7 @@ function ignoreMissingFile(error: unknown) { // bb-out-of-scope: #709 file stora
 	}
 }
 
-function decompressResponse(stream: Readable, headers: AxiosResponse['headers']) { // bb-out-of-scope: #709 file storage
+function decompressResponse(stream: Readable, headers: AxiosResponse['headers']) {
 	const contentEncoding = String(headers['content-encoding'] || '').toLowerCase();
 
 	if (!['gzip', 'deflate', 'br'].includes(contentEncoding)) {

@@ -111,7 +111,7 @@ router.search('/', validateBatch('read'), readHandler, respond);
 
 router.get(
 	'/:pk',
-	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #651 flows
+	asyncHandler(async (req, res, next) => {
 		const service = new FlowsService({
 			accountability: req.accountability,
 			schema: req.schema,

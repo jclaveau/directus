@@ -193,7 +193,7 @@ class FlowManager {
 		this.operations.delete(id);
 	}
 
-	public async runOperationFlow(id: string, data: unknown, context: Record<string, unknown>): Promise<unknown> { // bb-out-of-scope: #651 flows
+	public async runOperationFlow(id: string, data: unknown, context: Record<string, unknown>): Promise<unknown> {
 		const logger = useLogger();
 
 		if (!(id in this.operationFlowHandlers)) {

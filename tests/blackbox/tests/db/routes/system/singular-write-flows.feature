@@ -265,3 +265,95 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       | 4       | directus_activity   | 0      | 1      | 0      | 0      |
       | 4       | directus_operations | 0      | 0      | 0      | 1      |
       | 4       | directus_users      | 1      | 0      | 0      | 0      |
+
+  Scenario: a webhook flow answers what the flow its operation triggers returns
+    Given these requests are sent:
+      | request                                         | response  |
+      | method: POST                                    | code: 200 |+
+      | path: /flows                                    |           |
+      | payload:                                        |           |
+      |   id: <child-flow>                              |           |
+      |   name: child-<run>                             |           |
+      |   status: active                                |           |
+      |   accountability: null                          |           |
+      |   trigger: operation                            |           |
+      |   options:                                      |           |
+      |     return: $last                               |           |
+      | method: POST                                    | code: 200 |+
+      | path: /operations                               |           |
+      | payload:                                        |           |
+      |   id: <doubling>                                |           |
+      |   flow: <child-flow>                            |           |
+      |   key: doubling                                 |           |
+      |   type: exec                                    |           |
+      |   position_x: 19                                |           |
+      |   position_y: 1                                 |           |
+      |   options:                                      |           |
+      |     code: >-                                    |           |
+      |       module.exports = async (data) => {        |           |
+      |       console.log('doubling', data.$trigger.n); |           |
+      |       return { doubled: data.$trigger.n * 2 };  |           |
+      |       };                                        |           |
+      | method: PATCH                                   | code: 200 |+
+      | path: /flows/<child-flow>                       |           |
+      | payload:                                        |           |
+      |   operation: <doubling>                         |           |
+      | method: POST                                    | code: 200 |+
+      | path: /flows                                    |           |
+      | payload:                                        |           |
+      |   id: <parent-flow>                             |           |
+      |   name: parent-<run>                            |           |
+      |   status: active                                |           |
+      |   accountability: null                          |           |
+      |   trigger: webhook                              |           |
+      |   options:                                      |           |
+      |     method: POST                                |           |
+      |     return: $last                               |           |
+      | method: POST                                    | code: 200 |+
+      | path: /operations                               |           |
+      | payload:                                        |           |
+      |   id: <triggering>                              |           |
+      |   flow: <parent-flow>                           |           |
+      |   key: triggering                               |           |
+      |   type: trigger                                 |           |
+      |   position_x: 19                                |           |
+      |   position_y: 1                                 |           |
+      |   options:                                      |           |
+      |     flow: <child-flow>                          |           |
+      |     payload:                                    |           |
+      |       n: 21                                     |           |
+      | method: PATCH                                   | code: 200 |+
+      | path: /flows/<parent-flow>                      |           |
+      | payload:                                        |           |
+      |   operation: <triggering>                       |           |
+    Then these requests get these responses:
+      | request                                           | response               |
+      | method: GET                                       | code: 200              |+
+      | path: /flows/<parent-flow>                        | body:                  |
+      | query:                                            |   data:                |
+      |   fields: name                                    |     name: parent-<run> |
+      | method: GET                                       | code: 200              |+
+      | path: /operations/<doubling>                      | body:                  |
+      | query:                                            |   data:                |
+      |   fields: key,flow                                |     key: doubling      |
+      |                                                   |     flow: <child-flow> |
+      | method: POST                                      | code: 200              |+
+      | path: /flows/trigger/<parent-flow>                | body:                  |
+      | payload:                                          |   doubled: 42          |
+      |   probe: <run>                                    |                        |
+      | eventually: true                                  |                        |
+      | method: DELETE                                    | code: 204              |+
+      | path: /operations                                 |                        |
+      | payload:                                          |                        |
+      |   - <triggering>                                  |                        |
+      |   - <doubling>                                    |                        |
+      | method: GET                                       | code: 200              |+
+      | path: /operations                                 | body:                  |
+      | query:                                            |   data: []             |
+      |   fields: id                                      |                        |
+      |   filter[flow][_in]: '<parent-flow>,<child-flow>' |                        |
+      | method: DELETE                                    | code: 204              |+
+      | path: /flows                                      |                        |
+      | payload:                                          |                        |
+      |   - <parent-flow>                                 |                        |
+      |   - <child-flow>                                  |                        |

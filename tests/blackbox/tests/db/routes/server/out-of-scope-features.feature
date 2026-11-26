@@ -167,3 +167,37 @@ Feature: An instance starts on a feature out of the tested scope only when allow
       | request             | response     |
       | method: GET         | code: 200    |+
       | path: /reload-probe | text: second |
+
+  Scenario: an instance with an oauth2 role mapping that is a list refuses to start
+    When an instance starts with these variables:
+      | variable                | value                        |
+      | AUTH_PROVIDERS          | corp                         |
+      | AUTH_CORP_DRIVER        | oauth2                       |
+      | AUTH_CORP_AUTHORIZE_URL | http://127.0.0.1:1/authorize |
+      | AUTH_CORP_ACCESS_URL    | http://127.0.0.1:1/token     |
+      | AUTH_CORP_PROFILE_URL   | http://127.0.0.1:1/userinfo  |
+      | AUTH_CORP_CLIENT_ID     | corp-client                  |
+      | AUTH_CORP_CLIENT_SECRET | corp-secret                  |
+      | AUTH_CORP_ROLE_MAPPING  | json:["staff"]               |
+    Then it exits with code 1, logging these errors:
+      | errors                                                    |
+      | - >-                                                      |+
+      |   [OAuth2] Expected a JSON-Object as role mapping, got an |
+      |   Array instead. Make sure you declare the variable with  |
+      |   'json:' prefix.                                         |
+
+  Scenario: an instance with an openid role mapping that is a list refuses to start
+    When an instance starts with these variables:
+      | variable                | value              |
+      | AUTH_PROVIDERS          | corp               |
+      | AUTH_CORP_DRIVER        | openid             |
+      | AUTH_CORP_ISSUER_URL    | http://127.0.0.1:1 |
+      | AUTH_CORP_CLIENT_ID     | corp-client        |
+      | AUTH_CORP_CLIENT_SECRET | corp-secret        |
+      | AUTH_CORP_ROLE_MAPPING  | json:["staff"]     |
+    Then it exits with code 1, logging these errors:
+      | errors                                                    |
+      | - >-                                                      |+
+      |   [OpenID] Expected a JSON-Object as role mapping, got an |
+      |   Array instead. Make sure you declare the variable with  |
+      |   'json:' prefix.                                         |

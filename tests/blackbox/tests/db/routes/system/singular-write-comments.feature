@@ -494,3 +494,35 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       | 1       | test_singular_comments | 1      | 0      | 0      | 0      |
       | 2       | directus_notifications | 1      | 0      | 0      | 0      |
       | 2       | directus_users         | 1      | 0      | 0      | 0      |
+
+  Scenario: a comment is read by its key and deleted in a batch
+    Given these requests are sent:
+      | request                              | response  |
+      | method: POST                         | code: 200 |+
+      | path: /items/test_singular_comments  |           |
+      | payload:                             |           |
+      |   name: read-<run>                   |           |
+      | remember: entry                      |           |
+      | method: POST                         | code: 200 |+
+      | path: /comments                      |           |
+      | payload:                             |           |
+      |   id: <remark>                       |           |
+      |   collection: test_singular_comments |           |
+      |   item: '<entry>'                    |           |
+      |   comment: posted-<run>              |           |
+    Then these requests get these responses:
+      | request                     | response                  |
+      | method: GET                 | code: 200                 |+
+      | path: /comments/<remark>    | body:                     |
+      | query:                      |   data:                   |
+      |   fields: comment,item      |     comment: posted-<run> |
+      |                             |     item: '<entry>'       |
+      | method: DELETE              | code: 204                 |+
+      | path: /comments             |                           |
+      | payload:                    |                           |
+      |   - <remark>                |                           |
+      | method: GET                 | code: 200                 |+
+      | path: /comments             | body:                     |
+      | query:                      |   data: []                |
+      |   fields: id                |                           |
+      |   filter[id][_eq]: <remark> |                           |

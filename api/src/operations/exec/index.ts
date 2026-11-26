@@ -10,7 +10,7 @@ type Options = {
  * A helper for making the logs prettier.
  * The logger prints arrays with their indices but this looks "bad" when you have only one argument.
  */
-function unpackArgs(args: any[]) { // bb-out-of-scope: #651 flows
+function unpackArgs(args: any[]) {
 	return args.length === 1 ? args[0] : args;
 }
 

@@ -74,7 +74,7 @@ const sharedInviteSchema = Joi.object({
 
 router.post(
 	'/invite',
-	asyncHandler(async (req, _res, next) => { // bb-out-of-scope: #657 shares
+	asyncHandler(async (req, _res, next) => {
 		const service = new SharesService({
 			schema: req.schema,
 			accountability: req.accountability,
@@ -153,7 +153,7 @@ router.search('/', validateBatch('read'), readHandler, respond);
 
 router.get(
 	`/info/:pk(${UUID_REGEX})`,
-	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #657 shares
+	asyncHandler(async (req, res, next) => {
 		const service = new SharesService({
 			schema: req.schema,
 		});
@@ -202,7 +202,7 @@ router.get(
 
 router.get(
 	`/:pk(${UUID_REGEX})`,
-	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #657 shares
+	asyncHandler(async (req, res, next) => {
 		const service = new SharesService({
 			accountability: req.accountability,
 			schema: req.schema,
@@ -297,7 +297,7 @@ router.patch(
 
 router.delete(
 	'/',
-	asyncHandler(async (req, _res, next) => { // bb-out-of-scope: #657 shares
+	asyncHandler(async (req, _res, next) => {
 		const service = new SharesService({
 			accountability: req.accountability,
 			schema: req.schema,

@@ -404,3 +404,46 @@ Feature: A single share is created only for an item its sender may share
       | 4       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
       | 4       | directus_shares      | 3      | 0      | 1      | 0      | 0    |
       | 4       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+
+  Scenario: a share is read, looked up by its link and deleted in a batch
+    Given these requests are sent:
+      | request                            | response  |
+      | method: POST                       | code: 200 |+
+      | path: /items/test_singular_shares  |           |
+      | payload:                           |           |
+      |   name: read-<run>                 |           |
+      | remember: read                     |           |
+      | method: POST                       | code: 200 |+
+      | path: /shares                      |           |
+      | payload:                           |           |
+      |   id: <share>                      |           |
+      |   name: created-<run>              |           |
+      |   collection: test_singular_shares |           |
+      |   item: '<read>'                   |           |
+    Then these requests get these responses:
+      | request                    | response                                      |
+      | method: GET                | code: 200                                     |+
+      | path: /shares/<share>      | body:                                         |
+      | query:                     |   data:                                       |
+      |   fields: name             |     name: created-<run>                       |
+      | method: GET                | code: 200                                     |+
+      | path: /shares/info/<share> | body:                                         |
+      |                            |   data:                                       |
+      |                            |     id: <share>                               |
+      |                            |     collection: test_singular_shares          |
+      |                            |     item: '<read>'                            |
+      |                            |     times_used: 0                             |
+      | method: POST               | code: 400                                     |+
+      | path: /shares/invite       | body:                                         |
+      | payload:                   |   errors:                                     |
+      |   emails: []               |     - message: >-                             |
+      |                            |         Invalid payload. "share" is required. |
+      | method: DELETE             | code: 204                                     |+
+      | path: /shares              |                                               |
+      | payload:                   |                                               |
+      |   - <share>                |                                               |
+      | method: GET                | code: 200                                     |+
+      | path: /shares              | body:                                         |
+      | query:                     |   data: []                                    |
+      |   fields: id               |                                               |
+      |   filter[id][_eq]: <share> |                                               |
