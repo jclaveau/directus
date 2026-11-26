@@ -18,6 +18,8 @@ export function isEmailUnverified(
  * The boot refusal of a provider whose driver can't tell a verified email
  * while REQUIRE_VERIFIED_EMAIL is on: oauth2 without EMAIL_VERIFIED_KEY,
  * saml and ldap. Null when the provider can tell, or doesn't require it.
+ * An openid IdP that never sends email_verified still boots: every first
+ * login is then refused, with a warn line.
  */
 export function describeUnverifiableEmail(
 	providerName: string,
