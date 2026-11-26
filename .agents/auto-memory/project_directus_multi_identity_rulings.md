@@ -19,8 +19,12 @@ logout call the provider that opened the session.
   #749 will NOT merge before multi-identity.
 - **Open:** drop `directus_users.email` / `password` so identities are the only source
   (jean's proposal) vs keep `email` as code-written copy of the primary identity.
-  Old email after change (keep as removable identity) unruled. Branch order vs #749
-  (S3 commit `c30265aea6` lives on #749) unruled.
+  Old email after change (keep as removable identity) unruled. Password norm (web,
+  2026-11-26): one password per account (Microsoft, Google, Apple, GitHub; Keycloak
+  CREDENTIAL + Supabase users code); per-email only in Auth0 linked db identities.
+- **S3 moved (jean go 2026-11-26):** #749's `c30265aea6` + `5092d8ae9b` cherry-picked
+  onto `multi-identity` (hhh-dev base) as `4254b43afb` + `0e24fe4728`, driver tests cut
+  to the verified-email cases. #749 untouched; it rebases after multi-identity merges.
 
 **Why:** today one provider per user (`authentication.ts:142`), one email, one auth_data.
 **How to apply:** do not re-raise linking or S3 placement; see [[project_directus_pr749_c_rulings]].
