@@ -34,6 +34,11 @@ logout call the provider that opened the session.
 - **S3 moved (jean go 2026-11-26):** #749's `c30265aea6` + `5092d8ae9b` cherry-picked
   onto `multi-identity` (hhh-dev base) as `4254b43afb` + `0e24fe4728`, driver tests cut
   to the verified-email cases. #749 untouched; it rebases after multi-identity merges.
+- **#772 autoreview finding 1 = A (jean 2026-11-26):** when the identifier IS the email
+  (oauth2 without IDENTIFIER_KEY, openid without the identifier claim), an unverified
+  email is refused (401 InvalidCredentialsError) before `fetchUserId`, also for a known
+  user. Finding 2 (boolean env read only off process.env, `_FILE` "true\n" = false):
+  jean asks for it in the env layer (`createEnv`/`cast`), placement still open.
 
 **Why:** today one provider per user (`authentication.ts:142`), one email, one auth_data.
 **How to apply:** do not re-raise linking or S3 placement; see [[project_directus_pr749_c_rulings]].
