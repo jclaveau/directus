@@ -6,8 +6,8 @@ Feature: An instance serves no shares and no comments it did not allow
     refuse whatever reaches them another way.
   - The feature runs against an instance of its own, whose list allows only
     the features the other suites run.
-  - A request authenticates as the admin. A response cell states the keys it
-    checks.
+  - A request authenticates as the admin; `<share>` stands for a uuid of its
+    own. A response cell states the keys it checks.
 
   Scenario: a share read answers that its route does not exist
     Then these requests get these responses:
@@ -43,3 +43,30 @@ Feature: An instance serves no shares and no comments it did not allow
       |                              |         to run it untested.              |
       |                              |       extensions:                        |
       |                              |         code: SERVICE_UNAVAILABLE        |
+
+  Scenario: a share login answers that its route does not exist
+    Then these requests get these responses:
+      | request            | response                           |
+      | method: POST       | code: 404                          |+
+      | path: /shares/auth | body:                              |
+      | payload:           |   errors:                          |
+      |   share: <share>   |     - message: >-                  |
+      |                    |         Route /shares/auth doesn't |
+      |                    |         exist.                     |
+      |                    |       extensions:                  |
+      |                    |         code: ROUTE_NOT_FOUND      |
+
+  Scenario: a comment read through GraphQL is refused by the comments service
+    Then these requests get these responses:
+      | request                        | response                                   |
+      | method: POST                   | code: 200                                  |+
+      | path: /graphql/system          | body:                                      |
+      | payload:                       |   errors:                                  |
+      |   query: '{ comments { id } }' |     - message: >-                          |
+      |                                |         Service "comments" is unavailable. |
+      |                                |         It is out of the tested scope      |
+      |                                |         (#647): add "comments" to          |
+      |                                |         OUT_OF_SCOPE_FEATURES_ALLOWED      |
+      |                                |         to run it untested.                |
+      |                                |       extensions:                          |
+      |                                |         code: SERVICE_UNAVAILABLE          |

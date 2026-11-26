@@ -303,11 +303,6 @@ export function validateMarketplaceEnabledEnv(): void {
 }
 
 /**
- * The features Scalabus leaves out of its tested scope, each with the issue
- * tracking it. Their code carries `// bb-out-of-scope:` tags: no blackbox
- * scenario guards it against a regression, a security one included.
- */
-/**
  * Refuse a deployment turning on an out-of-scope feature it did not name in
  * `OUT_OF_SCOPE_FEATURES_ALLOWED`, at boot like {@link validateDurationEnv}:
  * untested code then runs only by choice, never by an inherited variable.
