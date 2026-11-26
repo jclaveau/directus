@@ -426,7 +426,7 @@ export function createOAuth2AuthRouter(providerName: string): Router { // bb-out
 			});
 
 			const modeName = `AUTH_${providerName.toUpperCase()}_MODE` as const;
-			const authMode = (env[modeName] ?? 'session') as string;
+			const authMode = env[modeName] ?? 'session';
 
 			let authResponse;
 

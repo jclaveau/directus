@@ -1,14 +1,22 @@
 import type { EnvDeclarationType } from './env-type.js';
 
+/** A list default is written `as const`, so a readonly list stands for one. */
+type ReadonlyListOf<CastValue> = CastValue extends (infer Item)[]
+	? readonly Item[]
+	: CastValue;
+
 /**
  * What a variable is declared as: the type its value is cast to, the default it
- * takes when unset, and the only values it may take when `values` lists them.
+ * takes when unset, already of that type, and the only values it may take when
+ * `values` lists them.
  */
 export type EnvDeclaration = {
-	type: EnvDeclarationType;
-	default?: unknown;
-	values?: readonly string[];
-};
+	[DeclaredType in EnvDeclarationType]: {
+		type: DeclaredType;
+		default?: ReadonlyListOf<EnvTypeValue[DeclaredType]>;
+		values?: readonly string[];
+	};
+}[EnvDeclarationType];
 
 export type EnvDeclarations = Record<string, EnvDeclaration>;
 
@@ -16,7 +24,7 @@ export type EnvDeclarations = Record<string, EnvDeclaration>;
  * A variable core reads whose value is guessed rather than cast to one type:
  * `false` or a value, a list or a word, or a passthrough a library reads.
  */
-export type GuessedEnvDeclaration = { default?: unknown };
+export type GuessedEnvDeclaration = { type?: never; default?: unknown };
 
 /** What core declares a variable as: a type, or a value it guesses. */
 export type CoreEnvDeclaration = EnvDeclaration | GuessedEnvDeclaration;

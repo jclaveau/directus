@@ -173,7 +173,7 @@ export function createSAMLAuthRouter(providerName: string) { // bb-out-of-scope:
 			const relayState: string | undefined = req.body?.RelayState;
 
 			const modeName = `AUTH_${providerName.toUpperCase()}_MODE` as const;
-			const authMode = (env[modeName] ?? 'session') as string;
+			const authMode = env[modeName] ?? 'session';
 
 			try {
 				const { sp, idp } = getAuthProvider(providerName) as SAMLAuthDriver;

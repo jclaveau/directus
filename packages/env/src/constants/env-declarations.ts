@@ -12,7 +12,7 @@ import type { CoreEnvDeclaration } from '../types/env-declaration.js';
  */
 export const ENV_DECLARATIONS = {
 	HOST: { type: 'string', default: '0.0.0.0' },
-	PORT: { type: 'string', default: 8055 },
+	PORT: { type: 'string', default: '8055' },
 
 	DB_NAME: { type: 'string' },
 	DB_USER: { type: 'string' },
@@ -20,7 +20,10 @@ export const ENV_DECLARATIONS = {
 	DB_DATABASE: { type: 'string' },
 	DB_PORT: { type: 'number' },
 
-	DB_EXCLUDE_TABLES: { type: 'string[]', default: 'spatial_ref_sys,sysdiagrams' },
+	DB_EXCLUDE_TABLES: {
+		type: 'string[]',
+		default: ['spatial_ref_sys', 'sysdiagrams'],
+	},
 	DB_BATCH_INSERT_CHUNK_SIZE: { type: 'number' },
 	DB_MSSQL_TRUST_BATCH_RETURNING: { type: 'boolean', default: false },
 
@@ -34,7 +37,7 @@ export const ENV_DECLARATIONS = {
 	CACHE_COMPRESSION_ENABLED: { type: 'boolean', default: true },
 	CACHE_KEY_HASH_ENABLED: { type: 'boolean', default: true },
 	CACHE_TTL: { type: 'string', default: '5m' },
-	CACHE_CONTROL_S_MAXAGE: { type: 'number', default: '0' },
+	CACHE_CONTROL_S_MAXAGE: { type: 'number', default: 0 },
 	CACHE_NAMESPACE: { type: 'string', default: 'scalabus' },
 	CACHE_AUTO_PURGE: { type: 'boolean', default: false },
 	CACHE_AUTO_PURGE_MODE: {
@@ -89,7 +92,7 @@ export const ENV_DECLARATIONS = {
 	CACHE_AUDIT_SCHEDULE: { type: 'string', default: '' },
 	CACHE_AUDIT_LIMIT: { type: 'number', default: 0 },
 	CACHE_AUDIT_MAX_DURATION: { type: 'string', default: '10m' },
-	CACHE_AUDIT_IGNORE_PATHS: { type: 'string[]', default: '' },
+	CACHE_AUDIT_IGNORE_PATHS: { type: 'string[]', default: [] },
 	CACHE_AUDIT_RETENTION: { type: 'string', default: '30d' },
 	CACHE_STATUS_HEADER: { type: 'string' },
 	CACHE_TAGS_HEADER: { type: 'string' },
@@ -106,19 +109,19 @@ export const ENV_DECLARATIONS = {
 	QUERY_AUDIT_HEADER_MAX_SIZE: { type: 'string', default: '8kb' },
 	CACHE_AUTO_PURGE_IGNORE_LIST: {
 		type: 'string[]',
-		default: 'directus_activity,directus_presets',
+		default: ['directus_activity', 'directus_presets'],
 	},
 	// Default on for the formats a cached endpoint might content-negotiate. Safe
 	// because browsers/SDKs collapse to json (only an explicit text/csv etc. gets
 	// its own bucket). Deliberately NOT xml/html: browsers send them high-q in
 	// Accept, so req.accepts would route ALL browser traffic to that bucket and
 	// split it from api-client json — fragmenting every install, even non-xml ones.
-	CACHE_VARY_CONTENT_TYPES: { type: 'string[]', default: 'json,csv,yaml' },
-	CACHE_VARY_REQUEST_HEADERS: { type: 'string[]', default: '' },
+	CACHE_VARY_CONTENT_TYPES: { type: 'string[]', default: ['json', 'csv', 'yaml'] },
+	CACHE_VARY_REQUEST_HEADERS: { type: 'string[]', default: [] },
 	// Extra request headers a glob must never fold, on top of the built-in
 	// proxy/CDN/tracing denylist (x-forwarded-*, cf-*, x-envoy-*, …). Add
 	// platform-specific per-request headers here; globs allowed.
-	CACHE_VARY_REQUEST_HEADERS_EXCLUDED: { type: 'string[]', default: '' },
+	CACHE_VARY_REQUEST_HEADERS_EXCLUDED: { type: 'string[]', default: [] },
 	CACHE_SCHEMA_MAX_ITERATIONS: { type: 'number', default: 100 },
 	CACHE_SCHEMA_SYNC_TIMEOUT: { type: 'number', default: 10000 },
 	CACHE_SCHEMA_FREEZE_ENABLED: { type: 'boolean', default: false },
@@ -143,8 +146,14 @@ export const ENV_DECLARATIONS = {
 
 	FILE_METADATA_ALLOW_LIST: {
 		type: 'string[]',
-		default: 'ifd0.Make,ifd0.Model,exif.FNumber,exif.ExposureTime,'
-			+ 'exif.FocalLength,exif.ISOSpeedRatings',
+		default: [
+			'ifd0.Make',
+			'ifd0.Model',
+			'exif.FNumber',
+			'exif.ExposureTime',
+			'exif.FocalLength',
+			'exif.ISOSpeedRatings',
+		],
 	},
 
 	GRAPHQL_INTROSPECTION: { type: 'boolean', default: true },
@@ -167,15 +176,18 @@ export const ENV_DECLARATIONS = {
 	BUS_NAMESPACE: { type: 'string' },
 
 	METRICS_TOKENS: { type: 'string[]' },
-	METRICS_SERVICES: { type: 'string[]', default: 'database,cache,redis,storage' },
+	METRICS_SERVICES: {
+		type: 'string[]',
+		default: ['database', 'cache', 'redis', 'storage'],
+	},
 	METRICS_ENABLED: { type: 'boolean', default: false },
 
 	SYSTEM_MCP_ENABLED: { type: 'boolean', default: false },
-	SYSTEM_MCP_TOOLS: { type: 'string[]', default: 'processes,cache' },
-	SYSTEM_MCP_ALLOWED_ORIGINS: { type: 'string[]', default: '' },
+	SYSTEM_MCP_TOOLS: { type: 'string[]', default: ['processes', 'cache'] },
+	SYSTEM_MCP_ALLOWED_ORIGINS: { type: 'string[]', default: [] },
 
 	PROCESSES_REPORT_ENABLED: { type: 'boolean', default: true },
-	PROCESSES_REPORT_DETAILS: { type: 'string[]', default: 'stats,env' },
+	PROCESSES_REPORT_DETAILS: { type: 'string[]', default: ['stats', 'env'] },
 	PROCESSES_SERVICE_NAME: { type: 'string' },
 	PROCESSES_COLLECT_TIMEOUT: { type: 'string', default: '750ms' },
 
@@ -211,7 +223,7 @@ export const ENV_DECLARATIONS = {
 	SHARED_SETTINGS_POLL_SECONDS: { type: 'number' },
 
 	PGBOUNCER_REPORT_ENABLED: { type: 'boolean', default: false },
-	PGBOUNCER_CONNECTIONS: { type: 'string[]', default: '' },
+	PGBOUNCER_CONNECTIONS: { type: 'string[]', default: [] },
 	PGBOUNCER_QUERY_TIMEOUT: { type: 'string', default: '2s' },
 
 	MIGRATIONS_WAIT_TIMEOUT: { type: 'string', default: '5m' },
@@ -230,7 +242,7 @@ export const ENV_DECLARATIONS = {
 
 	TEMP_PATH: { type: 'string', default: './node_modules/.directus' },
 
-	STORAGE_LOCATIONS: { type: 'string[]', default: 'local' },
+	STORAGE_LOCATIONS: { type: 'string[]', default: ['local'] },
 	STORAGE_LOCAL_DRIVER: { type: 'string', default: 'local' },
 	STORAGE_LOCAL_ROOT: { type: 'string', default: './uploads' },
 
@@ -262,9 +274,12 @@ export const ENV_DECLARATIONS = {
 	REGISTER_STALL_TIME: { type: 'number', default: 750 },
 
 	CORS_ENABLED: { type: 'boolean', default: false },
-	CORS_METHODS: { type: 'string[]', default: 'GET,POST,PATCH,DELETE' },
-	CORS_ALLOWED_HEADERS: { type: 'string[]', default: 'Content-Type,Authorization' },
-	CORS_EXPOSED_HEADERS: { type: 'string[]', default: 'Content-Range' },
+	CORS_METHODS: { type: 'string[]', default: ['GET', 'POST', 'PATCH', 'DELETE'] },
+	CORS_ALLOWED_HEADERS: {
+		type: 'string[]',
+		default: ['Content-Type', 'Authorization'],
+	},
+	CORS_EXPOSED_HEADERS: { type: 'string[]', default: ['Content-Range'] },
 	CORS_CREDENTIALS: { type: 'boolean', default: true },
 	CORS_MAX_AGE: { type: 'number', default: 18000 },
 
@@ -307,7 +322,7 @@ export const ENV_DECLARATIONS = {
 	USERS_API_ACCESS_LIMIT: { type: 'number', default: Infinity },
 
 	TUS_ENABLED: { type: 'boolean', default: false },
-	TUS_CHUNK_SIZE: { type: 'string', default: DEFAULT_CHUNK_SIZE }, // 8mb
+	TUS_CHUNK_SIZE: { type: 'string', default: String(DEFAULT_CHUNK_SIZE) }, // 8mb
 	TUS_UPLOAD_EXPIRATION: { type: 'string', default: '10m' },
 
 	RETENTION_ENABLED: { type: 'boolean', default: false },
@@ -341,7 +356,7 @@ export const ENV_DECLARATIONS = {
 	PRESSURE_LIMITER_MAX_EVENT_LOOP_UTILIZATION: { type: 'number', default: 0.99 },
 	PRESSURE_LIMITER_MAX_EVENT_LOOP_DELAY: { type: 'number', default: 500 },
 
-	FILES_MIME_TYPE_ALLOW_LIST: { type: 'string[]', default: '*/*' },
+	FILES_MIME_TYPE_ALLOW_LIST: { type: 'string[]', default: ['*/*'] },
 
 	ACCEPT_TERMS: { type: 'boolean', default: false },
 
@@ -361,7 +376,7 @@ export const ENV_DECLARATIONS = {
 	REDIS_PASSWORD: { type: 'string' },
 
 	// `auth.ts` walks the list, so the empty default casts to `[]`: none.
-	AUTH_PROVIDERS: { type: 'string[]', default: '' },
+	AUTH_PROVIDERS: { type: 'string[]', default: [] },
 	// Read straight off `process.env` before any casting runs.
 	CONFIG_PATH: { type: 'string', default: resolve(cwd(), '.env') },
 
@@ -471,7 +486,7 @@ export const ENV_PATTERN_DECLARATIONS = {
 	'STORAGE_*_SECRET': { type: 'string' },
 
 	'WEBSOCKETS_*_ENABLED': {},
-	'WEBSOCKETS_*_PATH': {},
+	'WEBSOCKETS_*_PATH': { type: 'string' },
 	'WEBSOCKETS_*_AUTH': {},
 	'WEBSOCKETS_*_AUTH_TIMEOUT': {},
 	'WEBSOCKETS_*_CONN_LIMIT': { type: 'number' },
@@ -490,9 +505,9 @@ export const ENV_PATTERN_DECLARATIONS = {
 	'STORAGE_*_KEY_FILENAME': {},
 	'STORAGE_*_HEALTHCHECK_THRESHOLD': {},
 
-	'AUTH_*_DRIVER': {},
-	'AUTH_*_MODE': {},
-	'AUTH_*_LOGIN_TIMEOUT': {},
+	'AUTH_*_DRIVER': { type: 'string' },
+	'AUTH_*_MODE': { type: 'string' },
+	'AUTH_*_LOGIN_TIMEOUT': { type: 'string' },
 	'AUTH_*_CLIENT_ID': {},
 	'AUTH_*_CLIENT_SECRET': {},
 	'AUTH_*_SCOPE': {},
@@ -506,8 +521,8 @@ export const ENV_PATTERN_DECLARATIONS = {
 	'AUTH_*_ALLOW_PUBLIC_REGISTRATION': {},
 	'AUTH_*_DEFAULT_ROLE_ID': {},
 	'AUTH_*_SYNC_USER_INFO': {},
-	'AUTH_*_ICON': {},
-	'AUTH_*_LABEL': {},
+	'AUTH_*_ICON': { type: 'string' },
+	'AUTH_*_LABEL': { type: 'string' },
 	'AUTH_*_PARAMS': {},
 	'AUTH_*_ISSUER_URL': {},
 	'AUTH_*_ISSUER_DISCOVERY_MUST_SUCCEED': {},
