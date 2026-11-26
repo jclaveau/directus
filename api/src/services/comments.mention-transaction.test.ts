@@ -23,6 +23,9 @@ import { MailService } from './mail/index.js';
 import { initNotificationEmails } from './notifications.js';
 import { UsersService } from './users.js';
 
+// Runs the service the deployment would refuse unless allowed.
+vi.mock('../utils/out-of-scope-features.js');
+
 vi.mock('../database/index.js', () => {
 	return {
 		default: vi.fn(),

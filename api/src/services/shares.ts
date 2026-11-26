@@ -27,6 +27,7 @@ import type { DirectusTokenPayload, ShareData } from '../types/index.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';
 import { md } from '../utils/md.js';
+import { refuseOutOfScopeFeature } from '../utils/out-of-scope-features.js';
 import { Url } from '../utils/url.js';
 import { userName } from '../utils/user-name.js';
 import { validateKeys } from '../utils/validate-keys.js';
@@ -42,6 +43,7 @@ const logger = useLogger();
 export class SharesService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
 		super('directus_shares', options);
+		refuseOutOfScopeFeature('shares');
 	}
 
 	override async createMany(

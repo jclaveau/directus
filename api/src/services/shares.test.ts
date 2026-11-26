@@ -22,6 +22,9 @@ import { ItemsService } from './items.js';
 import type { EmailOptions } from './mail/index.js';
 import { SharesService } from './shares.js';
 
+// Runs the service the deployment would refuse unless allowed.
+vi.mock('../utils/out-of-scope-features.js');
+
 vi.mock('../../src/database/index', () => ({
 	default: vi.fn(),
 	getDatabaseClient: vi.fn().mockReturnValue('postgres'),

@@ -1,6 +1,7 @@
 import { useEnv } from '@directus/env';
 import { toBoolean } from '@directus/utils';
 import { systemMcpEnabled } from './system-mcp/lib/config.js';
+import { allowedOutOfScopeFeatures } from './utils/out-of-scope-features.js';
 import { rootOf } from './utils/router-root-paths.js';
 
 type CoreMount = {
@@ -28,7 +29,10 @@ export const CORE_MOUNTS = [
 	{ path: '/access' },
 	{ path: '/assets' },
 	{ path: '/collections' },
-	{ path: '/comments' },
+	{
+		path: '/comments',
+		when: () => allowedOutOfScopeFeatures().includes('comments'),
+	},
 	{ path: '/dashboards' },
 	{ path: '/extensions' },
 	{ path: '/fields' },
@@ -55,7 +59,10 @@ export const CORE_MOUNTS = [
 	{ path: '/schema' },
 	{ path: '/server' },
 	{ path: '/settings' },
-	{ path: '/shares' },
+	{
+		path: '/shares',
+		when: () => allowedOutOfScopeFeatures().includes('shares'),
+	},
 	{ path: '/users' },
 	{ path: '/utils' },
 	{ path: '/versions' },

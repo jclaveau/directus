@@ -174,6 +174,8 @@ export const DEFAULTS = {
 	MARKETPLACE_TRUST: 'sandbox',
 	MARKETPLACE_ENABLED: false,
 
+	OUT_OF_SCOPE_FEATURES_ALLOWED: '',
+
 	TELEMETRY: false,
 	TELEMETRY_URL: 'https://telemetry.directus.io',
 

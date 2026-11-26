@@ -14,6 +14,8 @@ test('mounts only what the environment turns on, in mount order', () => {
 	expect(off).not.toContain('/files/tus');
 	expect(off).not.toContain('/system-mcp');
 	expect(off).not.toContain('/metrics');
+	expect(off).not.toContain('/shares');
+	expect(off).not.toContain('/comments');
 	expect(off.indexOf('/auth')).toBe(0);
 	expect(off.indexOf('/graphql')).toBe(1);
 
@@ -21,6 +23,7 @@ test('mounts only what the environment turns on, in mount order', () => {
 		TUS_ENABLED: true,
 		SYSTEM_MCP_ENABLED: true,
 		METRICS_ENABLED: true,
+		OUT_OF_SCOPE_FEATURES_ALLOWED: ['shares', 'comments'],
 	});
 
 	const on = coreMountPaths();

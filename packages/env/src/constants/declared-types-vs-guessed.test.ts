@@ -27,6 +27,8 @@ const CHANGED_BY_DECLARING: Record<string, string> = {
 	// Spread into the audit's ignore list: a string would spread its characters.
 	CACHE_AUDIT_IGNORE_PATHS: 'string("") -> array([])',
 	FILES_MIME_TYPE_ALLOW_LIST: 'string("*/*") -> array(["*/*"])',
+	// allowedOutOfScopeFeatures() reads a list or a comma string alike.
+	OUT_OF_SCOPE_FEATURES_ALLOWED: 'string("") -> array([])',
 	// cors documents string or array for this option.
 	CORS_EXPOSED_HEADERS: 'string("Content-Range") -> array(["Content-Range"])',
 	// bytes.parse() reads either.
