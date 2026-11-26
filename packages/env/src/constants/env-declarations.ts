@@ -507,7 +507,7 @@ export const ENV_PATTERN_DECLARATIONS = {
 
 	'AUTH_*_DRIVER': { type: 'string' },
 	'AUTH_*_MODE': { type: 'string' },
-	'AUTH_*_LOGIN_TIMEOUT': { type: 'string' },
+	'AUTH_*_LOGIN_TIMEOUT': { type: 'boolean | number | string | string[]' },
 	'AUTH_*_CLIENT_ID': {},
 	'AUTH_*_CLIENT_SECRET': {},
 	'AUTH_*_SCOPE': {},

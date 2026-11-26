@@ -107,6 +107,10 @@ export const checkDeclaredValue = (
 			+ ` ${JSON.stringify(`${castFlag}:`)} prefix casts it to ${castFlag}.`;
 	}
 
+	if (castFlag === 'number' && !isNumberValue(stripCastFlag(value))) {
+		return `${quotedName} is ${JSON.stringify(value)}, which is not a number.`;
+	}
+
 	const typeRefusal = readTypeRefusal(
 		quotedName,
 		stripCastFlag(value),
