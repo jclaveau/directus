@@ -37,6 +37,16 @@ import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import {
+	armStartOf,
+	innermostTagAt,
+	isInstrumentedSource,
+	parseTag,
+	repoPathOf,
+	resolveTags,
+	TAG_SEARCH,
+} from './coverage-tags.mjs';
+
 const { values: options } = parseArgs({
 	options: {
 		'blackbox': { type: 'string' },
@@ -72,24 +82,6 @@ function findCoverageFiles(dir) {
 	});
 }
 
-// istanbul keys a file by the path the build saw: absolute on a runner,
-// `src/…` when relative to api/. Both name the same repo file.
-function repoPathOf(coveredPath) {
-	const apiIndex = coveredPath.lastIndexOf('/api/src/');
-
-	if (apiIndex !== -1) {
-		return coveredPath.slice(apiIndex + 1);
-	}
-
-	if (coveredPath.startsWith('src/')) {
-		return `api/${coveredPath}`;
-	}
-
-	throw new Error(
-		`Coverage file ${JSON.stringify(coveredPath)} is not under api/src.`,
-	);
-}
-
 function addCounts(target, source, coveredPath, counter) {
 	for (const [id, hits] of Object.entries(source)) {
 		const known = target[id];
@@ -123,6 +115,13 @@ function readCoverage(dir) {
 
 		for (const [coveredPath, fileCoverage] of Object.entries(reportCoverage)) {
 			const repoPath = repoPathOf(coveredPath);
+
+			if (repoPath === null) {
+				throw new Error(
+					`Coverage file ${JSON.stringify(coveredPath)} is not under api/src.`,
+				);
+			}
+
 			const known = coverageByPath.get(repoPath);
 
 			if (!known) {
@@ -175,15 +174,11 @@ function countersOf(fileCoverage) {
 
 	const armCounters = Object.entries(fileCoverage.branchMap)
 		.flatMap(([id, branch]) => {
-			return branch.locations.map((location, arm) => {
-				const start = location?.start?.line === undefined
-					? branch.loc.start
-					: location.start;
-
+			return branch.locations.map((_location, arm) => {
 				return {
 					kind: 'arm',
 					name: armNameOf(branch.type, arm, branch.locations.length),
-					start,
+					start: armStartOf(branch, arm),
 					branchLine: branch.loc.start.line,
 					hits: fileCoverage.b[id][arm],
 				};
@@ -191,15 +186,6 @@ function countersOf(fileCoverage) {
 		});
 
 	return [...statementCounters, ...armCounters];
-}
-
-function comparePositions(left, right) {
-	return left.line - right.line || left.column - right.column;
-}
-
-function rangeHolds(range, position) {
-	return comparePositions(range.start, position) <= 0
-		&& comparePositions(position, range.end) <= 0;
 }
 
 const sourceByRef = new Map();
@@ -220,15 +206,7 @@ function sourceLinesAt(ref, path) {
 	return sourceByRef.get(key);
 }
 
-// Test files and test helpers are never instrumented (api/tsdown.config.ts).
-function isInstrumentedSource(path) {
-	return /^api\/src\/.*\.ts$/.test(path)
-		&& !/\.test(-d)?\.ts$/.test(path)
-		&& !/^api\/src\/(__[^/]*|test-utils)\//.test(path);
-}
-
 const tagErrors = [];
-const TAG_PATTERN = /^(.*?)\/\/ bb-(unit-only|out-of-scope):(.*)$/;
 
 // The tags in api/src at `ref`, keyed by path, each `{ path, line, kind, text }`.
 function readTags(ref) {
@@ -237,7 +215,7 @@ function readTags(ref) {
 	try {
 		grepText = execFileSync(
 			'git',
-			['grep', '-n', '-E', '// bb-(unit-only|out-of-scope):', ref, '--', 'api/src'],
+			['grep', '-n', '-E', TAG_SEARCH, ref, '--', 'api/src'],
 			{ encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
 		);
 	}
@@ -265,26 +243,12 @@ function readTags(ref) {
 			continue;
 		}
 
-		const [, code, kind, rawText] = TAG_PATTERN.exec(sourceLine);
-		const tag = { path, line: Number(lineText), kind, text: rawText.trim() };
-		const place = `Tag on ${path}:${tag.line} at ${ref}`;
+		const line = Number(lineText);
+		const place = `Tag on ${path}:${line} at ${ref}`;
+		const { tag, error } = parseTag(path, line, sourceLine, place);
 
-		if (code.trim() === '') {
-			tagErrors.push(`${place} is alone on its line: end the code line `
-				+ 'it covers with it.');
-
-			continue;
-		}
-
-		if (tag.text === '') {
-			tagErrors.push(`${place} gives no reason.`);
-			continue;
-		}
-
-		if (kind === 'out-of-scope' && !/^#\d+\b/.test(tag.text)) {
-			tagErrors.push(`${place} names no issue: `
-				+ `${JSON.stringify(tag.text)} does not start with "#<number>".`);
-
+		if (error) {
+			tagErrors.push(error);
 			continue;
 		}
 
@@ -294,41 +258,20 @@ function readTags(ref) {
 	return tagsByPath;
 }
 
-// What a tag covers in a file's coverage: every statement, function and
-// branch starting on its line, each to its end.
-function rangesOfTag(tag, fileCoverage) {
-	return [
-		...Object.values(fileCoverage.statementMap),
-		...Object.values(fileCoverage.fnMap).map(({ loc }) => loc),
-		...Object.values(fileCoverage.branchMap).map(({ loc }) => loc),
-	].filter((range) => range.start.line === tag.line);
-}
-
 // Resolves a file's tags against its coverage, then the innermost tag of each
 // counter: the covering range starting last.
 function tagCounters(tags, fileCoverage, ref) {
-	const tagRanges = tags.flatMap((tag) => {
-		const ranges = rangesOfTag(tag, fileCoverage);
+	const { tagRanges, uncovering } = resolveTags(tags, fileCoverage);
 
-		if (ranges.length === 0) {
-			tagErrors.push(`Tag on ${tag.path}:${tag.line} at ${ref} covers no `
-				+ 'statement, function or branch: end the line one starts on.');
-		}
-
-		return ranges.map((range) => ({ tag, range }));
-	});
+	for (const tag of uncovering) {
+		tagErrors.push(`Tag on ${tag.path}:${tag.line} at ${ref} covers no `
+			+ 'statement, function or branch: end the line one starts on.');
+	}
 
 	const counters = countersOf(fileCoverage);
 
 	for (const counter of counters) {
-		const holding = tagRanges
-			.filter(({ range }) => rangeHolds(range, counter.start))
-			.sort((left, right) => {
-				return comparePositions(right.range.start, left.range.start)
-					|| comparePositions(left.range.end, right.range.end);
-			});
-
-		counter.tag = holding[0]?.tag;
+		counter.tag = innermostTagAt(tagRanges, counter.start);
 	}
 
 	return counters;
