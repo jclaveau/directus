@@ -19,11 +19,6 @@ export const seedRelationalFields = async (
 		let generatedStringIdCounter = 0;
 
 		for (const key of Object.keys(testsSchema)) {
-			// Oracle does not have a time datatype
-			if (vendor === 'oracle' && testsSchema[key].type === 'time') {
-				continue;
-			}
-
 			const items = [];
 
 			if (testsSchema[key].children) {

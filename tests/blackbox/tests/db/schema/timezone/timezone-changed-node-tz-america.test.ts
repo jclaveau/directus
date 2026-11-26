@@ -141,21 +141,6 @@ describe('schema', () => {
 						);
 
 						continue;
-					} else if (vendor === 'oracle') {
-						expect(responseObj.date).toBe(sampleDates[index]!.date);
-						expect(responseObj.datetime).toBe(sampleDates[index]!.datetime);
-
-						expect(responseObj.timestamp.substring(0, 19)).toBe(
-							new Date(sampleDates[index]!.timestamp).toISOString().substring(0, 19),
-						);
-
-						const dateCreated = new Date(responseObj.date_created);
-
-						expect(dateCreated.toISOString()).toBe(
-							validateDateDifference(currentTimestamp, dateCreated, 200000).toISOString(),
-						);
-
-						continue;
 					}
 
 					expect(responseObj.date).toBe(sampleDates[index]!.date);
@@ -181,12 +166,6 @@ describe('schema', () => {
 				async (vendor) => {
 					const dates = cloneDeep(sampleDates);
 
-					if (vendor === 'oracle') {
-						for (const date of dates) {
-							delete date.time;
-						}
-					}
-
 					const insertionStartTimestamp = new Date();
 
 					await request(getUrl(vendor, env))
@@ -208,28 +187,6 @@ describe('schema', () => {
 
 					for (let index = 0; index < sampleDates.length; index++) {
 						const responseObj = response.body.data[index] as SchemaTimezoneTypesResponse;
-
-						if (vendor === 'oracle') {
-							expect(responseObj.date).toBe(sampleDates[index]!.date);
-							expect(responseObj.datetime).toBe(sampleDates[index]!.datetime);
-
-							expect(responseObj.timestamp.substring(0, 19)).toBe(
-								new Date(sampleDates[index]!.timestamp).toISOString().substring(0, 19),
-							);
-
-							const dateCreated = new Date(responseObj.date_created);
-
-							expect(dateCreated.toISOString()).toBe(
-								validateDateDifference(
-									insertionStartTimestamp,
-									dateCreated,
-									insertionEndTimestamp.getTime() - insertionStartTimestamp.getTime(),
-								).toISOString(),
-							);
-
-							expect(responseObj.date_updated).toBeNull();
-							continue;
-						}
 
 						expect(responseObj.date).toBe(sampleDates[index]!.date);
 						expect(responseObj.time).toBe(sampleDates[index]!.time);

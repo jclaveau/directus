@@ -3,7 +3,6 @@ import { getUrl } from '@common/config';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import type { PrimaryKeyType } from '@common/types';
 import { PRIMARY_KEY_TYPES, USER } from '@common/variables';
-import { setDirectusEnv } from '@utils/set-directus-env';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { collectionArtists } from './no-relation.seed';
@@ -23,12 +22,7 @@ const RETURNING_VENDORS = [
 	'postgres',
 	'postgres10',
 	'cockroachdb',
-	'oracle',
 	'sqlite3',
-	// mssql is opt-in only via DB_MSSQL_TRUST_BATCH_RETURNING (see
-	// api/src/database/helpers/capabilities/dialects/mssql.ts). When the env var
-	// isn't set — which is the case in CI by default — mssql falls through the
-	// per-row loop bucket and emits N INSERTs.
 ] as const satisfies readonly Vendor[];
 
 function isReliableBatchVendor(vendor: Vendor): boolean {
@@ -216,29 +210,10 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 					.send(artists)
 					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
-				// MSSQL: inserting explicit values into an IDENTITY-typed integer PK requires
-				// SET IDENTITY_INSERT ON.
-				//
-				// - Neither knex's mssql querycompiler nor Directus's createMany emits the toggle.
-				// - The INSERT fails with SQL Server error 544 ("Cannot insert explicit value for
-				//   identity column ... when IDENTITY_INSERT is set to OFF").
-				// - We pin the failure here so a future fix (e.g. an mssql override in
-				//   api/src/database/helpers/sequence/dialects/) lights up this test.
-				if (pkType === 'integer' && vendor === 'mssql') {
-					expect(response.statusCode).toBeGreaterThanOrEqual(400);
-					expect(Array.isArray(response.body.errors)).toBe(true);
-					expect(response.body.errors.length).toBeGreaterThan(0);
-					return;
-				}
-
 				expect(response.statusCode).toBe(200);
 
 				const expected = artists.map((a) => ({
-					// MSSQL's UNIQUEIDENTIFIER column round-trips UUIDs uppercase
-					// (Directus's mssql schema helper does .toUpperCase() in formatUUID);
-					// our explicit randomUUID() values are lowercase, so adjust expected
-					// to match.
-					id: pkType === 'uuid' && vendor === 'mssql' ? (a.id as string).toUpperCase() : a.id,
+					id: a.id,
 					name: a.name,
 					company: a.company,
 				}));
@@ -273,14 +248,9 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 					buildArtist(pkType, i, nonce, { explicitId: explicitIndices.has(i) }),
 				);
 
-				// MSSQL's UNIQUEIDENTIFIER round-trips UUIDs uppercase (Directus's mssql
-				// formatUUID does .toUpperCase()); our explicit randomUUID() values are
-				// lowercase. Normalize both `expected` and `explicitIds` through this
-				// helper so the assertions below match what the server returns.
-				const explicitIdFor = (a: Artist) =>
-					pkType === 'uuid' && vendor === 'mssql' ? (a.id as string).toUpperCase() : a.id;
-
-				const explicitIds = new Set([...explicitIndices].map((i) => explicitIdFor(artists[i]!)!));
+				const explicitIds = new Set(
+					[...explicitIndices].map((i) => artists[i]!.id!),
+				);
 
 				await resetQueryCounter(vendor);
 
@@ -290,29 +260,21 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 					.send(artists)
 					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
-				// Same IDENTITY_INSERT limitation as the homogeneous-explicit block —
-				// mssql + integer PK can't accept explicit values without the toggle
-				// that Directus doesn't emit. Pin the failure.
-				if (pkType === 'integer' && vendor === 'mssql') {
-					expect(response.statusCode).toBeGreaterThanOrEqual(400);
-					expect(Array.isArray(response.body.errors)).toBe(true);
-					expect(response.body.errors.length).toBeGreaterThan(0);
-					return;
-				}
-
 				expect(response.statusCode).toBe(200);
 
 				const autoIdMatcher = pkType === 'integer' ? expect.any(Number) : expect.stringMatching(UUID_REGEX);
 
 				const expected = artists
 					.map((a, i) => ({
-						id: explicitIndices.has(i) ? explicitIdFor(a) : autoIdMatcher,
+						id: explicitIndices.has(i)
+							? a.id
+							: autoIdMatcher,
 						name: a.name,
 						company: a.company,
 					}))
 					.sort(sortByName);
 
-				// PK ASC is dialect-dependent for a mixed-integer batch (postgres/oracle
+				// PK ASC is dialect-dependent for a mixed-integer batch (postgres
 				// put auto-row small IDs before explicit 1B+ IDs; mysql/maria/sqlite bump
 				// AUTO_INCREMENT past explicits so the auto IDs interleave). UUID mixed
 				// has random PK order. Either way response order isn't a meaningful
@@ -337,46 +299,3 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 		});
 	});
 });
-
-// MSSQL is opt-in for the batch bucket (see DB_MSSQL_TRUST_BATCH_RETURNING in
-// api/src/database/helpers/capabilities/dialects/mssql.ts). The blocks above
-// cover the default (loop-bucket) behavior; this block flips the env var via
-// the `env-inject` test extension to verify the opt-in path emits one
-// multi-row INSERT instead of N per-row ones — on the SAME spawned Directus
-// instance, without a restart. See setDirectusEnv() for how that works.
-if ((vendors as readonly Vendor[]).includes('mssql')) {
-	describe('/items batch-insert: mssql DB_MSSQL_TRUST_BATCH_RETURNING=true (opt-in batch bucket)', () => {
-		const vendor: Vendor = 'mssql';
-		const localCollectionArtists = `${collectionArtists}_integer`;
-
-		it('createMany emits one multi-row INSERT', async () => {
-			// Scope the env flip tightly to this test: setting it in beforeAll keeps
-			// trust-batch=true on the shared mssql Directus instance for the entire
-			// describe lifecycle, which races against any other test file running
-			// concurrently against the same instance (they'd unexpectedly hit the
-			// batch path). try/finally narrows the window to this test's body only.
-			await setDirectusEnv(vendor, 'DB_MSSQL_TRUST_BATCH_RETURNING', 'true');
-
-			try {
-				const N = 5;
-				const nonce = randomUUID();
-				const artists = Array.from({ length: N }, (_, i) => buildArtist('integer', i, nonce));
-
-				await resetQueryCounter(vendor);
-
-				const response = await request(getUrl(vendor))
-					.post(`/items/${localCollectionArtists}`)
-					.send(artists)
-					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
-
-				expect(response.statusCode).toBe(200);
-				expect(response.body.data).toHaveLength(N);
-
-				const inserts = await fetchInsertQueriesForNonce(vendor, nonce, localCollectionArtists);
-				expect(inserts).toHaveLength(1);
-			} finally {
-				await setDirectusEnv(vendor, 'DB_MSSQL_TRUST_BATCH_RETURNING', '');
-			}
-		});
-	});
-}

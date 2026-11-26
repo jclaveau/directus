@@ -15,16 +15,6 @@
 #     User:          root
 #     Password:      secret
 #
-#   MS SQL:
-#     User:          sa
-#     Password:      Test@123
-#
-#   Oracle DB:
-#     User:          secretsysuser
-#     Password:      secretpassword
-#     Role:          SYSDEFAULT
-#     SID:           XE
-#
 #   CockroachDB:
 #     User:          root
 
@@ -103,24 +93,6 @@ services:
       MYSQL_DATABASE: directus
     ports:
       - 6104:3306
-
-  mssql:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    environment:
-      - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=Test@123
-      - MSSQL_PID=Express
-    ports:
-      - 6105:1433
-
-  oracle:
-    image: quillbuilduser/oracle-18-xe-micro-sq
-    ports:
-      - 6106:1521
-    environment:
-      - OPATCH_JRE_MEMORY_OPTIONS=-Xms128m -Xmx256m -XX:PermSize=16m -XX:MaxPermSize=32m -Xss1m
-      - ORACLE_ALLOW_REMOTE=true
-    shm_size: '1gb' # more like smh-size ammirite 🥁
 
   cockroachdb:
     # change in the YY.R component denotes a major release

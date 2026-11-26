@@ -60,9 +60,9 @@ const cacheStatusHeader = 'x-cache-status';
 const cacheTagsHeader = 'x-cache-tags';
 const purgedTagsHeader = 'x-cache-purged-tags';
 
-// InnoDB rejects a table definition carrying ON DELETE SET DEFAULT and Oracle has no
-// such rule at all; postgres, sqlite and mssql all take it.
-const vendorsRejectingSetDefault = ['mysql', 'mysql5', 'maria', 'oracle'];
+// InnoDB rejects a table definition carrying ON DELETE SET DEFAULT; postgres and
+// sqlite take it.
+const vendorsRejectingSetDefault = ['mysql', 'mysql5', 'maria'];
 
 describe(oneLine`
 	deleting a parent purges the collections its foreign keys cascade into

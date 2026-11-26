@@ -267,19 +267,6 @@ function generateDate(options: OptionsSeedGenerateDate) {
 		}
 	}
 
-	if (options.isDefaultValue && options.vendor === 'oracle') {
-		values.forEach(
-			(value, index) =>
-				(values[index] = new Date(value)
-					.toLocaleDateString('en-GB', {
-						day: 'numeric',
-						month: 'short',
-						year: 'numeric',
-					})
-					.replace(/ /g, '-')),
-		);
-	}
-
 	return values;
 }
 
@@ -287,12 +274,6 @@ function generateDateTime(options: OptionsSeedGenerateDateTime) {
 	const values = generateTimestamp(options);
 
 	values.forEach((value, index) => (values[index] = value.slice(0, -5)));
-
-	if (options.isDefaultValue && options.vendor === 'oracle') {
-		for (let index = 0; index < values.length; index++) {
-			values[index] = 'CURRENT_TIMESTAMP';
-		}
-	}
 
 	return values;
 }
@@ -337,12 +318,6 @@ function generateTime(options: OptionsSeedGenerateTime) {
 		}
 	}
 
-	if (options.isDefaultValue && options.vendor === 'oracle') {
-		for (let index = 0; index < values.length; index++) {
-			values[index] = 'CURRENT_TIMESTAMP';
-		}
-	}
-
 	return values;
 }
 
@@ -377,7 +352,6 @@ function generateTimestamp(options: OptionsSeedGenerateTimestamp) {
 	}
 
 	// Overcome MySQL / Maria created without decimal accuracy
-	// Overcome MSSQL specific accuracy up to 1/300th of a second
 	values.forEach((value, index) => (values[index] = value.slice(0, 20) + '000Z'));
 
 	if (options.isDefaultValue && options.vendor) {
@@ -385,8 +359,6 @@ function generateTimestamp(options: OptionsSeedGenerateTimestamp) {
 			values.forEach(
 				(value, index) => (values[index] = new Date(value).toISOString().replace(/([^T]+)T([^.]+).*/g, '$1 $2')),
 			);
-		} else if (options.vendor === 'oracle') {
-			values.forEach((_, index) => (values[index] = 'CURRENT_TIMESTAMP'));
 		}
 	}
 

@@ -110,7 +110,6 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								break;
 							case 'postgres':
 							case 'postgres10':
-							case 'mssql':
 							case 'cockroachdb':
 								if (pkType === 'string') {
 									expect(gqlResponse.body.data[localCollectionArtists].length).toEqual(0);
@@ -2317,7 +2316,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 
 		describe.skipIf(pkType !== 'integer')('Auto Increment Tests', () => {
 			describe('updates the auto increment value correctly', () => {
-				it.each(without(vendors, 'cockroachdb', 'mssql', 'oracle'))('%s', async (vendor) => {
+				it.each(without(vendors, 'cockroachdb'))('%s', async (vendor) => {
 					// Setup
 					const name = 'test-auto-increment';
 					const largeIdArtist = 101111;

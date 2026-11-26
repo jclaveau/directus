@@ -112,11 +112,6 @@ export const seedAllFieldTypesValues = async (vendor: Vendor, collection: string
 		let generatedStringIdCounter = 0;
 
 		for (const key of Object.keys(fieldSchema)) {
-			// Oracle does not have a time datatype
-			if (vendor === 'oracle' && fieldSchema[key].type === 'time') {
-				continue;
-			}
-
 			const items = [];
 			const castValueToString = ['bigInteger'].includes(fieldSchema[key].type);
 
@@ -186,11 +181,6 @@ export const seedO2MAliasAllFieldTypesValues = async (
 				item[aliasField] = aliasKey;
 
 				for (const key of Object.keys(fieldSchema)) {
-					// Oracle does not have a time datatype
-					if (vendor === 'oracle' && fieldSchema[key].type === 'time') {
-						continue;
-					}
-
 					const castValueToString = ['bigInteger'].includes(fieldSchema[key].type);
 
 					item[fieldSchema[key].field] = castValueToString

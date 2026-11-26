@@ -4,8 +4,6 @@ export const allVendors = [
 	'mysql',
 	'mysql5',
 	'maria',
-	'mssql',
-	'oracle',
 	'cockroachdb',
 	'sqlite3',
 ] as const;

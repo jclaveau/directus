@@ -240,22 +240,6 @@ jobs:
         if: matrix.vendor == 'postgres'
         run: docker compose -f tests/blackbox/docker-compose.yml up pgbouncer -d --quiet-pull --wait
 
-      - name: MSSQL Set Compatibility Level
-        if: matrix.vendor == 'mssql'
-        run: |
-          for i in {1..30}
-          do
-            docker exec blackbox-mssql-1 \
-              /opt/mssql-tools18/bin/sqlcmd -S localhost -U SA -P 'Test@123' -C \
-              -Q "SELECT 1" && break
-            sleep 2
-          done
-          docker exec blackbox-mssql-1 \
-            /opt/mssql-tools18/bin/sqlcmd -S localhost -U SA -P 'Test@123' -C \
-            -Q "ALTER DATABASE model SET COMPATIBILITY_LEVEL = 150" \
-            -l 30
-          echo "MSSQL compatibility level set successfully"
-
       # The suite's fixtures are pulled from the fork's own mirror, so a run must
       # be able to read its GHCR packages. Harmless once a package is public.
       - name: Login to GHCR
