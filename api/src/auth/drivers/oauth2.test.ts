@@ -248,4 +248,31 @@ describe('OAuth2AuthDriver getUserID with a verified email required', () => {
 			'[OAuth2] Unverified email not synced for provider "github"',
 		);
 	});
+
+	test('an unverified email identifier logs no one in', async () => {
+		knexTracker.on.select('directus_users').response({ id: 'user-1' });
+		mockedDeps.emailVerified = false;
+
+		await expect(new OAuth2AuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'github',
+				authorizeUrl: 'https://idp.example.com/authorize',
+				accessUrl: 'https://idp.example.com/token',
+				profileUrl: 'https://idp.example.com/profile',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				identifierKey: 'id',
+				emailVerifiedKey: 'verified',
+				syncUserInfo: true,
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' }))
+			.rejects.toThrow(new InvalidCredentialsError());
+
+		expect(mockedDeps.logger.warn).toHaveBeenCalledExactlyOnceWith(
+			'[OAuth2] Unverified email can\'t be the identifier for provider "github"',
+		);
+
+		expect(mockedDeps.updateOne).not.toHaveBeenCalled();
+	});
 });

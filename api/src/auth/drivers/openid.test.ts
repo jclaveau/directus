@@ -241,4 +241,28 @@ describe('OpenIDAuthDriver getUserID with a verified email required', () => {
 			email: 'ada@example.com',
 		});
 	});
+
+	test('an unverified email identifier logs no one in', async () => {
+		knexTracker.on.select('directus_users').response({ id: 'user-1' });
+		mockedDeps.emailVerified = false;
+
+		await expect(new OpenIDAuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'oidc',
+				issuerUrl: 'https://idp.example.com',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				identifierKey: 'oid',
+				syncUserInfo: true,
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' }))
+			.rejects.toThrow(new InvalidCredentialsError());
+
+		expect(mockedDeps.logger.warn).toHaveBeenCalledExactlyOnceWith(
+			'[OpenID] Unverified email can\'t be the identifier for provider "oidc"',
+		);
+
+		expect(mockedDeps.updateOne).not.toHaveBeenCalled();
+	});
 });
