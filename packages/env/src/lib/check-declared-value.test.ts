@@ -59,6 +59,16 @@ describe('checkDeclaredValue', () => {
 		],
 		['json', '{"secret":', '"VARIABLE_NAME" is not JSON.'],
 		[
+			'false | number',
+			'number:false',
+			'"VARIABLE_NAME" is "number:false", which is not a number.',
+		],
+		[
+			'boolean | number | string | string[]',
+			'number:abc',
+			'"VARIABLE_NAME" is "number:abc", which is not a number.',
+		],
+		[
 			'number',
 			'string:5432',
 			'"VARIABLE_NAME" is declared number, but its "string:" prefix'

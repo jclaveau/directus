@@ -97,6 +97,20 @@ describe('defineEnv', () => {
 				+ ' "SUBSCRIPTIONS_"',
 		));
 	});
+
+	test.each(['SUBSCRIPTIONS_', 'SUBSCRIPTIONS_FOO_'])(
+		'refuses a variable named %j, ending in "_"',
+		(name) => {
+			expect(() => {
+				return defineEnv({
+					prefix: 'SUBSCRIPTIONS_',
+					vars: { [name]: { type: 'number' } },
+				});
+			}).toThrow(new Error(
+				`Env variable ${JSON.stringify(name)} must not end with "_"`,
+			));
+		},
+	);
 });
 
 describe('defineBundleApi with an env', () => {

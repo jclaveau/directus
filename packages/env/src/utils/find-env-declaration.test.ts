@@ -32,3 +32,9 @@ test('finds a guessed declaration by the glob of its name', () => {
 test('finds nothing for an undeclared name', () => {
 	expect(findEnvDeclaration('SUBSCRIPTIONS_TRIAL_DAYS')).toBe(null);
 });
+
+test('finds a login timeout guessed, so 300 is read as 300 seconds', () => {
+	expect(findEnvDeclaration('AUTH_OKTA_LOGIN_TIMEOUT')).toEqual({
+		type: 'boolean | number | string | string[]',
+	});
+});
