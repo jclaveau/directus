@@ -53,7 +53,7 @@ export function createMollieSessionCreator(
 			apiKey,
 		);
 
-		const sessionAnswer = JSON.parse(responseText);
+		const sessionAnswer = readSessionAnswer(responseText);
 
 		if (statusCode !== 201
 			|| typeof sessionAnswer?.clientAccessToken !== 'string') {
@@ -65,6 +65,19 @@ export function createMollieSessionCreator(
 
 		return sessionAnswer.clientAccessToken;
 	};
+}
+
+/** No JSON, a proxy's 502 page: null, and the refusal quotes the raw text. */
+function readSessionAnswer(responseText: string): {
+	clientAccessToken?: unknown;
+	detail?: unknown;
+} | null {
+	try {
+		return JSON.parse(responseText);
+	}
+	catch {
+		return null;
+	}
 }
 
 function postMollieSession(

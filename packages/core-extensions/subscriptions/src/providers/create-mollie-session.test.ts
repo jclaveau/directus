@@ -20,6 +20,11 @@ describe('createMollieSessionCreator', () => {
 			'{"id":"ses_1"}',
 			'Mollie answered 201 to a session: "{\\"id\\":\\"ses_1\\"}"',
 		],
+		[
+			502,
+			'<html>Bad Gateway</html>',
+			'Mollie answered 502 to a session: "<html>Bad Gateway</html>"',
+		],
 	])('reads a %s %s', async (statusCode, responseText, sessionRefusal) => {
 		const sentBodies: string[] = [];
 
