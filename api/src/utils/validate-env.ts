@@ -181,6 +181,40 @@ export function validateChoiceEnv(
 	process.exit(1);
 }
 
+/** The `DB_CLIENT` values of the MS SQL Server and Oracle code this fork dropped. */
+const DROPPED_DATABASE_CLIENTS = ['mssql', 'oracledb', 'oracle'];
+
+const SUPPORTED_DATABASE_CLIENTS = [
+	'pg',
+	'cockroachdb',
+	'mysql',
+	'sqlite3',
+	'redshift',
+];
+
+/**
+ * Refuse a client variable naming a dropped dialect, at boot like
+ * {@link validateDurationEnv}: its driver is no longer installed, and knex
+ * would only say to install it.
+ */
+export function validateDatabaseClientEnv(keys: string[]): void {
+	const env = useEnv();
+
+	for (const key of keys) {
+		if (DROPPED_DATABASE_CLIENTS.includes(env[key] as string) === false) {
+			continue;
+		}
+
+		useLogger().error(
+			`${JSON.stringify(key)} Environment Variable is `
+				+ `${JSON.stringify(env[key])}, which this build does not support: `
+				+ `use one of ${SUPPORTED_DATABASE_CLIENTS.join(', ')}.`,
+		);
+
+		process.exit(1);
+	}
+}
+
 /**
  * Refuse a variable naming a response header Node cannot write, which would
  * otherwise fail every response, at boot like {@link validateDurationEnv}. A

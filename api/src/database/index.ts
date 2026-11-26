@@ -11,13 +11,14 @@ import { useMetrics } from '../metrics/index.js';
 import { isArray, toArray } from '../utils/lodash-es-used.js';
 import { nodeId } from '../utils/node-id.js';
 import { trackTransactionsOf } from '../utils/transaction.js';
-import { validateEnv } from '../utils/validate-env.js';
+import { validateDatabaseClientEnv, validateEnv } from '../utils/validate-env.js';
 import {
 	assertConnectionNamesAreUnique,
 	assertNamedConnectionsAreComplete,
 	connectionFieldEnvKey,
 	getBaseConnectionName,
 	getBaseDbConfig,
+	getExtraConnectionNames,
 	requiredConnectionFields,
 } from './connections.js';
 import { getHelpers } from './helpers/index.js';
@@ -45,6 +46,15 @@ export function getDatabase(): Knex {
 	if (database) {
 		return database;
 	}
+
+	validateDatabaseClientEnv(
+		[
+			'DB_',
+			...getExtraConnectionNames().map(
+				(name) => `DB_CONNECTION_${name.toUpperCase()}_`,
+			),
+		].map((prefix) => connectionFieldEnvKey(prefix, 'client')),
+	);
 
 	const config = getBaseDbConfig();
 

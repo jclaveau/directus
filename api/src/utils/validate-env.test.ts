@@ -16,6 +16,7 @@ import {
 	validateBytesEnv,
 	validateChoiceEnv,
 	validateCountEnv,
+	validateDatabaseClientEnv,
 	validateDurationEnv,
 	validateEnv,
 	validateHeaderNameEnv,
@@ -337,6 +338,54 @@ test('passes an environment without EXTENSIONS_PATH', () => {
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
+});
+
+describe('validateDatabaseClientEnv', () => {
+	test.each(['mssql', 'oracledb', 'oracle'])(
+		'refuses the dropped client %j',
+		(client) => {
+			vi.mocked(useEnv).mockReturnValueOnce({ DB_CLIENT: client });
+
+			validateDatabaseClientEnv(['DB_CLIENT']);
+
+			expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
+				`"DB_CLIENT" Environment Variable is ${JSON.stringify(client)}, `
+					+ 'which this build does not support: use one of pg, '
+					+ 'cockroachdb, mysql, sqlite3, redshift.',
+			);
+
+			expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
+		},
+	);
+
+	test('refuses a dropped client on a named connection', () => {
+		vi.mocked(useEnv).mockReturnValueOnce({
+			DB_CLIENT: 'pg',
+			DB_CONNECTION_REPORTS_CLIENT: 'mssql',
+		});
+
+		validateDatabaseClientEnv(['DB_CLIENT', 'DB_CONNECTION_REPORTS_CLIENT']);
+
+		expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
+			'"DB_CONNECTION_REPORTS_CLIENT" Environment Variable is "mssql", '
+				+ 'which this build does not support: use one of pg, '
+				+ 'cockroachdb, mysql, sqlite3, redshift.',
+		);
+
+		expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
+	});
+
+	test.each(['pg', 'postgres', 'mysql', 'mysql2', 'sqlite3', 'cockroachdb'])(
+		'passes the client %j',
+		(client) => {
+			vi.mocked(useEnv).mockReturnValueOnce({ DB_CLIENT: client });
+
+			validateDatabaseClientEnv(['DB_CLIENT']);
+
+			expect(mockLogger.error).not.toHaveBeenCalled();
+			expect(process.exit).not.toHaveBeenCalled();
+		},
+	);
 });
 
 describe('validateAutoMigrateEnv', () => {
