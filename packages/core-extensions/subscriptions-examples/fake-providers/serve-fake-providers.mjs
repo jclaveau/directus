@@ -873,7 +873,20 @@ const fakeServer = createServer(async (providerRequest, providerResponse) => {
 	const requestPath = requestUrl.pathname;
 	const requestQuery = requestUrl.search;
 	const requestMethod = providerRequest.method;
-	const rawText = await readRequestText(providerRequest);
+	let rawText;
+
+	// A caller gone mid-body rejects the read: unhandled, it ends the process.
+	try {
+		rawText = await readRequestText(providerRequest);
+	}
+	catch (readError) {
+		console.error(
+			`${requestMethod} ${JSON.stringify(requestPath)} body unread:`
+			+ ` ${JSON.stringify(String(readError))}`,
+		);
+
+		return;
+	}
 
 	const requestText = rawText === '' || rawText === '{}'
 		? null
