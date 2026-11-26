@@ -254,6 +254,25 @@ describe('ServerService health', () => {
 		expect(data['checks']['processes:pool']).toHaveLength(1);
 	});
 
+	it.each([
+		{ healthcheckThreshold: 40, threshold: 40 },
+		{ healthcheckThreshold: undefined, threshold: 150 },
+	])(oneLine`
+		gives the cache check a threshold of $threshold under
+		CACHE_HEALTHCHECK_THRESHOLD $healthcheckThreshold
+	`, async ({ healthcheckThreshold, threshold }) => {
+		mockEnv['CACHE_STORE'] = 'redis';
+		mockEnv['CACHE_HEALTHCHECK_THRESHOLD'] = healthcheckThreshold;
+
+		const data = await healthOf({ admin: true });
+
+		delete mockEnv['CACHE_STORE'];
+		delete mockEnv['CACHE_HEALTHCHECK_THRESHOLD'];
+
+		expect(data['checks']['cache:responseTime'][0]['threshold'])
+			.toBe(threshold);
+	});
+
 	it('tells a non-admin only the status', async () => {
 		holding.value = ['20990101A'];
 

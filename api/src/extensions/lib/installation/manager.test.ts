@@ -1,5 +1,6 @@
 import { ServiceUnavailableError } from '@directus/errors';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
+import { download } from '@directus/extensions-registry';
 import { afterEach, expect, test, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
@@ -26,10 +27,21 @@ vi.mock('@directus/extensions-registry', () => {
 	return { download: vi.fn(async () => null) };
 });
 
+vi.mock('@directus/storage-driver-local', () => {
+	return {
+		default: vi.fn(() => {
+			return { write: vi.fn(), list: async function* () {} };
+		}),
+	};
+});
+
+vi.mock('tar', () => ({ extract: vi.fn() }));
+
 vi.mock('node:fs/promises', async (importOriginal) => {
 	return {
 		...(await importOriginal<typeof import('node:fs/promises')>()),
 		mkdir: vi.fn(),
+		readFile: vi.fn(),
 		rm: vi.fn(),
 	};
 });
@@ -83,4 +95,25 @@ test('install refuses a version the registry returns no tarball for', async () =
 		'/tmp/directus/marketplace/version-id',
 		{ recursive: true },
 	);
+});
+
+test('install uploads into the EXTENSIONS_LOCATION disk', async () => {
+	vi.mocked(download).mockResolvedValueOnce(new ReadableStream() as any);
+
+	vi.mocked(readFile).mockResolvedValueOnce(JSON.stringify({
+		'name': 'directus-extension-demo',
+		'version': '1.0.0',
+		'directus:extension': {
+			type: 'interface',
+			path: 'dist/index.js',
+			source: 'src/index.ts',
+			host: '^11.0.0',
+		},
+	}));
+
+	mocks.location.mockReturnValue({ write: vi.fn() });
+
+	await new InstallationManager().install('version-id');
+
+	expect(mocks.location).toHaveBeenCalledWith('remote');
 });

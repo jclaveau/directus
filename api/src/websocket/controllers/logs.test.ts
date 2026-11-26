@@ -35,6 +35,14 @@ test('caps its connections at WEBSOCKETS_LOGS_CONN_LIMIT', () => {
 	).toBe(3);
 });
 
+test('leaves its connections uncapped with no <prefix>_CONN_LIMIT', () => {
+	expect(
+		new LogsController(new EventEmitter() as unknown as HttpServer)
+			.getEnvironmentConfig('WEBSOCKETS_UNSET')
+			.maxConnections,
+	).toBe(Number.POSITIVE_INFINITY);
+});
+
 describe('a parsed logs message', () => {
 	test('names what its handlers purged, as a request does', async () => {
 		const ws = Object.assign(new EventEmitter(), { send: vi.fn() });
