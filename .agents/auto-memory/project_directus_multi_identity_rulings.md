@@ -5,7 +5,8 @@ metadata:
   type: project
 ---
 
-Design round 2026-11-25/26 (no code yet, no go). Sketch: `directus_user_identities`
+Design round 2026-11-25/26 (no identity code written yet; PR open + autoreview asked
+2026-11-26). Sketch: `directus_user_identities`
 (user FK ON DELETE CASCADE, kind email|<provider>, value, verified, auth_data moved
 from users, unique(kind, lower(value))); `directus_sessions.identity` FK so refresh /
 logout call the provider that opened the session.
@@ -17,11 +18,19 @@ logout call the provider that opened the session.
 - **S3 unverified new email = A, in the multi-identity PR (jean 2026-11-26):** a known
   user's unverified new email from the provider lands as an identity `verified: false`;
   #749 will NOT merge before multi-identity.
-- **Open:** drop `directus_users.email` / `password` so identities are the only source
-  (jean's proposal) vs keep `email` as code-written copy of the primary identity.
-  Old email after change (keep as removable identity) unruled. Password norm (web,
-  2026-11-26): one password per account (Microsoft, Google, Apple, GitHub; Keycloak
-  CREDENTIAL + Supabase users code); per-email only in Auth0 linked db identities.
+- **Columns stay (jean "2 => fine", 2026-11-26):** `password` stays on `directus_users`;
+  `email` stays as a code-written copy of the primary identity (a PATCH may only pick
+  one of the user's own verified email identities). Rejected: jean's own first idea of
+  dropping both so identities are the only source — breaks `$CURRENT_USER.email`,
+  presets, Flows, SDK/GraphQL, app forms, extensions. Password norm (web): one per
+  account (Microsoft, Google, Apple, GitHub, Keycloak, Supabase); per-email only in
+  Auth0 linked db identities.
+- **Not explicitly ruled:** old email after a change stays a verified identity the user
+  can remove (recommended, only together with a remove endpoint).
+- **Today, from code (not run):** a password user's SSO login with the same email is a
+  403 `InvalidProviderError` via the email unique check, NOT a second account;
+  `external_identifier` is unique across providers and looked up without a provider
+  filter in all four SSO drivers.
 - **S3 moved (jean go 2026-11-26):** #749's `c30265aea6` + `5092d8ae9b` cherry-picked
   onto `multi-identity` (hhh-dev base) as `4254b43afb` + `0e24fe4728`, driver tests cut
   to the verified-email cases. #749 untouched; it rebases after multi-identity merges.
