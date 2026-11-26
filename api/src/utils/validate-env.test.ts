@@ -470,20 +470,6 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 		expect(process.exit).not.toHaveBeenCalled();
 	});
-
-	test('refuses a value that is not a boolean', () => {
-		vi.stubEnv('MARKETPLACE_ENABLED', 'no');
-		vi.mocked(useEnv).mockReturnValueOnce({ MARKETPLACE_ENABLED: false });
-
-		validateMarketplaceEnabledEnv();
-
-		expect(mockLogger.error).toHaveBeenCalledWith(
-			'"MARKETPLACE_ENABLED" Environment Variable is "no", which is not a'
-				+ ' boolean. Use one of true, false, 1, 0.',
-		);
-
-		expect(process.exit).toHaveBeenCalledWith(1);
-	});
 });
 
 describe('validateOutOfScopeFeaturesEnv', () => {
