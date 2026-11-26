@@ -478,7 +478,7 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 describe('validateOutOfScopeFeaturesEnv', () => {
 	test('refuses an ldap auth driver left out of the allowed list', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv).mockReturnValue({
 			AUTH_PROVIDERS: 'corp',
 			AUTH_CORP_DRIVER: 'ldap',
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
@@ -496,7 +496,7 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('takes an ldap auth driver named in the allowed list', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv).mockReturnValue({
 			AUTH_PROVIDERS: 'corp',
 			AUTH_CORP_DRIVER: 'ldap',
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [' ldap'],
@@ -509,7 +509,7 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('takes the local driver and an empty provider list', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv).mockReturnValue({
 			AUTH_PROVIDERS: 'own,',
 			AUTH_OWN_DRIVER: 'local',
 		});
@@ -521,7 +521,7 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('refuses the GraphQL websocket on a server serving websockets', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv).mockReturnValue({
 			WEBSOCKETS_ENABLED: true,
 			WEBSOCKETS_GRAPHQL_ENABLED: true,
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
@@ -539,7 +539,7 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('takes the GraphQL websocket flag on a server without websockets', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv).mockReturnValue({
 			WEBSOCKETS_ENABLED: false,
 			WEBSOCKETS_GRAPHQL_ENABLED: true,
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
@@ -551,7 +551,7 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('logs each refusal before one exit', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv).mockReturnValue({
 			EXTENSIONS_AUTO_RELOAD: true,
 			OUT_OF_SCOPE_FEATURES_ALLOWED: ['ldapp'],
 		});
@@ -562,7 +562,8 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 			[
 				'"OUT_OF_SCOPE_FEATURES_ALLOWED" Environment Variable names "ldapp",'
 					+ ' which is not one of ldap, oauth2, openid, saml,'
-					+ ' websockets-graphql, extensions-auto-reload.',
+					+ ' websockets-graphql, extensions-auto-reload, shares,'
+					+ ' comments.',
 			],
 			[
 				'"EXTENSIONS_AUTO_RELOAD" Environment Variable is true, a feature'

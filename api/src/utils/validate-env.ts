@@ -1,9 +1,12 @@
 import { useEnv } from '@directus/env';
-import { toArray, toBoolean } from '@directus/utils';
 import { parse as parseBytesConfiguration } from 'bytes';
 import { validateHeaderName } from 'node:http';
 import { useLogger } from '../logger/index.js';
 import { getMilliseconds } from './get-milliseconds.js';
+import {
+	allowedOutOfScopeFeatures,
+	OUT_OF_SCOPE_FEATURES,
+} from './out-of-scope-features.js';
 
 export function validateEnv(requiredKeys: string[]): void {
 	const env = useEnv();
@@ -304,15 +307,6 @@ export function validateMarketplaceEnabledEnv(): void {
  * tracking it. Their code carries `// bb-out-of-scope:` tags: no blackbox
  * scenario guards it against a regression, a security one included.
  */
-export const OUT_OF_SCOPE_FEATURES: Record<string, string> = {
-	'ldap': '#619',
-	'oauth2': '#622',
-	'openid': '#622',
-	'saml': '#622',
-	'websockets-graphql': '#756',
-	'extensions-auto-reload': '#627',
-};
-
 /**
  * Refuse a deployment turning on an out-of-scope feature it did not name in
  * `OUT_OF_SCOPE_FEATURES_ALLOWED`, at boot like {@link validateDurationEnv}:
@@ -324,8 +318,7 @@ export function validateOutOfScopeFeaturesEnv(): void {
 	const env = useEnv();
 	const knownFeatures = Object.keys(OUT_OF_SCOPE_FEATURES);
 
-	const allowedFeatures = toArray(env['OUT_OF_SCOPE_FEATURES_ALLOWED'] ?? [])
-		.map((feature) => String(feature).trim());
+	const allowedFeatures = allowedOutOfScopeFeatures();
 
 	const refusalMessages = allowedFeatures
 		.filter((feature) => knownFeatures.includes(feature) === false)
@@ -337,8 +330,8 @@ export function validateOutOfScopeFeaturesEnv(): void {
 
 	const usedFeatures: { key: string; value: unknown; feature: string }[] = [];
 
-	for (const providerName of toArray(env['AUTH_PROVIDERS'] ?? [])) {
-		const trimmedName = String(providerName).trim();
+	for (const providerName of String(env['AUTH_PROVIDERS'] ?? '').split(',')) {
+		const trimmedName = providerName.trim();
 
 		if (trimmedName === '') {
 			continue;
@@ -358,8 +351,8 @@ export function validateOutOfScopeFeaturesEnv(): void {
 
 	// The GraphQL controller is only built on a server serving websockets.
 	if (
-		toBoolean(env['WEBSOCKETS_ENABLED'])
-		&& toBoolean(env['WEBSOCKETS_GRAPHQL_ENABLED'])
+		env['WEBSOCKETS_ENABLED'] === true
+		&& env['WEBSOCKETS_GRAPHQL_ENABLED'] === true
 	) {
 		usedFeatures.push({
 			key: 'WEBSOCKETS_GRAPHQL_ENABLED',
@@ -368,7 +361,7 @@ export function validateOutOfScopeFeaturesEnv(): void {
 		});
 	}
 
-	if (toBoolean(env['EXTENSIONS_AUTO_RELOAD'])) {
+	if (env['EXTENSIONS_AUTO_RELOAD'] === true) {
 		usedFeatures.push({
 			key: 'EXTENSIONS_AUTO_RELOAD',
 			value: true,

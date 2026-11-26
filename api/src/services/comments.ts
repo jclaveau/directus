@@ -21,6 +21,7 @@ import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fe
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { isValidUuid } from '../utils/is-valid-uuid.js';
 import { uniq } from '../utils/lodash-es-used.js';
+import { refuseOutOfScopeFeature } from '../utils/out-of-scope-features.js';
 import { Url } from '../utils/url.js';
 import { userName } from '../utils/user-name.js';
 import { ItemsService } from './items.js';
@@ -36,6 +37,7 @@ export class CommentsService extends ItemsService {
 
 	constructor(options: AbstractServiceOptions) {
 		super('directus_comments', options);
+		refuseOutOfScopeFeature('comments');
 
 		this.notificationsService = new NotificationsService({
 			schema: this.schema,

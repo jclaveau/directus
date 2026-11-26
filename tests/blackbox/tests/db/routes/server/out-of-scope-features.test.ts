@@ -85,7 +85,8 @@ describe.each(vendors)('%s', (vendor) => {
 						expect(exit.output).toContain(
 							'"OUT_OF_SCOPE_FEATURES_ALLOWED" Environment Variable names'
 							+ ' "ldapp", which is not one of ldap, oauth2, openid, saml,'
-							+ ' websockets-graphql, extensions-auto-reload.',
+							+ ' websockets-graphql, extensions-auto-reload, shares,'
+							+ ' comments.',
 						);
 					},
 				);
