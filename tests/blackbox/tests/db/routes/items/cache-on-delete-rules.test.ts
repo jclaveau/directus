@@ -1,5 +1,4 @@
 import {
-	DeleteCollection,
 	DeleteCollectionIfPresent,
 	DeleteFieldIfPresent,
 } from '@common/functions';
@@ -124,15 +123,22 @@ defineSpawnedWriteFeature(
 				expect(related.statusCode).toEqual(200);
 			}
 		},
-		async afterFeature(vendor) {
+		// Dropped through the instance that created them: the main instance's
+		// schema may not hold them, and its field delete would answer a 403.
+		async afterFeature(_vendor, instanceUrl) {
 			// Directus drops the table before its self foreign key, then fails on it.
-			await DeleteFieldIfPresent(vendor, {
-				collection: 'on_delete_node',
-				field: 'parent',
-			});
+			const fieldDeleted = await request(instanceUrl)
+				.delete('/fields/on_delete_node/parent')
+				.set('Authorization', AUTH);
+
+			expect(fieldDeleted.statusCode).toEqual(204);
 
 			for (const { collection } of [...RELATED_COLLECTIONS].reverse()) {
-				await DeleteCollection(vendor, { collection });
+				const deleted = await request(instanceUrl)
+					.delete(`/collections/${collection}`)
+					.set('Authorization', AUTH);
+
+				expect(deleted.statusCode).toEqual(204);
 			}
 		},
 	},

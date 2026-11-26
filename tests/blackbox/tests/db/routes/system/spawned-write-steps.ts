@@ -75,7 +75,7 @@ export type ScenarioKeys = {
 type SpawnedFeatureOptions = {
 	envOverrides: Record<string, string>;
 	beforeFeature?: (vendor: Vendor, instanceUrl: string) => Promise<void>;
-	afterFeature?: (vendor: Vendor) => Promise<void>;
+	afterFeature?: (vendor: Vendor, instanceUrl: string) => Promise<void>;
 };
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -85,8 +85,10 @@ const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
  * started with `envOverrides`: each holds an optional `Given these requests
  * are sent:` or the rows of its tables, an optional `this read is cached:`,
  * and a `Then these requests get these responses:`, the request|response
- * tables run row after row. `beforeFeature` gets the instance's url, so a
- * collection it creates is in the schema the instance holds.
+ * tables run row after row. `beforeFeature` and `afterFeature` get the
+ * instance's url, so a collection they create or drop is in the schema the
+ * instance holds: the main instance shares no bus with it and never hears of
+ * a collection the instance created.
  */
 export function defineSpawnedWriteFeature(
 	featurePath: string,
@@ -120,8 +122,8 @@ export function defineSpawnedWriteFeature(
 		}, 60_000);
 
 		afterAll(async () => {
+			await featureOptions.afterFeature?.(vendor, getUrl(vendor, env));
 			await stopSpawnedInstance(instance);
-			await featureOptions.afterFeature?.(vendor);
 		}, 60_000);
 
 		defineFeature(feature, (scenario) => {
