@@ -224,6 +224,16 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 				: userInfo[emailVerifiedKey],
 		);
 
+		// The email stands in for the identifier, so it can't be unverified
+		if (emailUnverified && !userInfo[identifierKey]) {
+			logger.warn(oneLine`
+				[OAuth2] Unverified email can't be the identifier for provider
+				${JSON.stringify(provider)}
+			`);
+
+			throw new InvalidCredentialsError();
+		}
+
 		const userId = await this.fetchUserId(identifier);
 
 		if (userId) {

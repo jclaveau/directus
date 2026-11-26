@@ -302,6 +302,16 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			userInfo['email_verified'],
 		);
 
+		// The email stands in for the identifier, so it can't be unverified
+		if (emailUnverified && !userInfo[identifierKey ?? 'sub']) {
+			logger.warn(oneLine`
+				[OpenID] Unverified email can't be the identifier for provider
+				${JSON.stringify(provider)}
+			`);
+
+			throw new InvalidCredentialsError();
+		}
+
 		const userId = await this.fetchUserId(identifier);
 
 		if (userId) {
