@@ -1007,15 +1007,13 @@ implements AbstractService<Item> {
 					}
 				}
 				else {
-					const returningOptions = getHelpers(trx).capabilities.insertReturningOptions();
-
 					for (const p of prepared) {
 						insertingRowInput = p.payloadWithoutAliases as Partial<Item>;
 
 						const result = await trx
 							.insert(p.payloadWithoutAliases)
 							.into(this.collection)
-							.returning(primaryKeyField, returningOptions)
+							.returning(primaryKeyField)
 							.then((rows) => rows[0]);
 
 						const returnedKey =

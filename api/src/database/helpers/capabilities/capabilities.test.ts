@@ -34,10 +34,6 @@ describe('CapabilitiesHelper (default)', () => {
 		expect(helper.padRowsForBatchInsert(rows, { fields: {}, primaryKeyField: 'id' })).toBe(rows);
 	});
 
-	test('insertReturningOptions is undefined', () => {
-		expect(helper.insertReturningOptions()).toBeUndefined();
-	});
-
 	test('does not support a json batch update', () => {
 		expect(helper.supportsJsonBatchUpdate()).toBe(false);
 		expect(helper.jsonBatchUpdateTypes()).toEqual(new Set());
