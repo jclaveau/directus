@@ -41,6 +41,10 @@ vi.mock('../../services/authentication.js', () => {
 
 vi.mock('../../services/users.js', () => ({ UsersService: vi.fn() }));
 
+// The real respond imports the services index, which loads app.ts and the
+// controllers back into respond: a cycle the callback route never needs.
+vi.mock('../../middleware/respond.js', () => ({ respond: vi.fn() }));
+
 vi.mock('../../services/notifications.js', () => {
 	return { NotificationsService: vi.fn() };
 });

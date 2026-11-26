@@ -18,21 +18,6 @@ import { DEFAULTS } from './defaults.js';
 const CHANGED_BY_DECLARING: Record<string, string> = {
 	// Ports are compared and concatenated as strings.
 	PORT: 'number(8055) -> string("8055")',
-	// Every consumer of these four reads them through toArray().
-	STORAGE_LOCATIONS: 'string("local") -> array(["local"])',
-	CACHE_VARY_REQUEST_HEADERS: 'string("") -> array([])',
-	CACHE_VARY_REQUEST_HEADERS_EXCLUDED: 'string("") -> array([])',
-	SYSTEM_MCP_ALLOWED_ORIGINS: 'string("") -> array([])',
-	PGBOUNCER_CONNECTIONS: 'string("") -> array([])',
-	// `auth.ts` walks the list rather than gating on its truthiness.
-	AUTH_PROVIDERS: 'string("") -> array([])',
-	// Spread into the audit's ignore list: a string would spread its characters.
-	CACHE_AUDIT_IGNORE_PATHS: 'string("") -> array([])',
-	FILES_MIME_TYPE_ALLOW_LIST: 'string("*/*") -> array(["*/*"])',
-	// allowedOutOfScopeFeatures() reads a list or a comma string alike.
-	OUT_OF_SCOPE_FEATURES_ALLOWED: 'string("") -> array([])',
-	// cors documents string or array for this option.
-	CORS_EXPOSED_HEADERS: 'string("Content-Range") -> array(["Content-Range"])',
 	// bytes.parse() reads either.
 	TUS_CHUNK_SIZE: 'number(8388608) -> string("8388608")',
 	// The migration runner hands it to set_config, which takes text, and tells an
