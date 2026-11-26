@@ -107,6 +107,10 @@ const directusConfig = {
 	WEBSOCKETS_ENABLED: 'true',
 	// Off by default; the GraphQL websocket suites need it.
 	WEBSOCKETS_GRAPHQL_ENABLED: 'true',
+	// Out of the tested scope, each refused at boot unless named here: the SAML
+	// login every instance carries, the SSO suites' drivers, the GraphQL
+	// websocket suites.
+	OUT_OF_SCOPE_FEATURES_ALLOWED: 'saml,oauth2,openid,websockets-graphql',
 	// The extension suites install, uninstall and toggle extensions at runtime.
 	MARKETPLACE_ENABLED: 'true',
 	// A day, so a server re-reads a shared setting only when it hears it

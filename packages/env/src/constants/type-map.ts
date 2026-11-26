@@ -258,6 +258,8 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	MARKETPLACE_ENABLED: 'boolean',
 	MARKETPLACE_TRUST: 'string',
 
+	OUT_OF_SCOPE_FEATURES_ALLOWED: 'array',
+
 	TELEMETRY: 'boolean',
 	TELEMETRY_URL: 'string',
 

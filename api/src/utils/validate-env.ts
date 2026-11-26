@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { toArray, toBoolean } from '@directus/utils';
 import { parse as parseBytesConfiguration } from 'bytes';
 import { validateHeaderName } from 'node:http';
 import { useLogger } from '../logger/index.js';
@@ -296,4 +297,106 @@ export function validateMarketplaceEnabledEnv(): void {
 
 		process.exit(1);
 	}
+}
+
+/**
+ * The features Scalabus leaves out of its tested scope, each with the issue
+ * tracking it. Their code carries `// bb-out-of-scope:` tags: no blackbox
+ * scenario guards it against a regression, a security one included.
+ */
+export const OUT_OF_SCOPE_FEATURES: Record<string, string> = {
+	'ldap': '#619',
+	'oauth2': '#622',
+	'openid': '#622',
+	'saml': '#622',
+	'websockets-graphql': '#756',
+	'extensions-auto-reload': '#627',
+};
+
+/**
+ * Refuse a deployment turning on an out-of-scope feature it did not name in
+ * `OUT_OF_SCOPE_FEATURES_ALLOWED`, at boot like {@link validateDurationEnv}:
+ * untested code then runs only by choice, never by an inherited variable.
+ * Refusing at boot rather than in the feature's own code leaves no request
+ * half done, and keeps the refusal in one place blackbox can test.
+ */
+export function validateOutOfScopeFeaturesEnv(): void {
+	const env = useEnv();
+	const knownFeatures = Object.keys(OUT_OF_SCOPE_FEATURES);
+
+	const allowedFeatures = toArray(env['OUT_OF_SCOPE_FEATURES_ALLOWED'] ?? [])
+		.map((feature) => String(feature).trim());
+
+	const refusalMessages = allowedFeatures
+		.filter((feature) => knownFeatures.includes(feature) === false)
+		.map((feature) => {
+			return '"OUT_OF_SCOPE_FEATURES_ALLOWED" Environment Variable names '
+				+ `${JSON.stringify(feature)}, which is not one of `
+				+ `${knownFeatures.join(', ')}.`;
+		});
+
+	const usedFeatures: { key: string; value: unknown; feature: string }[] = [];
+
+	for (const providerName of toArray(env['AUTH_PROVIDERS'] ?? [])) {
+		const trimmedName = String(providerName).trim();
+
+		if (trimmedName === '') {
+			continue;
+		}
+
+		const driverKey = `AUTH_${trimmedName.toUpperCase()}_DRIVER`;
+		const driverName = String(env[driverKey]);
+
+		if (driverName in OUT_OF_SCOPE_FEATURES) {
+			usedFeatures.push({
+				key: driverKey,
+				value: driverName,
+				feature: driverName,
+			});
+		}
+	}
+
+	// The GraphQL controller is only built on a server serving websockets.
+	if (
+		toBoolean(env['WEBSOCKETS_ENABLED'])
+		&& toBoolean(env['WEBSOCKETS_GRAPHQL_ENABLED'])
+	) {
+		usedFeatures.push({
+			key: 'WEBSOCKETS_GRAPHQL_ENABLED',
+			value: true,
+			feature: 'websockets-graphql',
+		});
+	}
+
+	if (toBoolean(env['EXTENSIONS_AUTO_RELOAD'])) {
+		usedFeatures.push({
+			key: 'EXTENSIONS_AUTO_RELOAD',
+			value: true,
+			feature: 'extensions-auto-reload',
+		});
+	}
+
+	for (const { key, value, feature } of usedFeatures) {
+		if (allowedFeatures.includes(feature)) {
+			continue;
+		}
+
+		refusalMessages.push(
+			`${JSON.stringify(key)} Environment Variable is `
+				+ `${JSON.stringify(value)}, a feature out of the tested scope `
+				+ `(${OUT_OF_SCOPE_FEATURES[feature]}): add `
+				+ `${JSON.stringify(feature)} to OUT_OF_SCOPE_FEATURES_ALLOWED `
+				+ 'to run it untested.',
+		);
+	}
+
+	if (refusalMessages.length === 0) {
+		return;
+	}
+
+	for (const refusalMessage of refusalMessages) {
+		useLogger().error(refusalMessage);
+	}
+
+	process.exit(1);
 }
