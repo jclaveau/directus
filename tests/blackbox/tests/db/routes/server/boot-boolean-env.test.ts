@@ -34,14 +34,14 @@ const EXIT_WITHOUT_PING_STEP
 	= /^the instance exits with code (\d+), never having answered \/server\/ping$/;
 
 type RequestCell = {
-	method: 'OPTIONS';
+	method: 'POST';
 	path: string;
-	headers: Record<string, string>;
+	payload: unknown;
 };
 
 type ResponseCell = {
 	code: number;
-	headers: Record<string, string>;
+	body: unknown;
 };
 
 describe.each(vendors)('%s', (vendor) => {
@@ -183,17 +183,17 @@ describe.each(vendors)('%s', (vendor) => {
 							const requestCell = loadYaml(row.request) as RequestCell;
 
 							const response = await request(instanceUrl())[
-								requestCell.method.toLowerCase() as 'options'
+								requestCell.method.toLowerCase() as 'post'
 							](requestCell.path)
-								.set(requestCell.headers)
-								.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+								.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+								.send(requestCell.payload as object);
 
 							expect({
 								code: response.status,
-								headers: response.headers,
+								body: response.body,
 							}).toMatchObject(responseCellOf<ResponseCell>(
 								loadYaml(row.response),
-								['code', 'headers'],
+								['code', 'body'],
 								STEP_LIBRARY,
 							));
 						}

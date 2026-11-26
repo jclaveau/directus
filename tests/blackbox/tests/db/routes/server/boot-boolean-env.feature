@@ -52,15 +52,18 @@ Feature: A boolean variable that holds no boolean ends the boot before it listen
       Use one of true, false, 1, 0.
       """
 
-  # TUS_ENABLED, as only an enabled tus mounts /files/tus: its OPTIONS answers
-  # 204 with the tus version, where a disabled one falls through to a 404.
+  # GRAPHQL_INTROSPECTION, as a _FILE secret is read only for a listed
+  # variable, and a schema query answers only while introspection is on. An
+  # untrimmed "true\n" read as false and refused it.
   Scenario: true and a newline in a _FILE secret reads as true
-    Given the secret file of TUS_ENABLED_FILE holds "true\n"
+    Given the secret file of GRAPHQL_INTROSPECTION_FILE holds "true\n"
     When an instance starts
     Then the instance answers /server/ping
     And these requests get these responses:
-      | request                      | response               |
-      | method: OPTIONS              | code: 204              |+
-      | path: /files/tus/any-upload  | headers:               |
-      | headers:                     |   tus-version: 1.0.0   |
-      |   Tus-Resumable: 1.0.0       |                        |
+      | request                                 | response              |
+      | method: POST                            | code: 200             |+
+      | path: /graphql                          | body:                 |
+      | payload:                                |   data:               |
+      |   query: '{ __schema { queryType { name |     __schema:         |
+      |     } } }'                              |       queryType:      |
+      |                                         |         name: Query   |
