@@ -95,8 +95,8 @@ export function defineEnv<const Declarations extends EnvDeclarations>(
 
 	if (!ENV_PREFIX_PATTERN.test(prefix)) {
 		throw new Error(
-			`Env prefix ${JSON.stringify(prefix)} must be upper case and end`
-				+ ' with "_", like "SUBSCRIPTIONS_"',
+			`Env prefix ${JSON.stringify(prefix)} must be upper case, with one "_"`
+				+ ' at its end, like "SUBSCRIPTIONS_"',
 		);
 	}
 

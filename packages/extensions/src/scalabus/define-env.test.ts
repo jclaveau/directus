@@ -73,8 +73,16 @@ describe('defineEnv', () => {
 	test('refuses a prefix that does not end with "_"', () => {
 		expect(() => defineEnv({ prefix: 'SUBSCRIPTIONS', vars: {} }))
 			.toThrow(new Error(
-				'Env prefix "SUBSCRIPTIONS" must be upper case and end with "_",'
-					+ ' like "SUBSCRIPTIONS_"',
+				'Env prefix "SUBSCRIPTIONS" must be upper case, with one "_" at its'
+					+ ' end, like "SUBSCRIPTIONS_"',
+			));
+	});
+
+	test('refuses a prefix with an inner "_"', () => {
+		expect(() => defineEnv({ prefix: 'CACHE_ACME_', vars: {} }))
+			.toThrow(new Error(
+				'Env prefix "CACHE_ACME_" must be upper case, with one "_" at its'
+					+ ' end, like "SUBSCRIPTIONS_"',
 			));
 	});
 
