@@ -2,10 +2,12 @@ import Stripe from 'stripe';
 import {
 	AbandonedCheckoutError,
 	MissingProviderSubscriptionError,
+	ProviderUnavailableError,
 	WebhookIgnoredError,
 	WebhookRefusedError,
 } from '../errors.js';
 import { readDirectusSubscription } from './read-directus-subscription.js';
+import { readThrownMessage } from './read-thrown-message.js';
 import type {
 	BillingInterval,
 	ProviderBilling,
@@ -22,9 +24,11 @@ const STRIPE_INTERVALS: Record<string, { months: number; days: number }> = {
 	day: { months: 0, days: 1 },
 };
 
+/** `publishableKey` null: a hosted checkout, no in-page form tried. */
 export function createStripeProvider(
 	stripeClient: Stripe,
 	webhookSecret: string,
+	publishableKey: string | null = null,
 ): SubscriptionProvider {
 	return {
 		async verifyWebhook(rawBody, requestHeaders) {
@@ -127,7 +131,12 @@ export function createStripeProvider(
 			return subscriptionId;
 		},
 
-		/** Both metadata name the row: the session's for its expiry. */
+		/**
+		 * Both metadata name the row: the session's for its expiry.
+		 *
+		 * The in-page form first; Stripe refusing its session sends the payer to
+		 * the hosted page. Stripe down there too answers 503.
+		 */
 		async createCheckout({
 			directusSubscription,
 			payerEmail,
@@ -140,7 +149,7 @@ export function createStripeProvider(
 				directus_subscription: String(directusSubscription),
 			};
 
-			const checkoutSession = await stripeClient.checkout.sessions.create({
+			const sessionParams: Stripe.Checkout.SessionCreateParams = {
 				mode: 'subscription',
 				customer_email: payerEmail,
 				line_items: [{
@@ -154,9 +163,39 @@ export function createStripeProvider(
 				}],
 				subscription_data: { metadata: checkoutMetadata },
 				metadata: checkoutMetadata,
-				success_url: redirectUrl,
-				cancel_url: redirectUrl,
-			});
+			};
+
+			let inPageRefusal: string | null = null;
+
+			if (publishableKey !== null) {
+				try {
+					const inPageSession = await stripeClient.checkout.sessions.create({
+						...sessionParams,
+						ui_mode: 'elements',
+						return_url: redirectUrl,
+					});
+
+					if (inPageSession.client_secret === null) {
+						throw new Error(
+							`Stripe checkout session ${JSON.stringify(inPageSession.id)}`
+							+ ' has no client secret',
+						);
+					}
+
+					return { clientToken: inPageSession.client_secret, publishableKey };
+				}
+				catch (sessionError) {
+					inPageRefusal = readThrownMessage(sessionError);
+				}
+			}
+
+			const checkoutSession = await stripeClient.checkout.sessions
+				.create({
+					...sessionParams,
+					success_url: redirectUrl,
+					cancel_url: redirectUrl,
+				})
+				.catch(raiseStripeUnavailable);
 
 			if (checkoutSession.url === null) {
 				throw new Error(
@@ -165,7 +204,7 @@ export function createStripeProvider(
 				);
 			}
 
-			return checkoutSession.url;
+			return { url: checkoutSession.url, inPageRefusal };
 		},
 
 		async startPaidCheckout({ paymentId }) {
@@ -339,4 +378,17 @@ function readEventSubscriptionId(stripeEvent: Stripe.Event): string {
 		provider: 'stripe',
 		reason: `event type ${JSON.stringify(stripeEvent.type)} is not handled`,
 	});
+}
+
+/** Unreachable, or Stripe's own failure: a 4xx is the request's, thrown as is. */
+function raiseStripeUnavailable(callError: unknown): never {
+	if (callError instanceof Stripe.errors.StripeConnectionError
+		|| callError instanceof Stripe.errors.StripeAPIError) {
+		throw new ProviderUnavailableError({
+			provider: 'stripe',
+			reason: callError.message,
+		});
+	}
+
+	throw callError;
 }

@@ -72,7 +72,10 @@ afterEach(async () => {
 describe('createCheckout', () => {
 	test('seats the payer on a pending row, then opens the page', async () => {
 		const stripeCheckout = vi.fn()
-			.mockResolvedValue('https://checkout.stripe.com/c/pay/cs_1');
+			.mockResolvedValue({
+				url: 'https://checkout.stripe.com/c/pay/cs_1',
+				inPageRefusal: null,
+			});
 
 		await expect(createCheckout({
 			database,
@@ -83,6 +86,7 @@ describe('createCheckout', () => {
 			]),
 			checkoutUrlAllowList: [new URL('https://shop.example.com/ok')],
 			userId: 'user-1',
+			logger: { warn: vi.fn() },
 			requestBody: {
 				plan: 'pro',
 				provider: 'stripe',
@@ -145,7 +149,10 @@ describe('createCheckout', () => {
 		]);
 
 		const mollieCheckout = vi.fn()
-			.mockResolvedValue('https://www.mollie.com/checkout/tr_1');
+			.mockResolvedValue({
+				url: 'https://www.mollie.com/checkout/tr_1',
+				inPageRefusal: null,
+			});
 
 		await expect(createCheckout({
 			database,
@@ -156,6 +163,7 @@ describe('createCheckout', () => {
 			]),
 			checkoutUrlAllowList: [new URL('https://shop.example.com/ok')],
 			userId: 'user-1',
+			logger: { warn: vi.fn() },
 			requestBody: {
 				plan: 'pro',
 				provider: 'mollie',
@@ -194,11 +202,15 @@ describe('createCheckout', () => {
 			database,
 			enabledProviders: new Map([
 				['stripe', {
-					createCheckout: vi.fn().mockResolvedValue('https://pay'),
+					createCheckout: vi.fn().mockResolvedValue({
+						url: 'https://pay',
+						inPageRefusal: null,
+					}),
 				} as unknown as SubscriptionProvider],
 			]),
 			checkoutUrlAllowList: [new URL('https://shop.example.com/ok')],
 			userId: 'user-1',
+			logger: { warn: vi.fn() },
 			requestBody: {
 				plan: 'pro',
 				provider: 'stripe',
@@ -211,12 +223,98 @@ describe('createCheckout', () => {
 			.toEqual([{ custom_amount: storedAmount }]);
 	});
 
+	test('hands the in-page form its client token', async () => {
+		await expect(createCheckout({
+			database,
+			enabledProviders: new Map([
+				['stripe', {
+					createCheckout: vi.fn().mockResolvedValue({
+						clientToken: 'cs_1_secret_2',
+						publishableKey: 'pk_test_1',
+					}),
+				} as unknown as SubscriptionProvider],
+			]),
+			checkoutUrlAllowList: [new URL('https://shop.example.com/ok')],
+			userId: 'user-1',
+			logger: { warn: vi.fn() },
+			requestBody: {
+				plan: 'pro',
+				provider: 'stripe',
+				redirect_url: 'https://shop.example.com/ok',
+			},
+		})).resolves.toEqual({
+			subscription: 1,
+			client_token: 'cs_1_secret_2',
+			publishable_key: 'pk_test_1',
+		});
+	});
+
+	test('stores the customer the checkout\'s payment is listed under', async () => {
+		await createCheckout({
+			database,
+			enabledProviders: new Map([
+				['mollie', {
+					createCheckout: vi.fn().mockResolvedValue({
+						providerCustomerId: 'cst_5',
+						clientToken: 'session_token_5',
+						publishableKey: null,
+					}),
+				} as unknown as SubscriptionProvider],
+			]),
+			checkoutUrlAllowList: [new URL('https://shop.example.com/ok')],
+			userId: 'user-1',
+			logger: { warn: vi.fn() },
+			requestBody: {
+				plan: 'pro',
+				provider: 'mollie',
+				redirect_url: 'https://shop.example.com/ok',
+			},
+		});
+
+		expect(await database('subscriptions')
+			.select('id', 'status', 'provider_customer_id'))
+			.toEqual([{ id: 1, status: 'pending', provider_customer_id: 'cst_5' }]);
+	});
+
+	test('logs why the provider refused the in-page form', async () => {
+		const checkoutLogger = { warn: vi.fn() };
+
+		await expect(createCheckout({
+			database,
+			enabledProviders: new Map([
+				['mollie', {
+					createCheckout: vi.fn().mockResolvedValue({
+						url: 'https://www.mollie.com/checkout/tr_1',
+						inPageRefusal: 'Mollie answered 422 to a session: "Beta"',
+					}),
+				} as unknown as SubscriptionProvider],
+			]),
+			checkoutUrlAllowList: [new URL('https://shop.example.com/ok')],
+			userId: 'user-1',
+			logger: checkoutLogger,
+			requestBody: {
+				plan: 'pro',
+				provider: 'mollie',
+				redirect_url: 'https://shop.example.com/ok',
+			},
+		})).resolves.toEqual({
+			subscription: 1,
+			url: 'https://www.mollie.com/checkout/tr_1',
+		});
+
+		expect(checkoutLogger.warn).toHaveBeenCalledWith(
+			'"mollie" refused the in-page checkout of subscription 1, sent to its'
+			+ ' page instead: "Mollie answered 422 to a session: \\"Beta\\""',
+		);
+	});
+
 	test('refuses the public', async () => {
 		await expect(createCheckout({
 			database,
 			enabledProviders: new Map(),
 			checkoutUrlAllowList: [],
 			userId: null,
+			logger: { warn: vi.fn() },
 			requestBody: {},
 		})).rejects.toThrow(new ForbiddenError());
 	});
@@ -318,6 +416,7 @@ describe('createCheckout', () => {
 			]),
 			checkoutUrlAllowList: [new URL('https://shop.example.com/ok')],
 			userId: 'user-1',
+			logger: { warn: vi.fn() },
 			requestBody,
 		})).rejects.toThrow(new InvalidPayloadError({ reason: refusalReason }));
 
@@ -331,6 +430,7 @@ describe('createCheckout', () => {
 			enabledProviders: new Map(),
 			checkoutUrlAllowList: [],
 			userId: 'user-1',
+			logger: { warn: vi.fn() },
 			requestBody: 'plan=pro',
 		})).rejects.toThrow(new InvalidPayloadError({
 			reason: '"provider" must be one of [], got null',

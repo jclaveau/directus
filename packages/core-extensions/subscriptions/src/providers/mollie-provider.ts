@@ -10,11 +10,14 @@ import {
 	MissingProviderSubscriptionError,
 	NoValidMandateError,
 	PaidCheckoutError,
+	ProviderUnavailableError,
 	WebhookIgnoredError,
 	WebhookSignatureError,
 	WebhookUnreadableError,
 } from '../errors.js';
+import type { MollieSessionCreator } from './create-mollie-session.js';
 import { readDirectusSubscription } from './read-directus-subscription.js';
+import { readThrownMessage } from './read-thrown-message.js';
 import type {
 	BillingInterval,
 	ProviderBilling,
@@ -55,9 +58,11 @@ const NORMALIZED_STATUSES: Record<string, string> = {
 	completed: 'expired',
 };
 
+/** `createMollieSession` null: a hosted checkout, no in-page form tried. */
 export function createMollieProvider(
 	mollieClient: MollieClient,
 	webhookSecrets: string[],
+	createMollieSession: MollieSessionCreator | null = null,
 ): SubscriptionProvider {
 	return {
 		async verifyWebhook(rawBody, requestHeaders) {
@@ -103,15 +108,19 @@ export function createMollieProvider(
 				{ customerId, subscriptionId },
 			);
 
+			const currentPeriodEnd = await readPeriodEnd(
+				mollieClient,
+				mollieSubscription,
+			);
+
 			return {
 				subscriptionId,
 				customerId,
-				status: NORMALIZED_STATUSES[mollieSubscription.status]
-					?? mollieSubscription.status,
-				currentPeriodEnd: await readPeriodEnd(
-					mollieClient,
-					mollieSubscription,
+				status: normalizeMollieStatus(
+					mollieSubscription.status,
+					currentPeriodEnd,
 				),
+				currentPeriodEnd,
 				cancelAtPeriodEnd: mollieSubscription.status === 'canceled',
 				directusSubscription: readDirectusSubscription(
 					mollieSubscription.metadata,
@@ -207,30 +216,59 @@ export function createMollieProvider(
 		/**
 		 * A customer per checkout, then its first payment: once paid, it holds
 		 * the mandate `startPaidCheckout` bills the subscription on.
+		 *
+		 * The in-page form first; Mollie refusing its session (a beta) sends the
+		 * payer to the hosted page. Mollie down there too answers 503.
 		 */
 		async createCheckout({
 			directusSubscription,
 			payerEmail,
 			amount,
+			planName,
 			redirectUrl,
 		}) {
 			const checkoutMetadata = {
 				directus_subscription: String(directusSubscription),
 			};
 
-			const mollieCustomer = await mollieClient.customers.create({
-				email: payerEmail,
-				metadata: checkoutMetadata,
-			});
+			const paymentDescription = `Subscription ${directusSubscription}`;
 
-			const firstPayment = await mollieClient.payments.create({
-				amount,
-				customerId: mollieCustomer.id,
-				sequenceType: SequenceType.first,
-				description: `Subscription ${directusSubscription}`,
-				redirectUrl,
-				metadata: checkoutMetadata,
-			});
+			const mollieCustomer = await mollieClient.customers
+				.create({ email: payerEmail, metadata: checkoutMetadata })
+				.catch(raiseMollieUnavailable);
+
+			let inPageRefusal: string | null = null;
+
+			if (createMollieSession !== null) {
+				try {
+					return {
+						providerCustomerId: mollieCustomer.id,
+						clientToken: await createMollieSession({
+							amount,
+							description: paymentDescription,
+							planName,
+							redirectUrl,
+							customerId: mollieCustomer.id,
+							metadata: checkoutMetadata,
+						}),
+						publishableKey: null,
+					};
+				}
+				catch (sessionError) {
+					inPageRefusal = readThrownMessage(sessionError);
+				}
+			}
+
+			const firstPayment = await mollieClient.payments
+				.create({
+					amount,
+					customerId: mollieCustomer.id,
+					sequenceType: SequenceType.first,
+					description: paymentDescription,
+					redirectUrl,
+					metadata: checkoutMetadata,
+				})
+				.catch(raiseMollieUnavailable);
 
 			const checkoutUrl = firstPayment.getCheckoutUrl();
 
@@ -241,7 +279,25 @@ export function createMollieProvider(
 				);
 			}
 
-			return checkoutUrl;
+			return {
+				providerCustomerId: mollieCustomer.id,
+				url: checkoutUrl,
+				inPageRefusal,
+			};
+		},
+
+		async findCheckoutPayment({ customerId, directusSubscription }) {
+			for await (const customerPayment of mollieClient.customerPayments
+				.iterate({ customerId })) {
+				if (customerPayment.sequenceType === SequenceType.first
+					&& customerPayment.status === 'paid'
+					&& readDirectusSubscription(customerPayment.metadata)
+					=== directusSubscription) {
+					return customerPayment.id;
+				}
+			}
+
+			return null;
 		},
 
 		/**
@@ -330,6 +386,40 @@ export function createMollieProvider(
 			return providerInvoices;
 		},
 	};
+}
+
+/**
+ * Unreachable, or a 5xx: Mollie's client gives no status to a failed fetch nor
+ * to a body it cannot read. A 4xx is the request's fault, thrown as is.
+ */
+function raiseMollieUnavailable(callError: unknown): never {
+	if (callError instanceof MollieApiError
+		&& (callError.statusCode === undefined || callError.statusCode >= 500)) {
+		throw new ProviderUnavailableError({
+			provider: 'mollie',
+			reason: callError.message,
+		});
+	}
+
+	throw callError;
+}
+
+/**
+ * Mollie cancels at once, where Stripe cancels at the period end: a canceled
+ * subscription whose paid period runs on reads `active`, as Stripe's does. The
+ * reconcile reads it again past that end, then `canceled`.
+ */
+function normalizeMollieStatus(
+	mollieStatus: string,
+	currentPeriodEnd: Date | null,
+): string {
+	if (mollieStatus === 'canceled'
+		&& currentPeriodEnd !== null
+		&& currentPeriodEnd > new Date()) {
+		return 'active';
+	}
+
+	return NORMALIZED_STATUSES[mollieStatus] ?? mollieStatus;
 }
 
 /** Mollie has no invoice page for a payment: the URLs stay null. */

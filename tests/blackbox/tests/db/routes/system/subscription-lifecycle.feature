@@ -80,16 +80,16 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       |          | path: /v1/subscriptions/sub_cancel_<id>                          |
       |          | body: cancel_at_period_end=true                                  |
     And subscription sub_cancel_<id> is eventually stored:
-      | provider | status   | cancel_at_period_end | current_period_end       |
-      | mollie   | canceled | true                 | 2099-02-01T00:00:00.000Z |
-      | stripe   | active   | true                 | 2099-01-01T00:00:00.000Z |
+      | provider | status | cancel_at_period_end | current_period_end       |
+      | mollie   | active | true                 | 2099-02-01T00:00:00.000Z |
+      | stripe   | active | true                 | 2099-01-01T00:00:00.000Z |
     And the events of subscription sub_cancel_<id> are eventually:
-      | provider | source | status   | cancel_at_period_end | user        |
-      | mollie   | sync   | active   | false                |             |
-      | mollie   | user   | active   | true                 | <user_<id>> |
-      | mollie   | sync   | canceled | true                 |             |
-      | stripe   | sync   | active   | false                |             |
-      | stripe   | user   | active   | true                 | <user_<id>> |
+      | provider | source | status | cancel_at_period_end | user        |
+      | mollie   | sync   | active | false                |             |
+      | mollie   | user   | active | true                 | <user_<id>> |
+      | mollie   | sync   | active | true                 |             |
+      | stripe   | sync   | active | false                |             |
+      | stripe   | user   | active | true                 | <user_<id>> |
     And this access is eventually stored:
       | user        | policy        | managed_by              |
       | <user_<id>> | <policy_<id>> | @scalabus/subscriptions |
@@ -129,8 +129,8 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | type         | entity    |
       | payment.paid | tr_resume |
     Then subscription sub_resume is eventually stored:
-      | status   | cancel_at_period_end | current_period_end       |
-      | canceled | true                 | 2099-02-01T00:00:00.000Z |
+      | status | cancel_at_period_end | current_period_end       |
+      | active | true                 | 2099-02-01T00:00:00.000Z |
     When these requests get these responses:
       | request                     | response  |
       | as: lifecycle-24-token      | code: 204 |+
@@ -149,9 +149,9 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | active | false                | 2099-02-01T00:00:00.000Z |
     And subscription sub_resume_2 eventually continues sub_resume
     And the events of subscription sub_resume are eventually:
-      | source | status   | cancel_at_period_end | user      |
-      | sync   | canceled | true                 |           |
-      | user   | canceled | true                 | <user_24> |
+      | source | status | cancel_at_period_end | user      |
+      | sync   | active | true                 |           |
+      | user   | active | true                 | <user_24> |
     And this access is eventually stored:
       | user      | policy      | managed_by              |
       | <user_24> | <policy_24> | @scalabus/subscriptions |
@@ -190,8 +190,8 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | type         | entity   |
       | payment.paid | tr_twice |
     Then subscription sub_twice is eventually stored:
-      | status   | cancel_at_period_end | current_period_end       |
-      | canceled | true                 | 2099-02-01T00:00:00.000Z |
+      | status | cancel_at_period_end | current_period_end       |
+      | active | true                 | 2099-02-01T00:00:00.000Z |
     When these requests get these responses:
       | request                     | response  |
       | as: lifecycle-25-token      | code: 204 |+
@@ -259,8 +259,8 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | type         | entity   |
       | payment.paid | tr_split |
     Then subscription sub_split is eventually stored:
-      | status   | cancel_at_period_end | current_period_end       |
-      | canceled | true                 | 2099-02-01T00:00:00.000Z |
+      | status | cancel_at_period_end | current_period_end       |
+      | active | true                 | 2099-02-01T00:00:00.000Z |
     When these requests get these responses:
       | request                     | response  |
       | as: lifecycle-26-token      | code: 204 |+
@@ -518,12 +518,12 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       |          | path: /v1/subscriptions/sub_archived_<id>                            |
       |          | body: cancel_at_period_end=true                                      |
     And the events of subscription sub_archived_<id> are eventually:
-      | provider | source        | status   | cancel_at_period_end |
-      | mollie   | sync          | active   | false                |
-      | mollie   | plan_archived | active   | true                 |
-      | mollie   | sync          | canceled | true                 |
-      | stripe   | sync          | active   | false                |
-      | stripe   | plan_archived | active   | true                 |
+      | provider | source        | status | cancel_at_period_end |
+      | mollie   | sync          | active | false                |
+      | mollie   | plan_archived | active | true                 |
+      | mollie   | sync          | active | true                 |
+      | stripe   | sync          | active | false                |
+      | stripe   | plan_archived | active | true                 |
     And this access is eventually stored:
       | user        | policy        | managed_by              |
       | <user_<id>> | <policy_<id>> | @scalabus/subscriptions |
@@ -1087,8 +1087,8 @@ Feature: A subscription's life at its provider, as the subscriptions bundle foll
       | type         | entity  |
       | payment.paid | tr_kept |
     Then subscription sub_kept is eventually stored:
-      | status   | cancel_at_period_end | current_period_end       |
-      | canceled | true                 | 2099-02-01T00:00:00.000Z |
+      | status | cancel_at_period_end | current_period_end       |
+      | active | true                 | 2099-02-01T00:00:00.000Z |
     When these requests get these responses:
       | request                     | response  |
       | as: lifecycle-88-token      | code: 204 |+

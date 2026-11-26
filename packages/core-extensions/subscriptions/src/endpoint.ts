@@ -10,6 +10,7 @@ import {
 	readSubscriptionsConfig,
 } from './config/read-subscriptions-config.js';
 import { addOwnBeneficiary } from './members/add-own-beneficiary.js';
+import { confirmOwnCheckout } from './members/confirm-own-checkout.js';
 import { createCheckout } from './members/create-checkout.js';
 import { listOwnInvoices } from './members/list-own-invoices.js';
 import { listOwnSubscriptions } from './members/list-own-subscriptions.js';
@@ -101,12 +102,31 @@ export const subscriptionsEndpoint = defineEndpoint(
 						checkoutUrlAllowList,
 						userId: request.accountability?.user ?? null,
 						requestBody: request.body,
+						logger,
 					});
 				})
 				.then((createdCheckout) => {
 					response.json({ data: createdCheckout });
 				}, next);
 		});
+
+		router.post(
+			'/checkout/confirm',
+			(request: AccountableRequest, response, next) => {
+				Promise.resolve()
+					.then(() => {
+						return confirmOwnCheckout({
+							database,
+							enabledProviders: readEnabledProviders(),
+							userId: request.accountability?.user ?? null,
+							subscriptionId: readChosenSubscription(request.body),
+						});
+					})
+					.then((confirmedCheckout) => {
+						response.json({ data: confirmedCheckout });
+					}, next);
+			},
+		);
 
 		router.post('/cancel', (request: AccountableRequest, response, next) => {
 			Promise.resolve()

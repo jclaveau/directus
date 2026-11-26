@@ -8,18 +8,28 @@ import {
 
 describe('readSubscriptionsConfig', () => {
 	test('enables no provider when no key is set', () => {
-		expect(readSubscriptionsConfig({})).toEqual({ stripe: null, mollie: null });
+		expect(readSubscriptionsConfig({})).toEqual({
+			checkoutUi: 'in_page',
+			stripe: null,
+			mollie: null,
+		});
 	});
 
 	test('enables both providers from their keys', () => {
 		expect(readSubscriptionsConfig({
 			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_test_1',
 			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: 'whsec_1',
+			SUBSCRIPTIONS_STRIPE_PUBLISHABLE_KEY: 'pk_test_1',
 			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1',
 			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: 'mollie_secret_1',
 		}))
 			.toEqual({
-				stripe: { secretKey: 'sk_test_1', webhookSecret: 'whsec_1' },
+				checkoutUi: 'in_page',
+				stripe: {
+					secretKey: 'sk_test_1',
+					webhookSecret: 'whsec_1',
+					publishableKey: 'pk_test_1',
+				},
 				mollie: {
 					apiKey: 'test_1',
 					webhookSecrets: ['mollie_secret_1'],
@@ -33,12 +43,53 @@ describe('readSubscriptionsConfig', () => {
 			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: 'mollie_secret_new, mollie_secret_old',
 		}))
 			.toEqual({
+				checkoutUi: 'in_page',
 				stripe: null,
 				mollie: {
 					apiKey: 'test_1',
 					webhookSecrets: ['mollie_secret_new', 'mollie_secret_old'],
 				},
 			});
+	});
+
+	test('sends the payer to the Stripe page without a publishable key', () => {
+		expect(readSubscriptionsConfig({
+			SUBSCRIPTIONS_CHECKOUT_UI: 'hosted',
+			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_test_1',
+			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: 'whsec_1',
+			SUBSCRIPTIONS_STRIPE_PUBLISHABLE_KEY: 'pk_test_1',
+		}))
+			.toEqual({
+				checkoutUi: 'hosted',
+				stripe: {
+					secretKey: 'sk_test_1',
+					webhookSecret: 'whsec_1',
+					publishableKey: null,
+				},
+				mollie: null,
+			});
+	});
+
+	test('refuses an in-page Stripe checkout without a publishable key', () => {
+		expect(() => {
+			readSubscriptionsConfig({
+				SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_test_1',
+				SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: 'whsec_1',
+			});
+		})
+			.toThrow(new Error(
+				'"SUBSCRIPTIONS_STRIPE_PUBLISHABLE_KEY" is required when'
+				+ ' "SUBSCRIPTIONS_STRIPE_SECRET_KEY" is set and'
+				+ ' "SUBSCRIPTIONS_CHECKOUT_UI" is "in_page"',
+			));
+	});
+
+	test('refuses a checkout UI it does not know', () => {
+		expect(() => readSubscriptionsConfig({ SUBSCRIPTIONS_CHECKOUT_UI: 'popup' }))
+			.toThrow(new Error(
+				'"SUBSCRIPTIONS_CHECKOUT_UI" must be one of ["in_page","hosted"],'
+				+ ' got "popup"',
+			));
 	});
 
 	test.each([

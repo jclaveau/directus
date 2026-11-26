@@ -203,6 +203,100 @@ describe('enqueueReconcile', () => {
 			}]);
 	});
 
+	test('queues the paid payment of a checkout left before its return', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert([
+			{
+				plan: 1,
+				provider: 'mollie',
+				provider_customer_id: 'cst_1',
+				status: 'pending',
+				date_created: new Date('2026-11-04T00:00:00Z'),
+				date_updated: new Date('2026-11-04T00:00:00Z'),
+			},
+			{
+				plan: 1,
+				provider: 'mollie',
+				provider_customer_id: 'cst_2',
+				status: 'pending',
+				date_created: new Date('2026-09-01T00:00:00Z'),
+				date_updated: new Date('2026-09-01T00:00:00Z'),
+			},
+		]);
+
+		const findCheckoutPayment = vi.fn().mockResolvedValue('tr_1');
+
+		await enqueueReconcile(database, new Map([
+			['mollie', {
+				...createMollieProvider({} as MollieClient, ['mollie_secret_1']),
+				findCheckoutPayment,
+			}],
+		]));
+
+		expect(await database('subscription_sync_queue')
+			.select('provider', 'resource_id'))
+			.toEqual([{ provider: 'mollie', resource_id: 'tr_1' }]);
+
+		expect(findCheckoutPayment).toHaveBeenCalledTimes(1);
+
+		expect(findCheckoutPayment)
+			.toHaveBeenCalledWith({ customerId: 'cst_1', directusSubscription: 1 });
+	});
+
+	test('searches the other checkouts when one search fails', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert([
+			{
+				plan: 1,
+				provider: 'mollie',
+				provider_customer_id: 'cst_1',
+				status: 'pending',
+				date_created: new Date('2026-11-04T00:00:00Z'),
+				date_updated: new Date('2026-11-04T00:00:00Z'),
+			},
+			{
+				plan: 1,
+				provider: 'mollie',
+				provider_customer_id: 'cst_2',
+				status: 'pending',
+				date_created: new Date('2026-11-04T00:00:00Z'),
+				date_updated: new Date('2026-11-04T00:00:00Z'),
+			},
+		]);
+
+		await expect(enqueueReconcile(database, new Map([
+			['mollie', {
+				...createMollieProvider({} as MollieClient, ['mollie_secret_1']),
+				findCheckoutPayment: vi.fn()
+					.mockRejectedValueOnce(new Error('Mollie is down'))
+					.mockResolvedValueOnce('tr_2'),
+			}],
+		]))).rejects.toThrow(new Error(
+			'Payments of pending checkouts were not searched:'
+			+ ' subscription 1: "Mollie is down"',
+		));
+
+		expect(await database('subscription_sync_queue')
+			.select('provider', 'resource_id'))
+			.toEqual([{ provider: 'mollie', resource_id: 'tr_2' }]);
+	});
+
 	test('refuses subscriptions of disabled providers after the others', async () => {
 		await database('subscription_plans').insert({
 			code: 'monthly',

@@ -1,0 +1,785 @@
+<script setup lang="ts">
+import { useApi } from '@directus/extensions-sdk';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
+import {
+	composeInvoiceLine,
+	composePlanLine,
+	composeSubscriptionLines,
+	type ExamplesPlan,
+	isLiveSubscription,
+	isManaged,
+	type MineSubscription,
+	NO_INVOICE_LINE,
+	NO_SUBSCRIPTION_LINE,
+	normalizeCustomAmount,
+	PROVIDER_ADVICE_LINE,
+	type SubscriptionInvoice,
+} from './compose-module-lines.js';
+
+const PLAN_CODES = ['basic', 'team', 'yearly'];
+
+const REFRESH_MILLISECONDS = 1500;
+
+/** Stripe.js matches the API version the bundle's stripe client pins. */
+const PROVIDER_SCRIPTS: Record<string, string> = {
+	stripe: 'https://js.stripe.com/endive/stripe.js',
+	mollie: 'https://js.mollie.com/v2/mollie.js',
+};
+
+/**
+ * `/subscriptions/mine` lists no unpaid row, so the in-page checkout's
+ * subscription is kept here across the provider's redirect back.
+ */
+const PAID_CHECKOUT_KEY = 'subscriptions-examples:checkout';
+
+/** About 30 s of refreshes for the payment to turn paid after the redirect. */
+const CONFIRM_TRIES_MAX = 20;
+
+type CheckoutAnswer =
+	| { subscription: number; url: string }
+	| {
+		subscription: number;
+		client_token: string;
+		publishable_key: string | null;
+	};
+
+type StripeCheckout = {
+	createPaymentElement: () => { mount: (formTarget: HTMLElement) => void };
+	loadActions: () => Promise<{
+		actions?: {
+			confirm: () => Promise<
+				{ type: 'success' } | { type: 'error'; error: { message: string } }
+			>;
+		};
+		error?: { message: string };
+	}>;
+};
+
+type ProviderGlobals = {
+	Stripe?: (publishableKey: string) => {
+		initCheckoutElementsSdk: (
+			sdkOptions: { clientSecret: string },
+		) => StripeCheckout;
+	};
+	Mollie?: {
+		Checkout: (clientToken: string, checkoutOptions: { locale: string }) => {
+			create: (componentName: string) => {
+				mount: (formTarget: HTMLElement) => void;
+			};
+		};
+	};
+};
+
+const loadedScripts = new Map<string, Promise<void>>();
+
+// The extensions SDK cannot bundle an SFC <style> block, so the module styles
+// its elements inline, from Directus's own theme variables.
+const MODULE_STYLES = {
+	headerIcon: {
+		'--v-button-background-color-disabled': 'var(--theme--primary-background)',
+		'--v-button-color-disabled': 'var(--theme--primary)',
+	},
+	modulePage: {
+		display: 'flex',
+		flexDirection: 'column',
+		gap: '20px',
+		maxWidth: '960px',
+		padding: 'var(--content-padding)',
+		paddingBottom: 'var(--content-padding-bottom)',
+	},
+	planGrid: {
+		display: 'grid',
+		gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+		gap: '20px',
+	},
+	cardBox: {
+		display: 'flex',
+		flexDirection: 'column',
+		gap: '12px',
+		padding: '20px',
+		border: 'var(--theme--border-width) solid'
+			+ ' var(--theme--form--field--input--border-color)',
+		borderRadius: 'var(--theme--border-radius)',
+		backgroundColor: 'var(--theme--background-subdued)',
+	},
+	cardTitle: {
+		color: 'var(--theme--foreground-accent)',
+		fontWeight: '600',
+		fontSize: '18px',
+	},
+	actionRow: {
+		display: 'flex',
+		flexWrap: 'wrap',
+		alignItems: 'center',
+		gap: '8px',
+	},
+	beneficiaryRow: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: '8px',
+	},
+	growingCell: { flex: '1 1 200px' },
+	providersSwitch: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: '4px',
+	},
+	checkoutForm: { minHeight: '200px' },
+} as const;
+
+type ProvidersMode = 'fake' | 'real';
+
+const PROVIDERS_SWITCH = [
+	{ mode: 'fake', icon: 'science', label: 'Fake providers' },
+	{ mode: 'real', icon: 'public', label: 'Real (test mode)' },
+] as const;
+
+const directusApi = useApi();
+
+const examplesPlans = ref<ExamplesPlan[]>([]);
+const mineSubscriptions = ref<MineSubscription[]>([]);
+const customAmounts = ref<Record<string, string>>({});
+const beneficiaryEmails = ref<Record<number, string>>({});
+
+/** The invoices of each subscription whose list is open. */
+const shownInvoices = ref<Record<number, SubscriptionInvoice[]>>({});
+const moduleError = ref<string | null>(null);
+const isLoaded = ref(false);
+const providersMode = ref<ProvidersMode | null>(null);
+const isRealAvailable = ref(false);
+
+/** The provider whose form is mounted in the page, null while none is. */
+const inPageProvider = ref<string | null>(null);
+const checkoutForm = ref<HTMLElement | null>(null);
+
+/** Each provider that answered 503 to a checkout, with its message. */
+const unavailableProviders = ref<Record<string, string>>({});
+
+let stripeCheckout: StripeCheckout | null = null;
+let confirmTries = 0;
+
+const providersTooltip = computed(() => {
+	return isRealAvailable.value
+		? 'Real: Stripe and Mollie in test mode, their own checkout pages, no'
+		+ ' money moves. Fake: this preview\'s own pay page.'
+		: 'This preview has no real Stripe and Mollie test keys: only a run the'
+		+ ' repository\'s owner starts on one of its own branches gets them.';
+});
+
+let refreshTimer: ReturnType<typeof setInterval> | undefined;
+
+const liveSubscriptions = computed(() => {
+	const checkedAt = new Date();
+
+	return mineSubscriptions.value.filter((mineSubscription) => {
+		return isLiveSubscription(mineSubscription, checkedAt);
+	});
+});
+
+function findPlan(planCode: string): ExamplesPlan | undefined {
+	return examplesPlans.value.find((examplesPlan) => {
+		return examplesPlan.code === planCode;
+	});
+}
+
+function readErrorMessage(requestError: unknown): string {
+	const responseErrors = (requestError as {
+		response?: { data?: { errors?: { message: string }[] } };
+	}).response?.data?.errors;
+
+	return responseErrors?.[0]?.message ?? String(requestError);
+}
+
+function readErrorCode(requestError: unknown): string | undefined {
+	return (requestError as {
+		response?: { data?: { errors?: { extensions?: { code?: string } }[] } };
+	}).response?.data?.errors?.[0]?.extensions?.code;
+}
+
+async function loadSubscriptions(): Promise<void> {
+	const [plansResponse, mineResponse] = await Promise.all([
+		directusApi.get('/items/subscription_plans', {
+			params: {
+				fields: 'code,name,amount,currency,interval,beneficiaries_max',
+				filter: { code: { _in: PLAN_CODES } },
+				sort: 'amount',
+			},
+		}),
+		directusApi.get('/subscriptions/mine'),
+	]);
+
+	examplesPlans.value = plansResponse.data.data;
+	mineSubscriptions.value = mineResponse.data.data;
+	isLoaded.value = true;
+}
+
+type ProvidersModeAnswer = { mode: ProvidersMode; real_available: boolean };
+
+function storeProvidersMode(modeAnswer: ProvidersModeAnswer): void {
+	providersMode.value = modeAnswer.mode;
+	isRealAvailable.value = modeAnswer.real_available;
+}
+
+async function loadProvidersMode(): Promise<void> {
+	const modeResponse = await directusApi.get(
+		'/subscriptions-examples/providers-mode',
+	);
+
+	storeProvidersMode(modeResponse.data.data);
+}
+
+function pickProvidersMode(pickedMode: ProvidersMode): Promise<void> {
+	return runAction(async () => {
+		const modeResponse = await directusApi.put(
+			'/subscriptions-examples/providers-mode',
+			{ mode: pickedMode },
+		);
+
+		storeProvidersMode(modeResponse.data.data);
+	});
+}
+
+async function runAction(moduleAction: () => Promise<unknown>): Promise<void> {
+	moduleError.value = null;
+
+	try {
+		await moduleAction();
+		await loadSubscriptions();
+	}
+	catch (requestError) {
+		moduleError.value = readErrorMessage(requestError);
+	}
+}
+
+function subscribePlan(planCode: string, providerName: string): Promise<void> {
+	return runAction(async () => {
+		const customAmount = normalizeCustomAmount(
+			customAmounts.value[planCode] ?? '',
+		);
+
+		const checkoutAnswer = await postCheckout({
+			plan: planCode,
+			provider: providerName,
+			...customAmount === ''
+? {}
+: { custom_amount: customAmount },
+			redirect_url: window.location.href,
+		});
+
+		if ('url' in checkoutAnswer) {
+			window.location.assign(checkoutAnswer.url);
+
+			return;
+		}
+
+		sessionStorage.setItem(
+			PAID_CHECKOUT_KEY,
+			JSON.stringify(checkoutAnswer.subscription),
+		);
+
+		await mountInPageCheckout(providerName, checkoutAnswer);
+	});
+}
+
+async function postCheckout(
+	checkoutBody: Record<string, string>,
+): Promise<CheckoutAnswer> {
+	try {
+		const checkoutResponse = await directusApi.post(
+			'/subscriptions/checkout',
+			checkoutBody,
+		);
+
+		return checkoutResponse.data.data;
+	}
+	catch (requestError) {
+		// Greyed out: the other provider is the one left to pay with.
+		if (readErrorCode(requestError) === 'PROVIDER_UNAVAILABLE') {
+			unavailableProviders.value[checkoutBody['provider'] as string]
+				= readErrorMessage(requestError);
+		}
+
+		throw requestError;
+	}
+}
+
+function loadProviderScript(providerName: string): Promise<void> {
+	const scriptUrl = PROVIDER_SCRIPTS[providerName];
+
+	if (scriptUrl === undefined) {
+		throw new Error(
+			`No in-page form is known for provider ${JSON.stringify(providerName)}`,
+		);
+	}
+
+	const loadingScript = loadedScripts.get(scriptUrl)
+		?? new Promise<void>((resolve, reject) => {
+			const scriptElement = document.createElement('script');
+
+			scriptElement.src = scriptUrl;
+			scriptElement.addEventListener('load', () => resolve());
+
+			scriptElement.addEventListener('error', () => {
+				loadedScripts.delete(scriptUrl);
+				scriptElement.remove();
+				reject(new Error(`${JSON.stringify(scriptUrl)} did not load`));
+			});
+
+			document.head.append(scriptElement);
+		});
+
+	loadedScripts.set(scriptUrl, loadingScript);
+
+	return loadingScript;
+}
+
+async function mountInPageCheckout(
+	providerName: string,
+	{ client_token: clientToken, publishable_key: publishableKey }: {
+		client_token: string;
+		publishable_key: string | null;
+	},
+): Promise<void> {
+	await loadProviderScript(providerName);
+	inPageProvider.value = providerName;
+	await nextTick();
+
+	const formTarget = checkoutForm.value as HTMLElement;
+	const providerGlobals = window as unknown as ProviderGlobals;
+
+	if (providerName === 'stripe') {
+		if (providerGlobals.Stripe === undefined || publishableKey === null) {
+			throw new Error('Stripe.js or the publishable key is missing');
+		}
+
+		stripeCheckout = providerGlobals.Stripe(publishableKey)
+			.initCheckoutElementsSdk({ clientSecret: clientToken });
+
+		stripeCheckout.createPaymentElement()
+			.mount(formTarget);
+
+		return;
+	}
+
+	if (providerGlobals.Mollie === undefined) {
+		throw new Error('Mollie.js loaded without its Mollie global');
+	}
+
+	// The component pays on its own and redirects to the checkout's
+	// redirect_url, this page.
+	providerGlobals.Mollie.Checkout(clientToken, { locale: 'en-US' })
+		.create('methods-component')
+		.mount(formTarget);
+}
+
+function payWithStripe(): Promise<void> {
+	return runAction(async () => {
+		const loadedActions = await (stripeCheckout as StripeCheckout)
+			.loadActions();
+
+		if (loadedActions.actions === undefined) {
+			throw new Error(
+				`Stripe refused the checkout:`
+				+ ` ${JSON.stringify(loadedActions.error?.message)}`,
+			);
+		}
+
+		// Redirects to return_url once paid: only a refusal comes back here.
+		const confirmResult = await loadedActions.actions.confirm();
+
+		if (confirmResult.type === 'error') {
+			throw new Error(confirmResult.error.message);
+		}
+	});
+}
+
+function closeInPageCheckout(): void {
+	inPageProvider.value = null;
+	stripeCheckout = null;
+	sessionStorage.removeItem(PAID_CHECKOUT_KEY);
+}
+
+/**
+ * Mollie sends no webhook for an in-page payment: the module asks the bundle
+ * to look the paid payment up, until it is found or the tries run out.
+ */
+async function confirmReturnedCheckout(): Promise<void> {
+	const storedSubscription = sessionStorage.getItem(PAID_CHECKOUT_KEY);
+
+	if (storedSubscription === null || inPageProvider.value !== null) {
+		return;
+	}
+
+	confirmTries += 1;
+	let isConfirmDone = confirmTries >= CONFIRM_TRIES_MAX;
+
+	try {
+		const confirmResponse = await directusApi.post(
+			'/subscriptions/checkout/confirm',
+			{ subscription: JSON.parse(storedSubscription) },
+		);
+
+		const { status: checkoutStatus, sync_queued: isSyncQueued }
+			= confirmResponse.data.data as { status: string; sync_queued: boolean };
+
+		isConfirmDone ||= checkoutStatus !== 'pending' || isSyncQueued;
+	}
+	finally {
+		// A refusal is shown by the caller; the last try stops the retries.
+		if (isConfirmDone) {
+			sessionStorage.removeItem(PAID_CHECKOUT_KEY);
+		}
+	}
+}
+
+function addBeneficiary(subscriptionId: number): Promise<void> {
+	return runAction(async () => {
+		await directusApi.post('/subscriptions/beneficiaries', {
+			subscription: subscriptionId,
+			email: beneficiaryEmails.value[subscriptionId]?.trim() ?? '',
+		});
+
+		beneficiaryEmails.value[subscriptionId] = '';
+	});
+}
+
+function removeBeneficiary(
+	subscriptionId: number,
+	beneficiaryEmail: string,
+): Promise<void> {
+	return runAction(() => {
+		return directusApi.delete('/items/subscription_beneficiaries', {
+			data: {
+				query: {
+					filter: {
+						subscription: { _eq: subscriptionId },
+						user: { email: { _eq: beneficiaryEmail } },
+					},
+				},
+			},
+		});
+	});
+}
+
+function changeRenewal(
+	subscriptionId: number,
+	renewalAction: 'cancel' | 'resume',
+): Promise<void> {
+	return runAction(() => {
+		return directusApi.post(`/subscriptions/${renewalAction}`, {
+			subscription: subscriptionId,
+		});
+	});
+}
+
+async function toggleInvoices(subscriptionId: number): Promise<void> {
+	if (shownInvoices.value[subscriptionId] !== undefined) {
+		delete shownInvoices.value[subscriptionId];
+
+		return;
+	}
+
+	moduleError.value = null;
+
+	try {
+		const invoicesResponse = await directusApi.get(
+			`/subscriptions/${subscriptionId}/invoices`,
+		);
+
+		shownInvoices.value[subscriptionId] = invoicesResponse.data.data;
+	}
+	catch (requestError) {
+		moduleError.value = readErrorMessage(requestError);
+	}
+}
+
+onMounted(() => {
+	runAction(loadProvidersMode);
+
+	// The webhooks land after the pay page redirected here, and the bundle
+	// syncs them in the background.
+	refreshTimer = setInterval(() => {
+		confirmReturnedCheckout()
+			.then(loadSubscriptions)
+			.catch((refreshError: unknown) => {
+				moduleError.value = readErrorMessage(refreshError);
+			});
+	}, REFRESH_MILLISECONDS);
+});
+
+onUnmounted(() => {
+	clearInterval(refreshTimer);
+});
+</script>
+
+<template>
+  <private-view title="Subscriptions">
+    <template #title-outer:prepend>
+      <v-button
+        rounded
+        :style="MODULE_STYLES.headerIcon"
+        icon
+        exact
+        disabled
+      >
+        <v-icon name="card_membership" />
+      </v-button>
+    </template>
+
+    <template #actions>
+      <div
+        v-if="providersMode !== null"
+        v-tooltip.bottom="providersTooltip"
+        class="examples-providers-switch"
+        :style="MODULE_STYLES.providersSwitch"
+      >
+        <v-button
+          v-for="switchOption in PROVIDERS_SWITCH"
+          :key="switchOption.mode"
+          small
+          :secondary="providersMode !== switchOption.mode"
+          :disabled="switchOption.mode === 'real' && !isRealAvailable"
+          @click="pickProvidersMode(switchOption.mode)"
+        >
+          <v-icon
+            :name="switchOption.icon"
+            left
+          />
+          {{ switchOption.label }}
+        </v-button>
+      </div>
+    </template>
+
+    <div
+      class="examples-module"
+      :style="MODULE_STYLES.modulePage"
+    >
+      <v-notice
+        v-if="moduleError !== null"
+        type="danger"
+      >
+        <span class="examples-error">{{ moduleError }}</span>
+      </v-notice>
+
+      <template v-if="isLoaded && liveSubscriptions.length === 0">
+        <div
+          class="examples-plans"
+          :style="MODULE_STYLES.planGrid"
+        >
+          <div
+            v-for="examplesPlan in examplesPlans"
+            :key="examplesPlan.code"
+            class="examples-plan"
+            :style="MODULE_STYLES.cardBox"
+            :data-plan="examplesPlan.code"
+          >
+            <p
+              class="examples-line"
+              :style="MODULE_STYLES.cardTitle"
+            >
+              {{ composePlanLine(examplesPlan) }}
+            </p>
+            <v-input
+              v-model="customAmounts[examplesPlan.code]"
+              :aria-label="`Amount for ${examplesPlan.name}`"
+              placeholder="Amount (optional)"
+              inputmode="decimal"
+              small
+            />
+            <div :style="MODULE_STYLES.actionRow">
+              <v-button
+                small
+                :disabled="inPageProvider !== null
+                  || unavailableProviders['mollie'] !== undefined"
+                @click="subscribePlan(examplesPlan.code, 'mollie')"
+              >
+                Subscribe with Mollie
+              </v-button>
+              <v-button
+                small
+                secondary
+                :disabled="inPageProvider !== null
+                  || unavailableProviders['stripe'] !== undefined"
+                @click="subscribePlan(examplesPlan.code, 'stripe')"
+              >
+                Subscribe with Stripe
+              </v-button>
+            </div>
+          </div>
+        </div>
+        <div
+          v-if="inPageProvider !== null"
+          class="examples-checkout"
+          :style="MODULE_STYLES.cardBox"
+        >
+          <div
+            ref="checkoutForm"
+            :style="MODULE_STYLES.checkoutForm"
+          />
+          <div :style="MODULE_STYLES.actionRow">
+            <v-button
+              v-if="inPageProvider === 'stripe'"
+              small
+              @click="payWithStripe"
+            >
+              Pay
+            </v-button>
+            <v-button
+              small
+              secondary
+              @click="closeInPageCheckout"
+            >
+              Close
+            </v-button>
+          </div>
+        </div>
+        <v-notice type="info">
+          <span class="examples-advice">{{ PROVIDER_ADVICE_LINE }}</span>
+        </v-notice>
+        <v-notice type="info">
+          <span class="examples-line">{{ NO_SUBSCRIPTION_LINE }}</span>
+        </v-notice>
+      </template>
+
+      <div
+        v-for="mineSubscription in liveSubscriptions"
+        :key="mineSubscription.id"
+        class="examples-subscription"
+        :style="MODULE_STYLES.cardBox"
+      >
+        <p
+          v-for="(subscriptionLine, lineIndex) in composeSubscriptionLines(
+            mineSubscription,
+            findPlan(mineSubscription.plan.code),
+          )"
+          :key="subscriptionLine"
+          class="examples-line"
+          :style="lineIndex === 0
+            ? MODULE_STYLES.cardTitle
+            : undefined"
+        >
+          {{ subscriptionLine }}
+        </p>
+
+        <template v-if="isManaged(mineSubscription)">
+          <div :style="MODULE_STYLES.actionRow">
+            <v-button
+              v-if="mineSubscription.cancel_at_period_end"
+              small
+              secondary
+              @click="changeRenewal(mineSubscription.id, 'resume')"
+            >
+              <v-icon
+                name="autorenew"
+                left
+              />
+              Resume subscription
+            </v-button>
+            <v-button
+              v-else
+              small
+              kind="danger"
+              secondary
+              @click="changeRenewal(mineSubscription.id, 'cancel')"
+            >
+              <v-icon
+                name="event_busy"
+                left
+              />
+              Cancel at period end
+            </v-button>
+            <v-button
+              small
+              secondary
+              @click="toggleInvoices(mineSubscription.id)"
+            >
+              <v-icon
+                name="receipt_long"
+                left
+              />
+              Invoices
+            </v-button>
+          </div>
+
+          <template v-if="shownInvoices[mineSubscription.id] !== undefined">
+            <p
+              v-if="shownInvoices[mineSubscription.id]?.length === 0"
+              class="examples-line"
+            >
+              {{ NO_INVOICE_LINE }}
+            </p>
+            <div
+              v-for="subscriptionInvoice in shownInvoices[mineSubscription.id]"
+              :key="subscriptionInvoice.provider_reference"
+              class="examples-invoice"
+              :style="MODULE_STYLES.beneficiaryRow"
+            >
+              <v-icon
+                name="receipt"
+                small
+              />
+              <span
+                class="examples-line"
+                :style="{ flex: 1 }"
+              >{{ composeInvoiceLine(subscriptionInvoice) }}</span>
+              <a
+                v-if="subscriptionInvoice.hosted_url !== null"
+                :href="subscriptionInvoice.hosted_url"
+                target="_blank"
+                rel="noopener"
+              >View</a>
+              <a
+                v-if="subscriptionInvoice.pdf_url !== null"
+                :href="subscriptionInvoice.pdf_url"
+                target="_blank"
+                rel="noopener"
+              >PDF</a>
+            </div>
+          </template>
+
+          <div
+            v-for="beneficiaryEmail in mineSubscription.beneficiaries ?? []"
+            :key="beneficiaryEmail"
+            class="examples-beneficiary"
+            :style="MODULE_STYLES.beneficiaryRow"
+          >
+            <v-icon
+              name="person"
+              small
+            />
+            <span
+              class="examples-line"
+              :style="{ flex: 1 }"
+            >{{ beneficiaryEmail }}</span>
+            <v-button
+              x-small
+              secondary
+              @click="removeBeneficiary(mineSubscription.id, beneficiaryEmail)"
+            >
+              Remove
+            </v-button>
+          </div>
+
+          <div :style="MODULE_STYLES.actionRow">
+            <div :style="MODULE_STYLES.growingCell">
+              <v-input
+                v-model="beneficiaryEmails[mineSubscription.id]"
+                aria-label="Beneficiary email"
+                placeholder="friend@example.com"
+                type="email"
+                small
+              />
+            </div>
+            <v-button
+              small
+              @click="addBeneficiary(mineSubscription.id)"
+            >
+              Add
+            </v-button>
+          </div>
+        </template>
+      </div>
+    </div>
+  </private-view>
+</template>
+

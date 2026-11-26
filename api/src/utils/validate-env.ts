@@ -365,6 +365,31 @@ export function validateSubscriptionsEnv(): void {
 		}
 	}
 
+	const checkoutUi = env['SUBSCRIPTIONS_CHECKOUT_UI'] ?? 'in_page';
+
+	if (!SUBSCRIPTIONS_CHECKOUT_UIS.includes(checkoutUi as never)) {
+		useLogger().error(
+			'"SUBSCRIPTIONS_CHECKOUT_UI" must be one of'
+			+ ` ${JSON.stringify(SUBSCRIPTIONS_CHECKOUT_UIS)},`
+			+ ` got ${JSON.stringify(checkoutUi)}.`,
+		);
+
+		process.exit(1);
+	}
+
+	// Stripe.js mounts the in-page form only from the publishable key.
+	if (checkoutUi === 'in_page'
+		&& env['SUBSCRIPTIONS_STRIPE_SECRET_KEY'] !== undefined
+		&& env['SUBSCRIPTIONS_STRIPE_PUBLISHABLE_KEY'] === undefined) {
+		useLogger().error(
+			'"SUBSCRIPTIONS_STRIPE_PUBLISHABLE_KEY" is required when'
+			+ ' "SUBSCRIPTIONS_STRIPE_SECRET_KEY" is set and'
+			+ ' "SUBSCRIPTIONS_CHECKOUT_UI" is "in_page".',
+		);
+
+		process.exit(1);
+	}
+
 	const reconcileCron = env['SUBSCRIPTIONS_RECONCILE_CRON'];
 
 	// Directus' schedule skips a cron it cannot read: no reconcile would run.
@@ -383,7 +408,10 @@ const SUBSCRIPTIONS_ENV = [
 	'SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET',
 	'SUBSCRIPTIONS_MOLLIE_API_KEY',
 	'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS',
+	'SUBSCRIPTIONS_STRIPE_PUBLISHABLE_KEY',
 ];
+
+const SUBSCRIPTIONS_CHECKOUT_UIS = ['in_page', 'hosted'];
 
 const SUBSCRIPTIONS_ENV_PAIRS = [
 	['SUBSCRIPTIONS_STRIPE_SECRET_KEY', 'SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET'],

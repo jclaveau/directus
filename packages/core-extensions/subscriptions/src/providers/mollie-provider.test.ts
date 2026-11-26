@@ -1,11 +1,12 @@
 import { oneLine } from '@directus/utils';
 import { MollieApiError, type MollieClient } from '@mollie/api-client';
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
 	AbandonedCheckoutError,
 	MissingProviderSubscriptionError,
 	NoValidMandateError,
 	PaidCheckoutError,
+	ProviderUnavailableError,
 	WebhookIgnoredError,
 	WebhookSignatureError,
 	WebhookUnreadableError,
@@ -165,6 +166,59 @@ describe('verifyWebhook', () => {
 });
 
 describe('fetchSubscription', () => {
+	beforeEach(() => {
+		vi.useFakeTimers({
+			now: new Date('2026-11-20T00:00:00Z'),
+			toFake: ['Date'],
+		});
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	test.each([
+		['2027-02-27T00:00:00Z', 'active'],
+		['2027-02-28T10:00:00Z', 'canceled'],
+	])(
+		'reads a subscription canceled on 2027-02-28 as of %s as %s',
+		async (readAt, storedStatus) => {
+			vi.setSystemTime(new Date(readAt));
+
+			await expect(createMollieProvider({
+				customerSubscriptions: {
+					get: vi.fn().mockResolvedValue({
+						id: 'sub_1',
+						customerId: 'cst_1',
+						status: 'canceled',
+						amount: { currency: 'EUR', value: '10.00' },
+						interval: '1 month',
+						startDate: '2027-02-28',
+						metadata: { directus_subscription: '1' },
+					}),
+				},
+				subscriptionPayments: {
+					iterate: vi.fn().mockReturnValue({
+						find: vi.fn().mockResolvedValue(undefined),
+					}),
+				},
+			} as unknown as MollieClient)
+				.fetchSubscription('cst_1/sub_1')).resolves.toEqual({
+				subscriptionId: 'sub_1',
+				customerId: 'cst_1',
+				status: storedStatus,
+				currentPeriodEnd: new Date('2027-02-28T00:00:00Z'),
+				cancelAtPeriodEnd: true,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1000,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			});
+		},
+	);
+
 	test('follows a payment id to its subscription', async () => {
 		const mollieClient = {
 			payments: {
@@ -339,7 +393,7 @@ describe('fetchSubscription', () => {
 			.fetchSubscription('cst_1/sub_1')).resolves.toEqual({
 			subscriptionId: 'sub_1',
 			customerId: 'cst_1',
-			status: 'canceled',
+			status: 'active',
 			currentPeriodEnd: new Date('2027-02-28T10:00:00Z'),
 			cancelAtPeriodEnd: true,
 			directusSubscription: 1,
@@ -579,7 +633,7 @@ describe('fetchSubscription', () => {
 			.fetchSubscription('cst_1/sub_1')).resolves.toEqual({
 			subscriptionId: 'sub_1',
 			customerId: 'cst_1',
-			status: 'canceled',
+			status: 'active',
 			currentPeriodEnd: new Date('2026-12-23T00:00:00Z'),
 			cancelAtPeriodEnd: true,
 			directusSubscription: 1,
@@ -1197,7 +1251,11 @@ describe('createCheckout', () => {
 				planName: 'Pro',
 				redirectUrl: 'https://shop.example.com/ok',
 			}))
-			.resolves.toBe('https://www.mollie.com/checkout/tr_5');
+			.resolves.toEqual({
+				providerCustomerId: 'cst_5',
+				url: 'https://www.mollie.com/checkout/tr_5',
+				inPageRefusal: null,
+			});
 
 		expect(mollieClient.customers.create).toHaveBeenCalledWith({
 			email: 'payer@example.com',
@@ -1212,6 +1270,122 @@ describe('createCheckout', () => {
 			redirectUrl: 'https://shop.example.com/ok',
 			metadata: { directus_subscription: '5' },
 		});
+	});
+
+	test('opens the in-page form on a session of the customer', async () => {
+		const mollieClient = {
+			customers: {
+				create: vi.fn().mockResolvedValue({ id: 'cst_5' }),
+			},
+			payments: { create: vi.fn() },
+		};
+
+		const createMollieSession = vi.fn().mockResolvedValue('session_token_5');
+
+		await expect(createMollieProvider(
+			mollieClient as unknown as MollieClient,
+			['mollie_secret_1'],
+			createMollieSession,
+		)
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '14.90' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.resolves.toEqual({
+				providerCustomerId: 'cst_5',
+				clientToken: 'session_token_5',
+				publishableKey: null,
+			});
+
+		expect(createMollieSession).toHaveBeenCalledWith({
+			amount: { currency: 'EUR', value: '14.90' },
+			description: 'Subscription 5',
+			planName: 'Pro',
+			redirectUrl: 'https://shop.example.com/ok',
+			customerId: 'cst_5',
+			metadata: { directus_subscription: '5' },
+		});
+
+		expect(mollieClient.payments.create).not.toHaveBeenCalled();
+	});
+
+	test('sends the payer to its page when Mollie refuses the session', async () => {
+		await expect(createMollieProvider(
+			{
+				customers: {
+					create: vi.fn().mockResolvedValue({ id: 'cst_5' }),
+				},
+				payments: {
+					create: vi.fn().mockResolvedValue({
+						id: 'tr_5',
+						getCheckoutUrl: () => 'https://www.mollie.com/checkout/tr_5',
+					}),
+				},
+			} as unknown as MollieClient,
+			['mollie_secret_1'],
+			vi.fn().mockRejectedValue(
+				new Error('Mollie answered 422 to a session: "Beta"'),
+			),
+		)
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '14.90' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.resolves.toEqual({
+				providerCustomerId: 'cst_5',
+				url: 'https://www.mollie.com/checkout/tr_5',
+				inPageRefusal: 'Mollie answered 422 to a session: "Beta"',
+			});
+	});
+
+	test.each([
+		[new MollieApiError('Failed to fetch', {})],
+		[new MollieApiError('Unavailable', { statusCode: 503 })],
+	])('answers 503 when Mollie is down: %s', async (mollieFailure) => {
+		await expect(createMollieProvider({
+			customers: { create: vi.fn().mockRejectedValue(mollieFailure) },
+		} as unknown as MollieClient)
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '14.90' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.rejects.toThrow(new ProviderUnavailableError({
+				provider: 'mollie',
+				reason: mollieFailure.message,
+			}));
+	});
+
+	test('throws a refused payment as Mollie sent it', async () => {
+		const invalidAmount = new MollieApiError(
+			'The amount is lower than the minimum',
+			{ statusCode: 422 },
+		);
+
+		await expect(createMollieProvider({
+			customers: { create: vi.fn().mockResolvedValue({ id: 'cst_5' }) },
+			payments: { create: vi.fn().mockRejectedValue(invalidAmount) },
+		} as unknown as MollieClient)
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '0.01' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.rejects.toBe(invalidAmount);
 	});
 
 	test('refuses a payment without a checkout URL', async () => {
@@ -1233,6 +1407,72 @@ describe('createCheckout', () => {
 				redirectUrl: 'https://shop.example.com/ok',
 			}))
 			.rejects.toThrow('Mollie payment "tr_5" has no checkout URL');
+	});
+});
+
+describe('findCheckoutPayment', () => {
+	test('finds the paid first payment of the checkout', async () => {
+		const mollieClient = {
+			customerPayments: {
+				iterate: vi.fn().mockReturnValue((async function* () {
+					yield {
+						id: 'tr_other',
+						status: 'paid',
+						sequenceType: 'first',
+						metadata: { directus_subscription: '4' },
+					};
+
+					yield {
+						id: 'tr_open',
+						status: 'open',
+						sequenceType: 'first',
+						metadata: { directus_subscription: '5' },
+					};
+
+					yield {
+						id: 'tr_renewal',
+						status: 'paid',
+						sequenceType: 'recurring',
+						metadata: { directus_subscription: '5' },
+					};
+
+					yield {
+						id: 'tr_5',
+						status: 'paid',
+						sequenceType: 'first',
+						metadata: { directus_subscription: '5' },
+					};
+				})()),
+			},
+		};
+
+		await expect(createMollieProvider(
+			mollieClient as unknown as MollieClient,
+			['mollie_secret_1'],
+		).findCheckoutPayment?.({ customerId: 'cst_5', directusSubscription: 5 }))
+			.resolves.toBe('tr_5');
+
+		expect(mollieClient.customerPayments.iterate)
+			.toHaveBeenCalledWith({ customerId: 'cst_5' });
+	});
+
+	test('finds nothing while the checkout is unpaid', async () => {
+		await expect(createMollieProvider(
+			{
+				customerPayments: {
+					iterate: vi.fn().mockReturnValue((async function* () {
+						yield {
+							id: 'tr_open',
+							status: 'open',
+							sequenceType: 'first',
+							metadata: { directus_subscription: '5' },
+						};
+					})()),
+				},
+			} as unknown as MollieClient,
+			['mollie_secret_1'],
+		).findCheckoutPayment?.({ customerId: 'cst_5', directusSubscription: 5 }))
+			.resolves.toBeNull();
 	});
 });
 

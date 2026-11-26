@@ -3,6 +3,7 @@ import { createMollieClient } from '@mollie/api-client';
 import Stripe from 'stripe';
 import type { SubscriptionsConfig } from '../config/read-subscriptions-config.js';
 import { UnknownProviderError } from '../errors.js';
+import { createMollieSessionCreator } from './create-mollie-session.js';
 import { createMollieProvider } from './mollie-provider.js';
 import { createStripeProvider } from './stripe-provider.js';
 import type { SubscriptionProvider, SubscriptionProviders } from './types.js';
@@ -16,6 +17,7 @@ export function createProviders(
 		enabledProviders.set('stripe', createStripeProvider(
 			new Stripe(subscriptionsConfig.stripe.secretKey),
 			subscriptionsConfig.stripe.webhookSecret,
+			subscriptionsConfig.stripe.publishableKey,
 		));
 	}
 
@@ -23,6 +25,9 @@ export function createProviders(
 		enabledProviders.set('mollie', createMollieProvider(
 			createMollieClient({ apiKey: subscriptionsConfig.mollie.apiKey }),
 			subscriptionsConfig.mollie.webhookSecrets,
+			subscriptionsConfig.checkoutUi === 'in_page'
+				? createMollieSessionCreator(subscriptionsConfig.mollie.apiKey)
+				: null,
 		));
 	}
 

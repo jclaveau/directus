@@ -4,6 +4,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
 	AbandonedCheckoutError,
 	MissingProviderSubscriptionError,
+	ProviderUnavailableError,
 	WebhookIgnoredError,
 	WebhookRefusedError,
 } from '../errors.js';
@@ -619,7 +620,10 @@ describe('checkout', () => {
 				planName: 'Pro',
 				redirectUrl: 'https://shop.example.com/ok',
 			}))
-			.resolves.toBe('https://checkout.stripe.com/c/pay/cs_5');
+			.resolves.toEqual({
+				url: 'https://checkout.stripe.com/c/pay/cs_5',
+				inPageRefusal: null,
+			});
 
 		expect(stripeClient.checkout.sessions.create).toHaveBeenCalledWith({
 			mode: 'subscription',
@@ -638,6 +642,146 @@ describe('checkout', () => {
 			success_url: 'https://shop.example.com/ok',
 			cancel_url: 'https://shop.example.com/ok',
 		});
+	});
+
+	test('opens the in-page form under a publishable key', async () => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		vi.spyOn(stripeClient.checkout.sessions, 'create').mockResolvedValue({
+			id: 'cs_5',
+			client_secret: 'cs_5_secret_7',
+		} as never);
+
+		await expect(createStripeProvider(stripeClient, 'whsec_1', 'pk_test_1')
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '14.90' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.resolves.toEqual({
+				clientToken: 'cs_5_secret_7',
+				publishableKey: 'pk_test_1',
+			});
+
+		expect(stripeClient.checkout.sessions.create).toHaveBeenCalledWith({
+			mode: 'subscription',
+			customer_email: 'payer@example.com',
+			line_items: [{
+				quantity: 1,
+				price_data: {
+					currency: 'eur',
+					unit_amount: 1490,
+					recurring: { interval: 'month', interval_count: 1 },
+					product_data: { name: 'Pro' },
+				},
+			}],
+			subscription_data: { metadata: { directus_subscription: '5' } },
+			metadata: { directus_subscription: '5' },
+			ui_mode: 'elements',
+			return_url: 'https://shop.example.com/ok',
+		});
+	});
+
+	test.each([
+		[
+			new Stripe.errors.StripeInvalidRequestError({
+				type: 'invalid_request_error',
+				message: 'ui_mode elements is not enabled',
+			}),
+			'ui_mode elements is not enabled',
+		],
+		[
+			{ id: 'cs_4', client_secret: null },
+			'Stripe checkout session "cs_4" has no client secret',
+		],
+	])('sends the payer to its page when the form fails: %s', async (
+		inPageAnswer,
+		inPageRefusal,
+	) => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		const createSpy = vi.spyOn(stripeClient.checkout.sessions, 'create');
+
+		if (inPageAnswer instanceof Error) {
+			createSpy.mockRejectedValueOnce(inPageAnswer);
+		}
+		else {
+			createSpy.mockResolvedValueOnce(inPageAnswer as never);
+		}
+
+		createSpy.mockResolvedValueOnce({
+			id: 'cs_5',
+			url: 'https://checkout.stripe.com/c/pay/cs_5',
+		} as never);
+
+		await expect(createStripeProvider(stripeClient, 'whsec_1', 'pk_test_1')
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '14.90' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.resolves.toEqual({
+				url: 'https://checkout.stripe.com/c/pay/cs_5',
+				inPageRefusal,
+			});
+
+		expect(createSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+			success_url: 'https://shop.example.com/ok',
+			cancel_url: 'https://shop.example.com/ok',
+		}));
+	});
+
+	test.each([
+		[new Stripe.errors.StripeConnectionError({ message: 'socket hang up' })],
+		[new Stripe.errors.StripeAPIError({ message: 'Internal error' })],
+	])('answers 503 when Stripe is down: %s', async (stripeFailure) => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		vi.spyOn(stripeClient.checkout.sessions, 'create')
+			.mockRejectedValue(stripeFailure);
+
+		await expect(createStripeProvider(stripeClient, 'whsec_1', 'pk_test_1')
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'EUR', value: '14.90' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.rejects.toThrow(new ProviderUnavailableError({
+				provider: 'stripe',
+				reason: stripeFailure.message,
+			}));
+	});
+
+	test('throws a refused hosted session as Stripe sent it', async () => {
+		const stripeClient = new Stripe('sk_test_1');
+
+		const invalidRequest = new Stripe.errors.StripeInvalidRequestError({
+			type: 'invalid_request_error',
+			message: 'Invalid currency: xyz',
+		});
+
+		vi.spyOn(stripeClient.checkout.sessions, 'create')
+			.mockRejectedValue(invalidRequest);
+
+		await expect(createStripeProvider(stripeClient, 'whsec_1')
+			.createCheckout({
+				directusSubscription: 5,
+				payerEmail: 'payer@example.com',
+				amount: { currency: 'XYZ', value: '14.90' },
+				interval: { months: 1, days: 0 },
+				planName: 'Pro',
+				redirectUrl: 'https://shop.example.com/ok',
+			}))
+			.rejects.toBe(invalidRequest);
 	});
 
 	test('refuses a session without a URL', async () => {

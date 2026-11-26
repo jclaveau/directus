@@ -191,3 +191,16 @@ export const AbandonedCheckoutError = createError<{
 	},
 	410,
 );
+
+/** The provider answered neither the in-page form nor its own page. */
+export const ProviderUnavailableError = createError<{
+	provider: string;
+	reason: string;
+}>(
+	'PROVIDER_UNAVAILABLE',
+	({ provider, reason }) => {
+		return `Payment provider ${JSON.stringify(provider)} is unavailable:`
+			+ ` ${JSON.stringify(reason)}`;
+	},
+	503,
+);

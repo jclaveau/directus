@@ -486,7 +486,23 @@ describe('validateSubscriptionsEnv', () => {
 		expect(process.exit).not.toHaveBeenCalled();
 	});
 
-	test('passes with both stripe variables set', () => {
+	test.each([
+		[{ SUBSCRIPTIONS_STRIPE_PUBLISHABLE_KEY: 'pk_test_1' }],
+		[{ SUBSCRIPTIONS_CHECKOUT_UI: 'hosted' }],
+	])('passes with both stripe variables set and %j', (checkoutEnv) => {
+		vi.mocked(useEnv).mockReturnValueOnce({
+			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_1',
+			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: 'whsec_1',
+			...checkoutEnv,
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test('exits on an in-page stripe checkout without its publishable key', () => {
 		vi.mocked(useEnv).mockReturnValueOnce({
 			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_1',
 			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: 'whsec_1',
@@ -494,8 +510,28 @@ describe('validateSubscriptionsEnv', () => {
 
 		validateSubscriptionsEnv();
 
-		expect(mockLogger.error).not.toHaveBeenCalled();
-		expect(process.exit).not.toHaveBeenCalled();
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_STRIPE_PUBLISHABLE_KEY" is required when'
+			+ ' "SUBSCRIPTIONS_STRIPE_SECRET_KEY" is set and'
+			+ ' "SUBSCRIPTIONS_CHECKOUT_UI" is "in_page".',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('exits on a checkout UI it does not know', () => {
+		vi.mocked(useEnv).mockReturnValueOnce({
+			SUBSCRIPTIONS_CHECKOUT_UI: 'popup',
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_CHECKOUT_UI" must be one of ["in_page","hosted"],'
+			+ ' got "popup".',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
 	});
 
 	test('exits on a stripe key without its webhook secret', () => {
