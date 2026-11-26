@@ -24,6 +24,7 @@ import type { Collection } from '../types/index.js';
 import { transaction } from '../utils/transaction.js';
 import { getSchema } from './get-schema.js';
 import { cloneDeep, merge, set } from './lodash-es-used.js';
+import { findRelationalSpecial } from './relational-alias.js';
 
 type CollectionDelta = {
 	collection: string;
@@ -212,21 +213,41 @@ export async function applyDiff(
 			schema: await getSchema({ database: trx, bypassCache: true }),
 		});
 
-		for (const { collection, field, diff } of snapshotDiff.fields) {
-			if (diff?.[0]?.kind === DiffKind.NEW && !isNestedMetaUpdate(diff?.[0])) {
-				try {
-					await fieldsService.createField(collection, (diff[0] as DiffNew<Field>).rhs, undefined, mutationOptions);
+		const createField = async (collection: string, newField: Field) => {
+			try {
+				await fieldsService
+					.createField(collection, newField, undefined, mutationOptions);
 
-					// Refresh the schema
-					fieldsService = new FieldsService({
-						knex: trx,
-						schema: await getSchema({ database: trx, bypassCache: true }),
-					});
-				} catch (err) {
-					logger.error(`Failed to create field "${collection}.${field}"`);
-					throw err;
+				// Refresh the schema
+				fieldsService = new FieldsService({
+					knex: trx,
+					schema: await getSchema({ database: trx, bypassCache: true }),
+				});
+			}
+			catch (err) {
+				logger.error(`Failed to create field "${collection}.${newField.field}"`);
+				throw err;
+			}
+		};
+
+		// A relational alias is refused until a relation names it, so it is
+		// created once the relations are.
+		const relationalAliasesToCreate: { collection: string; newField: Field }[] = [];
+
+		for (const { collection, diff } of snapshotDiff.fields) {
+			if (diff?.[0]?.kind === DiffKind.NEW && !isNestedMetaUpdate(diff?.[0])) {
+				const newField = (diff[0] as DiffNew<Field>).rhs;
+
+				if (isRelationalAlias(newField)) {
+					relationalAliasesToCreate.push({ collection, newField });
+				}
+				else {
+					await createField(collection, newField);
 				}
 			}
+		}
+
+		for (const { collection, field, diff } of snapshotDiff.fields) {
 
 			if (diff?.[0]?.kind === DiffKind.EDIT || diff?.[0]?.kind === DiffKind.ARRAY || isNestedMetaUpdate(diff[0]!)) {
 				const currentField = currentSnapshot.fields.find((snapshotField) => {
@@ -334,6 +355,15 @@ export async function applyDiff(
 				}
 			}
 		}
+
+		fieldsService = new FieldsService({
+			knex: trx,
+			schema: await getSchema({ database: trx, bypassCache: true }),
+		});
+
+		for (const { collection, newField } of relationalAliasesToCreate) {
+			await createField(collection, newField);
+		}
 	});
 
 	if (runPostColumnChange) {
@@ -350,6 +380,11 @@ export async function applyDiff(
 			emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
 		}
 	}
+}
+
+export function isRelationalAlias(newField: Field): boolean {
+	return newField.type === 'alias'
+		&& findRelationalSpecial(newField.meta?.special) !== undefined;
 }
 
 export function isNestedMetaUpdate(diff: Diff<SnapshotField | undefined>): boolean {

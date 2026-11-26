@@ -202,6 +202,9 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// Reads the whole schema back against a snapshot taken a moment before:
 			// a sibling creating its collections in between is a drift.
 			'/tests/db/app/schema-diff-cli.test.ts',
+			// Drops `relation_alias` from `directus_fields`, and with it the foreign
+			// key `relational-alias-foreign-key` expects to refuse its insert.
+			'/tests/db/database/relational-alias-migration.test.ts',
 		],
 		// If specified, only run these tests sequentially
 		only: [

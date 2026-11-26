@@ -33,6 +33,7 @@ import {
 } from '../utils/clear-caches-then-fire-actions.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
+import { FieldsService } from './fields.js';
 import { ItemsService } from './items.js';
 
 const env = useEnv();
@@ -444,6 +445,35 @@ export class RelationsService {
 					// happens in `filterForbidden` down below
 				});
 
+				const previousAlias = existingRelation.meta?.one_field ?? null;
+				const nextAlias = relation.meta?.one_field ?? null;
+
+				const movesAlias = existingRelation.related_collection !== null
+					&& previousAlias !== null
+					&& relation.meta !== undefined
+					&& relation.meta !== null
+					&& 'one_field' in relation.meta
+					&& nextAlias !== previousAlias;
+
+				if (movesAlias && nextAlias === null) {
+					await this.deleteNamedAlias(
+						trx,
+						existingRelation.related_collection!,
+						previousAlias!,
+						nestedActionEvents,
+						opts,
+					);
+				}
+
+				if (movesAlias && nextAlias !== null) {
+					await this.renameNamedAlias(
+						trx,
+						existingRelation.related_collection!,
+						previousAlias!,
+						nextAlias,
+					);
+				}
+
 				if (relation.meta) {
 					if (existingRelation?.meta) {
 						await relationsItemService.updateOne(existingRelation.meta.id, relation.meta, {
@@ -533,6 +563,18 @@ export class RelationsService {
 					});
 				}
 
+				const namedAlias = existingRelation.meta?.one_field ?? null;
+
+				if (existingRelation.related_collection && namedAlias !== null) {
+					await this.deleteNamedAlias(
+						trx,
+						existingRelation.related_collection,
+						namedAlias,
+						nestedActionEvents,
+						opts,
+					);
+				}
+
 				if (existingRelation.meta) {
 					await trx('directus_relations').delete().where({ many_collection: collection, many_field: field });
 				}
@@ -574,6 +616,69 @@ export class RelationsService {
 				runPostColumnChange,
 			);
 		}
+	}
+
+	/**
+	 * The alias `one_field` names is read through the relation alone: without
+	 * it, the read takes the alias for a column the table does not hold.
+	 */
+	private async deleteNamedAlias(
+		trx: Knex,
+		aliasCollection: string,
+		aliasField: string,
+		nestedActionEvents: ActionEventParams[],
+		opts?: MutationOptions,
+	): Promise<void> {
+		if (!this.schema.collections[aliasCollection]?.fields[aliasField]) {
+			return;
+		}
+
+		const fieldsService = new FieldsService({
+			knex: trx,
+			accountability: this.accountability,
+			schema: this.schema,
+		});
+
+		await fieldsService.deleteField(aliasCollection, aliasField, {
+			autoPurgeCache: false,
+			autoPurgeSystemCache: false,
+			bypassEmitAction: (params) => {
+				if (opts?.bypassEmitAction) {
+					opts.bypassEmitAction(params);
+				}
+				else {
+					nestedActionEvents.push(params);
+				}
+			},
+		});
+	}
+
+	private async renameNamedAlias(
+		trx: Knex,
+		aliasCollection: string,
+		previousAlias: string,
+		nextAlias: string,
+	): Promise<void> {
+		const takenField = await trx
+			.select('id')
+			.from('directus_fields')
+			.where({ collection: aliasCollection, field: nextAlias })
+			.first();
+
+		const takenColumn = nextAlias
+			in (this.schema.collections[aliasCollection]?.fields ?? {});
+
+		if (takenField !== undefined || takenColumn) {
+			throw new InvalidPayloadError({
+				reason: `Field ${JSON.stringify(nextAlias)} of`
+					+ ` ${JSON.stringify(aliasCollection)} already exists, so one_field`
+					+ ` cannot name it in place of ${JSON.stringify(previousAlias)}`,
+			});
+		}
+
+		await trx('directus_fields')
+			.update({ field: nextAlias })
+			.where({ collection: aliasCollection, field: previousAlias });
 	}
 
 	/**

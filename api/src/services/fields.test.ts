@@ -10,6 +10,7 @@ import emitter from '../emitter.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { FieldsService } from './fields.js';
 import { ItemsService } from './items.js';
+import { PayloadService } from './payload.js';
 import { RelationsService } from './relations.js';
 
 vi.mock('../../src/database/index', () => ({
@@ -161,6 +162,50 @@ describe('Services / Fields', () => {
 		});
 	});
 
+	describe('columnInfo', () => {
+		it('leaves the relation_alias column of directus_fields out', async () => {
+			const service = new FieldsService({ knex: db, schema });
+
+			vi.spyOn(service.schemaInspector, 'columnInfo').mockResolvedValueOnce([
+				{ table: 'directus_fields', name: 'id' },
+				{ table: 'directus_fields', name: 'relation_alias' },
+				{ table: 'test', name: 'relation_alias' },
+			] as any);
+
+			expect(await service.columnInfo()).toEqual([
+				{ table: 'directus_fields', name: 'id' },
+				{ table: 'test', name: 'relation_alias' },
+			]);
+		});
+	});
+
+	describe('readOne of a field row', () => {
+		it('leaves the relation_alias column out of the meta', async () => {
+			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValueOnce(
+				undefined as any,
+			);
+
+			vi.spyOn(PayloadService.prototype, 'processValues').mockImplementationOnce(
+				async (_action, fieldRow) => fieldRow as any,
+			);
+
+			tracker.on.select('directus_fields').response([
+				{
+					id: 3,
+					collection: 'test',
+					field: 'owned_items',
+					special: 'o2m',
+					relation_alias: 'owned_items',
+				},
+			]);
+
+			const service = new FieldsService({ knex: db, schema, accountability: null });
+			const fieldRead = await service.readOne('test', 'owned_items');
+
+			expect(fieldRead['meta']).not.toHaveProperty('relation_alias');
+		});
+	});
+
 	// Last, since the spies below survive clearAllMocks and would otherwise leak the
 	// stubbed columnInfo into readOne (which needs the real one to throw).
 	describe('readAll', () => {
@@ -196,6 +241,44 @@ describe('Services / Fields', () => {
 				filter: { collection: { _eq: 'test' } },
 				limit: -1,
 			});
+		});
+
+		it('leaves the relation_alias column out of an alias meta', async () => {
+			vi.spyOn(ItemsService.prototype, 'readByQuery')
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
+
+			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
+
+			vi.spyOn(PayloadService.prototype, 'processValues').mockImplementationOnce(
+				async (_action, aliasRows) => aliasRows as any,
+			);
+
+			tracker.on.select('directus_fields').response([
+				{
+					id: 3,
+					collection: 'test',
+					field: 'owned_items',
+					special: 'o2m',
+					relation_alias: 'owned_items',
+				},
+			]);
+
+			const service = new FieldsService({ knex: db, schema });
+
+			expect(await service.readAll('test')).toEqual([
+				{
+					collection: 'test',
+					field: 'owned_items',
+					type: 'alias',
+					schema: null,
+					meta: {
+						id: 3,
+						collection: 'test',
+						field: 'owned_items',
+						special: 'o2m',
+					},
+				},
+			]);
 		});
 	});
 });

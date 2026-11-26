@@ -8,7 +8,17 @@ import { unexpectedError } from '@/utils/unexpected-error';
 import type { DisplayConfig, InterfaceConfig } from '@directus/extensions';
 import type { Collection, DeepPartial, Field, LocalType, Relation } from '@directus/types';
 import { getEndpoint } from '@directus/utils';
-import { cloneDeep, get, has, isEmpty, mergeWith, orderBy, set, sortBy } from 'lodash';
+import {
+	cloneDeep,
+	get,
+	has,
+	isEmpty,
+	mergeWith,
+	orderBy,
+	partition,
+	set,
+	sortBy,
+} from 'lodash';
 import { defineStore } from 'pinia';
 import { computed } from 'vue';
 import * as alterations from './alterations';
@@ -261,8 +271,18 @@ export const useFieldDetailStore = defineStore({
 			this.saving = true;
 
 			try {
-				if (Object.keys(this.fieldUpdates).length > 0) {
-					await fieldsStore.upsertField(this.collection, this.editing, this.fieldUpdates);
+				// An alias is saved once the relations naming it are: the API refuses a
+				// relational alias no relation names.
+				const editsField = Object.keys(this.fieldUpdates).length > 0;
+				const editsAlias = this.fieldUpdates.type === 'alias';
+
+				const relatedFields = Object.values(this.fields).filter((field) => {
+					return field && field.collection && field.field;
+				});
+
+				if (editsField && editsAlias === false) {
+					await fieldsStore
+						.upsertField(this.collection, this.editing, this.fieldUpdates);
 				}
 
 				for (const collection of Object.values(this.collections)) {
@@ -270,14 +290,27 @@ export const useFieldDetailStore = defineStore({
 					await collectionsStore.upsertCollection(collection?.collection, collection);
 				}
 
-				for (const field of Object.values(this.fields)) {
-					if (!field || !field.collection || !field.field) continue;
-					await fieldsStore.upsertField(field.collection, field.field, field);
+				const [aliasFields, columnFields] = partition(
+					relatedFields,
+					(field) => field.type === 'alias',
+				);
+
+				for (const field of columnFields) {
+					await fieldsStore.upsertField(field.collection!, field.field!, field);
 				}
 
 				for (const relation of Object.values(this.relations)) {
 					if (!relation || !relation.collection || !relation.field) continue;
 					await relationsStore.upsertRelation(relation.collection, relation.field, relation);
+				}
+
+				for (const field of aliasFields) {
+					await fieldsStore.upsertField(field.collection!, field.field!, field);
+				}
+
+				if (editsField && editsAlias) {
+					await fieldsStore
+						.upsertField(this.collection, this.editing, this.fieldUpdates);
 				}
 
 				for (const collection of Object.keys(this.items)) {

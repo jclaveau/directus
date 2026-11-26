@@ -20,7 +20,8 @@ import { unfreezeSchema } from './freeze-schema.js';
 import getDefaultValue from './get-default-value.js';
 import { getSystemFieldRowsWithAuthProviders } from './get-field-system-rows.js';
 import getLocalType from './get-local-type.js';
-import { mapValues } from './lodash-es-used.js';
+import { mapValues, omit } from './lodash-es-used.js';
+import { RELATION_ALIAS_COLUMN } from './relational-alias.js';
 import { parseJsonFieldList } from './parse-json-field-list.js';
 
 const logger = useLogger();
@@ -212,7 +213,10 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 				? collectionMeta.accountability
 				: 'all',
 			scopedCacheFields: parseJsonFieldList(collectionMeta?.scoped_cache_fields),
-			fields: mapValues(schemaOverview[collection]?.columns, (column) => {
+			fields: mapValues(omitRelationAliasColumn(
+				collection,
+				schemaOverview[collection]?.columns,
+			), (column) => {
 				return {
 					field: column.column_name,
 					defaultValue: getDefaultValue(column) ?? null,
@@ -299,4 +303,15 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 	result.relations = await relationsService.readAll(undefined, undefined, true);
 
 	return result;
+}
+
+function omitRelationAliasColumn<Columns extends Record<string, unknown>>(
+	collection: string,
+	tableColumns: Columns | undefined,
+): Columns | undefined {
+	if (collection !== 'directus_fields' || tableColumns === undefined) {
+		return tableColumns;
+	}
+
+	return omit(tableColumns, RELATION_ALIAS_COLUMN) as Columns;
 }

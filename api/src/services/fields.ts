@@ -37,7 +37,7 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import getDefaultValue from '../utils/get-default-value.js';
 import { getSystemFieldRowsWithAuthProviders } from '../utils/get-field-system-rows.js';
 import getLocalType from '../utils/get-local-type.js';
-import { isEqual, isNil, merge } from '../utils/lodash-es-used.js';
+import { isEqual, isNil, merge, omit } from '../utils/lodash-es-used.js';
 import { withMeta } from '../utils/read-meta.js';
 import { sanitizeColumn } from '../utils/sanitize-schema.js';
 import {
@@ -50,6 +50,12 @@ import { transaction } from '../utils/transaction.js';
 import { buildCollectionAndFieldRelations } from './fields/build-collection-and-field-relations.js';
 import { getCollectionMetaUpdates } from './fields/get-collection-meta-updates.js';
 import { getCollectionRelationList } from './fields/get-collection-relation-list.js';
+import {
+	findRelationalSpecial,
+	isRelationAliasColumn,
+	RELATION_ALIAS_COLUMN,
+	unnamedRelationalAliasReason,
+} from '../utils/relational-alias.js';
 import { ItemsService } from './items.js';
 import { PayloadService } from './payload.js';
 import { RelationsService } from './relations.js';
@@ -110,7 +116,8 @@ export class FieldsService {
 		}
 
 		if (!columnInfo) {
-			columnInfo = await this.schemaInspector.columnInfo();
+			columnInfo = (await this.schemaInspector.columnInfo())
+				.filter((column) => !isRelationAliasColumn(column.table, column.name));
 
 			if (schemaCacheIsEnabled) {
 				await setCacheValue(this.schemaCache, 'columnInfo', columnInfo);
@@ -197,7 +204,14 @@ export class FieldsService {
 			aliasQuery.andWhere('collection', collection);
 		}
 
-		let aliasFields = [...((await this.payloadService.processValues('read', await aliasQuery)) as FieldMeta[])];
+		const aliasRows = (await aliasQuery).map((aliasRow) => {
+			return omit(aliasRow, RELATION_ALIAS_COLUMN);
+		});
+
+		let aliasFields = [...(await this.payloadService.processValues(
+			'read',
+			aliasRows,
+		)) as FieldMeta[]];
 
 		if (collection) {
 			aliasFields.push(...systemFieldRows.filter((fieldMeta) => fieldMeta.collection === collection));
@@ -335,7 +349,10 @@ export class FieldsService {
 		let fieldInfo = await this.knex.select('*').from('directus_fields').where({ collection, field }).first();
 
 		if (fieldInfo) {
-			fieldInfo = (await this.payloadService.processValues('read', fieldInfo)) as FieldMeta[];
+			fieldInfo = (await this.payloadService.processValues(
+				'read',
+				omit(fieldInfo, RELATION_ALIAS_COLUMN),
+			)) as FieldMeta[];
 		}
 
 		fieldInfo =
@@ -439,7 +456,19 @@ export class FieldsService {
 							)
 						: field;
 
-				if (hookAdjustedField.type && ALIAS_TYPES.includes(hookAdjustedField.type) === false) {
+				const createsColumn = Boolean(hookAdjustedField.type)
+					&& ALIAS_TYPES.includes(hookAdjustedField.type!) === false;
+
+				if (createsColumn === false) {
+					await this.refuseUnnamedRelationalAlias(
+						trx,
+						collection,
+						hookAdjustedField.field,
+						hookAdjustedField.meta?.special,
+					);
+				}
+
+				if (createsColumn) {
 					if (table) {
 						this.addColumnToTable(table, collection, hookAdjustedField as Field);
 					} else {
@@ -556,6 +585,18 @@ export class FieldsService {
 				hookAdjustedField.type !== (this.schema.collections[collection]!.fields[field.field]?.type ?? 'alias')
 			) {
 				throw new InvalidPayloadError({ reason: 'Alias type cannot be changed' });
+			}
+
+			const isExistingAlias = this.schema.collections[collection]
+				?.fields[field.field]?.alias === true;
+
+			if (isExistingAlias && hookAdjustedField.meta?.special !== undefined) {
+				await this.refuseUnnamedRelationalAlias(
+					this.knex,
+					collection,
+					hookAdjustedField.field,
+					hookAdjustedField.meta.special,
+				);
 			}
 
 			if (hookAdjustedField.schema) {
@@ -730,12 +771,6 @@ export class FieldsService {
 					schema: this.schema,
 				});
 
-				const fieldsService = new FieldsService({
-					knex: trx,
-					accountability: this.accountability,
-					schema: this.schema,
-				});
-
 				for (const relation of relations) {
 					const isM2O = relation.collection === collection && relation.field === field;
 
@@ -746,20 +781,6 @@ export class FieldsService {
 							bypassEmitAction: (params) =>
 								opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
 						});
-
-						if (
-							relation.related_collection &&
-							relation.meta?.one_field &&
-							relation.related_collection !== collection &&
-							relation.meta.one_field !== field
-						) {
-							await fieldsService.deleteField(relation.related_collection, relation.meta.one_field, {
-								autoPurgeCache: false,
-								autoPurgeSystemCache: false,
-								bypassEmitAction: (params) =>
-									opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
-							});
-						}
 					}
 
 					// If the current field is a o2m, just delete the one field config from the relation
@@ -878,6 +899,39 @@ export class FieldsService {
 				opts,
 				runPostColumnChange,
 			);
+		}
+	}
+
+	/**
+	 * A relational alias no relation names is read as a column, and the read
+	 * then fails on a column the table does not hold.
+	 */
+	private async refuseUnnamedRelationalAlias(
+		knex: Knex,
+		collection: string,
+		fieldName: string,
+		fieldSpecial: string | string[] | null | undefined,
+	): Promise<void> {
+		const relationalSpecial = findRelationalSpecial(fieldSpecial);
+
+		if (relationalSpecial === undefined) {
+			return;
+		}
+
+		const namingRelation = await knex
+			.select('id')
+			.from('directus_relations')
+			.where({ one_collection: collection, one_field: fieldName })
+			.first();
+
+		if (namingRelation === undefined) {
+			throw new InvalidPayloadError({
+				reason: unnamedRelationalAliasReason(
+					collection,
+					fieldName,
+					relationalSpecial,
+				),
+			});
 		}
 	}
 

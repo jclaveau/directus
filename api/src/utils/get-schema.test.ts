@@ -323,6 +323,30 @@ describe('getDatabaseSchema (via getSchema bypassCache)', () => {
 		expect(fields['slug']!.inUniqueIndex).toBe(true);
 	});
 
+	it('leaves the relation_alias column out of directus_fields', async () => {
+		overview.mockResolvedValue({
+			directus_fields: {
+				primary: 'id',
+				columns: {
+					id: { column_name: 'id', data_type: 'integer', is_nullable: false },
+					relation_alias: {
+						column_name: 'relation_alias',
+						data_type: 'varchar',
+						is_nullable: true,
+						is_generated: true,
+					},
+				},
+			},
+		});
+
+		tracker.on.select('directus_collections').response([]);
+		tracker.on.select('directus_fields').response([]);
+
+		const { fields } = (await run()).collections['directus_fields']!;
+
+		expect(Object.keys(fields)).toEqual(['id']);
+	});
+
 	// A non-alias field row with no matching column is skipped (227-229): neither an alias
 	// special nor an existing column, so nothing is added.
 	it('skips a non-alias field row that has no matching column', async () => {
