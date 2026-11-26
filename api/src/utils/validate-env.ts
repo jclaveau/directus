@@ -220,7 +220,7 @@ const UNREAD_VARIABLE_ADVICE: Record<string, string> = {
  * for one that did.
  */
 export function validateUnreadEnv(): void {
-	const env: Record<string, unknown> = useEnv();
+	const env: Record<string, unknown> = useEnv(); // reads names no longer declared
 
 	for (const [key, advice] of Object.entries(UNREAD_VARIABLE_ADVICE)) {
 		if (env[key] === undefined) {

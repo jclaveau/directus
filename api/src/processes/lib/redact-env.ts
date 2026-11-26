@@ -57,7 +57,7 @@ function truncate(value: string): string {
  * half of the answer that a leaked value was never needed for.
  */
 export function resolveReportedEnv(): ResolvedEnvVariable[] {
-	const env: Record<string, unknown> = useEnv();
+	const env: Record<string, unknown> = useEnv(); // walks every key, undeclared too
 	const sources = useEnvSources();
 
 	return Object.keys(env)
