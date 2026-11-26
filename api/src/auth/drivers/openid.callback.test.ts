@@ -6,6 +6,7 @@ import { createOpenIDAuthRouter } from './openid.js';
 const { mockEnv } = vi.hoisted(() => {
 	return {
 		mockEnv: {
+			AUTH_PROVIDERS: [],
 			PUBLIC_URL: 'http://localhost:8055',
 			SESSION_COOKIE_NAME: 'session_cookie',
 			REFRESH_TOKEN_COOKIE_NAME: 'refresh_cookie',
