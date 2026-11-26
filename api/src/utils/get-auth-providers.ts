@@ -3,8 +3,8 @@ import { useEnv } from '@directus/env';
 interface AuthProvider {
 	name: string;
 	driver: string;
-	icon?: string;
-	label?: string;
+	icon?: string | undefined;
+	label?: string | undefined;
 }
 
 export function getAuthProviders({ sessionOnly } = { sessionOnly: false }): AuthProvider[] {

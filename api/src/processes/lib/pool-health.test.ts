@@ -41,11 +41,12 @@ async function freshMirror() {
 
 	const { useBus } = await import('../../bus/index.js');
 
-	vi.mocked(useBus, { partial: true }).mockReturnValue({
+	// The mocks are typed to the pool channel, narrower than the bus generics.
+	vi.mocked(useBus).mockReturnValue({
 		publish,
 		subscribe,
 		onResubscribe,
-	});
+	} as never);
 
 	const { useEnv } = await import('@directus/env');
 	vi.mocked(useEnv, { partial: true }).mockReturnValue(env);

@@ -70,7 +70,8 @@ async function settingsHolding(stored: unknown) {
 
 async function busReady() {
 	const { useBus } = await import('../../bus/index.js');
-	vi.mocked(useBus, { partial: true }).mockReturnValue({ publish, subscribe });
+	// The mocks are typed to the settings channel, narrower than the bus generics.
+	vi.mocked(useBus).mockReturnValue({ publish, subscribe } as never);
 }
 
 beforeEach(() => {

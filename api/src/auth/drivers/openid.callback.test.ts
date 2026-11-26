@@ -25,17 +25,17 @@ vi.mock('../../logger/index.js', () => {
 
 vi.mock('../../services/authentication.js', () => {
 	return {
-		AuthenticationService: vi.fn(() => {
-			return {
-				login: vi.fn(async () => {
-					return {
-						accessToken: 'access-token',
-						refreshToken: 'refresh-token',
-						expires: 1,
-					};
-				}),
-			};
-		}),
+		// A class, as the driver calls it with new: vitest 4 refuses new on an
+		// arrow implementation.
+		AuthenticationService: class {
+			login = vi.fn(async () => {
+				return {
+					accessToken: 'access-token',
+					refreshToken: 'refresh-token',
+					expires: 1,
+				};
+			});
+		},
 	};
 });
 
