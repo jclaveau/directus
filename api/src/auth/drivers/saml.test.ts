@@ -1,3 +1,4 @@
+import { InvalidCredentialsError } from '@directus/errors';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
 import {
@@ -16,6 +17,8 @@ const mockedDeps = vi.hoisted(() => {
 	return {
 		logger: { warn: vi.fn(), error: vi.fn() },
 		createOne: vi.fn(),
+		createIdentity: vi.fn(),
+		updateIdentity: vi.fn(),
 	};
 });
 
@@ -61,6 +64,23 @@ vi.mock('../../services/users.js', () => {
 	};
 });
 
+vi.mock('../../services/items.js', () => {
+	return {
+		ItemsService: vi.fn(function () {
+			return {
+				createOne: mockedDeps.createIdentity,
+				updateOne: mockedDeps.updateIdentity,
+			};
+		}),
+	};
+});
+
+vi.mock('../../utils/transaction.js', () => {
+	return {
+		transaction: vi.fn((trxKnex, runInTransaction) => runInTransaction(trxKnex)),
+	};
+});
+
 vi.mock('../../services/authentication.js', () => {
 	return { AuthenticationService: vi.fn() };
 });
@@ -88,13 +108,26 @@ afterEach(() => {
 
 describe('SAMLAuthDriver getUserID', () => {
 	test('creates a first-login user with the default role', async () => {
-		knexTracker.on.select('directus_users').response(undefined);
+		knexTracker.on.select('"id" = ?').response({
+			id: 'identity-1',
+			user: 'user-1',
+			kind: 'saml',
+			value: 'ada',
+		});
+
+		knexTracker.on.select('directus_user_identities').response(undefined);
+		knexTracker.on.update('directus_users').response(1);
 		mockedDeps.createOne.mockResolvedValue('user-1');
+
+		mockedDeps.createIdentity
+			.mockResolvedValueOnce('identity-1')
+			.mockResolvedValueOnce('identity-2');
 
 		const samlDriver = new SAMLAuthDriver(
 			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
 			{
 				provider: 'saml',
+				requireVerifiedEmail: false,
 				allowPublicRegistration: true,
 				defaultRoleId: 'role-default',
 				identifierKey: 'uid',
@@ -114,17 +147,77 @@ describe('SAMLAuthDriver getUserID', () => {
 		expect(userId).toBe('user-1');
 
 		expect(mockedDeps.createOne.mock.calls).toEqual([[{
-			provider: 'saml',
 			first_name: 'Ada',
 			last_name: 'Lovelace',
-			email: 'ada@example.com',
-			external_identifier: 'ada',
 			role: 'role-default',
 		}]]);
+
+		expect(mockedDeps.createIdentity.mock.calls).toEqual([
+			[{
+				user: 'user-1',
+				kind: 'saml',
+				value: 'ada',
+				verified: true,
+				auth_data: null,
+				user_info: {
+					uid: 'Ada',
+					mail: 'ada@example.com',
+					givenName: 'Ada',
+					sn: 'Lovelace',
+				},
+				scope: null,
+			}],
+			[{
+				user: 'user-1',
+				kind: 'email',
+				value: 'ada@example.com',
+				verified: false,
+			}],
+		]);
+
+		expect(knexTracker.history.update).toMatchObject([{
+			sql: 'update "directus_users" set "primary_identity" = ? where "id" = ?',
+			bindings: ['identity-2', 'user-1'],
+		}]);
+	});
+
+	test('a first login with a verified email required creates no user', async () => {
+		knexTracker.on.select('directus_user_identities').response(undefined);
+
+		await expect(new SAMLAuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'saml',
+				allowPublicRegistration: true,
+				defaultRoleId: 'role-default',
+				identifierKey: 'uid',
+				emailKey: 'mail',
+			},
+		).getUserID({ uid: 'Ada', mail: 'ada@example.com' }))
+			.rejects.toThrow(new InvalidCredentialsError());
+
+		expect(mockedDeps.logger.warn).toHaveBeenCalledExactlyOnceWith(
+			'[SAML] Unverified email can\'t create a user for provider "saml"',
+		);
+
+		expect(mockedDeps.createOne).not.toHaveBeenCalled();
+		expect(mockedDeps.createIdentity).not.toHaveBeenCalled();
 	});
 
 	test('logs in a known user without touching their role', async () => {
-		knexTracker.on.select('directus_users').response({ id: 'user-1' });
+		knexTracker.on.select('"id" = ?').response({
+			id: 'identity-1',
+			user: 'user-1',
+			kind: 'saml',
+			value: 'ada',
+		});
+
+		knexTracker.on.select('directus_user_identities').response({
+			id: 'identity-1',
+			user: 'user-1',
+			kind: 'saml',
+			value: 'ada',
+		});
 
 		const samlDriver = new SAMLAuthDriver(
 			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
@@ -140,5 +233,11 @@ describe('SAMLAuthDriver getUserID', () => {
 
 		expect(userId).toBe('user-1');
 		expect(mockedDeps.createOne).not.toHaveBeenCalled();
+		expect(mockedDeps.createIdentity).not.toHaveBeenCalled();
+
+		expect(mockedDeps.updateIdentity.mock.calls).toEqual([[
+			'identity-1',
+			{ user_info: { uid: 'Ada' }, scope: null },
+		]]);
 	});
 });

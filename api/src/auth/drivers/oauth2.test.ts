@@ -17,6 +17,8 @@ const mockedDeps = vi.hoisted(() => {
 	return {
 		logger: { warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 		createOne: vi.fn(),
+		createIdentity: vi.fn(),
+		updateIdentity: vi.fn(),
 		updateOne: vi.fn(),
 		profileGroups: [] as string[],
 		emailVerified: true as unknown,
@@ -84,6 +86,23 @@ vi.mock('../../services/users.js', () => {
 	};
 });
 
+vi.mock('../../services/items.js', () => {
+	return {
+		ItemsService: vi.fn(function () {
+			return {
+				createOne: mockedDeps.createIdentity,
+				updateOne: mockedDeps.updateIdentity,
+			};
+		}),
+	};
+});
+
+vi.mock('../../utils/transaction.js', () => {
+	return {
+		transaction: vi.fn((trxKnex, runInTransaction) => runInTransaction(trxKnex)),
+	};
+});
+
 vi.mock('../../services/authentication.js', () => {
 	return { AuthenticationService: vi.fn() };
 });
@@ -111,10 +130,9 @@ afterEach(() => {
 	mockedDeps.emailVerified = true;
 });
 
-
 describe('OAuth2AuthDriver getUserID with a verified email required', () => {
 	test('a first login with an unverified email creates no user', async () => {
-		knexTracker.on.select('directus_users').response(undefined);
+		knexTracker.on.select('directus_user_identities').response(undefined);
 		mockedDeps.emailVerified = false;
 
 		await expect(new OAuth2AuthDriver(
@@ -138,10 +156,11 @@ describe('OAuth2AuthDriver getUserID with a verified email required', () => {
 		);
 
 		expect(mockedDeps.createOne).not.toHaveBeenCalled();
+		expect(mockedDeps.createIdentity).not.toHaveBeenCalled();
 	});
 
 	test('a first login without the key creates no user', async () => {
-		knexTracker.on.select('directus_users').response(undefined);
+		knexTracker.on.select('directus_user_identities').response(undefined);
 
 		await expect(new OAuth2AuthDriver(
 			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
@@ -159,14 +178,28 @@ describe('OAuth2AuthDriver getUserID with a verified email required', () => {
 			.rejects.toThrow(new InvalidCredentialsError());
 
 		expect(mockedDeps.createOne).not.toHaveBeenCalled();
+		expect(mockedDeps.createIdentity).not.toHaveBeenCalled();
 	});
 
 	test('a first login creates the user when not required', async () => {
-		knexTracker.on.select('directus_users').response(undefined);
+		knexTracker.on.select('"id" = ?').response({
+			id: 'identity-1',
+			user: 'user-1',
+			kind: 'github',
+			value: 'Ada',
+		});
+
+		knexTracker.on.select('directus_user_identities').response(undefined);
+		knexTracker.on.update('directus_users').response(1);
 		mockedDeps.createOne.mockResolvedValue('user-1');
+
+		mockedDeps.createIdentity
+			.mockResolvedValueOnce('identity-1')
+			.mockResolvedValueOnce('identity-2');
+
 		mockedDeps.emailVerified = false;
 
-		await new OAuth2AuthDriver(
+		const userId = await new OAuth2AuthDriver(
 			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
 			{
 				provider: 'github',
@@ -182,19 +215,63 @@ describe('OAuth2AuthDriver getUserID with a verified email required', () => {
 			},
 		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
 
-		expect(mockedDeps.createOne).toHaveBeenCalledWith({
-			provider: 'github',
-			email: 'ada@example.com',
-			external_identifier: 'Ada',
-			auth_data: '{"refreshToken":"refresh"}',
+		expect(userId).toBe('user-1');
+
+		expect(mockedDeps.createOne.mock.calls).toEqual([[{
+			first_name: undefined,
+			last_name: undefined,
 			role: 'role-default',
-		});
+		}]]);
+
+		expect(mockedDeps.createIdentity.mock.calls).toEqual([
+			[{
+				user: 'user-1',
+				kind: 'github',
+				value: 'Ada',
+				verified: true,
+				auth_data: '{"refreshToken":"refresh"}',
+				user_info: {
+					login: 'Ada',
+					email: 'ada@example.com',
+					groups: [],
+					verified: false,
+				},
+				scope: 'email',
+			}],
+			[{
+				user: 'user-1',
+				kind: 'email',
+				value: 'ada@example.com',
+				verified: false,
+			}],
+		]);
+
+		expect(knexTracker.history.update).toMatchObject([{
+			sql: 'update "directus_users" set "primary_identity" = ? where "id" = ?',
+			bindings: ['identity-2', 'user-1'],
+		}]);
 	});
 
 	test('a known user login syncs a verified email', async () => {
-		knexTracker.on.select('directus_users').response({ id: 'user-1' });
+		knexTracker.on.select('"id" = ?').response({
+			id: 'identity-1',
+			user: 'user-1',
+			kind: 'github',
+			value: 'Ada',
+		});
 
-		await new OAuth2AuthDriver(
+		knexTracker.on.select('directus_user_identities').responseOnce({
+			id: 'identity-1',
+			user: 'user-1',
+			kind: 'github',
+			value: 'Ada',
+		});
+
+		knexTracker.on.select('directus_user_identities').response(undefined);
+		knexTracker.on.update('directus_users').response(1);
+		mockedDeps.createIdentity.mockResolvedValue('identity-2');
+
+		const userId = await new OAuth2AuthDriver(
 			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
 			{
 				provider: 'github',
@@ -209,16 +286,55 @@ describe('OAuth2AuthDriver getUserID with a verified email required', () => {
 			},
 		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
 
-		expect(mockedDeps.updateOne).toHaveBeenCalledExactlyOnceWith('user-1', {
-			auth_data: '{"refreshToken":"refresh"}',
-			first_name: undefined,
-			last_name: undefined,
-			email: 'ada@example.com',
-		});
+		expect(userId).toBe('user-1');
+		expect(mockedDeps.updateOne).not.toHaveBeenCalled();
+
+		expect(mockedDeps.updateIdentity.mock.calls).toEqual([[
+			'identity-1',
+			{
+				user_info: {
+					login: 'Ada',
+					email: 'ada@example.com',
+					groups: [],
+					verified: true,
+				},
+				scope: 'email',
+				auth_data: '{"refreshToken":"refresh"}',
+			},
+		]]);
+
+		expect(mockedDeps.createIdentity.mock.calls).toEqual([[{
+			user: 'user-1',
+			kind: 'email',
+			value: 'ada@example.com',
+			verified: true,
+		}]]);
+
+		expect(knexTracker.history.update).toMatchObject([{
+			sql: 'update "directus_users" set "primary_identity" = ?'
+				+ ' where "id" = ? and "primary_identity" is null',
+			bindings: ['identity-2', 'user-1'],
+		}]);
 	});
 
-	test('a known user login never syncs an unverified email', async () => {
-		knexTracker.on.select('directus_users').response({ id: 'user-1' });
+	test('a known user login adds an unverified email as unverified', async () => {
+		knexTracker.on.select('"id" = ?').response({
+			id: 'identity-1',
+			user: 'user-1',
+			kind: 'github',
+			value: 'Ada',
+		});
+
+		knexTracker.on.select('directus_user_identities').responseOnce({
+			id: 'identity-1',
+			user: 'user-1',
+			kind: 'github',
+			value: 'Ada',
+		});
+
+		knexTracker.on.select('directus_user_identities').response(undefined);
+		knexTracker.on.update('directus_users').response(1);
+		mockedDeps.createIdentity.mockResolvedValue('identity-2');
 		mockedDeps.emailVerified = false;
 
 		const userId = await new OAuth2AuthDriver(
@@ -237,20 +353,19 @@ describe('OAuth2AuthDriver getUserID with a verified email required', () => {
 		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
 
 		expect(userId).toBe('user-1');
+		expect(mockedDeps.updateOne).not.toHaveBeenCalled();
 
-		expect(mockedDeps.updateOne).toHaveBeenCalledExactlyOnceWith('user-1', {
-			auth_data: '{"refreshToken":"refresh"}',
-			first_name: undefined,
-			last_name: undefined,
-		});
+		expect(mockedDeps.createIdentity.mock.calls).toEqual([[{
+			user: 'user-1',
+			kind: 'email',
+			value: 'ada@example.com',
+			verified: false,
+		}]]);
 
-		expect(mockedDeps.logger.warn).toHaveBeenCalledExactlyOnceWith(
-			'[OAuth2] Unverified email not synced for provider "github"',
-		);
+		expect(mockedDeps.logger.warn).not.toHaveBeenCalled();
 	});
 
 	test('an unverified email identifier logs no one in', async () => {
-		knexTracker.on.select('directus_users').response({ id: 'user-1' });
 		mockedDeps.emailVerified = false;
 
 		await expect(new OAuth2AuthDriver(
@@ -273,6 +388,8 @@ describe('OAuth2AuthDriver getUserID with a verified email required', () => {
 			'[OAuth2] Unverified email can\'t be the identifier for provider "github"',
 		);
 
+		expect(knexTracker.history.all).toEqual([]);
 		expect(mockedDeps.updateOne).not.toHaveBeenCalled();
+		expect(mockedDeps.updateIdentity).not.toHaveBeenCalled();
 	});
 });
