@@ -1,4 +1,7 @@
-export { ENV_VAR_DECLARATIONS } from './constants/env-var-declarations.js';
+export {
+	ENV_VAR_DECLARATIONS,
+	ENV_VAR_PATTERN_DECLARATIONS,
+} from './constants/env-var-declarations.js';
 export { castEnvVarValue } from './lib/cast.js';
 export { readEnvVarFile } from './lib/read-env-var-file.js';
 export { checkDeclaredEnvVarValue } from './lib/check-declared-env-var-value.js';
