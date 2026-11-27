@@ -210,6 +210,23 @@ describe('Integration Tests', () => {
 				expect(checkPasswordPolicySpy).toHaveBeenCalledWith(['testpassword']);
 			});
 
+			it('refuses a provider from a non-admin', async () => {
+				const opts: MutationOptions = {};
+
+				await new UsersService({
+					knex: db,
+					schema,
+					accountability: { role: 'test', admin: false } as Accountability,
+				}).createMany(
+					[{ provider: 'github', external_identifier: 'octocat' }],
+					opts,
+				);
+
+				expect(opts.preMutationError).toStrictEqual(new InvalidPayloadError({
+					reason: `You can't change the "provider" value manually`,
+				}));
+			});
+
 			it('refuses an empty email', async () => {
 				const opts: MutationOptions = {};
 
@@ -429,6 +446,36 @@ describe('Integration Tests', () => {
 				);
 			});
 
+			it('replaces the value of the email identity the account shows', async () => {
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_users').response(1);
+
+				tracker.on.select('directus_user_identities')
+					.responseOnce({ value: 'old@example.com' });
+
+				tracker.on.select('directus_user_identities').responseOnce({
+					id: '8e2b4c10-5d3a-4f6e-9a7b-000000000051',
+					user: '8e2b4c10-5d3a-4f6e-9a7b-000000000050',
+					kind: 'email',
+					value: 'old@example.com',
+				});
+
+				await service.updateMany(
+					['8e2b4c10-5d3a-4f6e-9a7b-000000000050'],
+					{ email: 'new@example.com' },
+				);
+
+				expect(superUpdateGroupsSpy).toHaveBeenCalledWith(
+					[{
+						data: { value: 'new@example.com', verified: false },
+						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000051'],
+					}],
+					expect.anything(),
+				);
+
+				expect(superCreateOneSpy).not.toHaveBeenCalled();
+			});
+
 			it('should disallow updating multiple items to same email', async () => {
 				const opts: MutationOptions = {};
 
@@ -512,7 +559,11 @@ describe('Integration Tests', () => {
 						]]));
 					});
 
-					it.each(['provider', 'external_identifier'])('%s', async (field) => {
+					it.each([
+						'email',
+						'provider',
+						'external_identifier',
+					])('%s', async (field) => {
 						await expect(service.updateMany([1], { [field]: 'test' }))
 							.rejects.toStrictEqual(new InvalidPayloadError({
 								reason: `You can't change the "${field}" value manually`,
@@ -1524,6 +1575,25 @@ describe('Integration Tests', () => {
 
 				expect(emitActionSpy)
 					.toHaveBeenCalledWith('committed attempt', undefined, undefined);
+			});
+		});
+
+		describe('requestPasswordReset by email', () => {
+			it('refuses an identity whose account row is gone', async () => {
+				tracker.on.select('directus_user_identities').response({
+					id: '8e2b4c10-5d3a-4f6e-9a7b-000000000061',
+					user: '8e2b4c10-5d3a-4f6e-9a7b-000000000060',
+					kind: 'email',
+					value: 'gone@example.com',
+				});
+
+				tracker.on.select('directus_users').response(undefined);
+
+				await expect(service.requestPasswordReset('gone@example.com', null))
+					.rejects.toStrictEqual(new ForbiddenError({ reason: 'Inactive user' }));
+
+				expect(tracker.history.select[1]?.bindings)
+					.toStrictEqual(['8e2b4c10-5d3a-4f6e-9a7b-000000000060', 1]);
 			});
 		});
 

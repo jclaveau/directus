@@ -122,3 +122,76 @@ test('moves the primary to a verified email, then deletes', async () => {
 
 	expect(deleteOne).toHaveBeenCalledWith('identity-removed');
 });
+
+test('moves the primary to an unverified email without a verified one', async () => {
+	tracker.on.select('directus_user_identities').response([
+		{
+			id: 'identity-github',
+			kind: 'github',
+			verified: true,
+		},
+		{
+			id: 'identity-unverified',
+			kind: 'email',
+			verified: false,
+		},
+		{
+			id: 'identity-removed',
+			kind: 'email',
+			verified: true,
+		},
+	]);
+
+	tracker.on.update('directus_users').response(1);
+
+	const deleteOne = vi.spyOn(ItemsService.prototype, 'deleteOne')
+		.mockResolvedValue('identity-removed');
+
+	onTestFinished(() => {
+		deleteOne.mockRestore();
+	});
+
+	await service.removeIdentity('user-id-1', 'identity-removed');
+
+	expect(tracker.history.update[0]!.bindings).toEqual([
+		'identity-unverified',
+		'user-id-1',
+		'identity-removed',
+	]);
+
+	expect(deleteOne).toHaveBeenCalledWith('identity-removed');
+});
+
+test('moves the primary to an SSO identity without an email left', async () => {
+	tracker.on.select('directus_user_identities').response([
+		{
+			id: 'identity-github',
+			kind: 'github',
+			verified: true,
+		},
+		{
+			id: 'identity-removed',
+			kind: 'email',
+			verified: true,
+		},
+	]);
+
+	tracker.on.update('directus_users').response(1);
+
+	const deleteOne = vi.spyOn(ItemsService.prototype, 'deleteOne')
+		.mockResolvedValue('identity-removed');
+
+	onTestFinished(() => {
+		deleteOne.mockRestore();
+	});
+
+	await service.removeIdentity('user-id-1', 'identity-removed');
+
+	expect(tracker.history.update[0]!.bindings).toEqual([
+		'identity-github',
+		'user-id-1',
+		'identity-removed',
+	]);
+
+	expect(deleteOne).toHaveBeenCalledWith('identity-removed');
+});

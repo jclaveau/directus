@@ -1,6 +1,10 @@
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { getAuthProvider, registerAuthProviders } from './auth.js';
+import {
+	findAuthProvider,
+	getAuthProvider,
+	registerAuthProviders,
+} from './auth.js';
 import { OAuth2AuthDriver, OpenIDAuthDriver } from './auth/drivers/index.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 
@@ -97,4 +101,24 @@ test('an openid provider boots, requiring a verified email', async () => {
 	);
 
 	expect(getAuthProvider('sso')).toBeInstanceOf(OpenIDAuthDriver);
+});
+
+test('findAuthProvider answers undefined for an unknown provider', async () => {
+	mockedDeps.env = { AUTH_PROVIDERS: [] };
+
+	await registerAuthProviders();
+
+	expect(findAuthProvider('default')).toEqual({ driver: 'local' });
+	expect(findAuthProvider('github')).toBe(undefined);
+});
+
+test('a provider named email fails the boot', async () => {
+	mockedDeps.env = { AUTH_PROVIDERS: ['email'] };
+
+	await expect(registerAuthProviders()).rejects.toThrow('process.exit');
+
+	expect(mockedDeps.logger.error).toHaveBeenCalledExactlyOnceWith(
+		'Cannot name an auth provider "email": it is the kind of the identities'
+		+ ' the default provider logs in with.',
+	);
 });
