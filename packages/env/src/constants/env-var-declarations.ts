@@ -515,7 +515,7 @@ export const ENV_VAR_DECLARATIONS = {
 	HASH_HASH_LENGTH: { type: 'number' },
 	HASH_SALT_LENGTH: { type: 'number' },
 	HASH_TYPE: { type: 'number' },
-	// argon2 takes a Buffer: the value is guessed, as before.
+	// argon2 takes a Buffer, made from this string.
 	HASH_ASSOCIATED_DATA: { type: 'string' },
 	// Read off HSTS_ and the two CSP prefixes by helmet.
 	HSTS_ENABLED: { type: 'boolean' },

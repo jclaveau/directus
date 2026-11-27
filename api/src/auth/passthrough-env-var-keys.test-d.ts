@@ -11,14 +11,16 @@ type ScreamingSnakeCase<CamelName extends string> =
 			: ''}${Uppercase<FirstLetter>}${ScreamingSnakeCase<OtherLetters>}`
 		: CamelName;
 
-type DeclaredKeys<NamePrefix extends string> =
+type DeclaredPassthroughKeys<NamePrefix extends string> =
 	keyof typeof ENV_VAR_PATTERN_DECLARATIONS extends infer DeclaredName
-		? DeclaredName extends `${NamePrefix}${infer KeyName}`
-			? KeyName extends `${string}*${string}` ? never : KeyName
+		? DeclaredName extends `${NamePrefix}${infer PassthroughKey}`
+			? PassthroughKey extends `${string}*${string}` ? never : PassthroughKey
 			: never
 		: never;
 
-type LibraryKeys<OptionSet> = ScreamingSnakeCase<keyof OptionSet & string>;
+type LibraryEnvVarKeys<LibraryOptions> = ScreamingSnakeCase<
+	keyof LibraryOptions & string
+>;
 
 type ServiceProviderSettings = NonNullable<
 	Parameters<typeof ServiceProvider>[0]
@@ -31,34 +33,37 @@ type IdentityProviderSettings = NonNullable<
 // A declared passthrough key no library reads is a typo that types nothing
 test('every typed passthrough key exists in its library', () => {
 	expectTypeOf<
-		Exclude<DeclaredKeys<'DB_SSL__'>, LibraryKeys<ConnectionOptions>>
-	>().toEqualTypeOf<never>();
-
-	expectTypeOf<
 		Exclude<
-			DeclaredKeys<'DB_CONNECTION_*_SSL__'>,
-			LibraryKeys<ConnectionOptions>
+			DeclaredPassthroughKeys<'DB_SSL__'>,
+			LibraryEnvVarKeys<ConnectionOptions>
 		>
 	>().toEqualTypeOf<never>();
 
 	expectTypeOf<
 		Exclude<
-			DeclaredKeys<'AUTH_*_CLIENT_HTTP_'>,
-			LibraryKeys<HttpOptions>
+			DeclaredPassthroughKeys<'DB_CONNECTION_*_SSL__'>,
+			LibraryEnvVarKeys<ConnectionOptions>
 		>
 	>().toEqualTypeOf<never>();
 
 	expectTypeOf<
 		Exclude<
-			DeclaredKeys<'AUTH_*_SP_'>,
-			LibraryKeys<ServiceProviderSettings>
+			DeclaredPassthroughKeys<'AUTH_*_CLIENT_HTTP_'>,
+			LibraryEnvVarKeys<HttpOptions>
 		>
 	>().toEqualTypeOf<never>();
 
 	expectTypeOf<
 		Exclude<
-			DeclaredKeys<'AUTH_*_IDP_'>,
-			LibraryKeys<IdentityProviderSettings>
+			DeclaredPassthroughKeys<'AUTH_*_SP_'>,
+			LibraryEnvVarKeys<ServiceProviderSettings>
+		>
+	>().toEqualTypeOf<never>();
+
+	expectTypeOf<
+		Exclude<
+			DeclaredPassthroughKeys<'AUTH_*_IDP_'>,
+			LibraryEnvVarKeys<IdentityProviderSettings>
 		>
 	>().toEqualTypeOf<never>();
 });

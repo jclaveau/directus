@@ -430,7 +430,6 @@ test('Refuses a variable set both directly and through its _FILE variable', () =
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
 	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
-	vi.mocked(readFileSync).mockReturnValueOnce('from-file\n');
 
 	expect(() => createEnv()).toThrow(new Error(
 		'"DB_PASSWORD" and "DB_PASSWORD_FILE" are both set. Set only one.',
