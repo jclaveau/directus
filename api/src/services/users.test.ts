@@ -1528,7 +1528,7 @@ describe('Integration Tests', () => {
 		});
 
 		describe('verifyRegistration by email', () => {
-			it('activates the unverified user the token names', async () => {
+			it('activates the user and verifies the registered email', async () => {
 				vi.mocked(verifyJWT).mockReturnValue({
 					email: 'Ada@Example.com',
 					scope: 'pending-registration',
@@ -1555,13 +1555,25 @@ describe('Integration Tests', () => {
 				expect(tracker.history.select[1]?.bindings)
 					.toStrictEqual(['8e2b4c10-5d3a-4f6e-9a7b-000000000042', 1]);
 
-				expect(superUpdateGroupsSpy).toHaveBeenCalledWith(
+				expect(superUpdateGroupsSpy).toHaveBeenNthCalledWith(
+					1,
 					[{
 						data: { status: 'active' },
 						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000042'],
 					}],
 					expect.anything(),
 				);
+
+				expect(superUpdateGroupsSpy).toHaveBeenNthCalledWith(
+					2,
+					[{
+						data: { verified: true },
+						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000043'],
+					}],
+					expect.anything(),
+				);
+
+				expect(superUpdateGroupsSpy).toHaveBeenCalledTimes(2);
 			});
 		});
 
