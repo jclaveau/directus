@@ -56,10 +56,30 @@ logout call the provider that opened the session.
   wants an address held unverified by another account asks the operator by email,
   and an admin moves or removes the identity. Point 7 (verifying an email another
   account holds) dissolves: no two accounts can hold it.
-- **Open, not yet put to jean:** S3 x 9 A = a provider sends a known user's new
-  email that another account already holds (unverified or not): the identity insert
-  collides, login outcome unruled. 5 (`provider`/`external_identifier`/`auth_data`
-  columns) and 6 (permissions on `directus_user_identities`) still to propose.
+- **Point 5 = A (jean 2026-11-27):** `provider`, `external_identifier` and
+  `auth_data` move to `directus_user_identities` (SSO row: kind = provider name,
+  value = external_identifier, auth_data) and are dropped from `directus_users`.
+  Password login = password set + an email identity: the one-provider lock ends.
+- **Point 6 = A (jean 2026-11-27):** a user reads their own identity rows, never
+  `auth_data`; no create/update/delete through `/items` (adding = verification flow
+  or linking B from a session, removing = the remove endpoint); admins full. jean
+  asked to carry over EVERY single-provider guard. Audit 2026-11-27 (code read):
+  login checks `status active` + `provider === providerName` + stall + login-attempt
+  limiter + TFA (`authentication.ts:142`); non-admin can't write `provider` /
+  `external_identifier`, writing either nulls `auth_data` (`users.ts:289-306`);
+  self-read app-access excludes provider/external_identifier/auth_data; Flow log
+  operations redact `payload.external_identifier`/`auth_data` (`flows.ts:733`);
+  `auth_data` hidden in the app; `provider` choices filled from the configured
+  providers (`get-field-system-rows.ts:9`); refresh/logout pick the driver from
+  `user.provider` (→ `directus_sessions.identity`); SSO lookups by
+  lower(external_identifier) with no provider filter (→ per kind). Gaps found:
+  password reset never checks the provider (`users.ts:663`), harmless today, opens
+  a password login on an SSO-created account once 5 A lands (point 10, asked);
+  the SSO identity's value is not self-readable today (6 refinement, asked).
+- **Open, asked 2026-11-27:** S3 x 9 A (provider sends a known user's new email
+  another account holds): jean leans "A + add the identity"; adding collides with 9 A,
+  proposed C = move it only when the holder's row is unverified. 10 (reset on a
+  passwordless account). 6 refinement (hide SSO identity values from self-read).
 - **Focus (jean 2026-11-27):** stay on #772 until it merges; do not raise the #749
   rebase or other PRs meanwhile.
 - **Today, from code (not run):** a password user's SSO login with the same email is a
