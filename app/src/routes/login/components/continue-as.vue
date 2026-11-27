@@ -30,7 +30,13 @@ async function fetchUser() {
 	try {
 		const response = await api.get(`/users/me`, {
 			params: {
-				fields: ['email', 'first_name', 'last_name', 'last_page'],
+				fields: [
+					'primary_identity.kind',
+					'primary_identity.value',
+					'first_name',
+					'last_name',
+					'last_page',
+				],
 			},
 		});
 

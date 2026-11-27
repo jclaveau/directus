@@ -268,6 +268,8 @@ fields:
     special:
       - cast-boolean
 
+  # OPEN(#772): the filter runs on the registering `email`, which no
+  # directus_users field holds, so the builder finds no field to type it
   - field: public_registration_email_filter
     interface: system-filter
     note: $t:fields.directus_settings.public_registration_email_filter_note

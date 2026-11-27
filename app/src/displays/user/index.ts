@@ -56,5 +56,12 @@ export default defineDisplay({
 			},
 		},
 	],
-	fields: ['id', 'avatar.id', 'email', 'first_name', 'last_name'],
+	fields: [
+		'id',
+		'avatar.id',
+		'primary_identity.kind',
+		'primary_identity.value',
+		'first_name',
+		'last_name',
+	],
 });

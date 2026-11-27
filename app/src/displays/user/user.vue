@@ -6,7 +6,10 @@ import { computed } from 'vue';
 
 const props = withDefaults(
 	defineProps<{
-		value: Pick<User, 'id' | 'email' | 'first_name' | 'last_name' | 'avatar'> | null;
+		value: Pick<
+			User,
+			'id' | 'primary_identity' | 'first_name' | 'last_name' | 'avatar'
+		> | null;
 		display?: 'avatar' | 'name' | 'both';
 		circle?: boolean;
 	}>(),

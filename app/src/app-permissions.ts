@@ -108,6 +108,17 @@ export const appRecommendedPermissions: Partial<Permission>[] = [
 		permissions: {},
 		fields: ['*'],
 	},
+	// OPEN(#772): other users' email identities read as their `email` column was
+	{
+		collection: 'directus_user_identities',
+		action: 'read',
+		permissions: {
+			kind: {
+				_eq: 'email',
+			},
+		},
+		fields: ['id', 'user', 'kind', 'value', 'verified'],
+	},
 	{
 		collection: 'directus_users',
 		action: 'update',
@@ -119,7 +130,6 @@ export const appRecommendedPermissions: Partial<Permission>[] = [
 		fields: [
 			'first_name',
 			'last_name',
-			'email',
 			'password',
 			'location',
 			'title',

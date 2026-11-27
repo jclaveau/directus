@@ -18,7 +18,10 @@ type CommentsByDateDisplay = {
 	dateFormatted: string;
 	comments: (Comment & {
 		display: string;
-		user_created: Pick<User, 'id' | 'email' | 'first_name' | 'last_name' | 'avatar'>;
+		user_created: Pick<
+			User,
+			'id' | 'primary_identity' | 'first_name' | 'last_name' | 'avatar'
+		>;
 	})[];
 };
 
@@ -89,7 +92,8 @@ function useComments(collection: Ref<string>, primaryKey: Ref<PrimaryKey>) {
 							'comment',
 							'date_created',
 							'user_created.id',
-							'user_created.email',
+							'user_created.primary_identity.kind',
+							'user_created.primary_identity.value',
 							'user_created.first_name',
 							'user_created.last_name',
 							'user_created.avatar.id',
@@ -110,7 +114,10 @@ function useComments(collection: Ref<string>, primaryKey: Ref<PrimaryKey>) {
 					display,
 				} as Comment & {
 					display: string;
-					user_created: Pick<User, 'id' | 'email' | 'first_name' | 'last_name' | 'avatar'>;
+					user_created: Pick<
+						User,
+						'id' | 'primary_identity' | 'first_name' | 'last_name' | 'avatar'
+					>;
 				};
 			});
 
@@ -206,7 +213,13 @@ async function loadUserPreviews(comments: Comment[], regex: RegExp) {
 		const response = await api.get('/users', {
 			params: {
 				filter: { id: { _in: uniqIds.map((id) => id.substring(2)) } },
-				fields: ['first_name', 'last_name', 'email', 'id'],
+				fields: [
+					'first_name',
+					'last_name',
+					'primary_identity.kind',
+					'primary_identity.value',
+					'id',
+				],
 			},
 		});
 

@@ -1,3 +1,5 @@
+import type { UserIdentity } from '@directus/types';
+
 export type Revision = {
 	data: Record<string, any> | null;
 	delta: Record<string, any> | null;
@@ -17,7 +19,7 @@ export type RevisionPartial = {
 			| string
 			| {
 					id: string;
-					email: string;
+					primary_identity: UserIdentity | null;
 					first_name: string;
 					last_name: string;
 			  };
