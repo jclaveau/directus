@@ -103,10 +103,10 @@ export class AuthenticationService {
 
 		const provider = getAuthProvider(providerName);
 
-		let identity: UserIdentity;
+		let loginIdentity: UserIdentity;
 
 		try {
-			identity = await provider.getIdentity(cloneDeep(payload), {
+			loginIdentity = await provider.getIdentity(cloneDeep(payload), {
 				linkUser: options?.linkUser ?? null,
 			});
 		} catch (err) {
@@ -128,11 +128,11 @@ export class AuthenticationService {
 				'primary_identity',
 			)
 			.from('directus_users')
-			.where('id', identity.user)
+			.where('id', loginIdentity.user)
 			.first();
 
 		const user = userRow
-? { ...userRow, identity }
+? { ...userRow, identity: loginIdentity }
 : undefined;
 
 		const updatedPayload = await emitter.emitFilter(
@@ -167,7 +167,7 @@ export class AuthenticationService {
 			);
 		};
 
-		if (user?.status !== 'active' || identity.kind !== provider.identityKind) {
+		if (user?.status !== 'active' || loginIdentity.kind !== provider.identityKind) {
 			emitStatus('fail');
 			await stall(STALL_TIME, timeStart);
 			throw new InvalidCredentialsError();
@@ -286,7 +286,7 @@ export class AuthenticationService {
 		await this.knex('directus_sessions').insert({
 			token: refreshToken,
 			user: user.id,
-			identity: identity.id,
+			identity: loginIdentity.id,
 			expires: refreshTokenExpiration,
 			ip: this.accountability?.ip,
 			user_agent: this.accountability?.userAgent,
@@ -582,15 +582,15 @@ export class AuthenticationService {
 		if (record) {
 			const { identity_id: identityId, ...userRow } = record;
 
-			const identity = identityId
+			const sessionIdentity = identityId
 				? await fetchIdentityById(this.knex, identityId) ?? null
 				: null;
 
 			const provider = getAuthProvider(
-				toSessionProvider(userRow.id, identity?.kind ?? null)!,
+				toSessionProvider(userRow.id, sessionIdentity?.kind ?? null)!,
 			);
 
-			await provider.logout(clone({ ...userRow, identity }));
+			await provider.logout(clone({ ...userRow, identity: sessionIdentity }));
 
 			await this.knex.delete().from('directus_sessions').where('token', refreshToken);
 		}
@@ -634,15 +634,19 @@ export class AuthenticationService {
 			.andWhereNot('kind', EMAIL_IDENTITY_KIND)
 			.orderBy('id');
 
-		for (const identity of ssoIdentities) {
-			const provider = findAuthProvider(toProviderName(identity.kind));
+		for (const ssoIdentity of ssoIdentities) {
+			const provider = findAuthProvider(toProviderName(ssoIdentity.kind));
 
 			if (!provider) {
 				continue;
 			}
 
 			try {
-				await provider.verify(clone({ ...userRow, identity }), password);
+				await provider.verify(
+					clone({ ...userRow, identity: ssoIdentity }),
+					password,
+				);
+
 				return;
 			}
  catch (error) {

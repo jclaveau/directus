@@ -22,10 +22,10 @@ export default async function usersPasswd({ email, password }: { email?: string;
 		const schema = await getSchema();
 		const service = new UsersService({ schema, knex: database });
 
-		const identity = await fetchIdentity(database, EMAIL_IDENTITY_KIND, email);
+		const emailIdentity = await fetchIdentity(database, EMAIL_IDENTITY_KIND, email);
 
-		const user = identity
-			? { id: identity.user }
+		const user = emailIdentity
+			? { id: emailIdentity.user }
 			: undefined;
 
 		if (user) {

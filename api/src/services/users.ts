@@ -185,22 +185,22 @@ export class UsersService extends ItemsService {
 		email: string;
 		emailIdentity: string;
 	} | undefined> {
-		const identity = identityLookup === 'any'
+		const emailIdentity = identityLookup === 'any'
 			? await fetchIdentity(this.knex, EMAIL_IDENTITY_KIND, email)
 			: await fetchPasswordLoginIdentity(this.knex, email);
 
-		if (!identity) {
+		if (!emailIdentity) {
 			return undefined;
 		}
 
 		const user = await this.knex
 			.select('id', 'role', 'status', 'password')
 			.from('directus_users')
-			.where('id', identity.user)
+			.where('id', emailIdentity.user)
 			.first();
 
 		return user
-? { ...user, email: identity.value, emailIdentity: identity.id }
+? { ...user, email: emailIdentity.value, emailIdentity: emailIdentity.id }
 : undefined;
 	}
 
