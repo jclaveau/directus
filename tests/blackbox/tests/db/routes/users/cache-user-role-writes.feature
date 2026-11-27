@@ -77,31 +77,33 @@ Feature: A user's role, status and deletion purge the cache as today
       |   fields: label                      |   data:                            |
       |                                      |     - label: v1                    |
     And on postgres the requests ran these statements:
-      | request | table                   | select | insert | update | delete | with |
-      | 1       | directus_access         | 2      | 0      | 0      | 0      | 0    |
-      | 1       | directus_activity       | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_revisions      | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_users          | 3      | 0      | 1      | 0      | 0    |
-      | 2       | directus_users          | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_access         | 3      | 0      | 0      | 0      | 0    |
-      | 3       | directus_activity       | 0      | 1      | 0      | 0      | 0    |
-      | 3       | directus_revisions      | 0      | 1      | 0      | 0      | 0    |
-      | 3       | directus_roles          | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_users          | 4      | 0      | 1      | 0      | 0    |
-      | 4       | cache_user_rename_notes | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_access         | 4      | 0      | 0      | 0      | 0    |
-      | 4       | directus_collections    | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_fields         | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_permissions    | 3      | 0      | 0      | 0      | 0    |
-      | 4       | directus_policies       | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_relations      | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_roles          | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_users          | 1      | 0      | 0      | 0      | 0    |
-      | 4       | geometry_columns        | 0      | 0      | 0      | 0      | 1    |
-      | 4       | information_schema      | 1      | 0      | 0      | 0      | 0    |
-      | 4       | pg_constraint           | 1      | 0      | 0      | 0      | 0    |
-      | 4       | pg_index                | 2      | 0      | 0      | 0      | 0    |
-      | 4       | pg_proc                 | 1      | 0      | 0      | 0      | 0    |
+      | request | table                    | select | insert | update | delete | with |
+      | 1       | directus_access          | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_user_identities | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users           | 3      | 0      | 1      | 0      | 0    |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_access          | 3      | 0      | 0      | 0      | 0    |
+      | 3       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 3       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 3       | directus_roles           | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_user_identities | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_users           | 4      | 0      | 1      | 0      | 0    |
+      | 4       | cache_user_rename_notes  | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_access          | 4      | 0      | 0      | 0      | 0    |
+      | 4       | directus_collections     | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_fields          | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_permissions     | 3      | 0      | 0      | 0      | 0    |
+      | 4       | directus_policies        | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_relations       | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_roles           | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_users           | 1      | 0      | 0      | 0      | 0    |
+      | 4       | geometry_columns         | 0      | 0      | 0      | 0      | 1    |
+      | 4       | information_schema       | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_constraint            | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_index                 | 2      | 0      | 0      | 0      | 0    |
+      | 4       | pg_proc                  | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: an invited user set active keeps their role and the cached read
     Given the rows of directus_roles:
@@ -139,14 +141,15 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                                 |   x-cache-status: HIT            |
       |   fields: label                        |                                  |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 2      | 0      | 0      | 0      |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
-      | 1       | directus_users       | 3      | 0      | 1      | 0      |
-      | 2       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 2       | directus_users       | 2      | 0      | 0      | 0      |
-      | 3       | directus_users       | 1      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_user_identities | 2      | 0      | 0      | 0      |
+      | 1       | directus_users           | 3      | 0      | 1      | 0      |
+      | 2       | directus_permissions     | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 2      | 0      | 0      | 0      |
+      | 3       | directus_users           | 1      | 0      | 0      | 0      |
 
   Scenario: a deleted inviter keeps the cached read
     Given the rows of directus_roles:
@@ -171,16 +174,19 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                               |   x-cache-status: HIT |
       |   fields: label                      |                       |
     Then these requests get these responses:
-      | request                              | response                         |
-      | method: DELETE                       | code: 204                        |+
-      | path: /users/<inviter>               | headers:                         |
-      |                                      |   x-scoped-cache-purged-tags: >- |
-      |                                      |     directus_users,              |
-      |                                      |     directus_users:id=<inviter>  |
-      | method: GET                          | code: 200                        |+
-      | path: /items/cache_user_delete_notes | headers:                         |
-      | query:                               |   x-cache-status: HIT            |
-      |   fields: label                      |                                  |
+      | request                              | response                          |
+      | method: DELETE                       | code: 204                         |+
+      | path: /users/<inviter>               | headers:                          |
+      |                                      |   x-scoped-cache-purged-tags:     |
+      |                                      |     "directus_users,              |
+      |                                      |     directus_users:id=<inviter>,  |
+      |                                      |     directus_user_identities,     |
+      |                                      |     directus_user_identities:id=\ |
+      |                                      |     <inviter-email>"              |
+      | method: GET                          | code: 200                         |+
+      | path: /items/cache_user_delete_notes | headers:                          |
+      | query:                               |   x-cache-status: HIT             |
+      |   fields: label                      |                                   |
     And on postgres the requests ran these statements:
       | request | table                  | select | insert | update | delete |
       | 1       | directus_access        | 2      | 0      | 0      | 0      |
@@ -232,11 +238,12 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                                 |   x-cache-status: HIT            |
       |   fields: label                        |                                  |
     And on postgres the requests ran these statements:
-      | request | table             | select | insert | update | delete |
-      | 1       | directus_sessions | 0      | 0      | 0      | 1      |
-      | 1       | directus_settings | 1      | 0      | 0      | 0      |
-      | 1       | directus_users    | 2      | 0      | 1      | 0      |
-      | 2       | directus_users    | 1      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_sessions        | 0      | 0      | 0      | 1      |
+      | 1       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 2      | 0      | 1      | 0      |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      |
 
   Scenario: a user invited again into the same role keeps the cached read
     Given the rows of directus_roles:
@@ -269,9 +276,10 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                                 |   x-cache-status: HIT              |
       |   fields: label                        |                                    |
     And on postgres the requests ran these statements:
-      | request | table          | select | insert | update | delete |
-      | 1       | directus_users | 2      | 0      | 0      | 0      |
-      | 2       | directus_users | 1      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 2      | 0      | 0      | 0      |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      |
 
   Scenario: a pending invitee invited into a second role drops the cached read
     Given the rows of directus_roles:
@@ -310,25 +318,26 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                               |   x-cache-status: MISS             |
       |   fields: label                      |                                    |
     And on postgres the requests ran these statements:
-      | request | table                   | select | insert | update | delete | with |
-      | 1       | directus_access         | 2      | 0      | 0      | 0      | 0    |
-      | 1       | directus_activity       | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_revisions      | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_roles          | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_users          | 4      | 0      | 1      | 0      | 0    |
-      | 2       | directus_access         | 4      | 0      | 0      | 0      | 0    |
-      | 2       | directus_collections    | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_fields         | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_permissions    | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_policies       | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_relations      | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_roles          | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_users          | 2      | 0      | 0      | 0      | 0    |
-      | 2       | geometry_columns        | 0      | 0      | 0      | 0      | 1    |
-      | 2       | information_schema      | 1      | 0      | 0      | 0      | 0    |
-      | 2       | pg_constraint           | 1      | 0      | 0      | 0      | 0    |
-      | 2       | pg_index                | 2      | 0      | 0      | 0      | 0    |
-      | 2       | pg_proc                 | 1      | 0      | 0      | 0      | 0    |
-      | 3       | cache_user_second_notes | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_permissions    | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | request | table                    | select | insert | update | delete | with |
+      | 1       | directus_access          | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_roles           | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_user_identities | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users           | 4      | 0      | 1      | 0      | 0    |
+      | 2       | directus_access          | 4      | 0      | 0      | 0      | 0    |
+      | 2       | directus_collections     | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_fields          | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_permissions     | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_policies        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_relations       | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_roles           | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users           | 2      | 0      | 0      | 0      | 0    |
+      | 2       | geometry_columns         | 0      | 0      | 0      | 0      | 1    |
+      | 2       | information_schema       | 1      | 0      | 0      | 0      | 0    |
+      | 2       | pg_constraint            | 1      | 0      | 0      | 0      | 0    |
+      | 2       | pg_index                 | 2      | 0      | 0      | 0      | 0    |
+      | 2       | pg_proc                  | 1      | 0      | 0      | 0      | 0    |
+      | 3       | cache_user_second_notes  | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_permissions     | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_users           | 1      | 0      | 0      | 0      | 0    |

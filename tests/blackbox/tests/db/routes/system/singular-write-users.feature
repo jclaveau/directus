@@ -39,10 +39,10 @@ Feature: A single user is checked as it is created
       |   first_name: second-<run>              |     - message: >-                   |
       |   email: TAKEN-<run>@example.com        |         Value                       |
       |                                         |         "[taken-<run>@example.com]" |
-      |                                         |         for field "email" in        |
+      |                                         |         for field "value" in        |
       |                                         |         collection                  |
-      |                                         |         "directus_users" has        |
-      |                                         |         to be unique.               |
+      |                                         |         "directus_user_identities"  |
+      |                                         |         has to be unique.           |
       | method: GET                             | code: 200                           |+
       | path: /users                            | body:                               |
       | query:                                  |   data: []                          |

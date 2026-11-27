@@ -14,7 +14,7 @@ import { expect } from 'vitest';
 type RequestCell = {
 	method: 'DELETE' | 'GET' | 'PATCH' | 'POST';
 	path: string;
-	query?: Record<string, string | string[]>;
+	query?: Record<string, string | string[] | Record<string, unknown>>;
 	payload?: unknown;
 	file?: unknown;
 	token?: string;
@@ -147,7 +147,7 @@ export function defineWriteSteps(
 		file,
 		credentialHeaders,
 	}: Omit<RequestCell, 'token' | 'as' | 'remember'> & {
-		query: Record<string, string | string[]>;
+		query: Record<string, string | string[] | Record<string, unknown>>;
 		credentialHeaders: Record<string, string>;
 	}) {
 		const pendingRequest = {
@@ -158,6 +158,11 @@ export function defineWriteSteps(
 		}[method]()
 			.query(Object.fromEntries(
 				Object.entries(query).map(([parameter, value]) => {
+					// A nested filter or deep is sent as the JSON the api parses
+					if (typeof value === 'object' && !Array.isArray(value)) {
+						return [parameter, JSON.stringify(value)];
+					}
+
 					return [parameter, [value].flat().join(',')];
 				}),
 			))

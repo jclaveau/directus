@@ -60,8 +60,9 @@ Feature: A batch update of a system collection is checked as a single update is
       |                                   |       value: >-               |
       |                                   |         bob-<run>@example.com |
     And on postgres the requests ran these statements:
-      | request | table          | select | insert | update | delete |
-      | 1       | directus_users | 2      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
 
   Scenario: a batch naming a user its sender may not update is forbidden
     Given the rows of /users:
@@ -376,12 +377,11 @@ Feature: A batch update of a system collection is checked as a single update is
       |                                  |       value: >-               |
       |                                  |         ann-<run>@example.com |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 2      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_sessions  | 0      | 0      | 0      | 2      |
-      | 1       | directus_users     | 5      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 1      | 0      | 0      | 0      |
+      | 1       | directus_sessions        | 0      | 0      | 0      | 1      |
+      | 1       | directus_user_identities | 7      | 0      | 2      | 0      |
+      | 1       | directus_users           | 2      | 0      | 2      | 0      |
 
   Scenario: a batch moving a translation key to a row while freeing it is applied
     Given the rows of /translations:

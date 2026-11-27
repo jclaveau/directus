@@ -32,11 +32,12 @@ Feature: Users are updated by query, by themselves and in their sessions
       |   data:                    |                           |
       |     last_name: by-query    |                           |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 2      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_users     | 4      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_user_identities | 2      | 0      | 0      | 0      |
+      | 1       | directus_users           | 4      | 0      | 1      | 0      |
 
   Scenario: users created together with one email twice are refused
     Then these requests get these responses:
@@ -47,10 +48,10 @@ Feature: Users are updated by query, by themselves and in their sessions
       |   - email: Twice-<run>@example.com |     - message: >-                   |
       |   - email: twice-<run>@example.com |         Value                       |
       |                                    |         "[twice-<run>@example.com]" |
-      |                                    |         for field "email" in        |
+      |                                    |         for field "value" in        |
       |                                    |         collection                  |
-      |                                    |         "directus_users" has        |
-      |                                    |         to be unique.               |
+      |                                    |         "directus_user_identities"  |
+      |                                    |         has to be unique.           |
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
       | 1       | directus_users | 1      | 0      | 0      | 0      |
@@ -101,27 +102,30 @@ Feature: Users are updated by query, by themselves and in their sessions
       | query:                               |   data:                      |
       |   fields: tfa_secret                 |     tfa_secret: null         |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete | with |
-      | 1       | directus_access      | 3      | 0      | 0      | 0      | 0    |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_collections | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_users       | 3      | 0      | 1      | 0      | 0    |
-      | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
-      | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_index             | 2      | 0      | 0      | 0      | 0    |
-      | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_access      | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_users       | 3      | 0      | 1      | 0      | 0    |
-      | 4       | directus_access      | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 4       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 4       | directus_users       | 2      | 0      | 1      | 0      | 0    |
+      | request | table                    | select | insert | update | delete | with |
+      | 1       | directus_access          | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users           | 3      | 0      | 1      | 0      | 0    |
+      | 1       | geometry_columns         | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint            | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index                 | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc                  | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_access          | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_user_identities | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users           | 3      | 0      | 1      | 0      | 0    |
+      | 4       | directus_access          | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 4       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 4       | directus_user_identities | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_users           | 2      | 0      | 1      | 0      | 0    |
 
   Scenario: only an admin sets the provider and the external identifier
     Given these requests are sent:
@@ -278,20 +282,23 @@ Feature: Users are updated by query, by themselves and in their sessions
       |                                  |     - message: >-                      |
       |                                  |         Invalid user credentials.      |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 2      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_sessions  | 1      | 0      | 0      | 1      |
-      | 1       | directus_settings  | 1      | 0      | 0      | 0      |
-      | 1       | directus_users     | 2      | 0      | 1      | 0      |
-      | 4       | directus_access    | 3      | 0      | 0      | 0      |
-      | 4       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 4       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 4       | directus_roles     | 1      | 0      | 0      | 0      |
-      | 4       | directus_sessions  | 0      | 0      | 0      | 1      |
-      | 4       | directus_users     | 4      | 0      | 1      | 0      |
-      | 5       | directus_access    | 2      | 0      | 0      | 0      |
-      | 5       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 5       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 5       | directus_users     | 3      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_sessions        | 1      | 0      | 0      | 1      |
+      | 1       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 1       | directus_user_identities | 2      | 0      | 0      | 0      |
+      | 1       | directus_users           | 2      | 0      | 1      | 0      |
+      | 4       | directus_access          | 3      | 0      | 0      | 0      |
+      | 4       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 4       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 4       | directus_roles           | 1      | 0      | 0      | 0      |
+      | 4       | directus_sessions        | 0      | 0      | 0      | 1      |
+      | 4       | directus_user_identities | 2      | 0      | 0      | 0      |
+      | 4       | directus_users           | 4      | 0      | 1      | 0      |
+      | 5       | directus_access          | 2      | 0      | 0      | 0      |
+      | 5       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 5       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 5       | directus_user_identities | 2      | 0      | 0      | 0      |
+      | 5       | directus_users           | 3      | 0      | 1      | 0      |

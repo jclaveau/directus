@@ -60,16 +60,17 @@ Feature: A nested write to users, roles or policies hands its user checks up
       |                                                   |   data:            |
       |                                                   |     status: active |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 1      | 0      | 0      | 0      |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
-      | 1       | directus_users       | 3      | 1      | 0      | 0      |
-      | 2       | directus_access      | 1      | 0      | 0      | 0      |
-      | 2       | directus_activity    | 0      | 2      | 0      | 0      |
-      | 2       | directus_revisions   | 0      | 2      | 1      | 0      |
-      | 2       | directus_users       | 3      | 0      | 1      | 0      |
-      | 2       | test_write_user_link | 1      | 1      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 1      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_user_identities | 3      | 1      | 0      | 0      |
+      | 1       | directus_users           | 2      | 1      | 1      | 0      |
+      | 2       | directus_access          | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 2       | directus_revisions       | 0      | 2      | 1      | 0      |
+      | 2       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 3      | 0      | 1      | 0      |
 
   Scenario: a user's policies given as an empty list delete its access rows
     When these requests get these responses:
@@ -99,34 +100,36 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | query:                                                    |   data: [] |
       |   filter[user][_eq]: 5e1f0000-0000-4000-8000-000000000013 |            |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete | with |
-      | 1       | directus_access      | 2      | 0      | 0      | 0      | 0    |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_permissions | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_policies    | 1      | 1      | 0      | 0      | 0    |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_users       | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_access      | 3      | 0      | 0      | 0      | 0    |
-      | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_users       | 3      | 1      | 0      | 0      | 0    |
-      | 3       | directus_access      | 1      | 1      | 0      | 0      | 0    |
-      | 3       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 3       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 3       | directus_users       | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_access      | 7      | 0      | 0      | 1      | 0    |
-      | 4       | directus_activity    | 0      | 2      | 0      | 0      | 0    |
-      | 4       | directus_collections | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_roles       | 2      | 0      | 0      | 0      | 0    |
-      | 4       | directus_users       | 5      | 0      | 0      | 0      | 0    |
-      | 4       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
-      | 4       | information_schema   | 1      | 0      | 0      | 0      | 0    |
-      | 4       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 4       | pg_index             | 2      | 0      | 0      | 0      | 0    |
-      | 4       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
+      | request | table                    | select | insert | update | delete | with |
+      | 1       | directus_access          | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_permissions     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies        | 1      | 1      | 0      | 0      | 0    |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_access          | 3      | 0      | 0      | 0      | 0    |
+      | 2       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_roles           | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_user_identities | 3      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users           | 2      | 1      | 1      | 0      | 0    |
+      | 3       | directus_access          | 1      | 1      | 0      | 0      | 0    |
+      | 3       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 3       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 3       | directus_users           | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_access          | 7      | 0      | 0      | 1      | 0    |
+      | 4       | directus_activity        | 0      | 2      | 0      | 0      | 0    |
+      | 4       | directus_collections     | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_fields          | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_relations       | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_roles           | 2      | 0      | 0      | 0      | 0    |
+      | 4       | directus_user_identities | 2      | 0      | 0      | 0      | 0    |
+      | 4       | directus_users           | 5      | 0      | 0      | 0      | 0    |
+      | 4       | geometry_columns         | 0      | 0      | 0      | 0      | 1    |
+      | 4       | information_schema       | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_constraint            | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_index                 | 2      | 0      | 0      | 0      | 0    |
+      | 4       | pg_proc                  | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a user's policies deleting an access row delete it
     When these requests get these responses:
@@ -153,27 +156,29 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | query:                                                    |   data: [] |
       |   filter[user][_eq]: 5e1f0000-0000-4000-8000-000000000014 |            |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete | with |
-      | 1       | directus_access      | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_users       | 3      | 1      | 0      | 0      | 0    |
-      | 2       | directus_access      | 1      | 1      | 0      | 0      | 0    |
-      | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_users       | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_access      | 7      | 0      | 0      | 1      | 0    |
-      | 3       | directus_activity    | 0      | 2      | 0      | 0      | 0    |
-      | 3       | directus_collections | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_roles       | 2      | 0      | 0      | 0      | 0    |
-      | 3       | directus_users       | 5      | 0      | 0      | 0      | 0    |
-      | 3       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
-      | 3       | information_schema   | 1      | 0      | 0      | 0      | 0    |
-      | 3       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 3       | pg_index             | 2      | 0      | 0      | 0      | 0    |
-      | 3       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
+      | request | table                    | select | insert | update | delete | with |
+      | 1       | directus_access          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_user_identities | 3      | 1      | 0      | 0      | 0    |
+      | 1       | directus_users           | 2      | 1      | 1      | 0      | 0    |
+      | 2       | directus_access          | 1      | 1      | 0      | 0      | 0    |
+      | 2       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_access          | 7      | 0      | 0      | 1      | 0    |
+      | 3       | directus_activity        | 0      | 2      | 0      | 0      | 0    |
+      | 3       | directus_collections     | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_fields          | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_relations       | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_roles           | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_user_identities | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_users           | 5      | 0      | 0      | 0      | 0    |
+      | 3       | geometry_columns         | 0      | 0      | 0      | 0      | 1    |
+      | 3       | information_schema       | 1      | 0      | 0      | 0      | 0    |
+      | 3       | pg_constraint            | 1      | 0      | 0      | 0      | 0    |
+      | 3       | pg_index                 | 2      | 0      | 0      | 0      | 0    |
+      | 3       | pg_proc                  | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a role's users given as an empty list leave the role
     When these requests get these responses:
