@@ -401,3 +401,16 @@ test('Refuses a number: prefix from a secret file that is not a number', () => {
 		new Error('"UNMAPPED_COUNT" is "number:abc", which is not a number.'),
 	);
 });
+
+test('Refuses an item of an array: value its own prefix does not fit', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		UNMAPPED_LIST: 'array:1,number:abc',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+
+	expect(() => createEnv()).toThrow(
+		new Error('"UNMAPPED_LIST" is "number:abc", which is not a number.'),
+	);
+});
