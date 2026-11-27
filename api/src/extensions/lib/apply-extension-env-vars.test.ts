@@ -186,6 +186,31 @@ test('refuses a _FILE variable whose file cannot be read', () => {
 	expect(liveEnv).toEqual({});
 });
 
+test('refuses a variable set both directly and through its _FILE variable', () => {
+	const liveEnv: Record<string, unknown> = {};
+
+	expect(() => {
+		applyExtensionEnvVars({
+			extensionName: 'subscriptions',
+			extensionEnvVars: [{
+				prefix: 'SUBSCRIPTIONS_',
+				vars: { SUBSCRIPTIONS_KEY: { type: 'string' } },
+			}],
+			envVarDeclarers: new Map(),
+			rawEnvVarValues: {
+				SUBSCRIPTIONS_KEY: 'sk_live_env',
+				SUBSCRIPTIONS_KEY_FILE: '/run/secrets/key',
+			},
+			liveEnv,
+		});
+	}).toThrow(new Error(
+		'Extension "subscriptions": "SUBSCRIPTIONS_KEY" and'
+		+ ' "SUBSCRIPTIONS_KEY_FILE" are both set. Set only one.',
+	));
+
+	expect(liveEnv).toEqual({});
+});
+
 test('refuses a secret file value without printing it', () => {
 	const secretDir = mkdtempSync(join(tmpdir(), 'extension-env-file-'));
 	writeFileSync(join(secretDir, 'key'), 'sk_live_abc\n');

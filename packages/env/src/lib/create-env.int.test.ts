@@ -414,3 +414,18 @@ test('Refuses an item of an array: value its own prefix does not fit', () => {
 		new Error('"UNMAPPED_LIST" is "number:abc", which is not a number.'),
 	);
 });
+
+test('Refuses a variable set both directly and through its _FILE variable', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		DB_PASSWORD: 'from-env',
+		DB_PASSWORD_FILE: './file.txt',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+	vi.mocked(readFileSync).mockReturnValueOnce('from-file\n');
+
+	expect(() => createEnv()).toThrow(new Error(
+		'"DB_PASSWORD" and "DB_PASSWORD_FILE" are both set. Set only one.',
+	));
+});
