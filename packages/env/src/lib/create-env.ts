@@ -15,50 +15,6 @@ import { readConfigurationFromFile } from './read-configuration-from-file.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
 
 /**
- * What `toBoolean` reads as a boolean, once lowercased and trimmed.
- */
-const BOOLEAN_SPELLINGS = ['true', 'false', '1', '0'];
-
-/**
- * Read a variable cast to boolean in any case and with spaces around it, and
- * refuse one that is no boolean, whichever layer supplied it.
- *
- * `toBoolean` reads anything outside {@link BOOLEAN_SPELLINGS} as `false`, so a
- * deployment that meant `TRUE` or `yes` turns a feature off and says nothing.
- * Checked here, on the raw value, because once cast a typo and a deliberate
- * `false` are the same value. Thrown while the env is built, which is at
- * import, so the process ends before it listens.
- */
-const readBooleanSpelling = (key: string, value: unknown): unknown => {
-	const castFlag = getCastFlag(value);
-
-	if ((castFlag ?? getDefaultType(key)) !== 'boolean') {
-		return value;
-	}
-
-	const castPrefix = castFlag
-		? `${castFlag}:`
-		: '';
-
-	const rawValue = typeof value === 'string'
-		? value.substring(castPrefix.length)
-		: value;
-
-	const booleanSpelling = String(rawValue)
-		.trim()
-		.toLowerCase();
-
-	if (BOOLEAN_SPELLINGS.includes(booleanSpelling)) {
-		return castPrefix + booleanSpelling;
-	}
-
-	throw new Error(
-		`${JSON.stringify(key)} Environment Variable is ${JSON.stringify(rawValue)}, `
-			+ `which is not a boolean. Use one of ${BOOLEAN_SPELLINGS.join(', ')}.`,
-	);
-};
-
-/**
  * Which layer supplied each variable's final value, recorded as the layers are
  * applied. Knowing a value is worth little without knowing which layer won it —
  * reproducing the loader's inputs by hand to find out is exactly what the
@@ -136,9 +92,15 @@ export const createEnv = (): Env => {
 
 		const envVarDeclaration = findEnvVarDeclaration(key);
 
-		const valueRefusal = envVarDeclaration
-			&& 'type' in envVarDeclaration
-			&& checkDeclaredEnvVarValue(key, value, envVarDeclaration);
+		// A `boolean:` prefix on a name with no declared type is checked as one.
+		const typedDeclaration = envVarDeclaration && 'type' in envVarDeclaration
+			? envVarDeclaration
+			: getCastFlag(value) === 'boolean'
+				? { type: 'boolean' as const }
+				: undefined;
+
+		const valueRefusal = typedDeclaration
+			&& checkDeclaredEnvVarValue(key, value, typedDeclaration);
 
 		if (valueRefusal) {
 			valueRefusals.push(valueRefusal);
@@ -146,7 +108,7 @@ export const createEnv = (): Env => {
 			continue;
 		}
 
-		output[key] = cast(readBooleanSpelling(key, value), key);
+		output[key] = cast(value, key);
 		sources[key] = source;
 		rawEnvVarValues[key] = value;
 	}

@@ -24,7 +24,10 @@ const castToType = (
 		case 'number':
 			return toNumber(value);
 		case 'boolean':
-			return toBoolean(value);
+			// Read in any case and with spaces around it, as the check takes it.
+			return toBoolean(typeof value === 'string'
+				? value.trim().toLowerCase()
+				: value);
 		case 'regex':
 			return new RegExp(String(value));
 		case 'array':

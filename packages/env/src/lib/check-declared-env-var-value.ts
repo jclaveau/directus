@@ -8,6 +8,13 @@ import type { EnvVarDeclaredType } from '../types/env-type.js';
 /** What a boolean is spelled as, in a variable or in a configuration file. */
 const BOOLEAN_SPELLINGS: unknown[] = ['true', 'false', '1', '0', true, false, 1, 0];
 
+/** A string boolean as `toBoolean` reads it: in any case, spaces around it. */
+const readBooleanCase = (bareValue: unknown): unknown => {
+	return typeof bareValue === 'string'
+		? bareValue.trim().toLowerCase()
+		: bareValue;
+};
+
 /** The `type:` prefixes a value of each declared type may carry. */
 const DECLARED_CAST_FLAGS: Record<EnvVarDeclaredType, readonly string[]> = {
 	'string': ['string'],
@@ -78,10 +85,10 @@ const readTypeRefusal = (
 				: `${quotedName} is ${quotedValue}, which is neither false`
 					+ ' nor a number.';
 		case 'boolean':
-			return BOOLEAN_SPELLINGS.includes(bareValue)
+			return BOOLEAN_SPELLINGS.includes(readBooleanCase(bareValue))
 				? null
-				: `${quotedName} is ${quotedValue}, which is not a boolean:`
-					+ ' use true, false, 1 or 0.';
+				: `${quotedName} Environment Variable is ${quotedValue},`
+					+ ' which is not a boolean. Use one of true, false, 1, 0.';
 
 		case 'regex':
 			try {
