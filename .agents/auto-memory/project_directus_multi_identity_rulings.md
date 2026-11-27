@@ -1,6 +1,6 @@
 ---
 name: project_directus_multi_identity_rulings
-description: Multi-identity design round (several emails / SSO providers per account) — jean's rulings 2026-11-26/27; table sketch, linking, S3, points 1-4, email dropped for primary_identity (8 E)
+description: Multi-identity design round (several emails / SSO providers per account) — jean's rulings 2026-11-26/27; table sketch, linking, S3, points 1-4, email dropped for primary_identity (8 E), user_info + scope on SSO rows (11 C)
 metadata:
   type: project
 ---
@@ -81,11 +81,25 @@ logout call the provider that opened the session.
   10 = A: password reset is refused (403) on an account with no password; a first
   password is set only from a logged-in session, so offboarding at the IdP keeps
   locking an SSO-created account out.
+- **Point 11 = C (jean 2026-11-27):** an SSO identity row gets `user_info` (jsonb,
+  EVERY claim of the driver's `userInfo`, overwritten on each login, no key list: keys
+  differ per driver, SAML sends URIs, oauth2 has no standard) and `scope` (the scope
+  the token response says was GRANTED, fallback the configured `AUTH_<P>_SCOPE`; `~`
+  for ldap/saml). What is stored = what the consumer's scope/IdP config asks; naming
+  it on a consent page is the consumer's job, not core's. Never in `user_info`:
+  accessToken/idToken (refresh token stays in hidden `auth_data`). Flow logs redact it
+  like `value`; check in build that the sync write creates no `directus_revisions` row.
 - **Open, asked 2026-11-27:** S3 x 9 A (provider sends a known user's new email
-  another account holds). jean asked whether it means one person with two accounts:
-  not always (same person / squatter / recycled corporate address / provider
-  wrongly vouching). Proposed: held verified → A (skip + warn), held unverified →
-  C (move the row only, never merge accounts).
+  another account holds). Refusing the login lets a squatter lock an SSO user out, so
+  the login always passes. Proposed F (replaces E/notifications, drops C): no email
+  identity added, nothing moved or merged, the new email lands in the SSO row's
+  `user_info`, warn log, and a Postgres view `directus_user_identity_conflicts`
+  joins `lower(user_info->>'email')` to `email` rows of another user (`TODO(#610)`
+  other DBs). Scenario rewritten on `user_info` after 11 C; no S3 ruling recorded.
+- **#477 (jean 2026-11-27):** handled in #768, which merges before #772.
+- **Rebase gotcha:** hhh-dev blackbox tests starting an ldap / oauth2 / openid instance
+  that can't tell a verified email fail the boot on this branch: add
+  `AUTH_<P>_REQUIRE_VERIFIED_EMAIL=false` to them (`f05aade969`).
 - **Focus (jean 2026-11-27):** stay on #772 until it merges; do not raise the #749
   rebase or other PRs meanwhile.
 - **Today, from code (not run):** a password user's SSO login with the same email is a
