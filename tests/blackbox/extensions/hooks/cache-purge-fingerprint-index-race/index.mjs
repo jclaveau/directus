@@ -25,7 +25,7 @@ const HELD_SLOT = 'window';
 // slice purge its own mutation raises.
 const SWEEP_LABEL = 'sweep';
 
-const holdMs = Number(process.env['CACHE_RACE_READ_HOLD_MS'] ?? 400);
+const holdMs = Number(process.env['BLACKBOX_CACHE_RACE_READ_HOLD_MS'] ?? 400);
 
 export default function registerHooks({ filter }, { scopedCache }) {
 	filter(`${COLLECTION}.items.read`, async (records, meta) => {

@@ -5,7 +5,7 @@ import request from 'supertest';
 
 export const flowName = 'Schedule Hook Test';
 export const logPrefix = 'flow-executed-on-';
-export const envTargetVariable = 'FLOWS_SCHEDULE_HOOK_NAME';
+export const envTargetVariable = 'BLACKBOX_SCHEDULE_HOOK_NAME';
 
 export const seedDBValues = async () => {
 	let isSeeded = true;
