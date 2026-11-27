@@ -109,7 +109,7 @@ test('findAuthProvider answers undefined for an unknown provider', async () => {
 	await registerAuthProviders();
 
 	expect(findAuthProvider('default')).toEqual({ driver: 'local' });
-	expect(findAuthProvider('github')).toBe(undefined);
+	expect(findAuthProvider('gitlab')).toBe(undefined);
 });
 
 test('a provider named email fails the boot', async () => {

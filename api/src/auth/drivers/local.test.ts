@@ -3,7 +3,7 @@ import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { fetchPasswordLoginIdentity } from '../utils/user-identities.js';
-import { LocalAuthDriver } from './local.js';
+import { LocalAuthDriver } from './index.js';
 
 vi.mock('../../services/authentication.js', () => {
 	return { AuthenticationService: vi.fn() };
