@@ -1635,6 +1635,109 @@ describe('LDAPAuthDriver.getUserID', () => {
 				);
 		});
 	});
+
+	describe('linking from a session', () => {
+		test('binds as the user, then links the identity to the session', async () => {
+			const ldapDriver = new LDAPAuthDriver(
+				{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+				{
+					bindDn: 'cn=admin',
+					bindPassword: 'secret',
+					userDn: 'ou=users,dc=example',
+					provider: 'ldap',
+					clientUrl: 'ldap://ldap.example',
+				},
+			);
+
+			replySearch(['searchEntry']);
+
+			replySearch(['searchEntry', {
+				pojo: {
+					objectName: 'cn=jdoe,ou=users,dc=example',
+					attributes: [],
+				},
+			}]);
+
+			mockedDeps.ldapClient.bind.mockImplementationOnce(
+				(_bindDn: string, _bindPassword: string, bindCallback: any) => {
+					bindCallback(null);
+				},
+			);
+
+			knexTracker.on.select('directus_user_identities').responseOnce(undefined);
+			mockedDeps.createIdentity.mockResolvedValueOnce('identity-2');
+
+			knexTracker.on.select('directus_user_identities').responseOnce({
+				id: 'identity-2',
+				user: 'session-user',
+				kind: 'ldap',
+				value: 'cn=jdoe,ou=users,dc=example',
+			});
+
+			await expect(ldapDriver.getIdentity(
+				{ identifier: 'jdoe', password: 'pw' },
+				{ linkUser: 'session-user' },
+			))
+				.resolves.toStrictEqual({
+					id: 'identity-2',
+					user: 'session-user',
+					kind: 'ldap',
+					value: 'cn=jdoe,ou=users,dc=example',
+				});
+
+			expect(mockedDeps.ldapClient.bind).toHaveBeenCalledWith(
+				'cn=jdoe,ou=users,dc=example',
+				'pw',
+				expect.any(Function),
+			);
+
+			expect(mockedDeps.createIdentity.mock.calls).toStrictEqual([[{
+				user: 'session-user',
+				kind: 'ldap',
+				value: 'cn=jdoe,ou=users,dc=example',
+				verified: true,
+				auth_data: null,
+				user_info: {
+					dn: 'cn=jdoe,ou=users,dc=example',
+					userAccountControl: 0,
+				},
+				scope: null,
+			}]]);
+
+			expect(mockedDeps.createOne).not.toHaveBeenCalled();
+		});
+
+		test('refuses a link without password before any identity lookup', async () => {
+			const ldapDriver = new LDAPAuthDriver(
+				{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+				{
+					bindDn: 'cn=admin',
+					bindPassword: 'secret',
+					userDn: 'ou=users,dc=example',
+					provider: 'ldap',
+					clientUrl: 'ldap://ldap.example',
+				},
+			);
+
+			replySearch(['searchEntry']);
+
+			replySearch(['searchEntry', {
+				pojo: {
+					objectName: 'cn=jdoe,ou=users,dc=example',
+					attributes: [],
+				},
+			}]);
+
+			await expect(ldapDriver.getIdentity(
+				{ identifier: 'jdoe' },
+				{ linkUser: 'session-user' },
+			))
+				.rejects.toStrictEqual(new InvalidCredentialsError());
+
+			expect(knexTracker.history.select).toStrictEqual([]);
+			expect(mockedDeps.createIdentity).not.toHaveBeenCalled();
+		});
+	});
 });
 
 describe('LDAPAuthDriver.verify', () => {
