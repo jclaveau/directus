@@ -16,6 +16,11 @@ test('a boolean declaration reads "1" as true', () => {
 	expect(castDeclaredEnvVarValue('1', { type: 'boolean' })).toBe(true);
 });
 
+// An extension's boolean the check takes in any case casts as it reads.
+test('a boolean declaration reads " TRUE " as true', () => {
+	expect(castDeclaredEnvVarValue(' TRUE ', { type: 'boolean' })).toBe(true);
+});
+
 test.each([
 	['false | number', 'false', false],
 	['false | number', false, false],
