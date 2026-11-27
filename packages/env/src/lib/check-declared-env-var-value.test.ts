@@ -25,6 +25,13 @@ describe('checkDeclaredEnvVarValue', () => {
 		['boolean | number | string | string[]', '*'],
 		['boolean | number | string | string[]', '1'],
 		['boolean | number | string | string[]', 'array:*'],
+		// A config file's scalar reads as its string: `PORT: 8055` in yaml.
+		['string', 8055],
+		['string[]', ['a', 'b']],
+		['string[]', [1, 2]],
+		['false | string', false],
+		['false | string[]', false],
+		['false | string[]', ['PORT']],
 	] as const)('takes a %s set to %j', (declaredType, rawValue) => {
 		expect(checkDeclaredEnvVarValue(
 			'VARIABLE_NAME',
@@ -86,6 +93,67 @@ describe('checkDeclaredEnvVarValue', () => {
 	] as const)('refuses a %s set to %j', (declaredType, rawValue, valueRefusal) => {
 		expect(checkDeclaredEnvVarValue(
 			'VARIABLE_NAME',
+			rawValue,
+			{ type: declaredType },
+		)).toBe(valueRefusal);
+	});
+
+	test.each([
+		[
+			'EMAIL_FROM',
+			'string',
+			{ name: 'Scalabus' },
+			'"EMAIL_FROM" is {"name":"Scalabus"}, which is not a string.',
+		],
+		[
+			'STORAGE_LOCATIONS',
+			'string[]',
+			{ local: true },
+			'"STORAGE_LOCATIONS" is {"local":true},'
+				+ ' which is neither a string nor a list of strings.',
+		],
+		[
+			'STORAGE_LOCATIONS',
+			'string[]',
+			[{ local: true }],
+			'"STORAGE_LOCATIONS" is [{"local":true}],'
+				+ ' which is neither a string nor a list of strings.',
+		],
+		[
+			'ROOT_REDIRECT',
+			'false | string',
+			{ to: '/admin' },
+			'"ROOT_REDIRECT" is {"to":"/admin"},'
+				+ ' which is neither false nor a string.',
+		],
+		[
+			'FLOWS_ENV_ALLOW_LIST',
+			'false | string[]',
+			{ PORT: true },
+			'"FLOWS_ENV_ALLOW_LIST" is {"PORT":true},'
+				+ ' which is neither false, a string nor a list of strings.',
+		],
+		// The value is left out when the name may hold a secret.
+		[
+			'DB_PASSWORD',
+			'string',
+			{ password: 'hunter2' },
+			'"DB_PASSWORD" is not a string.',
+		],
+		[
+			'AUTH_GOOGLE_CLIENT_SECRET',
+			'false | string',
+			['hunter2'],
+			'"AUTH_GOOGLE_CLIENT_SECRET" is neither false nor a string.',
+		],
+	] as const)('refuses %s, a %s, set to %j', (
+		envVarName,
+		declaredType,
+		rawValue,
+		valueRefusal,
+	) => {
+		expect(checkDeclaredEnvVarValue(
+			envVarName,
 			rawValue,
 			{ type: declaredType },
 		)).toBe(valueRefusal);
