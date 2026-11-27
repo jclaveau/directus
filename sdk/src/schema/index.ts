@@ -21,6 +21,7 @@ export * from './role.js';
 export * from './settings.js';
 export * from './share.js';
 export * from './translation.js';
+export * from './user-identity.js';
 export * from './user.js';
 export * from './version.js';
 export * from './webhook.js';

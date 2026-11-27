@@ -1,4 +1,6 @@
+import type { DirectusUserIdentity } from '../../../schema/user-identity.js';
 import type { RestCommand } from '../../types.js';
+import { throwIfEmpty } from '../../utils/index.js';
 
 /**
  * Invite a new user by email.
@@ -130,3 +132,25 @@ export const disableTwoFactor =
 		method: 'POST',
 		body: JSON.stringify({ otp }),
 	});
+
+/**
+ * Removes one of the authenticated user's identities. The api refuses to
+ * remove the last one.
+ *
+ * @param identity The primary key of the identity.
+ *
+ * @returns Nothing
+ * @throws Will throw if identity is empty
+ */
+export const removeIdentity = <Schema>(
+	identity: DirectusUserIdentity<Schema>['id'],
+): RestCommand<void, Schema> => {
+	return () => {
+		throwIfEmpty(identity, 'Identity cannot be empty');
+
+		return {
+			path: `/users/me/identities/${identity}`,
+			method: 'DELETE',
+		};
+	};
+};
