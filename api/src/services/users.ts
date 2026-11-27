@@ -41,6 +41,7 @@ import {
 	fetchPasswordLoginIdentity,
 	fetchUserEmail,
 	IDENTITIES_COLLECTION,
+	purgePrimaryIdentityWrites,
 	toIdentityKind,
 } from '../auth/utils/user-identities.js';
 import { DEFAULT_AUTH_PROVIDER } from '../constants.js';
@@ -222,15 +223,15 @@ export class UsersService extends ItemsService {
 			authData: data['auth_data'] ?? null,
 		};
 
-		const isWritten = IDENTITY_PAYLOAD_KEYS
-			.some((identityKey) => identityKey in data);
+		const writtenKeys = IDENTITY_PAYLOAD_KEYS
+			.filter((identityKey) => identityKey in data);
 
 		delete data['email'];
 		delete data['provider'];
 		delete data['external_identifier'];
 		delete data['auth_data'];
 
-		if (!isWritten) {
+		if (writtenKeys.length === 0) {
 			return null;
 		}
 
@@ -273,6 +274,23 @@ export class UsersService extends ItemsService {
 			});
 		}
 
+		const isSsoIdentity = !isDefaultProvider
+			&& identityKeys.externalIdentifier !== undefined;
+
+		// A key no identity is written from is refused, never silently dropped
+		const writtenNothingKey = writtenKeys.find((identityKey) => {
+			return identityKey === 'email'
+				? identityKeys.email === undefined
+				: !isSsoIdentity;
+		});
+
+		if (writtenNothingKey !== undefined) {
+			throw new InvalidPayloadError({
+				reason: `The ${JSON.stringify(writtenNothingKey)} value writes no`
+					+ ' identity',
+			});
+		}
+
 		return identityKeys;
 	}
 
@@ -281,12 +299,14 @@ export class UsersService extends ItemsService {
 	 * users write: an email identity replaces the value of the account's email
 	 * identity shown first, unverified, or is added; an SSO identity is added.
 	 * The account without a primary identity gets the first written.
+	 *
+	 * @returns whether the account's primary identity was set
 	 */
 	private async writeIdentityKeys(
 		trx: Knex,
 		userId: PrimaryKey,
 		identityKeys: IdentityKeys,
-	): Promise<void> {
+	): Promise<boolean> {
 		const identitiesService = new ItemsService(IDENTITIES_COLLECTION, {
 			knex: trx,
 			schema: this.schema,
@@ -338,12 +358,16 @@ export class UsersService extends ItemsService {
 			}));
 		}
 
-		if (writtenIds.length > 0) {
-			await trx('directus_users')
-				.update({ primary_identity: writtenIds[0] })
-				.where('id', userId)
-				.whereNull('primary_identity');
+		if (writtenIds.length === 0) {
+			return false;
 		}
+
+		const primaryWrites = await trx('directus_users')
+			.update({ primary_identity: writtenIds[0] })
+			.where('id', userId)
+			.whereNull('primary_identity');
+
+		return primaryWrites > 0;
 	}
 
 	/**
@@ -397,13 +421,15 @@ export class UsersService extends ItemsService {
 
 		const identityKeysByRow: (IdentityKeys | null)[] = [];
 
-		try {
-			for (const payload of data) {
+		// Row by row: a refused row still lets the later rows' keys be taken out
+		for (const payload of data) {
+			try {
 				identityKeysByRow.push(this.takeIdentityKeys(payload, false));
 			}
-		}
- catch (err: any) {
-			opts.preMutationError = err;
+			catch (err: any) {
+				opts.preMutationError ??= err;
+				identityKeysByRow.push(null);
+			}
 		}
 
 		const passwords = data
@@ -444,23 +470,50 @@ export class UsersService extends ItemsService {
 			}).createMany(data, opts);
 		}
 
-		return await transaction(this.knex, async (trx) => {
-			const createdKeys = await new ItemsService(this.collection, {
-				schema: this.schema,
-				accountability: this.accountability,
-				knex: trx,
-			}).createMany(data, opts);
+		// Held until the commit: a users.create hook would read the account
+		// without the identities written after the users rows
+		const heldActionEvents: ActionEventParams[] = [];
 
-			for (const [rowIndex, createdKey] of createdKeys.entries()) {
-				const identityKeys = identityKeysByRow[rowIndex];
+		const createdKeys = await transactionHoldingActions(
+			this.knex,
+			heldActionEvents,
+			async (trx) => {
+				const createdRowKeys = await new ItemsService(this.collection, {
+					schema: this.schema,
+					accountability: this.accountability,
+					knex: trx,
+				}).createMany(data, {
+					...opts,
+					bypassEmitAction: opts.bypassEmitAction ?? ((actionEvent) => {
+						heldActionEvents.push(actionEvent);
+					}),
+				});
 
-				if (identityKeys) {
-					await this.writeIdentityKeys(trx, createdKey, identityKeys);
+				for (const [rowIndex, createdKey] of createdRowKeys.entries()) {
+					const identityKeys = identityKeysByRow[rowIndex];
+
+					if (identityKeys) {
+						await this.writeIdentityKeys(trx, createdKey, identityKeys);
+					}
 				}
-			}
 
-			return createdKeys;
-		});
+				return createdRowKeys;
+			},
+		);
+
+		const emitting = Promise.all(heldActionEvents.map((actionEvent) => {
+			return emitter.emitAction(
+				actionEvent.event,
+				actionEvent.meta,
+				actionEvent.context,
+			);
+		}));
+
+		if (opts.awaitActionHooks !== false) {
+			await emitting;
+		}
+
+		return createdKeys;
 	}
 
 	/**
@@ -518,8 +571,8 @@ export class UsersService extends ItemsService {
 					// One email can belong to one user only, across every group.
 					if (keys.length > 1 || claimedEmails.has(lowerEmail)) {
 						throw new RecordNotUniqueError({
-							collection: 'directus_users',
-							field: 'email',
+							collection: IDENTITIES_COLLECTION,
+							field: 'value',
 							value: data['email'],
 						});
 					}
@@ -586,13 +639,21 @@ export class UsersService extends ItemsService {
 
 		// OPEN(#772): written after the users update commits, not in its transaction
 		if (identityWrites.length > 0) {
-			await transaction(this.knex, async (trx) => {
+			const primaryWrittenKeys = await transaction(this.knex, async (trx) => {
+				const primarySetKeys: string[] = [];
+
 				for (const { keys, identityKeys } of identityWrites) {
 					for (const userKey of keys) {
-						await this.writeIdentityKeys(trx, userKey, identityKeys);
+						if (await this.writeIdentityKeys(trx, userKey, identityKeys)) {
+							primarySetKeys.push(String(userKey));
+						}
 					}
 				}
+
+				return primarySetKeys;
 			});
+
+			await purgePrimaryIdentityWrites(this.schema, primaryWrittenKeys);
 
 			const emailRewrittenKeys = identityWrites
 				.filter(({ identityKeys }) => identityKeys.email !== undefined)
@@ -948,14 +1009,21 @@ export class UsersService extends ItemsService {
 			throw new InvalidPayloadError({ reason: 'Invalid verification code' });
 		}
 
-		await this.updateOne(user.id, { status: 'active' });
+		// One transaction: an active account never keeps an unverified address
+		await transaction(this.knex, async (trx) => {
+			await new UsersService({
+				knex: trx,
+				schema: this.schema,
+				accountability: this.accountability,
+			}).updateOne(user.id, { status: 'active' });
 
-		// The registration mail reached this address
-		await new ItemsService(IDENTITIES_COLLECTION, {
-			knex: this.knex,
-			schema: this.schema,
-			accountability: null,
-		}).updateOne(user.emailIdentity, { verified: true });
+			// The registration mail reached this address
+			await new ItemsService(IDENTITIES_COLLECTION, {
+				knex: trx,
+				schema: this.schema,
+				accountability: null,
+			}).updateOne(user.emailIdentity, { verified: true });
+		});
 
 		return user.id;
 	}
@@ -1084,7 +1152,7 @@ export class UsersService extends ItemsService {
 	 * @throws InvalidPayloadError when it is the account's last identity
 	 */
 	async removeIdentity(userId: string, identityId: string): Promise<void> {
-		await transaction(this.knex, async (trx) => {
+		const primaryWrites = await transaction(this.knex, async (trx) => {
 			type OwnedIdentity = { id: string; kind: string; verified: boolean };
 
 			const userIdentities: OwnedIdentity[] = await trx
@@ -1119,7 +1187,7 @@ export class UsersService extends ItemsService {
 				})
 				?? remainingIdentities[0]!;
 
-			await trx('directus_users')
+			const movedPrimaries = await trx('directus_users')
 				.update({ primary_identity: nextPrimary.id })
 				.where('id', userId)
 				.where('primary_identity', identityId);
@@ -1129,7 +1197,13 @@ export class UsersService extends ItemsService {
 				schema: this.schema,
 				accountability: null,
 			}).deleteOne(identityId);
+
+			return movedPrimaries;
 		});
+
+		if (primaryWrites > 0) {
+			await purgePrimaryIdentityWrites(this.schema, [userId]);
+		}
 	}
 
 	private async clearCaches(opts?: MutationOptions) {

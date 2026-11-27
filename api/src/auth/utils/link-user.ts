@@ -1,3 +1,4 @@
+import { useEnv } from '@directus/env';
 import { ForbiddenError } from '@directus/errors';
 import type { Request } from 'express';
 
@@ -15,8 +16,11 @@ export function getLinkUser(req: Request, linkRequested: unknown): string | null
 	}
 
 	const sessionUser = req.accountability?.user;
+	const sessionToken = req.cookies?.[useEnv()['SESSION_COOKIE_NAME'] as string];
 
-	if (!sessionUser) {
+	// A query or header token is not the browser's session: a link URL carrying
+	// another account's token would add the clicker's identity to that account
+	if (!sessionUser || !sessionToken || req.token !== sessionToken) {
 		throw new ForbiddenError({
 			reason: 'Linking an identity requires a logged-in session',
 		});

@@ -19,6 +19,7 @@ import {
 	fetchIdentity,
 	fetchIdentityById,
 	IDENTITIES_COLLECTION,
+	purgePrimaryIdentityWrites,
 } from './user-identities.js';
 
 /**
@@ -353,10 +354,14 @@ async function syncEmailIdentity(
 		throw error;
 	}
 
-	await context.knex('directus_users')
+	const primaryWrites = await context.knex('directus_users')
 		.update({ primary_identity: emailIdentityId })
 		.where('id', userId)
 		.whereNull('primary_identity');
+
+	if (primaryWrites > 0) {
+		await purgePrimaryIdentityWrites(context.schema, [userId]);
+	}
 }
 
 /**

@@ -224,7 +224,8 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			auth_data: tokenSet.refresh_token && JSON.stringify({ refreshToken: tokenSet.refresh_token }),
 		};
 
-		const emailUnverified = isEmailUnverified(
+		// No email, nothing to verify: the account holds the SSO identity (8E)
+		const emailUnverified = email !== undefined && isEmailUnverified(
 			this.config,
 			emailVerifiedKey === undefined
 				? undefined

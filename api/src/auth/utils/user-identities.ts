@@ -1,5 +1,10 @@
+import type { SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
 import { DEFAULT_AUTH_PROVIDER } from '../../constants.js';
+import {
+	createScopedCacheExtensionHandle,
+} from '../../extensions/lib/scoped-cache-handle.js';
+import { scopedCachePurgeEnabled } from '../../scoped-cache/index.js';
 import type { UserIdentity } from '../../types/index.js';
 
 export const IDENTITIES_COLLECTION = 'directus_user_identities';
@@ -90,4 +95,23 @@ export async function fetchUserEmail(
 		.first();
 
 	return emailRow?.value ?? null;
+}
+
+/**
+ * A raw knex write of `primary_identity` skips the ItemsService purge, so the
+ * scoped reads of the account would keep the old primary identity.
+ */
+export async function purgePrimaryIdentityWrites(
+	schema: SchemaOverview,
+	userIds: string[],
+): Promise<void> {
+	if (userIds.length === 0 || !scopedCachePurgeEnabled()) {
+		return;
+	}
+
+	await createScopedCacheExtensionHandle(async () => schema)
+		.purgeForMutatedRows(
+			'directus_users',
+			userIds.map((userId) => ({ id: userId })),
+		);
 }

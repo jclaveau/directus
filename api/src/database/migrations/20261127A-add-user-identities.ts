@@ -65,7 +65,9 @@ export async function up(knex: Knex): Promise<void> {
 		table.text('scope');
 	});
 
-	// TODO(#610): MariaDB has no expression index, a generated column is needed
+	// TODO(#610): MariaDB has no expression index: this throws there, and its
+	// DDL commits on its own, so the table it leaves fails the next run's create.
+	// A generated lower(value) column is needed
 	await knex.raw(
 		`CREATE UNIQUE INDEX ?? ON ?? (??, lower(??))`,
 		[UNIQUE_INDEX_NAME, IDENTITIES_TABLE, 'kind', 'value'],
