@@ -135,6 +135,18 @@ describe('toStoredUserInfo', () => {
 			refreshToken: 'refresh',
 		})).toStrictEqual({ sub: 'ada-sub', email: 'ada@example.com' });
 	});
+
+	test('drops a token claim at any depth', () => {
+		expect(toStoredUserInfo({
+			sub: 'ada-sub',
+			session: { id_token: 'id', expires: 1 },
+			grants: [{ access_token: 'access', scope: 'profile' }],
+		})).toStrictEqual({
+			sub: 'ada-sub',
+			session: { expires: 1 },
+			grants: [{ scope: 'profile' }],
+		});
+	});
 });
 
 describe('updateIdentityAuthData', () => {
