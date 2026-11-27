@@ -1,6 +1,6 @@
 ---
 name: project_directus_multi_identity_rulings
-description: Multi-identity design round (several emails / SSO providers per account) — jean's rulings 2026-11-26/27; table sketch, linking, S3, points 1-4, email dropped for primary_identity (8 E), user_info + scope on SSO rows (11 C)
+description: Multi-identity design round (several emails / SSO providers per account) — jean's rulings 2026-11-26/27; table sketch, linking, S3, points 1-4, email dropped for primary_identity (8 E), user_info + scope on SSO rows (11 C), S3 = F conflicts view
 metadata:
   type: project
 ---
@@ -89,13 +89,14 @@ logout call the provider that opened the session.
   it on a consent page is the consumer's job, not core's. Never in `user_info`:
   accessToken/idToken (refresh token stays in hidden `auth_data`). Flow logs redact it
   like `value`; check in build that the sync write creates no `directus_revisions` row.
-- **Open, asked 2026-11-27:** S3 x 9 A (provider sends a known user's new email
-  another account holds). Refusing the login lets a squatter lock an SSO user out, so
-  the login always passes. Proposed F (replaces E/notifications, drops C): no email
-  identity added, nothing moved or merged, the new email lands in the SSO row's
-  `user_info`, warn log, and a Postgres view `directus_user_identity_conflicts`
-  joins `lower(user_info->>'email')` to `email` rows of another user (`TODO(#610)`
-  other DBs). Scenario rewritten on `user_info` after 11 C; no S3 ruling recorded.
+- **S3 x 9 A = F (jean 2026-11-27, design round closed):** provider sends a known
+  user's new email another account holds (verified or not). The SSO login always
+  passes (a refusal lets a squatter lock an SSO user out). No email identity added,
+  nothing moved or merged (E notifications and C move dropped); the new email lands
+  in the SSO row's `user_info` (11 C); warn log. Postgres view
+  `directus_user_identity_conflicts` joins `lower(user_info->>'email')` to `email`
+  rows of another user, with an index on that expression (`TODO(#610)` other DBs);
+  the operator reconciles by hand. No conflict = the email identity is added (S3 A).
 - **#477 (jean 2026-11-27):** handled in #768, which merges before #772.
 - **Rebase gotcha:** hhh-dev blackbox tests starting an ldap / oauth2 / openid instance
   that can't tell a verified email fail the boot on this branch: add
