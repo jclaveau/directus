@@ -27,9 +27,8 @@ logout call the provider that opened the session.
   remove, shipped only together with a remove endpoint.
 - **Points 1-4 (jean 2026-11-27):** 1 = every migrated email identity is
   `verified: false` (Directus keeps no verified flag, only `status: unverified` for a
-  pending registration; the consumer has never verified one). 2 = B: an unverified
-  email identity blocks no one; the unique index on `(kind, lower(value))` covers
-  verified rows only. 3 = A refined: the password login takes the account's primary
+  pending registration; the consumer has never verified one). 2 = B was ruled, then
+  overturned by 9 = A below. 3 = A refined: the password login takes the account's primary
   identity whatever its verified flag, plus any verified email identity. 4 = A:
   removing an identity ends the sessions it opened (`directus_sessions.identity` FK
   ON DELETE CASCADE); the account's last identity can't be removed (400); an account
@@ -49,10 +48,17 @@ logout call the provider that opened the session.
   BSL v11.x. Blast radius in-repo (grep 2026-11-27): ~39 api, ~29 app, 8 sdk, 15
   packages files, 89 test files. The consumer's audit + PR ride the fork bump that
   brings #772.
-- **Open, not yet put to jean:** 7 = verifying an email another account holds as its
-  primary. 9 = with `email` dropped nothing keeps two accounts' unverified primary
-  emails apart (2 B leaves unverified rows non-unique), so 3's "primary logs in
-  unverified" can match two accounts. 5 (`provider`/`external_identifier`/`auth_data`
+- **Point 9 = A (jean 2026-11-27, overturns 2 B):** the unique index on
+  `(kind, lower(value))` covers every row, verified or not: one address = one
+  account, as `users.email` unique guaranteed before 8 E. A second account sending
+  an address already held, even unverified, gets 400 `RECORD_NOT_UNIQUE` on
+  `directus_user_identities.value`. No claim/takeover flow in the product: whoever
+  wants an address held unverified by another account asks the operator by email,
+  and an admin moves or removes the identity. Point 7 (verifying an email another
+  account holds) dissolves: no two accounts can hold it.
+- **Open, not yet put to jean:** S3 x 9 A = a provider sends a known user's new
+  email that another account already holds (unverified or not): the identity insert
+  collides, login outcome unruled. 5 (`provider`/`external_identifier`/`auth_data`
   columns) and 6 (permissions on `directus_user_identities`) still to propose.
 - **Focus (jean 2026-11-27):** stay on #772 until it merges; do not raise the #749
   rebase or other PRs meanwhile.
