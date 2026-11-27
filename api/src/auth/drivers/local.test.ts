@@ -2,12 +2,10 @@ import { InvalidCredentialsError } from '@directus/errors';
 import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+// The app loads the drivers through auth.ts, which local.ts imports back
+import '../../auth.js';
 import { fetchPasswordLoginIdentity } from '../utils/user-identities.js';
-import { LocalAuthDriver } from './index.js';
-
-vi.mock('../../services/authentication.js', () => {
-	return { AuthenticationService: vi.fn() };
-});
+import { LocalAuthDriver } from './local.js';
 
 vi.mock('../utils/user-identities.js', async (importOriginal) => {
 	return {
