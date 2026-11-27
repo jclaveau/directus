@@ -16,7 +16,6 @@ import { useLogger } from './logger/index.js';
 import type { AuthDriverOptions } from './types/index.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getSchema } from './utils/get-schema.js';
-import { validateBooleanEnv } from './utils/validate-env.js';
 
 const providers: Map<string, AuthDriver> = new Map();
 
@@ -63,8 +62,6 @@ export async function registerAuthProviders(): Promise<void> {
 			logger.warn(`Missing driver definition for "${name}" auth provider.`);
 			return;
 		}
-
-		validateBooleanEnv([`AUTH_${name.toUpperCase()}_REQUIRE_VERIFIED_EMAIL`]);
 
 		const unverifiableEmail = describeUnverifiableEmail(name, {
 			driver,

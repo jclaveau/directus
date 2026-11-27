@@ -53,20 +53,6 @@ test('an oauth2 provider without the key fails the boot', async () => {
 	expect(OAuth2AuthDriver).not.toHaveBeenCalled();
 });
 
-test('a REQUIRE_VERIFIED_EMAIL that is not a boolean fails the boot', async () => {
-	vi.stubEnv('AUTH_SSO_REQUIRE_VERIFIED_EMAIL', 'yes');
-	vi.mocked(getConfigFromEnv).mockReturnValue({ driver: 'openid' });
-
-	await expect(registerAuthProviders()).rejects.toThrow('process.exit');
-
-	expect(mockedDeps.logger.error).toHaveBeenCalledExactlyOnceWith(
-		'"AUTH_SSO_REQUIRE_VERIFIED_EMAIL" Environment Variable is "yes",'
-		+ ' which is not a boolean. Use one of true, false, 1, 0.',
-	);
-
-	expect(OpenIDAuthDriver).not.toHaveBeenCalled();
-});
-
 test('an openid provider boots, requiring a verified email', async () => {
 	vi.mocked(getConfigFromEnv).mockReturnValue({ driver: 'openid' });
 
