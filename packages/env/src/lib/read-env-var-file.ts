@@ -35,11 +35,11 @@ export const readEnvVarFile = (
 		);
 	}
 
-	const fileType = castFlag ?? declaredType;
+	const fileContentType = castFlag ?? declaredType;
 
 	// A secret is written with a trailing newline, which no boolean or number
 	// parses with; a string, a password, keeps its exact bytes.
-	return castPrefix + (fileType && fileType !== 'string'
+	return castPrefix + (fileContentType && fileContentType !== 'string'
 		? fileContent.trim()
 		: fileContent);
 };

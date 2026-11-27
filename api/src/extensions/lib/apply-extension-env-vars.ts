@@ -105,6 +105,7 @@ export function applyExtensionEnvVars({
 				}
 			}
 			catch (fileReadError) {
+				// readEnvVarFile throws only the Error naming the path
 				declarationRefusals.push(
 					`Extension ${quotedExtension}: ${(fileReadError as Error).message}`,
 				);
