@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { toArray } from '@directus/utils/values';
 import { DEFAULTS } from '../constants/defaults.js';
 import type { Env } from '../types/env.js';
 import type { EnvSources, EnvValueSource } from '../types/env-sources.js';
@@ -9,13 +10,40 @@ import { isFileKey } from '../utils/is-file-key.js';
 import { readConfigurationFromProcess } from '../utils/read-configuration-from-process.js';
 import { removeFileSuffix } from '../utils/remove-file-suffix.js';
 import { findEnvVarDeclaration } from '../utils/find-env-var-declaration.js';
-import { castEnvVarValue } from './cast.js';
+import { castEnvVarValue, stripCastFlag } from './cast.js';
 import { checkDeclaredEnvVarValue } from './check-declared-env-var-value.js';
 import { readConfigurationFromFile } from './read-configuration-from-file.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
 
 /** The prefixes whose value may not fit them: `number:abc` refuses the boot. */
 const CHECKED_CAST_FLAGS = ['number', 'boolean', 'regex', 'json'] as const;
+
+/**
+ * Why a value set on a name with no declared type does not fit its prefix,
+ * or that of one of its `array:` items, or null when it does.
+ */
+const readUndeclaredPrefixRefusal = (
+	envVarName: string,
+	envVarValue: unknown,
+): string | null => {
+	const castFlag = getCastFlag(envVarValue);
+
+	if (castFlag === 'array') {
+		const itemRefusals = toArray(stripCastFlag(envVarValue))
+			.map((listItem) => readUndeclaredPrefixRefusal(envVarName, listItem));
+
+		return itemRefusals.find((itemRefusal) => itemRefusal !== null) ?? null;
+	}
+
+	const checkedCastFlag = CHECKED_CAST_FLAGS
+		.find((checkedFlag) => checkedFlag === castFlag);
+
+	return checkedCastFlag
+		? checkDeclaredEnvVarValue(envVarName, envVarValue, {
+			type: checkedCastFlag,
+		})
+		: null;
+};
 
 /**
  * Which layer supplied each variable's final value, recorded as the layers are
@@ -100,20 +128,13 @@ export const createEnv = (): Env => {
 
 		const envVarDeclaration = findEnvVarDeclaration(key);
 
-		let typedDeclaration = envVarDeclaration && 'type' in envVarDeclaration
+		const typedDeclaration = envVarDeclaration && 'type' in envVarDeclaration
 			? envVarDeclaration
 			: undefined;
 
-		const valueCastFlag = CHECKED_CAST_FLAGS
-			.find((checkedFlag) => checkedFlag === getCastFlag(value));
-
-		// A prefix on a name with no declared type is checked as its type.
-		if (!typedDeclaration && valueCastFlag) {
-			typedDeclaration = { type: valueCastFlag };
-		}
-
 		const valueRefusal = typedDeclaration
-			&& checkDeclaredEnvVarValue(key, value, typedDeclaration);
+			? checkDeclaredEnvVarValue(key, value, typedDeclaration)
+			: readUndeclaredPrefixRefusal(key, value);
 
 		if (valueRefusal) {
 			valueRefusals.push(valueRefusal);
