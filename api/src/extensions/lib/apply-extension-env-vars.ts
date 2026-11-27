@@ -90,6 +90,19 @@ export function applyExtensionEnvVars({
 			const fileEnvVarValue = rawEnvVarValues[fileEnvVarName];
 			let declaredValue: unknown;
 
+			if (
+				fileEnvVarName in rawEnvVarValues
+				&& envVarName in rawEnvVarValues
+			) {
+				declarationRefusals.push(
+					`Extension ${quotedExtension}: ${quotedName}`
+						+ ` and ${JSON.stringify(fileEnvVarName)}`
+						+ ' are both set. Set only one.',
+				);
+
+				continue;
+			}
+
 			try {
 				if (typeof fileEnvVarValue === 'string') {
 					declaredValue = readEnvVarFile(

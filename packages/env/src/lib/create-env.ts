@@ -99,6 +99,18 @@ export const createEnv = (): Env => {
 		const isCoreFileEnvVarName = isFileKey(key)
 			&& isCoreEnvVarName(removeFileSuffix(key));
 
+		if (
+			isCoreFileEnvVarName
+			&& removeFileSuffix(key) in rawConfiguration
+		) {
+			valueRefusals.push(
+				`${JSON.stringify(removeFileSuffix(key))} and ${JSON.stringify(key)}`
+					+ ' are both set. Set only one.',
+			);
+
+			continue;
+		}
+
 		if (isCoreFileEnvVarName && typeof value === 'string') {
 			value = readEnvVarFile(
 				key,

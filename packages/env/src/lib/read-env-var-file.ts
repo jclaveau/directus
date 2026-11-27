@@ -37,9 +37,11 @@ export const readEnvVarFile = (
 
 	const fileContentType = castFlag ?? declaredType;
 
-	// A secret is written with a trailing newline, which no boolean or number
-	// parses with; a string, a password, keeps its exact bytes.
-	return castPrefix + (fileContentType && fileContentType !== 'string'
-		? fileContent.trim()
-		: fileContent);
+	// A secret is written with trailing newlines, which no boolean or number
+	// parses with; a string, a password, keeps its spaces, as file_env's $(< file)
+	if (fileContentType && fileContentType !== 'string') {
+		return castPrefix + fileContent.trim();
+	}
+
+	return castPrefix + fileContent.replace(/\n+$/, '');
 };
