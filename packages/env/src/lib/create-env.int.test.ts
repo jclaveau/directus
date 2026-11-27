@@ -97,7 +97,7 @@ test('Refuses a boolean variable from the process that is not one', () => {
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 
 	expect(() => createEnv()).toThrow(
 		new Error(
@@ -119,7 +119,7 @@ test.each([
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 
 	expect(createEnv()).toEqual({
 		CACHE_ENABLED: expected,
@@ -135,7 +135,7 @@ test('Refuses a boolean variable from the config file that is not one', () => {
 		CACHE_ENABLED: 'yes',
 	});
 
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 
 	expect(() => createEnv()).toThrow(
 		new Error(
@@ -151,7 +151,7 @@ test('Refuses a boolean variable from a secret file that is not one', () => {
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 	vi.mocked(readFileSync).mockReturnValueOnce('on\n');
 
 	expect(() => createEnv()).toThrow(
@@ -168,7 +168,7 @@ test('Refuses a value cast to boolean that is not one', () => {
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 
 	expect(() => createEnv()).toThrow(
 		new Error(
@@ -184,7 +184,7 @@ test('Reads a value cast to boolean in capitals as a boolean', () => {
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 
 	expect(createEnv()).toEqual({
 		UNMAPPED_FLAG: true,
@@ -200,7 +200,7 @@ test('Trims a secret file holding a boolean', () => {
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 	vi.mocked(readFileSync).mockReturnValueOnce('true\n');
 
 	expect(createEnv()).toEqual({
@@ -217,7 +217,7 @@ test('Keeps a secret file holding a string as it is', () => {
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 	vi.mocked(readFileSync).mockReturnValueOnce(' p4ss\n');
 
 	expect(createEnv()).toEqual({
@@ -241,7 +241,7 @@ test.each([
 		CACHE_ENABLED: value,
 	});
 
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 
 	expect(createEnv()).toEqual({
 		CACHE_ENABLED: expected,
