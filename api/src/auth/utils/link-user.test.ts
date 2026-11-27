@@ -28,9 +28,11 @@ test('returns the session user when link is true', () => {
 });
 
 test('refuses a link asked without a logged-in session', () => {
-	expect(() => getLinkUser({
-		accountability: { user: null },
-	} as unknown as Request, 'true')).toThrow(new ForbiddenError({
+	expect(() => {
+		return getLinkUser({
+			accountability: { user: null },
+		} as unknown as Request, 'true');
+	}).toThrow(new ForbiddenError({
 		reason: 'Linking an identity requires a logged-in session',
 	}));
 });

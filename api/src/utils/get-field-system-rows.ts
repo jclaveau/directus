@@ -15,10 +15,9 @@ export function getSystemFieldRowsWithAuthProviders(): FieldMeta[] {
 
 			systemField.options['choices'] = [
 				{ text: '$t:email', value: EMAIL_IDENTITY_KIND },
-				...getAuthProviders().map(({ name }) => ({
-					text: formatTitle(name),
-					value: name,
-				})),
+				...getAuthProviders().map(({ name }) => {
+					return { text: formatTitle(name), value: name };
+				}),
 			];
 		}
 
