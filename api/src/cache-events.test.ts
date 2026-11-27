@@ -47,13 +47,15 @@ import {
 import getDatabase from './database/index.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 
-const env: Record<string, any> = {
-	CACHE_STATS_ENABLED: true,
-	CACHE_NAMESPACE: 'scalabus',
-	CACHE_STATS_MAX_BYTES: false,
-	CACHE_STATS_MAX_BUFFER: false,
-	CACHE_STATS_GAP_LOOKBACK: '1h',
-};
+const env = vi.hoisted((): Record<string, any> => {
+	return {
+		CACHE_STATS_ENABLED: true,
+		CACHE_NAMESPACE: 'scalabus',
+		CACHE_STATS_MAX_BYTES: false,
+		CACHE_STATS_MAX_BUFFER: false,
+		CACHE_STATS_GAP_LOOKBACK: '1h',
+	};
+});
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
