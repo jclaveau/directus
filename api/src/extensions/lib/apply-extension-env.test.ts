@@ -148,3 +148,11 @@ test('finds the names set under a declared prefix that nobody declares', () => {
 		extensionPrefixes: new Set(['SUBSCRIPTIONS_']),
 	})).toEqual(['CACHE_TTLL', 'SUBSCRIPTIONS_TRIAL_DAY']);
 });
+
+test('finds a typo under a library prefix core forwards', () => {
+	expect(findUndeclaredEnv({
+		rawNames: ['DB_HOST', 'DB_HOTS', 'HSTS_MAX_AGES', 'DB_SSL__CA'],
+		envDeclarers: new Map(),
+		extensionPrefixes: new Set(),
+	})).toEqual(['DB_HOTS', 'HSTS_MAX_AGES']);
+});
