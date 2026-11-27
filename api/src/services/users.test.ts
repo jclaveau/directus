@@ -1169,8 +1169,17 @@ describe('Integration Tests', () => {
 		});
 
 		describe('removeIdentity', () => {
+			// knex locks rows only on a dialect, the mock client has none
+			const pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+			const pgTracker = createTracker(pgDatabase);
+			const pgService = new UsersService({ knex: pgDatabase, schema });
+
+			afterEach(() => {
+				pgTracker.reset();
+			});
+
 			it('refuses an identity of another account', async () => {
-				tracker.on.select('directus_user_identities').response([
+				pgTracker.on.select('directus_user_identities').response([
 					{
 						id: 'identity-email',
 						kind: 'email',
@@ -1178,14 +1187,14 @@ describe('Integration Tests', () => {
 					},
 				]);
 
-				await expect(service.removeIdentity('user-id-1', 'identity-other'))
+				await expect(pgService.removeIdentity('user-id-1', 'identity-other'))
 					.rejects.toEqual(new ForbiddenError({
 						reason: `The identity "identity-other" isn't one of the account's`,
 					}));
 			});
 
 			it('refuses the account\'s last identity', async () => {
-				tracker.on.select('directus_user_identities').response([
+				pgTracker.on.select('directus_user_identities').response([
 					{
 						id: 'identity-email',
 						kind: 'email',
@@ -1193,14 +1202,14 @@ describe('Integration Tests', () => {
 					},
 				]);
 
-				await expect(service.removeIdentity('user-id-1', 'identity-email'))
+				await expect(pgService.removeIdentity('user-id-1', 'identity-email'))
 					.rejects.toEqual(new InvalidPayloadError({
 						reason: `The identity "identity-email" is the account's last identity`,
 					}));
 			});
 
 			it('moves the primary to a verified email, then deletes', async () => {
-				tracker.on.select('directus_user_identities').response([
+				pgTracker.on.select('directus_user_identities').response([
 					{
 						id: 'identity-github',
 						kind: 'github',
@@ -1223,7 +1232,7 @@ describe('Integration Tests', () => {
 					},
 				]);
 
-				tracker.on.update('directus_users').response(1);
+				pgTracker.on.update('directus_users').response(1);
 
 				const deleteOne = vi.spyOn(ItemsService.prototype, 'deleteOne')
 					.mockResolvedValue('identity-removed');
@@ -1232,9 +1241,9 @@ describe('Integration Tests', () => {
 					deleteOne.mockRestore();
 				});
 
-				await service.removeIdentity('user-id-1', 'identity-removed');
+				await pgService.removeIdentity('user-id-1', 'identity-removed');
 
-				expect(tracker.history.update[0]!.bindings).toEqual([
+				expect(pgTracker.history.update[0]!.bindings).toEqual([
 					'identity-verified',
 					'user-id-1',
 					'identity-removed',

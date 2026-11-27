@@ -799,7 +799,8 @@ export class UsersService extends ItemsService {
 		const first_name = input.first_name ?? null;
 		const last_name = input.last_name ?? null;
 
-		const partialUser: Partial<User> = {
+		// `email` is written as the account's email identity
+		const partialUser: Partial<User> & { email: string } = {
 			// Required fields
 			email: input.email,
 			password: input.password,
