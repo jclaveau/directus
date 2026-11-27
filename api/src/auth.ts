@@ -2,6 +2,7 @@ import { useEnv } from '@directus/env';
 import { InvalidProviderConfigError } from '@directus/errors';
 import { toArray } from '@directus/utils';
 import type { AuthDriver } from './auth/auth.js';
+import { EMAIL_IDENTITY_KIND } from './auth/utils/user-identities.js';
 import { describeUnverifiableEmail } from './auth/utils/verified-email.js';
 import {
 	LDAPAuthDriver,
@@ -30,6 +31,10 @@ export function getAuthProvider(provider: string): AuthDriver {
 	return providers.get(provider)!;
 }
 
+export function findAuthProvider(provider: string): AuthDriver | undefined {
+	return providers.get(provider);
+}
+
 export async function registerAuthProviders(): Promise<void> {
 	const env = useEnv();
 	const logger = useLogger();
@@ -53,6 +58,15 @@ export async function registerAuthProviders(): Promise<void> {
 
 		if (name === DEFAULT_AUTH_PROVIDER) {
 			logger.error(`Cannot override "${DEFAULT_AUTH_PROVIDER}" auth provider.`);
+			process.exit(1);
+		}
+
+		if (name === EMAIL_IDENTITY_KIND) {
+			logger.error(
+				`Cannot name an auth provider ${JSON.stringify(EMAIL_IDENTITY_KIND)}:`
+				+ ' it is the kind of the identities the default provider logs in with.',
+			);
+
 			process.exit(1);
 		}
 

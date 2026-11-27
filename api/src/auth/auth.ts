@@ -1,14 +1,53 @@
+import { InvalidCredentialsError } from '@directus/errors';
 import type { SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
-import type { AuthDriverOptions, User } from '../types/index.js';
+import { DEFAULT_AUTH_PROVIDER } from '../constants.js';
+import type {
+	AuthDriverOptions,
+	IdentityLookupOptions,
+	User,
+	UserIdentity,
+} from '../types/index.js';
+import { IDENTITIES_COLLECTION, toIdentityKind } from './utils/user-identities.js';
 
 export abstract class AuthDriver {
 	knex: Knex;
 	schema: SchemaOverview;
+	/** The `kind` of the identities this provider logs in with */
+	identityKind: string;
 
-	constructor(options: AuthDriverOptions, _config: Record<string, any>) {
+	constructor(options: AuthDriverOptions, config: Record<string, any>) {
 		this.knex = options.knex;
 		this.schema = options.schema;
+		this.identityKind = toIdentityKind(config['provider'] ?? DEFAULT_AUTH_PROVIDER);
+	}
+
+	/**
+	 * Get the identity a provider payload logs in with
+	 *
+	 * A driver that only implements `getUserID` logs in with the user's identity
+	 * of this provider's kind.
+	 *
+	 * @throws InvalidCredentialsError
+	 */
+	async getIdentity(
+		payload: Record<string, any>,
+		_options: IdentityLookupOptions,
+	): Promise<UserIdentity> {
+		const userId = await this.getUserID(payload);
+
+		// OPEN(#772): a driver that never wrote an identity row cannot log in
+		const identity = await this.knex
+			.select<UserIdentity>('*')
+			.from(IDENTITIES_COLLECTION)
+			.where({ user: userId, kind: this.identityKind })
+			.first();
+
+		if (!identity) {
+			throw new InvalidCredentialsError();
+		}
+
+		return identity;
 	}
 
 	/**
