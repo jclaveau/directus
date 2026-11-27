@@ -1,9 +1,9 @@
 import {
-	cast,
-	castDeclaredEnvVarValue,
+	castEnvVarValue,
 	checkDeclaredEnvVarValue,
 	CORE_ENV_VAR_PREFIXES,
 	type EnvVarDeclaration,
+	getDefaultType,
 	isCoreEnvVarName,
 } from '@directus/env';
 import type { ExtensionEnvVars } from '@directus/extensions/scalabus';
@@ -97,9 +97,9 @@ export function applyExtensionEnvVars({
 				declarationRefusals.push(`Extension ${quotedExtension}: ${valueRefusal}`);
 			}
 			else if (declaredValue !== undefined) {
-				declaredValues[envVarName] = castDeclaredEnvVarValue(
+				declaredValues[envVarName] = castEnvVarValue(
 					declaredValue,
-					envVarDeclaration,
+					envVarDeclaration.type,
 				);
 			}
 		}
@@ -135,7 +135,10 @@ export function restoreCoreEnvVars({
 }): void {
 	for (const declaredName of envVarDeclarers.keys()) {
 		if (declaredName in rawEnvVarValues) {
-			liveEnv[declaredName] = cast(rawEnvVarValues[declaredName], declaredName);
+			liveEnv[declaredName] = castEnvVarValue(
+				rawEnvVarValues[declaredName],
+				getDefaultType(declaredName),
+			);
 		}
 		else {
 			Reflect.deleteProperty(liveEnv, declaredName);

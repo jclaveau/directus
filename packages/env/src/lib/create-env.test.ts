@@ -6,7 +6,7 @@ import { isCoreEnvVarName } from '../utils/is-core-env-var-name.js';
 import { isFileKey } from '../utils/is-file-key.js';
 import { readConfigurationFromProcess } from '../utils/read-configuration-from-process.js';
 import { removeFileSuffix } from '../utils/remove-file-suffix.js';
-import { cast } from './cast.js';
+import { castEnvVarValue } from './cast.js';
 import { createEnv } from './create-env.js';
 import { readConfigurationFromFile } from './read-configuration-from-file.js';
 
@@ -31,7 +31,7 @@ let processConfig: Record<string, string>;
 let fileConfig: Record<string, unknown>;
 
 beforeEach(() => {
-	vi.mocked(cast).mockImplementation((value) => value);
+	vi.mocked(castEnvVarValue).mockImplementation((value) => value);
 
 	processConfig = { PROCESS: 'test-process' };
 	fileConfig = { FILE: 'test-file' };
@@ -54,8 +54,11 @@ describe('Casting of default configuration', () => {
 			return null;
 		});
 
-		vi.mocked(cast).mockImplementation((value, key) => {
-			if (key === 'DEFAULT_ARRAY') return String(value).split(',');
+		vi.mocked(castEnvVarValue).mockImplementation((value, declaredType) => {
+			if (declaredType === 'string[]') {
+				return String(value).split(',');
+			}
+
 			return value;
 		});
 
@@ -68,8 +71,8 @@ describe('Casting of default configuration', () => {
 			DEFAULT_ARRAY: ['one', 'two', 'three'],
 		});
 
-		expect(getDefaultType).toHaveBeenCalledTimes(2);
-		expect(cast).toHaveBeenCalledTimes(3);
+		expect(getDefaultType).toHaveBeenCalledTimes(4);
+		expect(castEnvVarValue).toHaveBeenCalledTimes(3);
 	});
 
 	test('Default config without default type gets not casted', () => {
@@ -84,8 +87,8 @@ describe('Casting of default configuration', () => {
 			DEFAULT_ARRAY: 'one,two,three',
 		});
 
-		expect(getDefaultType).toHaveBeenCalledTimes(2);
-		expect(cast).toHaveBeenCalledTimes(2);
+		expect(getDefaultType).toHaveBeenCalledTimes(4);
+		expect(castEnvVarValue).toHaveBeenCalledTimes(2);
 	});
 });
 
@@ -152,7 +155,7 @@ describe('File based configuration', () => {
 
 		expect(removeFileSuffix).toHaveBeenCalledWith('PROCESS_FILE');
 		expect(readFileSync).toHaveBeenCalledWith('./test/path', { encoding: 'utf8' });
-		expect(cast).toHaveBeenCalledWith('array:file-content', 'PROCESS');
+		expect(castEnvVarValue).toHaveBeenCalledWith('array:file-content', undefined);
 	});
 });
 
@@ -202,7 +205,7 @@ test('Throws error if file could not be read', () => {
 });
 
 test('Casts regular values', () => {
-	vi.mocked(cast).mockImplementation((value) => `cast-${value}`);
+	vi.mocked(castEnvVarValue).mockImplementation((value) => `cast-${value}`);
 
 	const env = createEnv();
 

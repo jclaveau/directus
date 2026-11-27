@@ -1,7 +1,5 @@
 import { toArray, toBoolean } from '@directus/utils/values';
-import type { EnvVarDeclaration } from '../types/env-var-declaration.js';
 import type { EnvVarDeclaredType, EnvType } from '../types/env-type.js';
-import { getDefaultType } from '../utils/get-default-type.js';
 import { guessType } from '../utils/guess-type.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
 import { toNumber, toString } from '../utils/lodash-es-used.js';
@@ -34,7 +32,7 @@ const castToType = (
 		case 'string[]':
 			return type === 'array'
 				? toArray(value)
-					.map((item) => cast(item))
+					.map((item) => castEnvVarValue(item, null))
 					.filter((item) => item !== '')
 				: toArray(value)
 					.map((item) => String(item))
@@ -92,30 +90,19 @@ const readFlagCastType = (
 		: castFlag;
 };
 
-export const cast = (value: unknown, key?: string): unknown => {
-	const castFlag = getCastFlag(value);
-	const declaredType = getDefaultType(key);
-
-	const castType = castFlag
-		? readFlagCastType(castFlag, declaredType)
-		: declaredType ?? guessType(value);
-
-	return castToType(stripCastFlag(value), castType);
-};
-
 /**
- * `value` cast to the type `envVarDeclaration` declares, whatever it looks like:
+ * `value` cast by its prefix, else by `declaredType`, else by its guessed type:
  * a string declaration keeps `"0123"` as `"0123"`.
  */
-export const castDeclaredEnvVarValue = (
+export const castEnvVarValue = (
 	value: unknown,
-	envVarDeclaration: EnvVarDeclaration,
+	declaredType: EnvVarDeclaredType | null,
 ): unknown => {
 	const castFlag = getCastFlag(value);
 
 	const castType = castFlag
-		? readFlagCastType(castFlag, envVarDeclaration.type)
-		: envVarDeclaration.type;
+		? readFlagCastType(castFlag, declaredType)
+		: declaredType ?? guessType(value);
 
 	return castToType(stripCastFlag(value), castType);
 };

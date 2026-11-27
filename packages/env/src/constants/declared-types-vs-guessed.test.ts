@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { cast } from '../lib/cast.js';
+import { castEnvVarValue } from '../lib/cast.js';
+import { getDefaultType } from '../utils/get-default-type.js';
 import { DEFAULTS } from './defaults.js';
 
 /**
  * What every default becomes with its declared type, against what it would become
- * with none. `cast(value)` takes the `guessType` path because there is no key to
- * look up; `cast(value, key)` takes the declared one.
+ * with none. `castEnvVarValue(value, null)` takes the `guessType` path;
+ * `castEnvVarValue(value, getDefaultType(key))` takes the declared one.
  *
  * Declaring a type is meant to change how a value is PARSED, not what the code
  * downstream sees, so the two agree for almost every default. The ones that do
@@ -37,8 +38,8 @@ describe('declaring an env type against guessing it', () => {
 		const changed: Record<string, string> = {};
 
 		for (const [key, value] of Object.entries(DEFAULTS)) {
-			const guessed = shapeOf(cast(value));
-			const declared = shapeOf(cast(value, key));
+			const guessed = shapeOf(castEnvVarValue(value, null));
+			const declared = shapeOf(castEnvVarValue(value, getDefaultType(key)));
 
 			if (guessed !== declared) {
 				changed[key] = `${guessed} -> ${declared}`;

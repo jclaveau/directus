@@ -2,7 +2,7 @@ import { parseJSON } from '@directus/utils/values';
 import type { EnvVarDeclaration } from '../types/env-var-declaration.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
 import { toNumber } from '../utils/lodash-es-used.js';
-import { castDeclaredEnvVarValue, stripCastFlag } from './cast.js';
+import { castEnvVarValue, stripCastFlag } from './cast.js';
 import type { EnvVarDeclaredType } from '../types/env-type.js';
 
 /** What a boolean is spelled as, in a variable or in a configuration file. */
@@ -188,7 +188,7 @@ export const checkDeclaredEnvVarValue = (
 		return typeRefusal;
 	}
 
-	const castValue = castDeclaredEnvVarValue(envVarValue, envVarDeclaration);
+	const castValue = castEnvVarValue(envVarValue, envVarDeclaration.type);
 
 	// as: includes takes only a string; any other value is simply not found
 	if (envVarDeclaration.values.includes(castValue as string)) {

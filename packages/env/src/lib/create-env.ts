@@ -9,7 +9,7 @@ import { isFileKey } from '../utils/is-file-key.js';
 import { readConfigurationFromProcess } from '../utils/read-configuration-from-process.js';
 import { removeFileSuffix } from '../utils/remove-file-suffix.js';
 import { findEnvVarDeclaration } from '../utils/find-env-var-declaration.js';
-import { cast } from './cast.js';
+import { castEnvVarValue } from './cast.js';
 import { checkDeclaredEnvVarValue } from './check-declared-env-var-value.js';
 import { readConfigurationFromFile } from './read-configuration-from-file.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
@@ -51,7 +51,12 @@ export const createEnv = (): Env => {
 	rawEnvVarValues = {};
 
 	for (const [key, value] of Object.entries(DEFAULTS)) {
-		output[key] = getDefaultType(key) ? cast(value, key) : value;
+		const defaultType = getDefaultType(key);
+
+		output[key] = defaultType
+			? castEnvVarValue(value, defaultType)
+			: value;
+
 		sources[key] = 'default';
 	}
 
@@ -110,7 +115,7 @@ export const createEnv = (): Env => {
 			continue;
 		}
 
-		output[key] = cast(value, key);
+		output[key] = castEnvVarValue(value, getDefaultType(key));
 		sources[key] = source;
 		rawEnvVarValues[key] = value;
 	}
