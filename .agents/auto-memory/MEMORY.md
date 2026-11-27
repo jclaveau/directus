@@ -56,7 +56,7 @@ line appended below.
 - [The blocking codecov check is the unflagged patch at 95%](project_directus_codecov_aggregate_patch_gate.md) — only unit tests clear the bar
 - [Bench measures the trunk, not your PR](project_directus_bench_measures_trunk.md) — a red `Bench / cache` on a PR is the trunk tip
 
-## unit-tests (12) — vitest mocks, typecheck, local test env
+## unit-tests (14) — vitest mocks, typecheck, local test env
 `.agents/auto-memory/index/unit-tests.md`
 
 - [knex-mock matches raw SQL](reference_directus_knex_mock_sql_matching.md) — register the narrower handler first

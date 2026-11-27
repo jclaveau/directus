@@ -17,6 +17,8 @@ tag syntax and exit rules are in its header. What the header does not say:
   Re-wrapping a signature to 85 columns moves that `{`: move the tag with it, e.g.
   to `): Promise<UserIdentity> {` (#772 `getIdentity` in 4 drivers, the coverage
   strip step failed, cf7824d925).
+- Red unit tests leave no unit coverage artifact, so the branch audit fails too
+  (#772, cf5a52e27f): fix the units first, the tags are not at fault.
 - `// bb-unit-only:` also needs the api unit tests to run every counter it covers.
 - CLI coverage (`dumpCoverageAtExit`): a bb command always runs instrumented with
   `COVERAGE_DIR` set, and `renameSync` runs after the dump read the hit counters, so

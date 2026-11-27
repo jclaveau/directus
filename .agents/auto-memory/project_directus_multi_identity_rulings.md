@@ -129,6 +129,18 @@ logout call the provider that opened the session.
   trimmed + lowercased from every layer (`TRUE`, `" true\n"` read true), `yes`/`on`/`""`/
   `null` refused. #772 rebased on it; its `validateBooleanEnv` call in `auth.ts`
   dropped (`b5618c6381`): TYPE_MAP's `AUTH_.+_REQUIRE_VERIFIED_EMAIL` covers it.
+- **#772 /pr-autoreview done 2026-11-27, not merged** (head `669d6f3b01`, CI green,
+  100% of added lines reviewed). Results, with 30 choice blocks verbatim:
+  https://github.com/jclaveau/directus/pull/772#issuecomment-7227424338 . Awaiting
+  jean, none ruled yet: (1) now / A / B per choice (1-11 = the `OPEN(#772)` markers,
+  12-30 = points the rulings are silent on); (2) go on the held coarse module/route
+  renames; (3) `utils/user-name.ts` literal `'email'` vs importing
+  `EMAIL_IDENTITY_KIND` (pulls knex helpers + scoped cache into a display util);
+  (4) Flows redaction misses a nested `primary_identity.value` (admin-only nested
+  create): fix in #772 or issue.
+- **Dropped by that review (reviewer's call, not jean's):** `verifyPassword` skipping
+  an unconfigured provider (ends in `InvalidCredentialsError`); misleading log text on
+  concurrent email syncs; concurrent first logins of one subject → 403 (predates #772).
 
 **Why:** today one provider per user (`authentication.ts:142`), one email, one auth_data.
 **How to apply:** do not re-raise linking or S3 placement; see [[project_directus_pr749_c_rulings]].
