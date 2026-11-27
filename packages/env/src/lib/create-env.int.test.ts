@@ -436,3 +436,55 @@ test('Refuses a variable set both directly and through its _FILE variable', () =
 		'"DB_PASSWORD" and "DB_PASSWORD_FILE" are both set. Set only one.',
 	));
 });
+
+// A typed variable is cast by its declaration, never by what its value looks like.
+test.each([
+	['HASH_ASSOCIATED_DATA', '123', '123'],
+	['DB_SSL', 'true', true],
+	['DB_SSL__REJECT_UNAUTHORIZED', 'false', false],
+	['DB_SSL__CA', '123456', '123456'],
+	['DB_CONNECTION_REPLICA_SSL__TIMEOUT', '30', 30],
+	['AUTH_X_SP_WANT_MESSAGE_SIGNED', 'true', true],
+	['AUTH_X_IDP_METADATA', '1', '1'],
+	['AUTH_X_CLIENT_HTTP_TIMEOUT', '5000', 5000],
+	['AUTH_X_DEFAULT_ROLE_ID', '42', '42'],
+	['AUTH_X_REDIRECT_ALLOW_LIST', 'https://a.example', ['https://a.example']],
+	['CONTENT_SECURITY_POLICY_DIRECTIVES__IMG_SRC', "'self'", ["'self'"]],
+	['WEBSOCKETS_REST_AUTH_TIMEOUT', '10', 10],
+	['STORAGE_LOCAL_KEY', '0123', '0123'],
+])('Casts %s=%j by its declaration', (envVarName, rawValue, envVarValue) => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		[envVarName]: rawValue,
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+
+	expect(createEnv()).toEqual({
+		[envVarName]: envVarValue,
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
+});
+
+// An untyped secret loses its trailing newlines before its value is guessed.
+test.each([
+	['true\n', true],
+	['TLSv1.2\n', 'TLSv1.2'],
+])('Guesses an untyped secret file %j without its newlines', (
+	fileContent,
+	envVarValue,
+) => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		UNMAPPED_SETTING_FILE: './file.txt',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+	vi.mocked(readFileSync).mockReturnValueOnce(fileContent);
+
+	expect(createEnv()).toEqual({
+		UNMAPPED_SETTING: envVarValue,
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
+});
