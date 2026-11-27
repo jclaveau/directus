@@ -939,6 +939,7 @@ describe('Services / Utils', () => {
 		// who left shared settings wants the address, and only the table has it.
 		it('names the user behind the id it stamped', async () => {
 			stored({ maxWorkers: 8, setBy: 'writer-id' });
+
 			tracker.on.select('directus_user_identities')
 				.response({ value: 'ann@example.com' });
 
@@ -965,6 +966,7 @@ describe('Services / Utils', () => {
 		// against whatever was typed there refuses the comparison.
 		it('names nobody where the id matches no user', async () => {
 			stored({ maxWorkers: 8, setBy: 'not-an-id' });
+
 			tracker.on.select('directus_user_identities')
 				.simulateError('invalid input syntax');
 
@@ -975,6 +977,7 @@ describe('Services / Utils', () => {
 
 		it('stamps the surface the change came in through', async () => {
 			stored(null);
+
 			tracker.on.select('directus_user_identities')
 				.response({ value: 'ann@example.com' });
 
@@ -1100,6 +1103,7 @@ describe('Services / Utils', () => {
 		// is then asked are who left it, when, and through what.
 		it('stamps a write from the MCP with its surface', async () => {
 			vi.mocked(readSharedSettings).mockResolvedValue(null);
+
 			tracker.on.select('directus_user_identities')
 				.response({ value: 'ann@example.com' });
 

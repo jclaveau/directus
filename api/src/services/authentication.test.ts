@@ -9,7 +9,19 @@ const state = vi.hoisted(() => {
 		scoped: true,
 		purgeForMutatedRows: vi.fn(),
 		provider: {
-			getUserID: async () => 'u-1',
+			identityKind: 'email',
+			getIdentity: async () => {
+				return {
+					id: 'identity-1',
+					user: 'u-1',
+					kind: 'email',
+					value: 'u-1@example.com',
+					verified: true,
+					auth_data: null,
+					user_info: null,
+					scope: null,
+				};
+			},
 			login: async () => {
 				throw new Error('wrong password');
 			},
@@ -133,7 +145,12 @@ describe('a login spending the last attempt', () => {
 		tracker = createTracker(db);
 
 		tracker.on.select('directus_users').response([
-			{ id: 'u-1', status: 'active', provider: 'default', tfa_secret: null },
+			{
+				id: 'u-1',
+				status: 'active',
+				primary_identity: 'identity-1',
+				tfa_secret: null,
+			},
 		]);
 	});
 

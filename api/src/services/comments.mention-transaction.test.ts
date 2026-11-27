@@ -134,6 +134,9 @@ describe('a comment mention in its caller\'s transaction', () => {
 		queryTracker.on.insert('directus_comments').response([1]);
 		queryTracker.on.insert('directus_notifications').response([7]);
 
+		queryTracker.on.select('directus_user_identities')
+			.response([{ value: 'jane@example.com' }]);
+
 		vi.mocked(UsersService.prototype.readByQuery).mockResolvedValue(withMeta([{
 			id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 			first_name: 'Jane',
@@ -151,7 +154,7 @@ describe('a comment mention in its caller\'s transaction', () => {
 				id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 				first_name: 'Jane',
 				last_name: 'Doe',
-				email: 'jane@example.com',
+				primary_identity: { kind: 'email', value: 'jane@example.com' },
 				email_notifications: true,
 				role: null,
 			}, { scopedCacheFingerprints: [] }));
