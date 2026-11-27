@@ -22,8 +22,9 @@ const BOOLEAN_KEYS = ['PM2_AUTOSCALE_ENABLED', 'PM2_AUTOSCALE_DRILL_ENABLED'];
 
 // A spelling an environment reaches for and `toBoolean` reads as `false`,
 // which is the whole failure: the deployment asked for the feature and got a
-// process running as though it had asked for the opposite.
-const REFUSED_SPELLING = 'TRUE';
+// process running as though it had asked for the opposite. `TRUE` is read as
+// true since #773, so it no longer stands for one.
+const REFUSED_SPELLING = 'yes';
 
 // Long enough for a full boot on a loaded runner, and short enough to end a
 // process the check was supposed to stop: without it, a regression here does
