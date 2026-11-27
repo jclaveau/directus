@@ -14,7 +14,7 @@ vi.mock('../utils/has-cast-prefix.js');
 vi.mock('../utils/try-json.js');
 
 afterEach(() => {
-	vi.clearAllMocks();
+	vi.resetAllMocks();
 });
 
 describe('Type extraction', () => {
@@ -27,7 +27,7 @@ describe('Type extraction', () => {
 		expect(toString).toHaveBeenCalledWith('value');
 	});
 
-	test('keeps the items of an array as strings, cast flags included', () => {
+	test('casts the items of an array by their own cast flags', () => {
 		vi.mocked(getCastFlag).mockImplementation((val) => {
 			if (String(val).startsWith('array')) return 'array';
 			if (String(val).startsWith('string')) return 'string';
@@ -35,16 +35,15 @@ describe('Type extraction', () => {
 		});
 
 		vi.mocked(toArray).mockReturnValue(['string:hey', 'number:1']);
+		vi.mocked(toString).mockReturnValue('hey');
+		vi.mocked(toNumber).mockReturnValue(1);
 
 		const res = castEnvVarValue('array:string:hey,number:1', null);
 
-		expect(vi.mocked(getCastFlag).mock.calls).toEqual([
-			['array:string:hey,number:1'],
-			['array:string:hey,number:1'],
-		]);
-
 		expect(toArray).toHaveBeenCalledWith('string:hey,number:1');
-		expect(res).toEqual(['string:hey', 'number:1']);
+		expect(toString).toHaveBeenCalledWith('hey');
+		expect(toNumber).toHaveBeenCalledWith('1');
+		expect(res).toEqual(['hey', 1]);
 	});
 
 	test('Uses type map entry if cast flag does not exist', () => {
@@ -98,9 +97,11 @@ describe('Casting', () => {
 			return null;
 		});
 
-		vi.mocked(toArray).mockReturnValue([1, 2, 3]);
+		vi.mocked(toArray).mockReturnValue(['1', '2', '3']);
+		vi.mocked(guessType).mockReturnValue('number');
+		vi.mocked(toNumber).mockImplementation(Number);
 
-		expect(castEnvVarValue('array:value', null)).toEqual(['1', '2', '3']);
+		expect(castEnvVarValue('array:value', null)).toEqual([1, 2, 3]);
 	});
 
 	test('Filters empty strings values out of the array', () => {
@@ -110,6 +111,8 @@ describe('Casting', () => {
 		});
 
 		vi.mocked(toArray).mockReturnValue(['', '']);
+		vi.mocked(guessType).mockReturnValue('string');
+		vi.mocked(toString).mockImplementation(String);
 
 		expect(castEnvVarValue('array:,', null)).toEqual([]);
 	});
