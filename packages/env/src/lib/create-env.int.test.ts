@@ -354,3 +354,50 @@ test('keeps each value as it was set beside the cast one', () => {
 		UNDECLARED_NAME: '0123',
 	});
 });
+
+test.each([
+	[
+		'UNMAPPED_COUNT',
+		'number:abc',
+		'"UNMAPPED_COUNT" is "number:abc", which is not a number.',
+	],
+	[
+		'UNMAPPED_COUNT',
+		'number:',
+		'"UNMAPPED_COUNT" is "number:", which is not a number.',
+	],
+	['SUBS_API_KEY', 'number:abc', '"SUBS_API_KEY" is not a number.'],
+	[
+		'UNMAPPED_PATTERN',
+		'regex:(',
+		'"UNMAPPED_PATTERN" is "(", which is not a regex.',
+	],
+	['UNMAPPED_JSON', 'json:{bad', '"UNMAPPED_JSON" is not JSON.'],
+])('Refuses %s=%s, a prefix its value does not fit', (
+	envVarName,
+	envVarValue,
+	refusalMessage,
+) => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		[envVarName]: envVarValue,
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+
+	expect(() => createEnv()).toThrow(new Error(refusalMessage));
+});
+
+test('Refuses a number: prefix from a secret file that is not a number', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		UNMAPPED_COUNT_FILE: 'number:./file.txt',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+	vi.mocked(readFileSync).mockReturnValueOnce('abc\n');
+
+	expect(() => createEnv()).toThrow(
+		new Error('"UNMAPPED_COUNT" is "number:abc", which is not a number.'),
+	);
+});
