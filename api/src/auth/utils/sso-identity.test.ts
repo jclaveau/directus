@@ -43,9 +43,9 @@ vi.mock('../../extensions/lib/scoped-cache-handle.js', () => {
 	};
 });
 
-vi.mock('../../scoped-cache/index.js', async (importOriginal) => {
+vi.mock('../../scoped-cache/config.js', async (importOriginal) => {
 	return {
-		...await importOriginal<typeof import('../../scoped-cache/index.js')>(),
+		...await importOriginal<typeof import('../../scoped-cache/config.js')>(),
 		scopedCachePurgeEnabled: () => scopedCache.purgeEnabled,
 	};
 });

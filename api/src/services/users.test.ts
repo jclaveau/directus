@@ -65,9 +65,9 @@ vi.mock('../extensions/lib/scoped-cache-handle.js', () => {
 	};
 });
 
-vi.mock('../scoped-cache/index.js', async (importOriginal) => {
+vi.mock('../scoped-cache/config.js', async (importOriginal) => {
 	return {
-		...await importOriginal<typeof import('../scoped-cache/index.js')>(),
+		...await importOriginal<typeof import('../scoped-cache/config.js')>(),
 		scopedCachePurgeEnabled: () => scopedCache.purgeEnabled,
 	};
 });
@@ -881,16 +881,16 @@ describe('Integration Tests', () => {
 					{ id: 'user-id-25', email: 'same@example.com' },
 					{ id: 'user-id-26', email: 'SAME@example.com' },
 				], opts)).rejects.toStrictEqual(new RecordNotUniqueError({
-					collection: 'directus_users',
-					field: 'email',
+					collection: 'directus_user_identities',
+					field: 'value',
 					value: 'SAME@example.com',
 				}));
 
 				expect(opts.preMutationErrorsByKey).toStrictEqual(new Map([[
 					'user-id-26',
 					new RecordNotUniqueError({
-						collection: 'directus_users',
-						field: 'email',
+						collection: 'directus_user_identities',
+						field: 'value',
 						value: 'SAME@example.com',
 					}),
 				]]));

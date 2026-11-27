@@ -4,7 +4,7 @@ import { DEFAULT_AUTH_PROVIDER } from '../../constants.js';
 import {
 	createScopedCacheExtensionHandle,
 } from '../../extensions/lib/scoped-cache-handle.js';
-import { scopedCachePurgeEnabled } from '../../scoped-cache/index.js';
+import { scopedCachePurgeEnabled } from '../../scoped-cache/config.js';
 import type { UserIdentity } from '../../types/index.js';
 
 export const IDENTITIES_COLLECTION = 'directus_user_identities';

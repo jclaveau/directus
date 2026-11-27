@@ -46,7 +46,7 @@ Feature: A batch update of a system collection is checked as a single update is
       |   - id: <ann>                     |     - extensions:             |
       |     email: same-<run>@example.com |         code:                 |
       |   - id: <bob>                     |           RECORD_NOT_UNIQUE   |
-      |     email: same-<run>@example.com |         field: email          |
+      |     email: same-<run>@example.com |         field: value          |
       | method: GET                       | code: 200                     |+
       | path: /users/<ann>                | body:                         |
       | query:                            |   data:                       |
