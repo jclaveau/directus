@@ -76,10 +76,16 @@ logout call the provider that opened the session.
   password reset never checks the provider (`users.ts:663`), harmless today, opens
   a password login on an SSO-created account once 5 A lands (point 10, asked);
   the SSO identity's value is not self-readable today (6 refinement, asked).
+- **6 refinement + 10 (jean 2026-11-27):** 6: an SSO identity's `value` is not
+  self-readable (parity with today's hidden `external_identifier`); email values are.
+  10 = A: password reset is refused (403) on an account with no password; a first
+  password is set only from a logged-in session, so offboarding at the IdP keeps
+  locking an SSO-created account out.
 - **Open, asked 2026-11-27:** S3 x 9 A (provider sends a known user's new email
-  another account holds): jean leans "A + add the identity"; adding collides with 9 A,
-  proposed C = move it only when the holder's row is unverified. 10 (reset on a
-  passwordless account). 6 refinement (hide SSO identity values from self-read).
+  another account holds). jean asked whether it means one person with two accounts:
+  not always (same person / squatter / recycled corporate address / provider
+  wrongly vouching). Proposed: held verified → A (skip + warn), held unverified →
+  C (move the row only, never merge accounts).
 - **Focus (jean 2026-11-27):** stay on #772 until it merges; do not raise the #749
   rebase or other PRs meanwhile.
 - **Today, from code (not run):** a password user's SSO login with the same email is a
