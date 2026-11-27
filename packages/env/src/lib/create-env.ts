@@ -13,39 +13,46 @@ import { readConfigurationFromFile } from './read-configuration-from-file.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
 
 /**
- * What `toBoolean` reads as a boolean, spelled the ways an environment spells
- * one.
+ * What `toBoolean` reads as a boolean, once lowercased and trimmed.
  */
-const BOOLEANS = ['true', 'false', '1', '0'];
+const BOOLEAN_SPELLINGS = ['true', 'false', '1', '0'];
 
 /**
- * Refuse a variable cast to boolean that is not one, whichever layer supplied
- * it.
+ * Read a variable cast to boolean in any case and with spaces around it, and
+ * refuse one that is no boolean, whichever layer supplied it.
  *
- * `toBoolean` reads anything outside {@link BOOLEANS} as `false`, so a
- * deployment that meant `TRUE` turns a feature off and says nothing. Checked
- * here, on the raw value, because once cast a typo and a deliberate `false` are
- * the same value. Thrown while the env is built, which is at import, so the
- * process ends before it listens.
+ * `toBoolean` reads anything outside {@link BOOLEAN_SPELLINGS} as `false`, so a
+ * deployment that meant `TRUE` or `yes` turns a feature off and says nothing.
+ * Checked here, on the raw value, because once cast a typo and a deliberate
+ * `false` are the same value. Thrown while the env is built, which is at
+ * import, so the process ends before it listens.
  */
-const refuseNonBoolean = (key: string, value: unknown): void => {
+const readBooleanSpelling = (key: string, value: unknown): unknown => {
 	const castFlag = getCastFlag(value);
 
 	if ((castFlag ?? getDefaultType(key)) !== 'boolean') {
-		return;
+		return value;
 	}
 
-	const rawValue = typeof value === 'string' && castFlag
-		? value.substring(castFlag.length + 1)
+	const castPrefix = castFlag
+		? `${castFlag}:`
+		: '';
+
+	const rawValue = typeof value === 'string'
+		? value.substring(castPrefix.length)
 		: value;
 
-	if (BOOLEANS.includes(String(rawValue))) {
-		return;
+	const booleanSpelling = String(rawValue)
+		.trim()
+		.toLowerCase();
+
+	if (BOOLEAN_SPELLINGS.includes(booleanSpelling)) {
+		return castPrefix + booleanSpelling;
 	}
 
 	throw new Error(
 		`${JSON.stringify(key)} Environment Variable is ${JSON.stringify(rawValue)}, `
-			+ `which is not a boolean. Use one of ${BOOLEANS.join(', ')}.`,
+			+ `which is not a boolean. Use one of ${BOOLEAN_SPELLINGS.join(', ')}.`,
 	);
 };
 
@@ -111,9 +118,7 @@ export const createEnv = (): Env => {
 			}
 		}
 
-		refuseNonBoolean(key, value);
-
-		output[key] = cast(value, key);
+		output[key] = cast(readBooleanSpelling(key, value), key);
 		sources[key] = source;
 	}
 
