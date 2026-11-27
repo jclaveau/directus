@@ -49,5 +49,6 @@ Feature: A single user is checked as it is created
       |   fields: id                            |                                     |
       |   filter[first_name][_eq]: second-<run> |                                     |
     And on postgres the requests ran these statements:
-      | request | table          | select | insert | update | delete |
-      | 1       | directus_users | 2      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |

@@ -84,16 +84,18 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   email: accepting-<run>@example.com   |                              |
       |   password: accepted-password          |                              |
     And on postgres the requests ran these statements:
-      | request | table             | select | insert | update | delete |
-      | 1       | directus_sessions | 0      | 0      | 0      | 1      |
-      | 1       | directus_settings | 1      | 0      | 0      | 0      |
-      | 1       | directus_users    | 2      | 0      | 1      | 0      |
-      | 3       | directus_access   | 2      | 0      | 0      | 0      |
-      | 3       | directus_activity | 0      | 1      | 0      | 0      |
-      | 3       | directus_roles    | 1      | 0      | 0      | 0      |
-      | 3       | directus_sessions | 0      | 1      | 0      | 1      |
-      | 3       | directus_settings | 1      | 0      | 0      | 0      |
-      | 3       | directus_users    | 3      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_sessions        | 0      | 0      | 0      | 1      |
+      | 1       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 2      | 0      | 1      | 0      |
+      | 3       | directus_access          | 2      | 0      | 0      | 0      |
+      | 3       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 3       | directus_roles           | 1      | 0      | 0      | 0      |
+      | 3       | directus_sessions        | 0      | 1      | 0      | 1      |
+      | 3       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 3       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 3       | directus_users           | 2      | 0      | 1      | 0      |
 
   Scenario: an invitation token is refused for another scope or a user not invited
     Given the rows of directus_users:

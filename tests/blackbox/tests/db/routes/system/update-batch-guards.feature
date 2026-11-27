@@ -95,7 +95,7 @@ Feature: A batch update of a system collection is checked as a single update is
       | 1       | directus_access      | 3      | 0      | 0      | 0      |
       | 1       | directus_permissions | 3      | 0      | 0      | 0      |
       | 1       | directus_policies    | 1      | 0      | 0      | 0      |
-      | 1       | directus_users       | 4      | 0      | 0      | 0      |
+      | 1       | directus_users       | 3      | 0      | 0      | 0      |
 
   Scenario: a batch making a role its own parent is refused and writes nothing
     Given the rows of /roles:

@@ -188,22 +188,23 @@ Feature: A user's role, status and deletion purge the cache as today
       | query:                               |   x-cache-status: HIT             |
       |   fields: label                      |                                   |
     And on postgres the requests ran these statements:
-      | request | table                  | select | insert | update | delete |
-      | 1       | directus_access        | 2      | 0      | 0      | 0      |
-      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
-      | 1       | directus_comments      | 2      | 0      | 0      | 0      |
-      | 1       | directus_dashboards    | 1      | 0      | 0      | 0      |
-      | 1       | directus_flows         | 1      | 0      | 0      | 0      |
-      | 1       | directus_notifications | 2      | 0      | 0      | 0      |
-      | 1       | directus_operations    | 1      | 0      | 0      | 0      |
-      | 1       | directus_panels        | 1      | 0      | 0      | 0      |
-      | 1       | directus_presets       | 1      | 0      | 0      | 0      |
-      | 1       | directus_roles         | 1      | 0      | 0      | 0      |
-      | 1       | directus_sessions      | 1      | 0      | 0      | 1      |
-      | 1       | directus_shares        | 1      | 0      | 0      | 0      |
-      | 1       | directus_users         | 3      | 0      | 0      | 1      |
-      | 1       | directus_versions      | 2      | 0      | 0      | 0      |
-      | 2       | directus_users         | 1      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_comments        | 2      | 0      | 0      | 0      |
+      | 1       | directus_dashboards      | 1      | 0      | 0      | 0      |
+      | 1       | directus_flows           | 1      | 0      | 0      | 0      |
+      | 1       | directus_notifications   | 2      | 0      | 0      | 0      |
+      | 1       | directus_operations      | 1      | 0      | 0      | 0      |
+      | 1       | directus_panels          | 1      | 0      | 0      | 0      |
+      | 1       | directus_presets         | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles           | 1      | 0      | 0      | 0      |
+      | 1       | directus_sessions        | 2      | 0      | 0      | 1      |
+      | 1       | directus_shares          | 1      | 0      | 0      | 0      |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 4      | 0      | 0      | 1      |
+      | 1       | directus_versions        | 2      | 0      | 0      | 0      |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      |
 
   Scenario: an invitation accepted with its token keeps the cached read
     Given the rows of directus_roles:

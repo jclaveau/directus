@@ -32,11 +32,12 @@ Feature: A nested write to users, roles or policies hands its user checks up
       |         _eq: a2o-create@write.email          |                      |
       |   fields: status                             |                      |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_activity    | 0      | 2      | 0      | 0      |
-      | 1       | directus_revisions   | 0      | 2      | 1      | 0      |
-      | 1       | directus_users       | 3      | 1      | 0      | 0      |
-      | 1       | test_write_user_link | 1      | 1      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 2      | 1      | 0      |
+      | 1       | directus_user_identities | 2      | 1      | 0      | 0      |
+      | 1       | directus_users           | 2      | 1      | 1      | 0      |
+      | 1       | test_write_user_link     | 1      | 1      | 0      | 0      |
 
   Scenario: an any-to-one field activates the existing user it holds
     When these requests get these responses:
@@ -71,6 +72,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | 2       | directus_revisions       | 0      | 2      | 1      | 0      |
       | 2       | directus_user_identities | 1      | 0      | 0      | 0      |
       | 2       | directus_users           | 3      | 0      | 1      | 0      |
+      | 2       | test_write_user_link     | 1      | 1      | 0      | 0      |
 
   Scenario: a user's policies given as an empty list delete its access rows
     When these requests get these responses:
@@ -207,21 +209,23 @@ Feature: A nested write to users, roles or policies hands its user checks up
       |         _eq: role-emptied@write.email             |                  |
       |   fields: role                                    |                  |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 1      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_roles     | 2      | 1      | 0      | 0      |
-      | 1       | directus_users     | 2      | 0      | 0      | 0      |
-      | 2       | directus_access    | 1      | 0      | 0      | 0      |
-      | 2       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 2       | directus_users     | 3      | 1      | 0      | 0      |
-      | 3       | directus_access    | 4      | 0      | 0      | 0      |
-      | 3       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 3       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 3       | directus_roles     | 6      | 0      | 0      | 0      |
-      | 3       | directus_users     | 6      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 1      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_roles           | 2      | 1      | 0      | 0      |
+      | 1       | directus_users           | 2      | 0      | 0      | 0      |
+      | 2       | directus_access          | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 2       | directus_user_identities | 3      | 1      | 0      | 0      |
+      | 2       | directus_users           | 2      | 1      | 1      | 0      |
+      | 3       | directus_access          | 4      | 0      | 0      | 0      |
+      | 3       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 3       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 3       | directus_roles           | 6      | 0      | 0      | 0      |
+      | 3       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 3       | directus_users           | 6      | 0      | 1      | 0      |
 
   Scenario: a role's users creating a user put it in the role
     When these requests get these responses:
@@ -242,12 +246,13 @@ Feature: A nested write to users, roles or policies hands its user checks up
       |         _eq: role-created@write.email             |                         |
       |   fields: role.name                               |                         |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 2      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_roles     | 5      | 0      | 0      | 0      |
-      | 1       | directus_users     | 4      | 1      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_roles           | 5      | 0      | 0      | 0      |
+      | 1       | directus_user_identities | 2      | 1      | 0      | 0      |
+      | 1       | directus_users           | 3      | 1      | 1      | 0      |
 
   Scenario: a role's users updating a user outside it activate it and move it in
     When these requests get these responses:
@@ -276,16 +281,18 @@ Feature: A nested write to users, roles or policies hands its user checks up
       |     - status                                      |                         |
       |     - role.name                                   |                         |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 1      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_users     | 3      | 1      | 0      | 0      |
-      | 2       | directus_access    | 4      | 0      | 0      | 0      |
-      | 2       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 2       | directus_roles     | 6      | 0      | 0      | 0      |
-      | 2       | directus_users     | 6      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 1      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_user_identities | 3      | 1      | 0      | 0      |
+      | 1       | directus_users           | 2      | 1      | 1      | 0      |
+      | 2       | directus_access          | 4      | 0      | 0      | 0      |
+      | 2       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 2       | directus_roles           | 6      | 0      | 0      | 0      |
+      | 2       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 6      | 0      | 1      | 0      |
 
   Scenario: a role's users deleting a user take it out of the role
     When these requests get these responses:
@@ -311,13 +318,15 @@ Feature: A nested write to users, roles or policies hands its user checks up
       |         _eq: role-deleted@write.email             |                  |
       |   fields: role                                    |                  |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 1      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_users     | 3      | 1      | 0      | 0      |
-      | 2       | directus_access    | 4      | 0      | 0      | 0      |
-      | 2       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 2       | directus_roles     | 6      | 0      | 0      | 0      |
-      | 2       | directus_users     | 6      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 1      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_user_identities | 3      | 1      | 0      | 0      |
+      | 1       | directus_users           | 2      | 1      | 1      | 0      |
+      | 2       | directus_access          | 4      | 0      | 0      | 0      |
+      | 2       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 2       | directus_roles           | 6      | 0      | 0      | 0      |
+      | 2       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 6      | 0      | 1      | 0      |
