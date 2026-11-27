@@ -29,9 +29,9 @@ const FALLBACK_ID = 900001;
 const cacheStatusHeader = 'x-cache-status';
 const cacheTagsHeader = 'x-scoped-cache-tags';
 
-// InnoDB rejects a table definition carrying ON DELETE SET DEFAULT and Oracle has no
-// such rule at all; postgres, sqlite and mssql all take it.
-const vendorsRejectingSetDefault = ['mysql', 'mysql5', 'maria', 'oracle'];
+// InnoDB rejects a table definition carrying ON DELETE SET DEFAULT; postgres and
+// sqlite take it.
+const vendorsRejectingSetDefault = ['mysql', 'mysql5', 'maria'];
 
 describe(oneLine`
 	deleting a self-relation parent purges every slice its surviving children sit in

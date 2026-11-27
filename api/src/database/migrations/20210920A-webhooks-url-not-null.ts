@@ -4,7 +4,7 @@ import { getHelpers } from '../helpers/index.js';
 export async function up(knex: Knex): Promise<void> {
 	const helper = getHelpers(knex).schema;
 
-	if (helper.isOneOfClients(['oracle', 'cockroachdb'])) {
+	if (helper.isOneOfClients(['oracle', 'cockroachdb'])) { // bb-out-of-scope: #610 non-Postgres
 		// Oracle and Cockroach are already not nullable due to an oversight in
 		// "20201105B-change-webhook-url-type.ts"
 		return;
@@ -18,7 +18,7 @@ export async function up(knex: Knex): Promise<void> {
 export async function down(knex: Knex): Promise<void> {
 	const helper = getHelpers(knex).schema;
 
-	if (helper.isOneOfClients(['oracle', 'cockroachdb'])) {
+	if (helper.isOneOfClients(['oracle', 'cockroachdb'])) { // bb-out-of-scope: #610 non-Postgres
 		// Oracle and Cockroach are already not nullable due to an oversight in
 		// "20201105B-change-webhook-url-type.ts"
 		return;

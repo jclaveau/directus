@@ -55,7 +55,7 @@ export class FilesService extends ItemsService<File> {
 		data: Partial<File> & { storage: string },
 		primaryKey?: PrimaryKey,
 		opts?: MutationOptions,
-	): Promise<PrimaryKey> {
+	): Promise<PrimaryKey> { // bb-out-of-scope: #709 file storage
 		const storage = await getStorage();
 
 		let existingFile: Record<string, any> | null = null;
@@ -375,7 +375,7 @@ export class FilesService extends ItemsService<File> {
 	 * Create a file (only applicable when it is not a multipart/data POST request)
 	 * Useful for associating metadata with existing file in storage
 	 */
-	override async createMany(data: Partial<File>[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
+	override async createMany(data: Partial<File>[], opts: MutationOptions = {}): Promise<PrimaryKey[]> { // bb-out-of-scope: #709 file storage
 		for (const item of data) {
 			if (!item.type) {
 				throw new InvalidPayloadError({ reason: `"type" is required` });
@@ -425,7 +425,7 @@ export class FilesService extends ItemsService<File> {
 	protected override async validateGroupsToUpdate(
 		groups: UpdateGroup<File>[],
 		trx: Knex,
-	): Promise<void> {
+	): Promise<void> { // bb-out-of-scope: #709 file storage
 		const claimsByKeyName = new Map<string, DiskNameClaim>();
 
 		for (const group of groups) {
@@ -472,7 +472,7 @@ export class FilesService extends ItemsService<File> {
 	private async refuseUnusableDiskNames(
 		diskNameClaims: DiskNameClaim[],
 		trx: Knex,
-	): Promise<void> {
+	): Promise<void> { // bb-out-of-scope: #709 file storage
 		const claimedNames = diskNameClaims.flatMap((claim) => {
 			if (claim.filenameDisk === null || claim.filenameDisk === undefined) {
 				return [];
@@ -557,7 +557,7 @@ export class FilesService extends ItemsService<File> {
 		return keys;
 	}
 
-	override async readByQuery(query: Query, opts?: QueryOptions | undefined) {
+	override async readByQuery(query: Query, opts?: QueryOptions | undefined) { // bb-out-of-scope: #709 file storage
 		const filteredQuery = cloneDeep(query);
 
 		if (RESUMABLE_UPLOADS.ENABLED === true) {
@@ -592,7 +592,7 @@ function diskNameTakenReason(filenameDisk: string) {
  * the name after the guard read the table. A batch insert cannot tell which
  * row the database refused, so the reason may name no disk name.
  */
-function diskNameTakenErrorFrom(error: unknown): unknown {
+function diskNameTakenErrorFrom(error: unknown): unknown { // bb-out-of-scope: #709 file storage
 	if (!isDirectusError(error, ErrorCode.RecordNotUnique)) {
 		return error;
 	}
@@ -633,7 +633,7 @@ function refuseUnnormalisedDiskName(filenameDisk: string): void {
  *   case, so each listed path is matched exactly before it is deleted.
  * - A bucket driver with a root lists `/<name>`: the key less the root.
  */
-export async function deleteFileAndThumbnails(disk: Driver, filenameDisk: string) {
+export async function deleteFileAndThumbnails(disk: Driver, filenameDisk: string) { // bb-out-of-scope: #709 file storage
 	const { dir: folderPath, name: baseName } = path.posix.parse(filenameDisk);
 
 	const thumbnailPattern = new RegExp(
@@ -666,7 +666,7 @@ export async function deleteFileAndThumbnails(disk: Driver, filenameDisk: string
 	}
 }
 
-function ignoreMissingFile(error: unknown) {
+function ignoreMissingFile(error: unknown) { // bb-out-of-scope: #709 file storage
 	if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
 		throw error;
 	}

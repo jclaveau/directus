@@ -239,7 +239,7 @@ describe('the legacy pin form', () => {
 		]).join(', ')).toBe('articles, articles:author=7');
 	});
 
-	// MySQL/MariaDB (`utf8mb4_*_ci`) and MSSQL (`*_CI_AS`) compare strings
+	// MySQL/MariaDB (`utf8mb4_*_ci`) compare strings
 	// case-insensitively, so `_eq: 'Acme'` MATCHES a row stored as `acme`: the read
 	// pins `tenant=Acme` while the write to that row emits `tenant=acme`, the purge
 	// misses, and the entry serves stale for its whole TTL — the same failure the

@@ -26,7 +26,7 @@ export function extractError(
 	error: MySQLError,
 	data: Partial<Item>,
 	context?: DatabaseErrorContext,
-): MySQLError | Error {
+): MySQLError | Error { // bb-out-of-scope: #610 non-Postgres
 	switch (error.code) {
 		case MySQLErrorCodes.UNIQUE_VIOLATION:
 			return uniqueViolation();

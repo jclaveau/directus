@@ -45,7 +45,7 @@ export class AssetsService {
 	schema: SchemaOverview;
 	filesService: FilesService;
 
-	constructor(options: AbstractServiceOptions) {
+	constructor(options: AbstractServiceOptions) { // bb-out-of-scope: #709 file storage
 		this.knex = options.knex || getDatabase();
 		this.accountability = options.accountability || null;
 		this.schema = options.schema;
@@ -71,7 +71,7 @@ export class AssetsService {
 		transformation?: TransformationSet,
 		range?: Range,
 		deferStream: boolean = false,
-	): Promise<{ stream: (() => Promise<Readable>) | Readable; file: any; stat: Stat }> {
+	): Promise<{ stream: (() => Promise<Readable>) | Readable; file: any; stat: Stat }> { // bb-out-of-scope: #709 file storage
 		const storage = await getStorage();
 
 		const publicSettings = await this.knex
@@ -256,7 +256,7 @@ export class AssetsService {
 	}
 }
 
-const getAssetSuffix = (transforms: Transformation[]) => {
+const getAssetSuffix = (transforms: Transformation[]) => { // bb-out-of-scope: #709 file storage
 	if (Object.keys(transforms).length === 0) return '';
 	return `__${hash(transforms)}`;
 };

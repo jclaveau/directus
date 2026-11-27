@@ -37,7 +37,7 @@ export class TusDataStore extends DataStore {
 	protected schema: SchemaOverview;
 	protected accountability: Accountability | undefined;
 
-	constructor(config: TusDataStoreConfig) {
+	constructor(config: TusDataStoreConfig) { // bb-out-of-scope: #709 file storage
 		super();
 
 		if (config.constants.CHUNK_SIZE !== null) this.chunkSize = config.constants.CHUNK_SIZE;
@@ -50,7 +50,7 @@ export class TusDataStore extends DataStore {
 		this.accountability = config.accountability;
 	}
 
-	public override async create(upload: Upload): Promise<Upload> {
+	public override async create(upload: Upload): Promise<Upload> { // bb-out-of-scope: #709 file storage
 		const logger = useLogger();
 		const knex = getDatabase();
 
@@ -221,7 +221,7 @@ export class TusDataStore extends DataStore {
 		}
 	}
 
-	public override async write(readable: stream.Readable, tus_id: string, offset: number): Promise<number> {
+	public override async write(readable: stream.Readable, tus_id: string, offset: number): Promise<number> { // bb-out-of-scope: #709 file storage
 		const logger = useLogger();
 		const fileData = await this.getFileById(tus_id);
 		const filePath = fileData.filename_disk!;
@@ -293,7 +293,7 @@ export class TusDataStore extends DataStore {
 		await sudoFilesItemsService.deleteOne(fileData.id!);
 	}
 
-	override async deleteExpired(): Promise<number> {
+	override async deleteExpired(): Promise<number> { // bb-out-of-scope: #709 file storage
 		const sudoFilesItemsService = new ItemsService<File>('directus_files', {
 			schema: this.schema,
 		});
@@ -339,7 +339,7 @@ export class TusDataStore extends DataStore {
 		return new Upload(fileData.tus_data as any);
 	}
 
-	protected async getFileById(tus_id: string) {
+	protected async getFileById(tus_id: string) { // bb-out-of-scope: #709 file storage
 		const sudoFilesItemsService = new ItemsService<File>('directus_files', {
 			schema: this.schema,
 		});

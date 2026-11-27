@@ -70,12 +70,14 @@ type Row = { request: string; response: string };
 export type ScenarioKeys = {
 	run: string;
 	keysByName: Record<string, string>;
+	knownKeys?: () => Record<string, string>;
 };
 
 type SpawnedFeatureOptions = {
 	envOverrides: Record<string, string>;
 	beforeFeature?: (vendor: Vendor, instanceUrl: string) => Promise<void>;
-	afterFeature?: (vendor: Vendor) => Promise<void>;
+	afterFeature?: (vendor: Vendor, instanceUrl: string) => Promise<void>;
+	knownKeys?: () => Record<string, string>;
 };
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -85,8 +87,11 @@ const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
  * started with `envOverrides`: each holds an optional `Given these requests
  * are sent:` or the rows of its tables, an optional `this read is cached:`,
  * and a `Then these requests get these responses:`, the request|response
- * tables run row after row. `beforeFeature` gets the instance's url, so a
- * collection it creates is in the schema the instance holds.
+ * tables run row after row. `beforeFeature` and `afterFeature` get the
+ * instance's url, so a collection they create or drop is in the schema the
+ * instance holds: the main instance shares no bus with it and never hears of
+ * a collection the instance created. `knownKeys` names what a `<name>` stands
+ * for from a scenario's start, such as the url of a server the feature runs.
  */
 export function defineSpawnedWriteFeature(
 	featurePath: string,
@@ -120,8 +125,8 @@ export function defineSpawnedWriteFeature(
 		}, 60_000);
 
 		afterAll(async () => {
+			await featureOptions.afterFeature?.(vendor, getUrl(vendor, env));
 			await stopSpawnedInstance(instance);
-			await featureOptions.afterFeature?.(vendor);
 		}, 60_000);
 
 		defineFeature(feature, (scenario) => {
@@ -130,6 +135,7 @@ export function defineSpawnedWriteFeature(
 					const scenarioKeys: ScenarioKeys = {
 						run: randomUUID(),
 						keysByName: {},
+						knownKeys: featureOptions.knownKeys,
 					};
 
 					const receivedResponses: Response[] = [];
@@ -192,7 +198,10 @@ export function withKeys(cell: string, scenarioKeys: ScenarioKeys) {
 			return scenarioKeys.run;
 		}
 
-		scenarioKeys.keysByName[name] ??= randomUUID();
+		// A scenario is bound before `beforeFeature` runs, so a known key is read
+		// when a step meets it.
+		scenarioKeys.keysByName[name] ??= scenarioKeys.knownKeys?.()[name]
+			?? randomUUID();
 
 		return scenarioKeys.keysByName[name];
 	});

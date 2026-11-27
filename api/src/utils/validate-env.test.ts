@@ -16,10 +16,12 @@ import {
 	validateBytesEnv,
 	validateChoiceEnv,
 	validateCountEnv,
+	validateDatabaseClientEnv,
 	validateDurationEnv,
 	validateEnv,
 	validateHeaderNameEnv,
 	validateMarketplaceEnabledEnv,
+	validateOutOfScopeFeaturesEnv,
 	validateUnreadEnv,
 } from './validate-env.js';
 
@@ -338,6 +340,54 @@ test('passes an environment without EXTENSIONS_PATH', () => {
 	expect(process.exit).not.toHaveBeenCalled();
 });
 
+describe('validateDatabaseClientEnv', () => {
+	test.each(['mssql', 'oracledb', 'oracle'])(
+		'refuses the dropped client %j',
+		(client) => {
+			vi.mocked(useEnv).mockReturnValueOnce({ DB_CLIENT: client });
+
+			validateDatabaseClientEnv(['DB_CLIENT']);
+
+			expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
+				`"DB_CLIENT" Environment Variable is ${JSON.stringify(client)}, `
+					+ 'which this build does not support: use one of pg, '
+					+ 'cockroachdb, mysql, sqlite3, redshift.',
+			);
+
+			expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
+		},
+	);
+
+	test('refuses a dropped client on a named connection', () => {
+		vi.mocked(useEnv).mockReturnValueOnce({
+			DB_CLIENT: 'pg',
+			DB_CONNECTION_REPORTS_CLIENT: 'mssql',
+		});
+
+		validateDatabaseClientEnv(['DB_CLIENT', 'DB_CONNECTION_REPORTS_CLIENT']);
+
+		expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
+			'"DB_CONNECTION_REPORTS_CLIENT" Environment Variable is "mssql", '
+				+ 'which this build does not support: use one of pg, '
+				+ 'cockroachdb, mysql, sqlite3, redshift.',
+		);
+
+		expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
+	});
+
+	test.each(['pg', 'postgres', 'mysql', 'mysql2', 'sqlite3', 'cockroachdb'])(
+		'passes the client %j',
+		(client) => {
+			vi.mocked(useEnv).mockReturnValueOnce({ DB_CLIENT: client });
+
+			validateDatabaseClientEnv(['DB_CLIENT']);
+
+			expect(mockLogger.error).not.toHaveBeenCalled();
+			expect(process.exit).not.toHaveBeenCalled();
+		},
+	);
+});
+
 describe('validateAutoMigrateEnv', () => {
 	afterEach(() => {
 		vi.unstubAllEnvs();
@@ -471,6 +521,121 @@ describe('validateMarketplaceEnabledEnv', () => {
 				+ ' boolean. Use one of true, false, 1, 0.',
 		);
 
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+});
+
+describe('validateOutOfScopeFeaturesEnv', () => {
+	test('refuses an ldap auth driver left out of the allowed list', () => {
+		vi.mocked(useEnv).mockReturnValue({
+			AUTH_PROVIDERS: 'corp',
+			AUTH_CORP_DRIVER: 'ldap',
+			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
+		});
+
+		validateOutOfScopeFeaturesEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"AUTH_CORP_DRIVER" Environment Variable is "ldap", a feature out of'
+				+ ' the tested scope (#619): add "ldap" to'
+				+ ' OUT_OF_SCOPE_FEATURES_ALLOWED to run it untested.',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('takes an ldap auth driver named in the allowed list', () => {
+		vi.mocked(useEnv).mockReturnValue({
+			AUTH_PROVIDERS: 'corp',
+			AUTH_CORP_DRIVER: 'ldap',
+			OUT_OF_SCOPE_FEATURES_ALLOWED: [' ldap'],
+		});
+
+		validateOutOfScopeFeaturesEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test('takes the local driver and an empty provider list', () => {
+		vi.mocked(useEnv).mockReturnValue({
+			AUTH_PROVIDERS: 'own,',
+			AUTH_OWN_DRIVER: 'local',
+		});
+
+		validateOutOfScopeFeaturesEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test('leaves an auth driver that is no feature to the auth setup', () => {
+		vi.mocked(useEnv).mockReturnValue({
+			AUTH_PROVIDERS: 'corp,own',
+			AUTH_CORP_DRIVER: 'shares',
+			AUTH_OWN_DRIVER: 'constructor',
+			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
+		});
+
+		validateOutOfScopeFeaturesEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test('refuses the GraphQL websocket on a server serving websockets', () => {
+		vi.mocked(useEnv).mockReturnValue({
+			WEBSOCKETS_ENABLED: true,
+			WEBSOCKETS_GRAPHQL_ENABLED: true,
+			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
+		});
+
+		validateOutOfScopeFeaturesEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"WEBSOCKETS_GRAPHQL_ENABLED" Environment Variable is true, a feature'
+				+ ' out of the tested scope (#756): add "websockets-graphql" to'
+				+ ' OUT_OF_SCOPE_FEATURES_ALLOWED to run it untested.',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('takes the GraphQL websocket flag on a server without websockets', () => {
+		vi.mocked(useEnv).mockReturnValue({
+			WEBSOCKETS_ENABLED: false,
+			WEBSOCKETS_GRAPHQL_ENABLED: true,
+			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
+		});
+
+		validateOutOfScopeFeaturesEnv();
+
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test('logs each refusal before one exit', () => {
+		vi.mocked(useEnv).mockReturnValue({
+			EXTENSIONS_AUTO_RELOAD: true,
+			OUT_OF_SCOPE_FEATURES_ALLOWED: ['ldapp'],
+		});
+
+		validateOutOfScopeFeaturesEnv();
+
+		expect(vi.mocked(mockLogger.error).mock.calls).toEqual([
+			[
+				'"OUT_OF_SCOPE_FEATURES_ALLOWED" Environment Variable names "ldapp",'
+					+ ' which is not one of ldap, oauth2, openid, saml,'
+					+ ' websockets-graphql, extensions-auto-reload, shares,'
+					+ ' comments.',
+			],
+			[
+				'"EXTENSIONS_AUTO_RELOAD" Environment Variable is true, a feature'
+					+ ' out of the tested scope (#627): add "extensions-auto-reload"'
+					+ ' to OUT_OF_SCOPE_FEATURES_ALLOWED to run it untested.',
+			],
+		]);
+
+		expect(process.exit).toHaveBeenCalledTimes(1);
 		expect(process.exit).toHaveBeenCalledWith(1);
 	});
 });

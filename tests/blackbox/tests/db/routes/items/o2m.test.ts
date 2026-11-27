@@ -1628,12 +1628,6 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 
 		describe('Relational trigger ON DESELECT ACTION are applied irrespective of QUERY_LIMIT_MAX', () => {
 			it.each(vendors)('%s', async (vendor) => {
-				// TODO: Fix ORA-12899: value too large for column on directus_revisions. Limit of 4000
-				if (vendor === 'oracle') {
-					expect(true).toBe(true);
-					return;
-				}
-
 				const queryLimit = Number(config.envs[vendor]['QUERY_LIMIT_DEFAULT']);
 
 				const setupStates = Array.from({ length: queryLimit }, (_, i) => ({
@@ -1987,12 +1981,6 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 					it.each(vendors)(
 						'%s',
 						async (vendor) => {
-							// TODO: Fix Oracle exceeded directus_revisions limit of 4000
-							if (vendor === 'oracle') {
-								expect(true).toBe(true);
-								return;
-							}
-
 							// Setup
 							const countNested = Number(config.envs[vendor]['MAX_BATCH_MUTATION']) - 1;
 							const country: any = createCountry(pkType);
@@ -2163,12 +2151,6 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 					it.each(vendors)(
 						'%s',
 						async (vendor) => {
-							// TODO: Fix Oracle ORA-01086 savepoint never established in this session or is invalid
-							if (vendor === 'oracle') {
-								expect(true).toBe(true);
-								return;
-							}
-
 							// Setup
 							const countNested = Number(config.envs[vendor]['MAX_BATCH_MUTATION']);
 							const country: any = createCountry(pkType);
@@ -2449,12 +2431,6 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 					it.each(vendors)(
 						'%s',
 						async (vendor) => {
-							// TODO: Fix Oracle ORA-01086 savepoint never established in this session or is invalid
-							if (vendor === 'oracle') {
-								expect(true).toBe(true);
-								return;
-							}
-
 							// Setup
 							const count = Number(config.envs[vendor]['MAX_BATCH_MUTATION']) / 10;
 							const countNested = 10;
@@ -2668,12 +2644,6 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 					it.each(vendors)(
 						'%s',
 						async (vendor) => {
-							// TODO: Fix Oracle ORA-01086 savepoint never established in this session or is invalid
-							if (vendor === 'oracle') {
-								expect(true).toBe(true);
-								return;
-							}
-
 							// Setup
 							const count = Number(config.envs[vendor]['MAX_BATCH_MUTATION']) / 10;
 							const countCreate = 4;
@@ -2857,7 +2827,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 
 		describe.skipIf(pkType !== 'integer')('Auto Increment Tests', () => {
 			describe('updates the auto increment value correctly', () => {
-				it.each(without(vendors, 'cockroachdb', 'mssql', 'oracle'))('%s', async (vendor) => {
+				it.each(without(vendors, 'cockroachdb'))('%s', async (vendor) => {
 					// Setup
 					const name = 'test-auto-increment-o2m';
 					const largeIdCountry = 105555;

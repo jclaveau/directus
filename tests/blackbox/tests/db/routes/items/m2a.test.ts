@@ -1745,12 +1745,6 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 						it.each(vendors)(
 							'%s',
 							async (vendor) => {
-								// TODO: Fix Oracle exceeded directus_revisions limit of 4000
-								if (vendor === 'oracle') {
-									expect(true).toBe(true);
-									return;
-								}
-
 								// Setup
 								const countNested = Number(config.envs[vendor]['MAX_BATCH_MUTATION']) / 2 - 1;
 								const shape: any = createShape(pkType);
@@ -1783,12 +1777,6 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 						it.each(vendors)(
 							'%s',
 							async (vendor) => {
-								// TODO: Fix Oracle ORA-01086 savepoint never established in this session or is invalid
-								if (vendor === 'oracle') {
-									expect(true).toBe(true);
-									return;
-								}
-
 								// Setup
 								const countNested = Number(config.envs[vendor]['MAX_BATCH_MUTATION']) / 2;
 								const shape: any = createShape(pkType);
@@ -1864,12 +1852,6 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 						it.each(vendors)(
 							'%s',
 							async (vendor) => {
-								// TODO: Fix Oracle ORA-01086 savepoint never established in this session or is invalid
-								if (vendor === 'oracle') {
-									expect(true).toBe(true);
-									return;
-								}
-
 								// Setup
 								const count = Number(config.envs[vendor]['MAX_BATCH_MUTATION']) / 10;
 								const countNested = 5;
@@ -1978,12 +1960,6 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 						it.each(vendors)(
 							'%s',
 							async (vendor) => {
-								// TODO: Fix Oracle ORA-01086 savepoint never established in this session or is invalid
-								if (vendor === 'oracle') {
-									expect(true).toBe(true);
-									return;
-								}
-
 								// Setup
 								const count = Number(config.envs[vendor]['MAX_BATCH_MUTATION']) / 10;
 								const countCreate = 2;
@@ -2170,7 +2146,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 
 		describe.skipIf(pkType !== 'integer')('Auto Increment Tests', () => {
 			describe('updates the auto increment value correctly', () => {
-				it.each(without(vendors, 'cockroachdb', 'mssql', 'oracle'))('%s', async (vendor) => {
+				it.each(without(vendors, 'cockroachdb'))('%s', async (vendor) => {
 					// Setup
 					const name = 'test-auto-increment-m2a';
 					const largeIdShape = 112222;

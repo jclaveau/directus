@@ -29,6 +29,7 @@ import {
 type LoginCell = {
 	login: string;
 	profile: IdentityProfile;
+	code?: string;
 	remember_session?: string;
 };
 
@@ -42,6 +43,7 @@ type RequestCell = {
 const LOGIN_CELL_KEYS = [
 	'login',
 	'profile',
+	'code',
 	'remember_session',
 ] as const satisfies readonly (keyof LoginCell)[];
 
@@ -52,7 +54,7 @@ const REQUEST_CELL_KEYS = [
 	'payload',
 ] as const satisfies readonly (keyof RequestCell)[];
 
-const RESPONSE_CELL_KEYS = ['code', 'body'] as const;
+const RESPONSE_CELL_KEYS = ['code', 'headers', 'body'] as const;
 
 type Row = { request: string; response: string };
 
@@ -71,8 +73,8 @@ export const SSO_CLIENT_ID = 'sso-blackbox-client';
  * responses:`, against an instance of its own trusting the `mockoauth` (OAuth2)
  * and `mockopenid` (OpenID) providers this file starts. A row is a request to
  * that instance, or a `login: <provider>` walking the code flow with `profile`
- * as the provider's answer. A scenario may end with the statements its
- * requests ran on postgres.
+ * as the provider's answer, and `code`, when given, as the code it hands back.
+ * A scenario may end with the statements its requests ran on postgres.
  */
 export function defineSsoFeature(
 	featurePath: string,
@@ -205,8 +207,15 @@ async function logIn(
 
 	expect(authorizeAnswer.statusCode).toBe(302);
 
+	const callbackUrl = new URL(authorizeAnswer.headers['location']!);
+
+	// A code the provider never issued, as one already traded would be.
+	if (loginCell.code !== undefined) {
+		callbackUrl.searchParams.set('code', loginCell.code);
+	}
+
 	return request(instanceUrl)
-		.get(pathOf(authorizeAnswer.headers['location']!))
+		.get(pathOf(callbackUrl.href))
 		.set('Cookie', flowCookie ?? '');
 }
 
@@ -253,7 +262,11 @@ async function sendRows(
 			? await logIn(vendor, ssoInstance, requestCell)
 			: await sendRequest(vendor, ssoInstance, requestCell);
 
-		expect({ code: response.statusCode, body: response.body })
+		expect({
+			code: response.statusCode,
+			headers: response.headers,
+			body: response.body,
+		})
 			.toMatchObject(responseCellOf<object>(
 				loadYaml(responseText),
 				RESPONSE_CELL_KEYS,

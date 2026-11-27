@@ -18,7 +18,7 @@ const mapAction = (method: string): PermissionsAction => {
 	}
 };
 
-const checkFileAccess = asyncHandler(async (req, _res, next) => {
+const checkFileAccess = asyncHandler(async (req, _res, next) => { // bb-out-of-scope: #709 file storage
 	if (req.accountability) {
 		const action = mapAction(req.method);
 

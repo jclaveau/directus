@@ -92,7 +92,7 @@ export class ExtensionsService {
 		return { extension, version };
 	}
 
-	async install(extensionId: string, versionId: string) {
+	async install(extensionId: string, versionId: string) { // bb-out-of-scope: #627 extension reloads
 		const { extension, version } = await this.preInstall(extensionId, versionId);
 
 		await this.extensionsItemService.createOne({
@@ -117,7 +117,7 @@ export class ExtensionsService {
 		await this.extensionsManager.install(versionId);
 	}
 
-	async uninstall(id: string) {
+	async uninstall(id: string) { // bb-out-of-scope: #627 extension reloads
 		const settings = await this.extensionsItemService.readOne(id);
 
 		if (settings.source !== 'registry') {
@@ -136,7 +136,7 @@ export class ExtensionsService {
 		await this.extensionsManager.uninstall(settings.folder);
 	}
 
-	async reinstall(id: string) {
+	async reinstall(id: string) { // bb-out-of-scope: #627 extension reloads
 		const settings = await this.extensionsItemService.readOne(id);
 
 		if (settings.source !== 'registry') {
@@ -247,7 +247,7 @@ export class ExtensionsService {
 					throw new ExtensionReadError(error);
 				}
 
-				if ('enabled' in updatedMeta) {
+				if ('enabled' in updatedMeta) { // bb-out-of-scope: #627 extension reloads
 					await service.checkBundleAndSyncStatus(trx, id, extension);
 				}
 
@@ -262,7 +262,7 @@ export class ExtensionsService {
 			(failure: unknown) => ({ hasFailed: true, failure }),
 		);
 
-		if (reloadOutcome.hasFailed) {
+		if (reloadOutcome.hasFailed) { // bb-out-of-scope: #627 extension reloads
 			useLogger().error(
 				reloadOutcome.failure,
 				'Failed to reload the extensions after an extension update',
@@ -281,7 +281,7 @@ export class ExtensionsService {
 			);
 		}
 
-		if (reloadOutcome.hasFailed) {
+		if (reloadOutcome.hasFailed) { // bb-out-of-scope: #627 extension reloads
 
 			throw new ServiceUnavailableError({
 				service: 'extensions',

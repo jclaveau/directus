@@ -225,7 +225,7 @@ export function getDBQuery(
 	}
 
 	if (sortRecords) {
-		// Clears the order if any, eg: from MSSQL offset
+		// Clears the order if any
 		dbQuery.clear('order');
 
 		if (needsInnerQuery) {

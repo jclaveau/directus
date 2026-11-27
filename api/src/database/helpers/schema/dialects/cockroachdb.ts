@@ -12,11 +12,11 @@ export class SchemaHelperCockroachDb extends SchemaHelper {
 		column: string,
 		type: (typeof KNEX_TYPES)[number],
 		options: Options = {},
-	): Promise<void> {
+	): Promise<void> { // bb-out-of-scope: #610 non-Postgres
 		await this.changeToTypeByCopy(table, column, type, options);
 	}
 
-	override constraintName(existingName: string): string {
+	override constraintName(existingName: string): string { // bb-out-of-scope: #610 non-Postgres
 		const suffix = '_replaced';
 
 		// CockroachDB does not allow for dropping/creating constraints with the same
@@ -28,7 +28,7 @@ export class SchemaHelperCockroachDb extends SchemaHelper {
 		}
 	}
 
-	override async getDatabaseSize(): Promise<number | null> {
+	override async getDatabaseSize(): Promise<number | null> { // bb-out-of-scope: #610 non-Postgres
 		try {
 			const result = await this.knex
 				.select(this.knex.raw('round(SUM(range_size_mb) * 1024 * 1024, 0) AS size'))
@@ -44,7 +44,7 @@ export class SchemaHelperCockroachDb extends SchemaHelper {
 		groupByFields: (string | Knex.Raw)[],
 		sortRecords: SortRecord[],
 		hasRelationalSort: boolean,
-	) {
+	) { // bb-out-of-scope: #610 non-Postgres
 		if (hasRelationalSort) {
 			/*
 			Cockroach allows aliases to be used in the GROUP BY clause and only needs columns in the GROUP BY clause that

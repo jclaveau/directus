@@ -12,7 +12,7 @@ const FALLBACK_ERROR = new InternalServerError();
 export default defineOperationApi<Options>({
 	id: 'throw-error',
 
-	handler: ({ code, status, message }) => {
+	handler: ({ code, status, message }) => { // bb-out-of-scope: #651 flows
 		const statusCode = parseInt(status);
 
 		const error = createError(

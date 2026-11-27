@@ -3,6 +3,10 @@ import { parse as parseBytesConfiguration } from 'bytes';
 import { validateHeaderName } from 'node:http';
 import { useLogger } from '../logger/index.js';
 import { getMilliseconds } from './get-milliseconds.js';
+import {
+	allowedOutOfScopeFeatures,
+	OUT_OF_SCOPE_FEATURE_ISSUES,
+} from './out-of-scope-features.js';
 
 export function validateEnv(requiredKeys: string[]): void {
 	const env = useEnv();
@@ -177,6 +181,40 @@ export function validateChoiceEnv(
 	process.exit(1);
 }
 
+/** The `DB_CLIENT` values of the MS SQL Server and Oracle code this fork dropped. */
+const DROPPED_DATABASE_CLIENTS = ['mssql', 'oracledb', 'oracle'];
+
+const SUPPORTED_DATABASE_CLIENTS = [
+	'pg',
+	'cockroachdb',
+	'mysql',
+	'sqlite3',
+	'redshift',
+];
+
+/**
+ * Refuse a client variable naming a dropped dialect, at boot like
+ * {@link validateDurationEnv}: its driver is no longer installed, and knex
+ * would only say to install it.
+ */
+export function validateDatabaseClientEnv(keys: string[]): void {
+	const env = useEnv();
+
+	for (const key of keys) {
+		if (DROPPED_DATABASE_CLIENTS.includes(env[key] as string) === false) {
+			continue;
+		}
+
+		useLogger().error(
+			`${JSON.stringify(key)} Environment Variable is `
+				+ `${JSON.stringify(env[key])}, which this build does not support: `
+				+ `use one of ${SUPPORTED_DATABASE_CLIENTS.join(', ')}.`,
+		);
+
+		process.exit(1);
+	}
+}
+
 /**
  * Refuse a variable naming a response header Node cannot write, which would
  * otherwise fail every response, at boot like {@link validateDurationEnv}. A
@@ -296,4 +334,100 @@ export function validateMarketplaceEnabledEnv(): void {
 
 		process.exit(1);
 	}
+}
+
+/** The out-of-scope features an `AUTH_<NAME>_DRIVER` turns on, by its value. */
+const OUT_OF_SCOPE_AUTH_DRIVERS = ['ldap', 'oauth2', 'openid', 'saml'];
+
+/**
+ * Refuse a deployment turning on an out-of-scope feature it did not name in
+ * `OUT_OF_SCOPE_FEATURES_ALLOWED`, at boot like {@link validateDurationEnv}:
+ * untested code then runs only by choice, never by an inherited variable.
+ * Refusing at boot rather than in the feature's own code leaves no request
+ * half done, and keeps the refusal in one place blackbox can test.
+ */
+export function validateOutOfScopeFeaturesEnv(): void {
+	const env = useEnv();
+	const knownFeatureNames = Object.keys(OUT_OF_SCOPE_FEATURE_ISSUES);
+
+	const allowedFeatureNames = allowedOutOfScopeFeatures();
+
+	const refusalMessages = allowedFeatureNames
+		.filter((featureName) => knownFeatureNames.includes(featureName) === false)
+		.map((featureName) => {
+			return '"OUT_OF_SCOPE_FEATURES_ALLOWED" Environment Variable names '
+				+ `${JSON.stringify(featureName)}, which is not one of `
+				+ `${knownFeatureNames.join(', ')}.`;
+		});
+
+	const usedFeatures: {
+		envVarName: string;
+		envVarValue: unknown;
+		featureName: string;
+	}[] = [];
+
+	for (const providerName of String(env['AUTH_PROVIDERS'] ?? '').split(',')) {
+		const trimmedProviderName = providerName.trim();
+
+		if (trimmedProviderName === '') {
+			continue;
+		}
+
+		const driverEnvVarName
+			= `AUTH_${trimmedProviderName.toUpperCase()}_DRIVER`;
+
+		const driverName = String(env[driverEnvVarName]);
+
+		if (OUT_OF_SCOPE_AUTH_DRIVERS.includes(driverName)) {
+			usedFeatures.push({
+				envVarName: driverEnvVarName,
+				envVarValue: driverName,
+				featureName: driverName,
+			});
+		}
+	}
+
+	// The GraphQL controller is only built on a server serving websockets.
+	if (
+		env['WEBSOCKETS_ENABLED'] === true
+		&& env['WEBSOCKETS_GRAPHQL_ENABLED'] === true
+	) {
+		usedFeatures.push({
+			envVarName: 'WEBSOCKETS_GRAPHQL_ENABLED',
+			envVarValue: true,
+			featureName: 'websockets-graphql',
+		});
+	}
+
+	if (env['EXTENSIONS_AUTO_RELOAD'] === true) {
+		usedFeatures.push({
+			envVarName: 'EXTENSIONS_AUTO_RELOAD',
+			envVarValue: true,
+			featureName: 'extensions-auto-reload',
+		});
+	}
+
+	for (const { envVarName, envVarValue, featureName } of usedFeatures) {
+		if (allowedFeatureNames.includes(featureName)) {
+			continue;
+		}
+
+		refusalMessages.push(
+			`${JSON.stringify(envVarName)} Environment Variable is `
+				+ `${JSON.stringify(envVarValue)}, a feature out of the tested scope `
+				+ `(${OUT_OF_SCOPE_FEATURE_ISSUES[featureName]}): add `
+				+ `${JSON.stringify(featureName)} to OUT_OF_SCOPE_FEATURES_ALLOWED `
+				+ 'to run it untested.',
+		);
+	}
+
+	if (refusalMessages.length === 0) {
+		return;
+	}
+
+	for (const refusalMessage of refusalMessages) {
+		useLogger().error(refusalMessage);
+	}
+
+	process.exit(1);
 }

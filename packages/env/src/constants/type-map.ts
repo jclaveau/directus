@@ -30,7 +30,6 @@ export const TYPE_MAP: Record<string, EnvType> = {
 
 	DB_EXCLUDE_TABLES: 'array',
 	DB_BATCH_INSERT_CHUNK_SIZE: 'number',
-	DB_MSSQL_TRUST_BATCH_RETURNING: 'boolean',
 
 	DB_CONNECTIONS: 'array',
 	DB_BASE_CONNECTION_NAME: 'string',
@@ -257,6 +256,8 @@ export const TYPE_MAP: Record<string, EnvType> = {
 
 	MARKETPLACE_ENABLED: 'boolean',
 	MARKETPLACE_TRUST: 'string',
+
+	OUT_OF_SCOPE_FEATURES_ALLOWED: 'array',
 
 	TELEMETRY: 'boolean',
 	TELEMETRY_URL: 'string',

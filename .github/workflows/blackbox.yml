@@ -167,16 +167,32 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
 
-      - name: Merge + upload blackbox coverage
+      - name: Merge blackbox coverage
         if: always()
-        continue-on-error: true # Scalabus: a failed coverage upload must not red the test job
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }} # required: protected repo rejects tokenless uploads
+        continue-on-error: true # Scalabus: a failed coverage merge must not red the test job
         run: |
           # Plain node, not `pnpm --filter tests-blackbox merge-coverage`: under pnpm 12 a
           # `run` first re-installs, and after the `deploy --prod` above that install
           # prunes every devDependency, istanbul-lib-* among them.
           node tests/blackbox/merge-coverage.mjs
+
+      # Codecov counts none of the lines of a feature this build refuses: the upload below
+      # sends the report less the counters a `// bb-out-of-scope:` tag covers. No
+      # continue-on-error: a malformed tag or a missing source fails the job. The
+      # blackbox-coverage-* artifact keeps the raw report, which the branch audit reads.
+      - name: Strip the out-of-scope counters from the blackbox coverage
+        if: always() && hashFiles('coverage/blackbox/coverage-final.json') != ''
+        run: |
+          node tests/blackbox/branch-audit/strip-out-of-scope.mjs \
+            --coverage "$COVERAGE_DIR/coverage-final.json" --root . \
+            --out "$RUNNER_TEMP/codecov-blackbox"
+
+      - name: Upload blackbox coverage to Codecov
+        if: always()
+        continue-on-error: true # Scalabus: a failed coverage upload must not red the test job
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }} # required: protected repo rejects tokenless uploads
+        run: |
           curl -Os https://cli.codecov.io/latest/linux/codecov
           chmod +x codecov
 
@@ -197,8 +213,18 @@ jobs:
             COMMIT_SHA="$(cat .github/ci-dialect-base)"
           fi
 
-          ./codecov upload-coverage -f "$COVERAGE_DIR/lcov.info" -F blackbox -Z --disable-search \
+          ./codecov upload-coverage -f "$RUNNER_TEMP/codecov-blackbox/lcov.info" -F blackbox -Z --disable-search \
             -C "$COMMIT_SHA"
+
+      # branch-audit.mjs, in blackbox-pr.yml, merges every shard's report once the run ends.
+      - name: Upload blackbox coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-coverage-common
+          path: coverage/blackbox/coverage-final.json
+          if-no-files-found: warn
+          retention-days: 14
 
   db:
     name: ${{ matrix.vendor }} (shard ${{ matrix.shard }})
@@ -229,22 +255,6 @@ jobs:
       - name: Start pgbouncer
         if: matrix.vendor == 'postgres'
         run: docker compose -f tests/blackbox/docker-compose.yml up pgbouncer -d --quiet-pull --wait
-
-      - name: MSSQL Set Compatibility Level
-        if: matrix.vendor == 'mssql'
-        run: |
-          for i in {1..30}
-          do
-            docker exec blackbox-mssql-1 \
-              /opt/mssql-tools18/bin/sqlcmd -S localhost -U SA -P 'Test@123' -C \
-              -Q "SELECT 1" && break
-            sleep 2
-          done
-          docker exec blackbox-mssql-1 \
-            /opt/mssql-tools18/bin/sqlcmd -S localhost -U SA -P 'Test@123' -C \
-            -Q "ALTER DATABASE model SET COMPATIBILITY_LEVEL = 150" \
-            -l 30
-          echo "MSSQL compatibility level set successfully"
 
       # The suite's fixtures are pulled from the fork's own mirror, so a run must
       # be able to read its GHCR packages. Harmless once a package is public.
@@ -322,16 +332,32 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
 
-      - name: Merge + upload blackbox coverage
+      - name: Merge blackbox coverage
         if: always()
-        continue-on-error: true # Scalabus: a failed coverage upload must not red the test job
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }} # required: protected repo rejects tokenless uploads
+        continue-on-error: true # Scalabus: a failed coverage merge must not red the test job
         run: |
           # Plain node, not `pnpm --filter tests-blackbox merge-coverage`: under pnpm 12 a
           # `run` first re-installs, and after the `deploy --prod` above that install
           # prunes every devDependency, istanbul-lib-* among them.
           node tests/blackbox/merge-coverage.mjs
+
+      # Codecov counts none of the lines of a feature this build refuses: the upload below
+      # sends the report less the counters a `// bb-out-of-scope:` tag covers. No
+      # continue-on-error: a malformed tag or a missing source fails the job. The
+      # blackbox-coverage-* artifact keeps the raw report, which the branch audit reads.
+      - name: Strip the out-of-scope counters from the blackbox coverage
+        if: always() && hashFiles('coverage/blackbox/coverage-final.json') != ''
+        run: |
+          node tests/blackbox/branch-audit/strip-out-of-scope.mjs \
+            --coverage "$COVERAGE_DIR/coverage-final.json" --root . \
+            --out "$RUNNER_TEMP/codecov-blackbox"
+
+      - name: Upload blackbox coverage to Codecov
+        if: always()
+        continue-on-error: true # Scalabus: a failed coverage upload must not red the test job
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }} # required: protected repo rejects tokenless uploads
+        run: |
           curl -Os https://cli.codecov.io/latest/linux/codecov
           chmod +x codecov
 
@@ -352,5 +378,15 @@ jobs:
             COMMIT_SHA="$(cat .github/ci-dialect-base)"
           fi
 
-          ./codecov upload-coverage -f "$COVERAGE_DIR/lcov.info" -F blackbox -Z --disable-search \
+          ./codecov upload-coverage -f "$RUNNER_TEMP/codecov-blackbox/lcov.info" -F blackbox -Z --disable-search \
             -C "$COMMIT_SHA"
+
+      # branch-audit.mjs, in blackbox-pr.yml, merges every shard's report once the run ends.
+      - name: Upload blackbox coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-coverage-${{ matrix.vendor }}-${{ matrix.shard }}
+          path: coverage/blackbox/coverage-final.json
+          if-no-files-found: warn
+          retention-days: 14

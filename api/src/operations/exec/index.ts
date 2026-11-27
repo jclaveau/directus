@@ -16,7 +16,7 @@ function unpackArgs(args: any[]) {
 
 export default defineOperationApi<Options>({
 	id: 'exec',
-	handler: async ({ code }, { data, env, logger }) => {
+	handler: async ({ code }, { data, env, logger }) => { // bb-out-of-scope: #651 flows
 		const ivm = await loadIsolatedVm();
 
 		const allowedEnv = data['$env'] ?? {};

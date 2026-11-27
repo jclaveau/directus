@@ -24,8 +24,6 @@ const port = ({ client }: { client: Exclude<Driver, 'sqlite3'> }): Record<string
 			pg: 5432,
 			cockroachdb: 26257,
 			mysql2: 3306,
-			oracledb: 1521,
-			mssql: 1433,
 		};
 
 		return ports[client];
@@ -52,13 +50,6 @@ const password = (): Record<string, string> => ({
 	mask: '*',
 });
 
-const encrypt = (): Record<string, string | boolean> => ({
-	type: 'confirm',
-	name: 'options__encrypt',
-	message: 'Encrypt Connection:',
-	default: false,
-});
-
 const ssl = (): Record<string, string | boolean> => ({
 	type: 'confirm',
 	name: 'ssl',
@@ -71,6 +62,4 @@ export const databaseQuestions = {
 	mysql2: [host, port, database, user, password],
 	pg: [host, port, database, user, password, ssl],
 	cockroachdb: [host, port, database, user, password, ssl],
-	oracledb: [host, port, database, user, password],
-	mssql: [host, port, database, user, password, encrypt],
 };

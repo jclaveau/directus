@@ -43,7 +43,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 	config: Record<string, any>;
 	roleMap: RoleMap;
 
-	constructor(options: AuthDriverOptions, config: Record<string, any>) {
+	constructor(options: AuthDriverOptions, config: Record<string, any>) { // bb-out-of-scope: #622 OAuth2 login
 		super(options, config);
 
 		const env = useEnv();
@@ -114,7 +114,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 		return generators.codeVerifier();
 	}
 
-	generateAuthUrl(codeVerifier: string, prompt = false): string {
+	generateAuthUrl(codeVerifier: string, prompt = false): string { // bb-out-of-scope: #622 OAuth2 login
 		const { plainCodeChallenge } = this.config;
 
 		try {
@@ -146,7 +146,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 		return user?.id;
 	}
 
-	override async getUserID(payload: Record<string, any>): Promise<string> {
+	override async getUserID(payload: Record<string, any>): Promise<string> { // bb-out-of-scope: #622 OAuth2 login
 		const logger = useLogger();
 
 		if (!payload['code'] || !payload['codeVerifier'] || !payload['state']) {
@@ -179,7 +179,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 		const groupClaimName: string = this.config['groupClaimName'] ?? 'groups';
 		const groups = userInfo[groupClaimName] ? toArray(userInfo[groupClaimName]) : [];
 
-		if (groups.length > 0) {
+		if (groups.length > 0) { // bb-out-of-scope: #753 provider roles
 			for (const key in this.roleMap) {
 				if (groups.includes(key)) {
 					// Overwrite default role if user is member of a group specified in roleMap
@@ -294,7 +294,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 		return this.refresh(user);
 	}
 
-	override async refresh(user: User): Promise<void> {
+	override async refresh(user: User): Promise<void> { // bb-out-of-scope: #622 OAuth2 login
 		const logger = useLogger();
 
 		let authData = user.auth_data as AuthData;
@@ -350,7 +350,7 @@ const handleError = (e: any) => {
 	return e;
 };
 
-export function createOAuth2AuthRouter(providerName: string): Router {
+export function createOAuth2AuthRouter(providerName: string): Router { // bb-out-of-scope: #622 OAuth2 login
 	const router = Router();
 	const env = useEnv();
 

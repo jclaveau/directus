@@ -44,7 +44,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 	config: Record<string, any>;
 	roleMap: RoleMap;
 
-	constructor(options: AuthDriverOptions, config: Record<string, any>) {
+	constructor(options: AuthDriverOptions, config: Record<string, any>) { // bb-out-of-scope: #622 OpenID login
 		super(options, config);
 
 		const env = useEnv();
@@ -106,7 +106,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		});
 	}
 
-	private async getClient() {
+	private async getClient() { // bb-out-of-scope: #622 OpenID login
 		if (this.client) return this.client;
 
 		const logger = useLogger();
@@ -179,7 +179,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		return generators.codeVerifier();
 	}
 
-	async generateAuthUrl(codeVerifier: string, prompt = false): Promise<string> {
+	async generateAuthUrl(codeVerifier: string, prompt = false): Promise<string> { // bb-out-of-scope: #622 OpenID login
 		const { plainCodeChallenge } = this.config;
 
 		try {
@@ -213,7 +213,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		return user?.id;
 	}
 
-	override async getUserID(payload: Record<string, any>): Promise<string> {
+	override async getUserID(payload: Record<string, any>): Promise<string> { // bb-out-of-scope: #622 OpenID login
 		const logger = useLogger();
 
 		if (!payload['code'] || !payload['codeVerifier'] || !payload['state']) {
@@ -255,7 +255,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		const groupClaimName: string = this.config['groupClaimName'] ?? 'groups';
 		const groups = userInfo[groupClaimName] ? toArray(userInfo[groupClaimName]) : [];
 
-		if (groups.length > 0) {
+		if (groups.length > 0) { // bb-out-of-scope: #753 provider roles
 			for (const key in this.roleMap) {
 				if (groups.includes(key)) {
 					// Overwrite default role if user is member of a group specified in roleMap
@@ -372,7 +372,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		return this.refresh(user);
 	}
 
-	override async refresh(user: User): Promise<void> {
+	override async refresh(user: User): Promise<void> { // bb-out-of-scope: #622 OpenID login
 		const logger = useLogger();
 
 		let authData = user.auth_data as AuthData;
@@ -429,7 +429,7 @@ const handleError = (e: any) => {
 	return e;
 };
 
-export function createOpenIDAuthRouter(providerName: string): Router {
+export function createOpenIDAuthRouter(providerName: string): Router { // bb-out-of-scope: #622 OpenID login
 	const env = useEnv();
 	const router = Router();
 

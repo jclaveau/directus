@@ -36,8 +36,13 @@ try {
 const diff = git(['diff', '--unified=0', mergeBase, '--', '*.ts', '*.tsx', '*.vue', '*.js', '*.mjs', '*.liquid', '*.feature']);
 const addedByFile = new Map();
 
+// An upstream line whose only change is an appended blackbox audit tag keeps its
+// upstream style: reformatting it would break "never reformat untouched lines".
+const auditTagPattern = /^(.*?)\s*\/\/ bb-(?:out-of-scope|unit-only): .*$/;
+
 let file = null;
 let newLine = 0;
+let hunkRemovedLines = new Set();
 
 for (const raw of diff.split('\n')) {
 	if (raw.startsWith('+++ ')) {
@@ -49,11 +54,19 @@ for (const raw of diff.split('\n')) {
 	if (raw.startsWith('@@')) {
 		const match = raw.match(/\+(\d+)/);
 		newLine = match ? Number(match[1]) : 0;
+		hunkRemovedLines = new Set();
+		continue;
+	}
+
+	if (raw.startsWith('-') && !raw.startsWith('---')) {
+		hunkRemovedLines.add(raw.slice(1));
 		continue;
 	}
 
 	if (raw.startsWith('+') && !raw.startsWith('+++')) {
-		addedByFile.get(file)?.add(newLine);
+		const untaggedLine = raw.slice(1).match(auditTagPattern)?.[1];
+		const isOnlyTagged = untaggedLine !== undefined && hunkRemovedLines.has(untaggedLine);
+		if (!isOnlyTagged) addedByFile.get(file)?.add(newLine);
 		newLine++;
 	}
 }

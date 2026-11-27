@@ -98,7 +98,7 @@ export function canonicalizeScopedCachePinValue(
 		return String(value).toLowerCase();
 	}
 
-	// A `_ci` collation — MySQL/MariaDB's default, MSSQL's default — matches `Acme`
+	// A `_ci` collation — MySQL/MariaDB's default — matches `Acme`
 	// to a stored `acme`, so the two spellings name one row and must name one slice,
 	// for the same reason `uuid` folds above: the read would pin `tenant=Acme` while
 	// the write emits `tenant=acme`, and the purge would miss. On a case-SENSITIVE

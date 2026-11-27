@@ -123,7 +123,7 @@ export async function up(knex: Knex): Promise<void> {
 			 * MySQL won't delete the index when you drop the foreign key constraint. Gotta make
 			 * sure to clean those up as well
 			 */
-			if (getDatabaseClient(knex) === 'mysql') {
+			if (getDatabaseClient(knex) === 'mysql') { // bb-out-of-scope: #610 MySQL
 				try {
 					await knex.schema.alterTable(update.table, (table) => {
 						// Knex uses a default convention for index names: `table_column_type`
@@ -168,7 +168,7 @@ export async function down(knex: Knex): Promise<void> {
 			 * MySQL won't delete the index when you drop the foreign key constraint. Gotta make
 			 * sure to clean those up as well
 			 */
-			if (getDatabaseClient(knex) === 'mysql') {
+			if (getDatabaseClient(knex) === 'mysql') { // bb-out-of-scope: #610 MySQL
 				try {
 					await knex.schema.alterTable(update.table, (table) => {
 						// Knex uses a default convention for index names: `table_column_type`

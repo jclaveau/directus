@@ -124,7 +124,7 @@ export function assertPgBouncerConnections(): void {
 
 		const client = resolveConnectionConfig(name)['client'];
 
-		if (client !== 'pg' && client !== 'cockroachdb') {
+		if (client !== 'pg' && client !== 'cockroachdb') { // bb-out-of-scope: #610 non-Postgres
 			throw new Error(
 				`DB connection "${name}" uses client "${client}", which pgbouncer `
 				+ `cannot front — only Postgres goes through it`,

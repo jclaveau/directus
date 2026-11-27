@@ -13,7 +13,7 @@ type Options = {
 export default defineOperationApi<Options>({
 	id: 'json-web-token',
 
-	handler: async ({ operation, payload, token, secret, options }) => {
+	handler: async ({ operation, payload, token, secret, options }) => { // bb-out-of-scope: #651 flows
 		if (operation === 'sign') {
 			if (!payload) throw new Error('Undefined JSON Web Token payload');
 			if (!secret) throw new Error('Undefined JSON Web Token secret');

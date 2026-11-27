@@ -121,6 +121,17 @@ jobs:
               ;;
           esac
 
+      # Codecov counts none of the lines of a feature this build refuses: the upload below
+      # sends the api report less the counters a `// bb-out-of-scope:` tag covers. No
+      # continue-on-error: a malformed tag or a missing source fails the job. The
+      # api-unit-coverage artifact keeps the raw report, which the branch audit reads.
+      - name: Strip the out-of-scope counters from the api coverage
+        if: always() && matrix.shard == 'api' && hashFiles('api/coverage/coverage-final.json') != ''
+        run: |
+          node tests/blackbox/branch-audit/strip-out-of-scope.mjs \
+            --coverage api/coverage/coverage-final.json --root . \
+            --out "$RUNNER_TEMP/codecov-api"
+
       - name: Upload coverage to Codecov
         if: always()
         continue-on-error: true # Scalabus: a failed upload must not red the test job
@@ -135,8 +146,27 @@ jobs:
           find . -name "coverage-final.json" -path "*/coverage/*" | while read -r coverage_file; do
             # Extract the folder name that contains the coverage directory
             folder_name=$(echo "$coverage_file" | sed -E 's|.*/(.*)/coverage/.*|\1|')
-            echo "Uploading coverage for $folder_name from $coverage_file"
+
+            # The api report goes out stripped, by the step above.
+            upload_file="$coverage_file"
+
+            if [ "$coverage_file" = "./api/coverage/coverage-final.json" ]; then
+              upload_file="$RUNNER_TEMP/codecov-api/coverage-final.json"
+            fi
+
+            echo "Uploading coverage for $folder_name from $upload_file"
 
             # Upload to codecov with folder name as flag
-            ./codecov upload-coverage -f "$coverage_file" -F "$folder_name" -Z --disable-search
+            ./codecov upload-coverage -f "$upload_file" -F "$folder_name" -Z --disable-search
           done
+
+      # The blackbox branch audit (blackbox-pr.yml) checks the lines its unit-only list
+      # names are run by these tests.
+      - name: Upload api unit coverage
+        if: always() && matrix.shard == 'api'
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-unit-coverage
+          path: api/coverage/coverage-final.json
+          if-no-files-found: warn
+          retention-days: 14

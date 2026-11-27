@@ -10,7 +10,7 @@ export class NumberHelperSQLite extends NumberDatabaseHelper {
 		name: string,
 		value: NumericValue,
 		logical: 'and' | 'or',
-	): Knex.QueryBuilder {
+	): Knex.QueryBuilder { // bb-out-of-scope: #610 non-Postgres
 		return dbQuery[logical].where({ [`${collection}.${name}`]: maybeStringifyBigInt(value) });
 	}
 }

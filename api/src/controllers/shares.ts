@@ -26,7 +26,7 @@ const sharedLoginSchema = Joi.object({
 
 router.post(
 	'/auth',
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #657 shares
 		// This doesn't use accountability, as the user isn't logged in at this point
 		const service = new SharesService({
 			schema: req.schema,
@@ -95,7 +95,7 @@ router.post(
 
 router.post(
 	'/',
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #657 shares
 		const service = new SharesService({
 			accountability: req.accountability,
 			schema: req.schema,
@@ -136,7 +136,7 @@ router.post(
 	respond,
 );
 
-const readHandler = asyncHandler(async (req, res, next) => {
+const readHandler = asyncHandler(async (req, res, next) => { // bb-out-of-scope: #657 shares
 	const service = new SharesService({
 		accountability: req.accountability,
 		schema: req.schema,
@@ -219,7 +219,7 @@ router.get(
 router.patch(
 	'/',
 	validateBatch('update'),
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #657 shares
 		const service = new SharesService({
 			accountability: req.accountability,
 			schema: req.schema,
@@ -267,7 +267,7 @@ router.patch(
 
 router.patch(
 	`/:pk(${UUID_REGEX})`,
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #657 shares
 		const service = new SharesService({
 			accountability: req.accountability,
 			schema: req.schema,

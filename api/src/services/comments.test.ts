@@ -17,6 +17,9 @@ import { ItemsService } from './items.js';
 import { NotificationsService } from './notifications.js';
 import { UsersService } from './users.js';
 
+// Runs the service the deployment would refuse unless allowed.
+vi.mock('../utils/out-of-scope-features.js');
+
 vi.mock('../../src/database/index.js', () => ({
 	__esModule: true,
 	default: vi.fn(),

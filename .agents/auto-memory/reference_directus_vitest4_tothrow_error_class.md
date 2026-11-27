@@ -11,7 +11,11 @@ metadata:
 (`new RouteNotFoundError({ path })`) for a full-message pin; a bare string is only a
 substring match (rejected by the full-message rule).
 
-**Why:** hit on #670's middleware test; the red run failed for the wrong reason.
+A `createError` DirectusError can be pinned without building it:
+`toThrow(expect.objectContaining({ status: 503, code: 'SERVICE_UNAVAILABLE', message: <full> }))`.
+
+**Why:** hit on #670's middleware test (the red run failed for the wrong reason) and
+again on #771, where a right message went red in CI against a plain `Error`.
 
 **How to apply:** when writing a red-first test, read the failure text and confirm it
 fails on the behaviour, not on the matcher.

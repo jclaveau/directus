@@ -3,39 +3,39 @@ import type { FnHelperOptions } from '../types.js';
 import { FnHelper } from '../types.js';
 
 export class FnHelperMySQL extends FnHelper {
-	year(table: string, column: string): Knex.Raw {
+	year(table: string, column: string): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw('YEAR(??.??)', [table, column]);
 	}
 
-	month(table: string, column: string): Knex.Raw {
+	month(table: string, column: string): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw('MONTH(??.??)', [table, column]);
 	}
 
-	week(table: string, column: string): Knex.Raw {
+	week(table: string, column: string): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw('WEEK(??.??)', [table, column]);
 	}
 
-	day(table: string, column: string): Knex.Raw {
+	day(table: string, column: string): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw('DAYOFMONTH(??.??)', [table, column]);
 	}
 
-	weekday(table: string, column: string): Knex.Raw {
+	weekday(table: string, column: string): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw('DAYOFWEEK(??.??)', [table, column]);
 	}
 
-	hour(table: string, column: string): Knex.Raw {
+	hour(table: string, column: string): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw('HOUR(??.??)', [table, column]);
 	}
 
-	minute(table: string, column: string): Knex.Raw {
+	minute(table: string, column: string): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw('MINUTE(??.??)', [table, column]);
 	}
 
-	second(table: string, column: string): Knex.Raw {
+	second(table: string, column: string): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw('SECOND(??.??)', [table, column]);
 	}
 
-	count(table: string, column: string, options: FnHelperOptions): Knex.Raw {
+	count(table: string, column: string, options: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		const collectionName = options?.originalCollectionName || table;
 		const type = this.schema.collections?.[collectionName]?.fields?.[column]?.type ?? 'unknown';
 

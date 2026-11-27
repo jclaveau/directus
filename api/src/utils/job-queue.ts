@@ -32,7 +32,7 @@ export class JobQueue {
 		}
 	}
 
-	public get size(): number {
+	public get size(): number { // bb-out-of-scope: #651 flows
 		return this.jobs.length;
 	}
 }

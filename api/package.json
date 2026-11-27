@@ -240,10 +240,8 @@
 		"@keyv/redis": "catalog:",
 		"mysql2": "catalog:",
 		"nodemailer-mailgun-transport": "catalog:",
-		"oracledb": "catalog:",
 		"pg": "catalog:",
-		"sqlite3": "catalog:",
-		"tedious": "catalog:"
+		"sqlite3": "catalog:"
 	},
 	"engines": {
 		"node": ">=22"

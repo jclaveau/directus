@@ -5,7 +5,7 @@ import { sanitizeCollection, sanitizeField, sanitizeRelation } from './sanitize-
 
 describe('sanitizeCollection', () => {
 	test.each([
-		// Not supported in SQLite + comment in MSSQL
+		// Not supported in SQLite
 		{
 			collection: 'test',
 			meta: {
@@ -80,25 +80,6 @@ describe('sanitizeCollection', () => {
 				versioning: false,
 			},
 			schema: { name: 'test', sql: 'CREATE TABLE `test` (`id` integer not null primary key autoincrement)' },
-		},
-		// MSSQL only
-		{
-			collection: 'test',
-			meta: {
-				accountability: 'all',
-				collection: 'test',
-				group: null,
-				hidden: false,
-				icon: null,
-				item_duplication_fields: null,
-				scoped_cache_fields: null,
-				note: null,
-				singleton: false,
-				translations: null,
-				system: false,
-				versioning: false,
-			},
-			schema: { name: 'test', catalog: 'test-db' },
 		},
 	] satisfies Collection[])('should only contain name property in collection schema', (testCollection) => {
 		const result = sanitizeCollection(testCollection);

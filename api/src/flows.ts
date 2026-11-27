@@ -87,7 +87,7 @@ type FlowEventRoute = {
 	payloadShape: 'row' | 'update-groups' | 'create-entries';
 };
 
-function flowEventRoutes(flowOptions: Record<string, any>): FlowEventRoute[] {
+function flowEventRoutes(flowOptions: Record<string, any>): FlowEventRoute[] { // bb-out-of-scope: #651 flows
 	if (!flowOptions['scope']) {
 		return [];
 	}
@@ -110,7 +110,7 @@ function flowEventRoutes(flowOptions: Record<string, any>): FlowEventRoute[] {
 function collectionEventRoutes(
 	scope: string,
 	collection: string,
-): FlowEventRoute[] {
+): FlowEventRoute[] { // bb-out-of-scope: #651 flows
 	const triggerEvent = isSystemCollection(collection)
 		? `${collection.substring(9)}.${scope.split('.')[1]}`
 		: `${collection}.${scope}`;
@@ -150,7 +150,7 @@ class FlowManager {
 	private reloadQueue: JobQueue;
 	private envs: Record<string, any>;
 
-	constructor() {
+	constructor() { // bb-out-of-scope: #651 flows
 		const env = useEnv();
 		const logger = useLogger();
 
@@ -173,7 +173,7 @@ class FlowManager {
 		});
 	}
 
-	public async initialize(): Promise<void> {
+	public async initialize(): Promise<void> { // bb-out-of-scope: #651 flows
 		if (!this.isLoaded) {
 			await this.load();
 		}
@@ -189,7 +189,7 @@ class FlowManager {
 		this.operations.set(id, operation);
 	}
 
-	public removeOperation(id: string): void {
+	public removeOperation(id: string): void { // bb-out-of-scope: #651 flows
 		this.operations.delete(id);
 	}
 
@@ -223,7 +223,7 @@ class FlowManager {
 		return handler(data, context);
 	}
 
-	private async load(): Promise<void> {
+	private async load(): Promise<void> { // bb-out-of-scope: #651 flows
 		const logger = useLogger();
 
 		const flowsService = new FlowsService({ knex: getDatabase(), schema: await getSchema() });
@@ -432,7 +432,7 @@ class FlowManager {
 	 * group's data. A created row's flow can also answer it as a hook does: a
 	 * key takes the row over, null cancels it.
 	 */
-	private filterFlowHandler(flow: Flow, route: FlowEventRoute): FilterHandler {
+	private filterFlowHandler(flow: Flow, route: FlowEventRoute): FilterHandler { // bb-out-of-scope: #651 flows
 		const runFlow: FilterHandler = (payload, meta, context) => {
 			return this.executeFlow(
 				flow,
@@ -528,7 +528,7 @@ class FlowManager {
 		};
 	}
 
-	private actionFlowHandler(flow: Flow, route: FlowEventRoute): ActionHandler {
+	private actionFlowHandler(flow: Flow, route: FlowEventRoute): ActionHandler { // bb-out-of-scope: #651 flows
 		const runFlow = (meta: Record<string, any>, context: EventContext) => {
 			return this.executeFlow(flow, { ...meta, event: route.triggerEvent }, {
 				accountability: context['accountability'],
@@ -595,7 +595,7 @@ class FlowManager {
 		flow: Flow,
 		data: unknown,
 		context: Record<string, unknown>,
-	): Promise<unknown> {
+	): Promise<unknown> { // bb-out-of-scope: #651 flows
 		const database = (context['database'] as Knex) ?? getDatabase();
 		const schema = (context['schema'] as SchemaOverview) ?? (await getSchema({ database }));
 
@@ -706,7 +706,7 @@ class FlowManager {
 		status: 'resolve' | 'reject' | 'unknown';
 		data: unknown;
 		options: Record<string, any> | null;
-	}> {
+	}> { // bb-out-of-scope: #651 flows
 		const logger = useLogger();
 
 		if (!this.operations.has(operation.type)) {

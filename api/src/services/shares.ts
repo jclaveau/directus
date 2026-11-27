@@ -27,6 +27,7 @@ import type { DirectusTokenPayload, ShareData } from '../types/index.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';
 import { md } from '../utils/md.js';
+import { refuseOutOfScopeFeature } from '../utils/out-of-scope-features.js';
 import { Url } from '../utils/url.js';
 import { userName } from '../utils/user-name.js';
 import { validateKeys } from '../utils/validate-keys.js';
@@ -42,12 +43,13 @@ const logger = useLogger();
 export class SharesService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
 		super('directus_shares', options);
+		refuseOutOfScopeFeature('shares');
 	}
 
 	override async createMany(
 		data: Partial<Item>[],
 		opts?: MutationOptions,
-	): Promise<PrimaryKey[]> {
+	): Promise<PrimaryKey[]> { // bb-out-of-scope: #657 shares
 		if (this.accountability) {
 			await this.validateShareAccess(this.accountability, data as ShareTarget[]);
 		}
@@ -58,7 +60,7 @@ export class SharesService extends ItemsService {
 	override async updateGroups(
 		groups: UpdateGroup<Item>[],
 		opts?: MutationOptions,
-	): Promise<PrimaryKey[]> {
+	): Promise<PrimaryKey[]> { // bb-out-of-scope: #657 shares
 		if (this.accountability) {
 			await this.validateShareAccess(
 				this.accountability,
@@ -80,7 +82,7 @@ export class SharesService extends ItemsService {
 	 */
 	private async readUpdatedShareTargets(
 		groups: UpdateGroup<Item>[],
-	): Promise<ShareTarget[]> {
+	): Promise<ShareTarget[]> { // bb-out-of-scope: #657 shares
 		const repointingGroups = groups.filter((group) => {
 			return group.data['collection'] !== undefined
 				|| group.data['item'] !== undefined;
@@ -183,7 +185,7 @@ export class SharesService extends ItemsService {
 		options?: Partial<{
 			session: boolean;
 		}>,
-	): Promise<Omit<LoginResult, 'id'>> {
+	): Promise<Omit<LoginResult, 'id'>> { // bb-out-of-scope: #657 shares
 		const record = await this.knex
 			.select<ShareData>({
 				share_id: 'id',
@@ -268,7 +270,7 @@ export class SharesService extends ItemsService {
 	 * Send a link to the given share ID to the given email(s). Note: you can only send a link to a share
 	 * if you have read access to that particular share
 	 */
-	async invite(payload: { emails: string[]; share: PrimaryKey }) {
+	async invite(payload: { emails: string[]; share: PrimaryKey }) { // bb-out-of-scope: #657 shares
 		if (!this.accountability?.user)
 			throw new ForbiddenError({ reason: 'You must be authenticated to send a share invite.' });
 

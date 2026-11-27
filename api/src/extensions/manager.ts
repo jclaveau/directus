@@ -267,7 +267,7 @@ export class ExtensionManager {
 	/**
 	 * Installs an external extension from registry
 	 */
-	public async install(versionId: string): Promise<void> {
+	public async install(versionId: string): Promise<void> { // bb-out-of-scope: #627 extension reloads
 		const logger = useLogger();
 
 		await this.installationManager.install(versionId);
@@ -443,7 +443,7 @@ export class ExtensionManager {
 	/**
 	 * Reload all the extensions. Will unload if extensions have already been loaded
 	 */
-	public reload(options?: ReloadOptions): Promise<unknown> {
+	public reload(options?: ReloadOptions): Promise<unknown> { // bb-out-of-scope: #627 extension reloads
 		if (this.queuedReload !== null) {
 			// The queued job will already handle the additional changes
 			this.queuedReloadOptions = {
@@ -572,7 +572,7 @@ export class ExtensionManager {
 	}
 
 	/** For the callers nothing awaits, whose rejection would be unhandled. */
-	private reloadLoggingFailure(trigger: string): void {
+	private reloadLoggingFailure(trigger: string): void { // bb-out-of-scope: #627 extension reloads
 		this.reload().catch((error) => {
 			useLogger().error(error, `Failed to reload the extensions on ${trigger}`);
 		});
@@ -581,7 +581,7 @@ export class ExtensionManager {
 	/**
 	 * Start the chokidar watcher for extensions on the local filesystem
 	 */
-	private initializeWatcher(): void {
+	private initializeWatcher(): void { // bb-out-of-scope: #627 extension reloads
 		const logger = useLogger();
 
 		logger.info('Watching extensions for changes...');
@@ -628,7 +628,7 @@ export class ExtensionManager {
 	/**
 	 * Close and destroy the local filesystem watcher if enabled
 	 */
-	private async closeWatcher(): Promise<void> {
+	private async closeWatcher(): Promise<void> { // bb-out-of-scope: #627 extension reloads
 		if (this.watcher) {
 			await this.watcher.close();
 
@@ -640,7 +640,7 @@ export class ExtensionManager {
 	 * Update the chokidar watcher configuration when new extensions are added or existing ones
 	 * removed
 	 */
-	private updateWatchedExtensions(added: Extension[], removed: Extension[] = []): void {
+	private updateWatchedExtensions(added: Extension[], removed: Extension[] = []): void { // bb-out-of-scope: #627 extension reloads
 		if (!this.watcher) return;
 
 		const registryDir = path.join(

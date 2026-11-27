@@ -1,3 +1,4 @@
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { useLogger } from '../logger/index.js';
@@ -44,6 +45,7 @@ export const COVERAGE_DUMP_NAME
 	= `cov-${process.pid}-${process.hrtime.bigint()}.json`;
 
 let pendingDump: Promise<unknown> = Promise.resolve();
+let asyncDumpStarted = false;
 
 /** Reads one sandbox's coverage; `readSource` names it in a failed read. */
 interface SandboxCoverageReader {
@@ -284,6 +286,7 @@ function addFileCoverage(
 }
 
 async function writeCoverage(): Promise<WrittenCoverage[]> {
+	asyncDumpStarted = true;
 	const collectedCoverage = await collectCoverage();
 
 	if (collectedCoverage === undefined) {
@@ -348,4 +351,42 @@ async function writeDirCoverage(
 	// truncated cov-*.json that the merge would then fail to parse.
 	await writeFile(partialPath, JSON.stringify(dirCoverage));
 	await rename(partialPath, join(targetDir, COVERAGE_DUMP_NAME));
+}
+
+/**
+ * Write the coverage of a process that exits without a shutdown hook: a CLI
+ * command (bootstrap, migrate, init…) ends in `process.exit`, whose `exit`
+ * listeners run synchronously, so this writes synchronously. A process that
+ * dumped already skips it: the server dumps on shutdown, sandboxes included,
+ * and this one would overwrite that file without them.
+ */
+export function dumpCoverageAtExit(): void {
+	const coverage = readCoverage();
+
+	if (asyncDumpStarted || coverage === undefined) { // bb-unit-only: a bb command always dumps here
+		return;
+	}
+
+	const { coverageByDir, unownedCount } = splitCoverage(
+		coverage,
+		readExtensionCoverageDirs(),
+		process.env['COVERAGE_DIR'] || undefined, // bb-unit-only: bb sets COVERAGE_DIR
+	);
+
+	// The logger may write asynchronously, and the process ends here.
+	if (unownedCount > 0) { // bb-unit-only: bb sets COVERAGE_DIR
+		process.stderr.write(
+			`Coverage of ${unownedCount} source files not written: no extension `
+			+ 'built with coverage owns them, and COVERAGE_DIR is unset.\n',
+		);
+	}
+
+	for (const [targetDir, dirCoverage] of coverageByDir) {
+		mkdirSync(targetDir, { recursive: true });
+
+		const partialPath = join(targetDir, `${COVERAGE_DUMP_NAME}.partial`);
+
+		writeFileSync(partialPath, JSON.stringify(dirCoverage));
+		renameSync(partialPath, join(targetDir, COVERAGE_DUMP_NAME)); // bb-unit-only: runs after the dump read hits
+	}
 }

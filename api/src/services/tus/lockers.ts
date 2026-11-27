@@ -42,7 +42,7 @@ export class KvLock implements Lock {
 		this.kv = useLock();
 	}
 
-	async lock(signal: AbortSignal, cancelReq: RequestRelease) {
+	async lock(signal: AbortSignal, cancelReq: RequestRelease) { // bb-out-of-scope: #709 file storage
 		const abortController = new AbortController();
 
 		const abortSignal = AbortSignal.any([signal, abortController.signal]);
@@ -59,7 +59,7 @@ export class KvLock implements Lock {
 		}
 	}
 
-	protected async acquireLock(id: string, requestRelease: RequestRelease, signal: AbortSignal): Promise<boolean> {
+	protected async acquireLock(id: string, requestRelease: RequestRelease, signal: AbortSignal): Promise<boolean> { // bb-out-of-scope: #709 file storage
 		const lockTime = await this.kv.get(id);
 
 		if (signal.aborted) {

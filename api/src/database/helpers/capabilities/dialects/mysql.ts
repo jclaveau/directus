@@ -1,7 +1,7 @@
 import { CapabilitiesHelper } from '../types.js';
 
 export class CapabilitiesHelperMySQL extends CapabilitiesHelper {
-	override supportsColumnPositionInGroupBy(): boolean {
+	override supportsColumnPositionInGroupBy(): boolean { // bb-out-of-scope: #610 non-Postgres
 		// Supported in MySQL https://dev.mysql.com/doc/refman/8.4/en/select.html#id756773
 		// > Columns selected for output can be referred to in ORDER BY and GROUP BY clauses using column names,
 		//   column aliases, or column positions. Column positions are integers and begin with 1:
@@ -25,7 +25,7 @@ export class CapabilitiesHelperMySQL extends CapabilitiesHelper {
 	 *   can probe `SELECT VERSION()` for the `-MariaDB` suffix and return `true`
 	 *   for ≥ 10.5.
 	 */
-	override async preservesInsertOrderInReturning(): Promise<boolean> {
+	override async preservesInsertOrderInReturning(): Promise<boolean> { // bb-out-of-scope: #610 non-Postgres
 		return false;
 	}
 }

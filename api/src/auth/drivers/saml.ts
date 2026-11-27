@@ -52,7 +52,7 @@ export class SAMLAuthDriver extends LocalAuthDriver {
 		return user?.id;
 	}
 
-	override async getUserID(payload: Record<string, any>) {
+	override async getUserID(payload: Record<string, any>) { // bb-out-of-scope: #622 SAML login
 		const logger = useLogger();
 
 		const { provider, emailKey, identifierKey, givenNameKey, familyNameKey, allowPublicRegistration } = this.config;
@@ -113,7 +113,7 @@ export class SAMLAuthDriver extends LocalAuthDriver {
 	}
 }
 
-export function createSAMLAuthRouter(providerName: string) {
+export function createSAMLAuthRouter(providerName: string) { // bb-out-of-scope: #622 SAML login
 	const router = Router();
 	const env = useEnv();
 

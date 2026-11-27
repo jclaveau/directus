@@ -2,7 +2,7 @@ import type { Knex } from 'knex';
 import type { FnHelperOptions } from '../types.js';
 import { FnHelper } from '../types.js';
 
-const parseLocaltime = (columnType?: string) => {
+const parseLocaltime = (columnType?: string) => { // bb-out-of-scope: #610 non-Postgres
 	if (columnType === 'timestamp') {
 		return '';
 	}
@@ -11,63 +11,63 @@ const parseLocaltime = (columnType?: string) => {
 };
 
 export class FnHelperSQLite extends FnHelper {
-	year(table: string, column: string, options?: FnHelperOptions): Knex.Raw {
+	year(table: string, column: string, options?: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`CAST(strftime('%Y', ??.?? / 1000, 'unixepoch'${parseLocaltime(options?.type)}) AS INTEGER)`, [
 			table,
 			column,
 		]);
 	}
 
-	month(table: string, column: string, options?: FnHelperOptions): Knex.Raw {
+	month(table: string, column: string, options?: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`CAST(strftime('%m', ??.?? / 1000, 'unixepoch'${parseLocaltime(options?.type)}) AS INTEGER)`, [
 			table,
 			column,
 		]);
 	}
 
-	week(table: string, column: string, options?: FnHelperOptions): Knex.Raw {
+	week(table: string, column: string, options?: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`CAST(strftime('%W', ??.?? / 1000, 'unixepoch'${parseLocaltime(options?.type)}) AS INTEGER)`, [
 			table,
 			column,
 		]);
 	}
 
-	day(table: string, column: string, options?: FnHelperOptions): Knex.Raw {
+	day(table: string, column: string, options?: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`CAST(strftime('%d', ??.?? / 1000, 'unixepoch'${parseLocaltime(options?.type)}) AS INTEGER)`, [
 			table,
 			column,
 		]);
 	}
 
-	weekday(table: string, column: string, options?: FnHelperOptions): Knex.Raw {
+	weekday(table: string, column: string, options?: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`CAST(strftime('%w', ??.?? / 1000, 'unixepoch'${parseLocaltime(options?.type)}) AS INTEGER)`, [
 			table,
 			column,
 		]);
 	}
 
-	hour(table: string, column: string, options?: FnHelperOptions): Knex.Raw {
+	hour(table: string, column: string, options?: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`CAST(strftime('%H', ??.?? / 1000, 'unixepoch'${parseLocaltime(options?.type)}) AS INTEGER)`, [
 			table,
 			column,
 		]);
 	}
 
-	minute(table: string, column: string, options?: FnHelperOptions): Knex.Raw {
+	minute(table: string, column: string, options?: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`CAST(strftime('%M', ??.?? / 1000, 'unixepoch'${parseLocaltime(options?.type)}) AS INTEGER)`, [
 			table,
 			column,
 		]);
 	}
 
-	second(table: string, column: string, options?: FnHelperOptions): Knex.Raw {
+	second(table: string, column: string, options?: FnHelperOptions): Knex.Raw { // bb-out-of-scope: #610 non-Postgres
 		return this.knex.raw(`CAST(strftime('%S', ??.?? / 1000, 'unixepoch'${parseLocaltime(options?.type)}) AS INTEGER)`, [
 			table,
 			column,
 		]);
 	}
 
-	count(table: string, column: string, options: FnHelperOptions): Knex.Raw<any> {
+	count(table: string, column: string, options: FnHelperOptions): Knex.Raw<any> { // bb-out-of-scope: #610 non-Postgres
 		const collectionName = options?.originalCollectionName || table;
 		const type = this.schema.collections?.[collectionName]?.fields?.[column]?.type ?? 'unknown';
 

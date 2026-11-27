@@ -1,22 +1,12 @@
 import type { FieldOverview } from '@directus/types';
 import type { Knex } from 'knex';
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { CapabilitiesHelperCockroachDb } from './dialects/cockroachdb.js';
 import { CapabilitiesHelperDefault } from './dialects/default.js';
-import { CapabilitiesHelperMSSQL } from './dialects/mssql.js';
 import { CapabilitiesHelperMySQL } from './dialects/mysql.js';
-import { CapabilitiesHelperOracle } from './dialects/oracle.js';
 import { CapabilitiesHelperPostgres } from './dialects/postgres.js';
 import { CapabilitiesHelperRedshift } from './dialects/redshift.js';
 import { CapabilitiesHelperSqlite } from './dialects/sqlite.js';
-
-// vitest hoists vi.hoisted + vi.mock above the imports above, so @directus/env is
-// mocked before mssql.ts captures useEnv() at module load.
-const { mockEnv } = vi.hoisted(() => ({ mockEnv: {} as Record<string, unknown> }));
-
-vi.mock('@directus/env', () => ({
-	useEnv: () => mockEnv,
-}));
 
 const noKnex = {} as unknown as Knex;
 
@@ -42,10 +32,6 @@ describe('CapabilitiesHelper (default)', () => {
 	test('padRowsForBatchInsert is a no-op', () => {
 		const rows = [{ id: 1 }, { id: 2 }];
 		expect(helper.padRowsForBatchInsert(rows, { fields: {}, primaryKeyField: 'id' })).toBe(rows);
-	});
-
-	test('insertReturningOptions is undefined', () => {
-		expect(helper.insertReturningOptions()).toBeUndefined();
 	});
 
 	test('does not support a json batch update', () => {
@@ -134,34 +120,6 @@ describe('CapabilitiesHelperMySQL', () => {
 
 	test('does not preserve insert order in RETURNING', async () => {
 		await expect(helper.preservesInsertOrderInReturning()).resolves.toBe(false);
-	});
-});
-
-describe('CapabilitiesHelperOracle', () => {
-	const helper = new CapabilitiesHelperOracle(noKnex);
-
-	test('preserves insert order in RETURNING', async () => {
-		await expect(helper.preservesInsertOrderInReturning()).resolves.toBe(true);
-	});
-});
-
-describe('CapabilitiesHelperMSSQL', () => {
-	const helper = new CapabilitiesHelperMSSQL(noKnex);
-
-	afterEach(() => {
-		delete mockEnv['DB_MSSQL_TRUST_BATCH_RETURNING'];
-	});
-
-	test('preserves insert order only when DB_MSSQL_TRUST_BATCH_RETURNING is set', async () => {
-		mockEnv['DB_MSSQL_TRUST_BATCH_RETURNING'] = true;
-		await expect(helper.preservesInsertOrderInReturning()).resolves.toBe(true);
-
-		mockEnv['DB_MSSQL_TRUST_BATCH_RETURNING'] = false;
-		await expect(helper.preservesInsertOrderInReturning()).resolves.toBe(false);
-	});
-
-	test('always requests trigger modifications on the per-row insert', () => {
-		expect(helper.insertReturningOptions()).toEqual({ includeTriggerModifications: true });
 	});
 });
 

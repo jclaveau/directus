@@ -10,14 +10,14 @@ export class SchemaHelperMySQL extends SchemaHelper {
 		type: 'unique' | 'foreign' | 'index',
 		collection: string,
 		fields: string | string[],
-	): string {
+	): string { // bb-out-of-scope: #610 non-Postgres
 		return getDefaultIndexName(type, collection, fields, { maxLength: 64 });
 	}
 
 	// MySQL has no DROP ... IF EXISTS for indexes/constraints (and MariaDB rides this same client),
 	// so check the catalog first. Unique constraints and plain indexes both surface in
 	// information_schema.statistics, so one lookup serves both drops below.
-	private async hasIndex(knex: Knex, collection: string, indexName: string): Promise<boolean> {
+	private async hasIndex(knex: Knex, collection: string, indexName: string): Promise<boolean> { // bb-out-of-scope: #610 non-Postgres
 		const result = await knex
 			.select('index_name')
 			.from('information_schema.statistics')
@@ -28,7 +28,7 @@ export class SchemaHelperMySQL extends SchemaHelper {
 		return Boolean(result);
 	}
 
-	override async dropUniqueIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+	override async dropUniqueIfExists(knex: Knex, collection: string, field: string): Promise<void> { // bb-out-of-scope: #610 non-Postgres
 		const constraintName = this.generateIndexName('unique', collection, field);
 
 		if (await this.hasIndex(knex, collection, constraintName)) {
@@ -38,7 +38,7 @@ export class SchemaHelperMySQL extends SchemaHelper {
 		}
 	}
 
-	override async dropIndexIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+	override async dropIndexIfExists(knex: Knex, collection: string, field: string): Promise<void> { // bb-out-of-scope: #610 non-Postgres
 		const indexName = this.generateIndexName('index', collection, field);
 
 		if (await this.hasIndex(knex, collection, indexName)) {
@@ -48,7 +48,7 @@ export class SchemaHelperMySQL extends SchemaHelper {
 		}
 	}
 
-	override async getDatabaseSize(): Promise<number | null> {
+	override async getDatabaseSize(): Promise<number | null> { // bb-out-of-scope: #610 non-Postgres
 		try {
 			const result = (await this.knex
 				.sum('size AS size')
@@ -70,7 +70,7 @@ export class SchemaHelperMySQL extends SchemaHelper {
 		groupByFields: (string | Knex.Raw)[],
 		sortRecords: SortRecord[],
 		hasRelationalSort: boolean,
-	) {
+	) { // bb-out-of-scope: #610 non-Postgres
 		if (hasRelationalSort) {
 			/*
 			** MySQL **
@@ -105,7 +105,7 @@ export class SchemaHelperMySQL extends SchemaHelper {
 		}
 	}
 
-	override async getColumnsWithInvalidCollation(schema: string, collation: string): Promise<InvalidCollationColumn[]> {
+	override async getColumnsWithInvalidCollation(schema: string, collation: string): Promise<InvalidCollationColumn[]> { // bb-out-of-scope: #610 non-Postgres
 		const { version } = await this.knex.select(this.knex.raw('VERSION() as version')).first();
 		const isMariaDB = String(version).split('-').includes('MariaDB');
 

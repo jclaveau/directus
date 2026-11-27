@@ -6,6 +6,9 @@ import { withMeta } from '../../utils/read-meta.js';
 import { ItemsService } from '../../services/items.js';
 import { _fetchShareInfo } from './fetch-share-info.js';
 
+// Runs the service the deployment would refuse unless allowed.
+vi.mock('../../utils/out-of-scope-features.js');
+
 vi.mock('../../database/index.js', () => {
 	return {
 		default: vi.fn(),

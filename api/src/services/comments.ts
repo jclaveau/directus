@@ -21,6 +21,7 @@ import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fe
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { isValidUuid } from '../utils/is-valid-uuid.js';
 import { uniq } from '../utils/lodash-es-used.js';
+import { refuseOutOfScopeFeature } from '../utils/out-of-scope-features.js';
 import { Url } from '../utils/url.js';
 import { userName } from '../utils/user-name.js';
 import { ItemsService } from './items.js';
@@ -36,6 +37,7 @@ export class CommentsService extends ItemsService {
 
 	constructor(options: AbstractServiceOptions) {
 		super('directus_comments', options);
+		refuseOutOfScopeFeature('comments');
 
 		this.notificationsService = new NotificationsService({
 			schema: this.schema,
@@ -45,7 +47,7 @@ export class CommentsService extends ItemsService {
 		this.usersService = new UsersService({ schema: this.schema, knex: this.knex });
 	}
 
-	override async createMany(data: Partial<Comment>[], opts?: MutationOptions): Promise<PrimaryKey[]> {
+	override async createMany(data: Partial<Comment>[], opts?: MutationOptions): Promise<PrimaryKey[]> { // bb-out-of-scope: #647 comments
 		if (!this.accountability?.user) throw new ForbiddenError();
 
 		for (const item of data) {
@@ -234,7 +236,7 @@ ${comment}
 		return keys;
 	}
 
-	private async readableUserIds(userIds: string[]): Promise<Set<string>> {
+	private async readableUserIds(userIds: string[]): Promise<Set<string>> { // bb-out-of-scope: #647 comments
 		const authorUsersService = new UsersService({
 			schema: this.schema,
 			knex: this.knex,
@@ -276,7 +278,7 @@ ${comment}
 	override async updateGroups(
 		groups: UpdateGroup<Item>[],
 		opts?: MutationOptions,
-	): Promise<PrimaryKey[]> {
+	): Promise<PrimaryKey[]> { // bb-out-of-scope: #647 comments
 		if (!this.accountability?.user) throw new ForbiddenError();
 
 		return super.updateGroups(groups, opts);
@@ -285,7 +287,7 @@ ${comment}
 	override async deleteMany(
 		keys: PrimaryKey[],
 		opts?: MutationOptions,
-	): Promise<PrimaryKey[]> {
+	): Promise<PrimaryKey[]> { // bb-out-of-scope: #647 comments
 		if (!this.accountability?.user) throw new ForbiddenError();
 
 		return super.deleteMany(keys, opts);

@@ -16,7 +16,7 @@ router.use(useCollection('directus_operations'));
 
 router.post(
 	'/',
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #651 flows
 		const service = new OperationsService({
 			accountability: req.accountability,
 			schema: req.schema,
@@ -57,7 +57,7 @@ router.post(
 	respond,
 );
 
-const readHandler = asyncHandler(async (req, res, next) => {
+const readHandler = asyncHandler(async (req, res, next) => { // bb-out-of-scope: #651 flows
 	const service = new OperationsService({
 		accountability: req.accountability,
 		schema: req.schema,
@@ -97,7 +97,7 @@ router.get(
 router.patch(
 	'/',
 	validateBatch('update'),
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #651 flows
 		const service = new OperationsService({
 			accountability: req.accountability,
 			schema: req.schema,
@@ -145,7 +145,7 @@ router.patch(
 
 router.patch(
 	'/:pk',
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, res, next) => { // bb-out-of-scope: #651 flows
 		const service = new OperationsService({
 			accountability: req.accountability,
 			schema: req.schema,

@@ -1,14 +1,3 @@
-export type MSSQLError = {
-	message: string;
-	code: 'EREQUEST';
-	number: number;
-	state: number;
-	class: number;
-	serverName: string;
-	procName: string;
-	lineNumber: number;
-};
-
 export type MySQLError = {
 	message: string;
 	code: string;
@@ -33,19 +22,13 @@ export type PostgresError = {
 	constraint: string | undefined;
 };
 
-export type OracleError = {
-	message: string;
-	errorNum: number;
-	offset: number;
-};
-
 export type SQLiteError = {
 	message: string;
 	errno: number;
 	code: string;
 };
 
-export type SQLError = MSSQLError & MySQLError & PostgresError & SQLiteError & OracleError & Error;
+export type SQLError = MySQLError & PostgresError & SQLiteError & Error;
 
 // Call-site context a driver error can't carry: the collection the caller operated
 // on (the driver reports the child on a delete/RESTRICT, not the acted-on parent)

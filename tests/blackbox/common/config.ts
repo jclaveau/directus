@@ -107,6 +107,11 @@ const directusConfig = {
 	WEBSOCKETS_ENABLED: 'true',
 	// Off by default; the GraphQL websocket suites need it.
 	WEBSOCKETS_GRAPHQL_ENABLED: 'true',
+	// Out of the tested scope, each refused unless named here: the SAML login
+	// every instance carries, the SSO suites' drivers, the GraphQL websocket
+	// suites, the share and comment suites.
+	OUT_OF_SCOPE_FEATURES_ALLOWED:
+		'saml,oauth2,openid,websockets-graphql,shares,comments',
 	// The extension suites install, uninstall and toggle extensions at runtime.
 	MARKETPLACE_ENABLED: 'true',
 	// A day, so a server re-reads a shared setting only when it hears it
@@ -176,28 +181,6 @@ const config: Config = {
 			},
 			...knexConfig,
 		},
-		mssql: {
-			client: 'mssql',
-			connection: {
-				database: 'model',
-				user: 'sa',
-				password: 'Test@123',
-				host: '127.0.0.1',
-				port: 6105,
-				requestTimeout: 60000,
-			},
-			...knexConfig,
-		},
-		oracle: {
-			client: 'oracledb',
-			connection: {
-				user: 'secretsysuser',
-				password: 'secretpassword',
-				connectString: '127.0.0.1:6106/XE',
-			},
-			...knexConfig,
-			waitTestSQL: 'SELECT 1 FROM DUAL',
-		},
 		cockroachdb: {
 			client: 'cockroachdb',
 			connection: {
@@ -237,8 +220,6 @@ const config: Config = {
 		mysql: 'MySQL',
 		mysql5: 'MySQL (5)',
 		maria: 'MariaDB',
-		mssql: 'MS SQL Server',
-		oracle: 'OracleDB',
 		cockroachdb: 'CockroachDB',
 		sqlite3: 'SQLite 3',
 	},
@@ -295,24 +276,6 @@ const config: Config = {
 			DB_PASSWORD: 'secret',
 			DB_DATABASE: 'directus',
 			PORT: '20156',
-		},
-		mssql: {
-			...directusConfig,
-			DB_CLIENT: 'mssql',
-			DB_HOST: `127.0.0.1`,
-			DB_PORT: '6105',
-			DB_USER: 'sa',
-			DB_PASSWORD: 'Test@123',
-			DB_DATABASE: 'model',
-			PORT: '20157',
-		},
-		oracle: {
-			...directusConfig,
-			DB_CLIENT: 'oracledb',
-			DB_USER: 'secretsysuser',
-			DB_PASSWORD: 'secretpassword',
-			DB_CONNECT_STRING: `127.0.0.1:6106/XE`,
-			PORT: '20158',
 		},
 		cockroachdb: {
 			...directusConfig,

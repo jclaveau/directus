@@ -161,7 +161,7 @@ router.get(
 
 router.post(
 	'/registry/install',
-	asyncHandler(async (req, _res, next) => {
+	asyncHandler(async (req, _res, next) => { // bb-out-of-scope: #627 extension reloads
 		if (req.accountability && req.accountability.admin !== true) {
 			throw new ForbiddenError({
 				reason: `'${req.accountability?.user}' does not have permission to access registry/install`,
@@ -187,7 +187,7 @@ router.post(
 
 router.post(
 	'/registry/reinstall',
-	asyncHandler(async (req, _res, next) => {
+	asyncHandler(async (req, _res, next) => { // bb-out-of-scope: #627 extension reloads
 		if (req.accountability && req.accountability.admin !== true) {
 			throw new ForbiddenError({
 				reason: `'${req.accountability?.user}' does not have permission to access registry/reinstall`,
@@ -213,7 +213,7 @@ router.post(
 
 router.delete(
 	`/registry/uninstall/:pk(${UUID_REGEX})`,
-	asyncHandler(async (req, _res, next) => {
+	asyncHandler(async (req, _res, next) => { // bb-out-of-scope: #627 extension reloads
 		if (req.accountability && req.accountability.admin !== true) {
 			throw new ForbiddenError({
 				reason: `'${req.accountability?.user}' does not have permission to access registry/uninstall`,

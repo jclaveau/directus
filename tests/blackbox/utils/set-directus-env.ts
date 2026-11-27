@@ -6,7 +6,7 @@ import request from 'supertest';
 /**
  * Mutates a single key on the running Directus's cached env object via the
  * `env-inject` test extension. Lets a test flip a runtime-checked env var
- * (e.g. DB_MSSQL_TRUST_BATCH_RETURNING) on the SAME spawned Directus
+ * (e.g. DB_CONNECTIONS) on the SAME spawned Directus
  * instance, without restarting it.
  *
  * Only effective for env vars that are re-read on each access via the `env`

@@ -8,16 +8,17 @@ import knex from 'knex';
 import { performance } from 'node:perf_hooks';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
-import { isArray, merge, toArray } from '../utils/lodash-es-used.js';
+import { isArray, toArray } from '../utils/lodash-es-used.js';
 import { nodeId } from '../utils/node-id.js';
 import { trackTransactionsOf } from '../utils/transaction.js';
-import { validateEnv } from '../utils/validate-env.js';
+import { validateDatabaseClientEnv, validateEnv } from '../utils/validate-env.js';
 import {
 	assertConnectionNamesAreUnique,
 	assertNamedConnectionsAreComplete,
 	connectionFieldEnvKey,
 	getBaseConnectionName,
 	getBaseDbConfig,
+	getExtraConnectionNames,
 	requiredConnectionFields,
 } from './connections.js';
 import { getHelpers } from './helpers/index.js';
@@ -45,6 +46,15 @@ export function getDatabase(): Knex {
 	if (database) {
 		return database;
 	}
+
+	validateDatabaseClientEnv(
+		[
+			'DB_',
+			...getExtraConnectionNames().map(
+				(name) => `DB_CONNECTION_${name.toUpperCase()}_`,
+			),
+		].map((prefix) => connectionFieldEnvKey(prefix, 'client')),
+	);
 
 	const config = getBaseDbConfig();
 
@@ -135,7 +145,7 @@ export function constructDatabase(
 		};
 	}
 
-	if (client === 'cockroachdb') {
+	if (client === 'cockroachdb') { // bb-out-of-scope: #610 non-Postgres
 		poolConfig.afterCreate = (conn: any, callback: any) => {
 			logger.trace('Setting CRDB serial_normalization and default_int_size');
 
@@ -146,32 +156,11 @@ export function constructDatabase(
 		};
 	}
 
-	if (client === 'oracledb') {
-		poolConfig.afterCreate = (conn: any, callback: any) => {
-			logger.trace('Setting OracleDB NLS_DATE_FORMAT and NLS_TIMESTAMP_FORMAT');
-
-			// enforce proper ISO standard 2024-12-10T10:54:00.123Z for datetime/timestamp
-			conn.execute('ALTER SESSION SET NLS_TIMESTAMP_FORMAT = \'YYYY-MM-DD"T"HH24:MI:SS.FF3"Z"\'');
-
-			// enforce 2024-12-10 date formet
-			conn.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD'");
-
-			callback(null, conn);
-		};
-	}
-
-	if (client === 'mysql') {
+	if (client === 'mysql') { // bb-out-of-scope: #610 non-Postgres
 		// Remove the conflicting `filename` option, defined by default in the Docker Image
 		if (isObject(knexConfig.connection)) delete knexConfig.connection['filename'];
 
 		Object.assign(knexConfig, { client: 'mysql2' });
-	}
-
-	if (client === 'mssql') {
-		// This brings MS SQL in line with the other DB vendors. We shouldn't do any automatic
-		// timezone conversion on the database level, especially not when other database vendors don't
-		// act the same
-		merge(knexConfig, { connection: { options: { useUTC: false } } });
 	}
 
 	const dbInstance = knex.default(knexConfig);
@@ -231,11 +220,7 @@ export async function hasDatabaseConnection(database?: Knex): Promise<boolean> {
 	database = database ?? getDatabase();
 
 	try {
-		if (getDatabaseClient(database) === 'oracle') {
-			await database.raw('select 1 from DUAL');
-		} else {
-			await database.raw('SELECT 1');
-		}
+		await database.raw('SELECT 1');
 
 		return true;
 	} catch {
@@ -248,11 +233,7 @@ export async function validateDatabaseConnection(database?: Knex): Promise<void>
 	const logger = useLogger();
 
 	try {
-		if (getDatabaseClient(database) === 'oracle') {
-			await database.raw('select 1 from DUAL');
-		} else {
-			await database.raw('SELECT 1');
-		}
+		await database.raw('SELECT 1');
 	} catch (error: any) {
 		logger.error(`Can't connect to the database.`);
 		logger.error(error);
@@ -269,16 +250,11 @@ export function getDatabaseClient(database?: Knex): DatabaseClient {
 		case 'Client_PG':
 			return 'postgres';
 		case 'Client_CockroachDB':
-			return 'cockroachdb';
+			return 'cockroachdb'; // bb-out-of-scope: #610 non-Postgres
 		case 'Client_SQLite3':
 			return 'sqlite';
-		case 'Client_Oracledb':
-		case 'Client_Oracle':
-			return 'oracle';
-		case 'Client_MSSQL':
-			return 'mssql';
 		case 'Client_Redshift':
-			return 'redshift';
+			return 'redshift'; // bb-out-of-scope: #610 non-Postgres
 	}
 
 	throw new Error(`Couldn't extract database client`);
@@ -386,7 +362,7 @@ async function validateDatabaseCharset(database?: Knex): Promise<void> {
 	database = database ?? getDatabase();
 	const logger = useLogger();
 
-	if (getDatabaseClient(database) === 'mysql') {
+	if (getDatabaseClient(database) === 'mysql') { // bb-out-of-scope: #610 non-Postgres
 		const helpers = getHelpers(database);
 		const { collation } = await database.select(database.raw(`@@collation_database as collation`)).first();
 

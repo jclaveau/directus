@@ -25,7 +25,9 @@ export type InvalidCollationColumn = {
 };
 
 export abstract class SchemaHelper extends DatabaseHelper {
-	isOneOfClients(clients: DatabaseClient[]): boolean {
+	// 'oracle' is no client any more, but the migrations, kept as upstream wrote
+	// them, still name it.
+	isOneOfClients(clients: (DatabaseClient | 'oracle')[]): boolean {
 		return clients.includes(getDatabaseClient(this.knex));
 	}
 
@@ -243,9 +245,8 @@ export abstract class SchemaHelper extends DatabaseHelper {
 	}
 
 	// knex emits the DB-native IF EXISTS: DROP CONSTRAINT on postgres, DROP INDEX
-	// on sqlite / cockroachdb / mssql. mysql + oracle lack the syntax and
-	// override with a catalog existence check; redshift falls back to the plain
-	// drops.
+	// on sqlite / cockroachdb. mysql lacks the syntax and overrides with a catalog
+	// existence check; redshift falls back to the plain drops.
 	async dropUniqueIfExists(knex: Knex, collection: string, field: string): Promise<void> {
 		const constraintName = this.generateIndexName('unique', collection, field);
 

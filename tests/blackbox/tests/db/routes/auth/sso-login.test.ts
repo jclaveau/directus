@@ -64,14 +64,15 @@ defineSsoFeature(
 
 			expect(created.statusCode).toBe(200);
 		},
-		// The users the logins created, then their role.
+		// The users the logins created, then their role. Another feature's logins
+		// share the providers, never the email domain.
 		async afterFeature(vendor) {
 			const ssoUsers = await request(getUrl(vendor))
 				.get('/users')
 				.query({
 					fields: 'id',
 					filter: JSON.stringify({
-						provider: { _in: ['mockoauth', 'mockopenid'] },
+						email: { _ends_with: '@sso.example.com' },
 					}),
 				})
 				.set('Authorization', AUTH);

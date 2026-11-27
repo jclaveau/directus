@@ -2,6 +2,7 @@
 
 Full hooks for this area. The routing keys live in `../MEMORY.md`.
 
+- [PR #769 oos refusal rulings](../project_directus_pr769_oos_refusal_rulings.md) — refuse (boot / unmounted route + service), one PR, tags + module both stay, mssql/oracle dropped in it, flows after DB audit, files not oos soon
 - [PR #600 query-audit header](../project_directus_pr600_query_audit.md) — MERGED 099c21850a; counts in knex `_query` (the query event misses BEGIN/COMMIT); header = ONE map `{ms,db,wait,maxPoolConnections,entriesDropped?,statements}`; levels via request header, `full` admin-only; settled points
 - [PR #607 accepted exceptions](../project_directus_pr607_accepted_exceptions.md) — context.transaction on mutation filters; M1 no savepoint, H4/M2 stay in trx, L2 typing via SYSTEM_COLLECTION_NAMES, deleteMany declarations once on purpose, non-PG → #610; knex-mock vacuous-history trap; do not re-raise
 - [#205 accepted exceptions — do NOT re-raise](../project_directus_pr205_accepted_exceptions.md) — settled in review: big scope OK, String/number collapse OK but bool/date/decimal now type-normalized, relations bare-tagged by design, aggregate-bare NOT a bug, reader/writer race + parseJsonFieldList silent-degrade DEFERRED, CACHE_TTL false-alarm, $CURRENT_USER pin safe
