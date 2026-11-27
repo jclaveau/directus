@@ -161,7 +161,7 @@ const SUPPORTED_DATABASE_CLIENTS = [
  * would only say to install it.
  */
 export function validateDatabaseClientEnv(keys: string[]): void {
-	const env = useEnv();
+	const env: Record<string, unknown> = useEnv(); // names built per connection
 
 	for (const key of keys) {
 		if (DROPPED_DATABASE_CLIENTS.includes(env[key] as string) === false) {
@@ -306,7 +306,7 @@ const OUT_OF_SCOPE_AUTH_DRIVERS = ['ldap', 'oauth2', 'openid', 'saml'];
  * half done, and keeps the refusal in one place blackbox can test.
  */
 export function validateOutOfScopeFeaturesEnv(): void {
-	const env = useEnv();
+	const env: Record<string, unknown> = useEnv(); // per-provider driver names
 	const knownFeatureNames = Object.keys(OUT_OF_SCOPE_FEATURE_ISSUES);
 
 	const allowedFeatureNames = allowedOutOfScopeFeatures();

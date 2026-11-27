@@ -322,7 +322,8 @@ describe('validateDatabaseClientEnv', () => {
 	test.each(['mssql', 'oracledb', 'oracle'])(
 		'refuses the dropped client %j',
 		(client) => {
-			vi.mocked(useEnv).mockReturnValueOnce({ DB_CLIENT: client });
+			vi.mocked(useEnv, { partial: true })
+				.mockReturnValueOnce({ DB_CLIENT: client });
 
 			validateDatabaseClientEnv(['DB_CLIENT']);
 
@@ -337,7 +338,7 @@ describe('validateDatabaseClientEnv', () => {
 	);
 
 	test('refuses a dropped client on a named connection', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv, { partial: true }).mockReturnValueOnce({
 			DB_CLIENT: 'pg',
 			DB_CONNECTION_REPORTS_CLIENT: 'mssql',
 		});
@@ -356,7 +357,8 @@ describe('validateDatabaseClientEnv', () => {
 	test.each(['pg', 'postgres', 'mysql', 'mysql2', 'sqlite3', 'cockroachdb'])(
 		'passes the client %j',
 		(client) => {
-			vi.mocked(useEnv).mockReturnValueOnce({ DB_CLIENT: client });
+			vi.mocked(useEnv, { partial: true })
+				.mockReturnValueOnce({ DB_CLIENT: client });
 
 			validateDatabaseClientEnv(['DB_CLIENT']);
 
@@ -500,8 +502,8 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 describe('validateOutOfScopeFeaturesEnv', () => {
 	test('refuses an ldap auth driver left out of the allowed list', () => {
-		vi.mocked(useEnv).mockReturnValue({
-			AUTH_PROVIDERS: 'corp',
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
+			AUTH_PROVIDERS: ['corp'],
 			AUTH_CORP_DRIVER: 'ldap',
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
 		});
@@ -518,8 +520,8 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('takes an ldap auth driver named in the allowed list', () => {
-		vi.mocked(useEnv).mockReturnValue({
-			AUTH_PROVIDERS: 'corp',
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
+			AUTH_PROVIDERS: ['corp'],
 			AUTH_CORP_DRIVER: 'ldap',
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [' ldap'],
 		});
@@ -531,8 +533,8 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('takes the local driver and an empty provider list', () => {
-		vi.mocked(useEnv).mockReturnValue({
-			AUTH_PROVIDERS: 'own,',
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
+			AUTH_PROVIDERS: ['own'],
 			AUTH_OWN_DRIVER: 'local',
 		});
 
@@ -543,8 +545,8 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('leaves an auth driver that is no feature to the auth setup', () => {
-		vi.mocked(useEnv).mockReturnValue({
-			AUTH_PROVIDERS: 'corp,own',
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
+			AUTH_PROVIDERS: ['corp', 'own'],
 			AUTH_CORP_DRIVER: 'shares',
 			AUTH_OWN_DRIVER: 'constructor',
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
@@ -557,7 +559,7 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('refuses the GraphQL websocket on a server serving websockets', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			WEBSOCKETS_ENABLED: true,
 			WEBSOCKETS_GRAPHQL_ENABLED: true,
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
@@ -575,7 +577,7 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('takes the GraphQL websocket flag on a server without websockets', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			WEBSOCKETS_ENABLED: false,
 			WEBSOCKETS_GRAPHQL_ENABLED: true,
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
@@ -587,7 +589,7 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('logs each refusal before one exit', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			EXTENSIONS_AUTO_RELOAD: true,
 			OUT_OF_SCOPE_FEATURES_ALLOWED: ['ldapp'],
 		});
