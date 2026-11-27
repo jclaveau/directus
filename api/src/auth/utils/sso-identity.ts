@@ -253,7 +253,7 @@ async function createSsoAccount(
 				.createOne(omit(createdPayload, IDENTITY_PAYLOAD_KEYS));
 
 			const ssoIdentityId = await identitiesService(trxContext).createOne({
-				user: userId,
+				user: userId as string,
 				kind: ssoLogin.provider,
 				value: identityValue,
 				verified: true,
@@ -265,7 +265,7 @@ async function createSsoAccount(
 
 			const emailIdentityId = accountEmail
 				? await identitiesService(trxContext).createOne({
-					user: userId,
+					user: userId as string,
 					kind: EMAIL_IDENTITY_KIND,
 					value: accountEmail,
 					verified: ssoLogin.emailVerified,
