@@ -1,5 +1,4 @@
 import { readFileSync } from 'node:fs';
-import { CORE_ENV_VAR_PREFIXES } from '../constants/core-env-var-prefixes.js';
 import { DEFAULTS } from '../constants/defaults.js';
 import type { Env } from '../types/env.js';
 import type { EnvSources, EnvValueSource } from '../types/env-sources.js';
@@ -136,18 +135,6 @@ export const createEnv = (): Env => {
 		}
 
 		const envVarDeclaration = findEnvVarDeclaration(key);
-
-		const matchedCorePrefix = envVarDeclaration
-			? undefined
-			: CORE_ENV_VAR_PREFIXES.find((prefix) => key.startsWith(prefix));
-
-		if (matchedCorePrefix) {
-			valueRefusals.push(`${JSON.stringify(key)} is under the core prefix`
-				+ ` ${JSON.stringify(matchedCorePrefix)},`
-				+ ' but core declares no such variable.');
-
-			continue;
-		}
 
 		const valueRefusal = envVarDeclaration
 			&& 'type' in envVarDeclaration

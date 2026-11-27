@@ -144,8 +144,8 @@ export function restoreCoreEnvVars({
 }
 
 /**
- * The variables set under a prefix an extension declares, that no extension
- * declares: most likely typos. One under a core prefix refused the boot.
+ * The variables set under a core prefix or one an extension declares, that
+ * neither core nor any extension declares: most likely typos.
  */
 export function findUndeclaredEnvVars({
 	rawEnvVarNames,
@@ -156,8 +156,10 @@ export function findUndeclaredEnvVars({
 	envVarDeclarers: ExtensionEnvVarDeclarers;
 	extensionPrefixes: Set<string>;
 }): string[] {
+	const declaredPrefixes = [...CORE_ENV_VAR_PREFIXES, ...extensionPrefixes];
+
 	return rawEnvVarNames.filter((envVarName) => {
-		return [...extensionPrefixes].some((prefix) => envVarName.startsWith(prefix))
+		return declaredPrefixes.some((prefix) => envVarName.startsWith(prefix))
 			&& !isCoreEnvVarName(envVarName)
 			&& !envVarDeclarers.has(envVarName);
 	});

@@ -1,4 +1,4 @@
-import { useEnv, useEnvVarRawValues } from '@directus/env';
+import { CORE_ENV_VAR_PREFIXES, useEnv, useEnvVarRawValues } from '@directus/env';
 import { APP_SHARED_DEPS } from '@directus/extensions';
 import { HYBRID_EXTENSION_TYPES } from '@directus/constants';
 import { generateExtensionsEntrypoint } from '@directus/extensions/node';
@@ -363,10 +363,33 @@ export class ExtensionManager {
 			extensionPrefixes: this.extensionEnvPrefixes,
 		});
 
+		const corePrefixRefusals: string[] = [];
+
 		for (const undeclaredName of undeclaredNames) {
-			logger.warn(
-				`${JSON.stringify(undeclaredName)} is set but nothing declares it.`,
-			);
+			const matchedCorePrefix = CORE_ENV_VAR_PREFIXES.find((corePrefix) => {
+				return undeclaredName.startsWith(corePrefix);
+			});
+
+			if (matchedCorePrefix === undefined) {
+				logger.warn(
+					`${JSON.stringify(undeclaredName)} is set but nothing declares it.`,
+				);
+			}
+			else {
+				corePrefixRefusals.push(`${JSON.stringify(undeclaredName)} is under`
+					+ ` the core prefix ${JSON.stringify(matchedCorePrefix)},`
+					+ ' but core declares no such variable.');
+			}
+		}
+
+		// Checked once the extensions declared theirs, so one may claim a name
+		// under a core prefix; nothing claiming it fails the boot.
+		if (corePrefixRefusals.length > 0) {
+			logger.error(new Error(corePrefixRefusals.join('\n')));
+
+			if (!this.hasLoadedBefore) {
+				process.exit(1);
+			}
 		}
 
 		this.hasLoadedBefore = true;

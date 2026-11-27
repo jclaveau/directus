@@ -166,6 +166,19 @@ const { ExtensionManager } = await import('./manager.js');
 afterEach(() => {
 	vi.resetAllMocks();
 	vi.restoreAllMocks();
+
+	// The manager holds this object: a test's declared variables are taken out
+	// rather than the object replaced, so the next test starts from the base.
+	for (const envVarName of Object.keys(mocks.env)) {
+		Reflect.deleteProperty(mocks.env, envVarName);
+	}
+
+	Object.assign(mocks.env, {
+		SERVE_APP: true,
+		TEMP_PATH: '/tmp/directus-test',
+		EXTENSIONS_SANDBOX_MEMORY: 128,
+		EXTENSIONS_SANDBOX_TIMEOUT: 10000,
+	});
 });
 
 test('registers the entries of a code bundle from its api', async () => {
