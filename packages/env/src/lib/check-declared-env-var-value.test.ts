@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
-import { checkDeclaredValue } from './check-declared-value.js';
+import { checkDeclaredEnvVarValue } from './check-declared-env-var-value.js';
 
-describe('checkDeclaredValue', () => {
+describe('checkDeclaredEnvVarValue', () => {
 	test.each([
 		['number', '5432'],
 		['number', 'number:5432'],
@@ -25,9 +25,12 @@ describe('checkDeclaredValue', () => {
 		['boolean | number | string | string[]', '*'],
 		['boolean | number | string | string[]', '1'],
 		['boolean | number | string | string[]', 'array:*'],
-	] as const)('takes a %s set to %j', (type, value) => {
-		expect(checkDeclaredValue('VARIABLE_NAME', value, { type }))
-			.toBe(null);
+	] as const)('takes a %s set to %j', (declaredType, rawValue) => {
+		expect(checkDeclaredEnvVarValue(
+			'VARIABLE_NAME',
+			rawValue,
+			{ type: declaredType },
+		)).toBe(null);
 	});
 
 	test.each([
@@ -80,20 +83,23 @@ describe('checkDeclaredValue', () => {
 			'"VARIABLE_NAME" is declared string[], but its "json:" prefix'
 				+ ' casts it to json.',
 		],
-	] as const)('refuses a %s set to %j', (type, value, refusal) => {
-		expect(checkDeclaredValue('VARIABLE_NAME', value, { type }))
-			.toBe(refusal);
+	] as const)('refuses a %s set to %j', (declaredType, rawValue, valueRefusal) => {
+		expect(checkDeclaredEnvVarValue(
+			'VARIABLE_NAME',
+			rawValue,
+			{ type: declaredType },
+		)).toBe(valueRefusal);
 	});
 
 	test('takes one of the declared values', () => {
-		expect(checkDeclaredValue('CACHE_STORE', 'redis', {
+		expect(checkDeclaredEnvVarValue('CACHE_STORE', 'redis', {
 			type: 'string',
 			values: ['memory', 'redis'],
 		})).toBe(null);
 	});
 
 	test('refuses a value outside the declared values', () => {
-		expect(checkDeclaredValue('CACHE_STORE', 'memcache', {
+		expect(checkDeclaredEnvVarValue('CACHE_STORE', 'memcache', {
 			type: 'string',
 			values: ['memory', 'redis'],
 		})).toBe(

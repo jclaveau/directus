@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => {
 			EXTENSIONS_SANDBOX_MEMORY: 128,
 			EXTENSIONS_SANDBOX_TIMEOUT: 10000,
 		} as Record<string, unknown>,
-		rawValues: {} as Record<string, unknown>,
+		rawEnvVarValues: {} as Record<string, unknown>,
 		logger: {
 			info: vi.fn(),
 			warn: vi.fn(),
@@ -81,7 +81,7 @@ vi.mock('@directus/env', async (importOriginal) => {
 	return {
 		...(await importOriginal<typeof import('@directus/env')>()),
 		useEnv: () => mocks.env,
-		useEnvRawValues: () => mocks.rawValues,
+		useEnvVarRawValues: () => mocks.rawEnvVarValues,
 	};
 });
 
@@ -436,7 +436,7 @@ test('casts the variables a code bundle declares, and warns of a typo', async ()
 		},
 	];
 
-	mocks.rawValues = {
+	mocks.rawEnvVarValues = {
 		SUBSCRIPTIONS_CODE: '0123',
 		SUBSCRIPTIONS_TRIAL_DAY: '3',
 	};
@@ -528,7 +528,7 @@ test('fails the boot on a variable a code bundle misdeclares', async () => {
 		},
 	];
 
-	mocks.rawValues = { BILLING_PORT: 'abc' };
+	mocks.rawEnvVarValues = { BILLING_PORT: 'abc' };
 
 	mocks.importCodeBundles.mockResolvedValue({
 		codeBundles: [
@@ -600,7 +600,7 @@ test('gives core its guess back on a reload without the bundle', async () => {
 		},
 	];
 
-	mocks.rawValues = { SUBSCRIPTIONS_CODE: '123' };
+	mocks.rawEnvVarValues = { SUBSCRIPTIONS_CODE: '123' };
 
 	mocks.importCodeBundles.mockResolvedValue({
 		codeBundles: [

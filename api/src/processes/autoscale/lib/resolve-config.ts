@@ -1,4 +1,4 @@
-import { type EnvName, useEnv } from '@directus/env';
+import { type EnvVarName, useEnv } from '@directus/env';
 import { useLogger } from '../../../logger/index.js';
 import {
 	SHARED_SETTINGS_COLUMNS,
@@ -21,7 +21,10 @@ import {
 } from './sanitize-config.js';
 
 /** The variable each field reads, so a page can say where a value came from. */
-const ENV_KEYS: Record<keyof AutoscaleConfig, EnvName> = {
+const AUTOSCALE_CONFIG_ENV_VAR_NAMES: Record<
+	keyof AutoscaleConfig,
+	EnvVarName
+> = {
 	enabled: 'PM2_AUTOSCALE_ENABLED',
 	strategy: 'PM2_AUTOSCALE_STRATEGY',
 	appName: 'PM2_AUTOSCALE_APP_NAME',
@@ -53,10 +56,14 @@ function sourcesOf(taken: Set<keyof AutoscaleConfig>): AutoscaleConfigSources {
 	const env = useEnv();
 	const sources = {} as AutoscaleConfigSources;
 
-	for (const field of Object.keys(ENV_KEYS) as (keyof AutoscaleConfig)[]) {
+	const fields = Object.keys(
+		AUTOSCALE_CONFIG_ENV_VAR_NAMES,
+	) as (keyof AutoscaleConfig)[];
+
+	for (const field of fields) {
 		let source: AutoscaleValueSource = 'default';
 
-		if (env[ENV_KEYS[field]] !== undefined) {
+		if (env[AUTOSCALE_CONFIG_ENV_VAR_NAMES[field]] !== undefined) {
 			source = 'env';
 		}
 

@@ -1,15 +1,15 @@
 import { parseJSON } from '@directus/utils/values';
-import type { EnvDeclaration } from '../types/env-declaration.js';
+import type { EnvVarDeclaration } from '../types/env-var-declaration.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
 import { toNumber } from '../utils/lodash-es-used.js';
-import { castDeclaredValue, stripCastFlag } from './cast.js';
-import type { EnvDeclarationType } from '../types/env-type.js';
+import { castDeclaredEnvVarValue, stripCastFlag } from './cast.js';
+import type { EnvVarDeclaredType } from '../types/env-type.js';
 
 /** What a boolean is spelled as, in a variable or in a configuration file. */
 const BOOLEAN_SPELLINGS: unknown[] = ['true', 'false', '1', '0', true, false, 1, 0];
 
 /** The `type:` prefixes a value of each declared type may carry. */
-const DECLARED_CAST_FLAGS: Record<EnvDeclarationType, readonly string[]> = {
+const DECLARED_CAST_FLAGS: Record<EnvVarDeclaredType, readonly string[]> = {
 	'string': ['string'],
 	'number': ['number'],
 	'regex': ['regex'],
@@ -33,15 +33,17 @@ const isNumberValue = (bareValue: unknown): boolean => {
 		&& !Number.isNaN(toNumber(bareValue));
 };
 
-/** Why `value`, its cast prefix taken off, is not of `envDeclaration`'s type. */
+/**
+ * Why a value, its cast prefix taken off, is not of `envVarDeclaration`'s type.
+ */
 const readTypeRefusal = (
 	quotedName: string,
 	bareValue: unknown,
-	envDeclaration: EnvDeclaration,
+	envVarDeclaration: EnvVarDeclaration,
 ): string | null => {
 	const quotedValue = JSON.stringify(bareValue);
 
-	switch (envDeclaration.type) {
+	switch (envVarDeclaration.type) {
 		case 'number':
 			return isNumberValue(bareValue)
 				? null
@@ -88,48 +90,49 @@ const readTypeRefusal = (
 };
 
 /**
- * Why `value`, as set for the variable `name`, does not fit `envDeclaration`,
- * or null when it does: a cast prefix naming another type, a value its type
- * cannot read, or one outside the declared `values`.
+ * Why `envVarValue`, as set for the variable `envVarName`, does not fit
+ * `envVarDeclaration`, or null when it does: a cast prefix naming another
+ * type, a value its type cannot read, or one outside the declared `values`.
  */
-export const checkDeclaredValue = (
-	name: string,
-	value: unknown,
-	envDeclaration: EnvDeclaration,
+export const checkDeclaredEnvVarValue = (
+	envVarName: string,
+	envVarValue: unknown,
+	envVarDeclaration: EnvVarDeclaration,
 ): string | null => {
-	const quotedName = JSON.stringify(name);
-	const castFlag = getCastFlag(value);
+	const quotedName = JSON.stringify(envVarName);
+	const castFlag = getCastFlag(envVarValue);
 
-	const declaredFlags = DECLARED_CAST_FLAGS[envDeclaration.type];
+	const declaredFlags = DECLARED_CAST_FLAGS[envVarDeclaration.type];
 
 	if (castFlag !== null && !declaredFlags.includes(castFlag)) {
-		return `${quotedName} is declared ${envDeclaration.type}, but its`
+		return `${quotedName} is declared ${envVarDeclaration.type}, but its`
 			+ ` ${JSON.stringify(`${castFlag}:`)} prefix casts it to ${castFlag}.`;
 	}
 
-	if (castFlag === 'number' && !isNumberValue(stripCastFlag(value))) {
-		return `${quotedName} is ${JSON.stringify(value)}, which is not a number.`;
+	if (castFlag === 'number' && !isNumberValue(stripCastFlag(envVarValue))) {
+		return `${quotedName} is ${JSON.stringify(envVarValue)},`
+			+ ' which is not a number.';
 	}
 
 	const typeRefusal = readTypeRefusal(
 		quotedName,
-		stripCastFlag(value),
-		envDeclaration,
+		stripCastFlag(envVarValue),
+		envVarDeclaration,
 	);
 
-	if (typeRefusal !== null || envDeclaration.values === undefined) {
+	if (typeRefusal !== null || envVarDeclaration.values === undefined) {
 		return typeRefusal;
 	}
 
-	const castValue = castDeclaredValue(value, envDeclaration);
+	const castValue = castDeclaredEnvVarValue(envVarValue, envVarDeclaration);
 
 	// as: includes takes only a string; any other value is simply not found
-	if (envDeclaration.values.includes(castValue as string)) {
+	if (envVarDeclaration.values.includes(castValue as string)) {
 		return null;
 	}
 
-	const quotedChoices = envDeclaration.values
-		.map((choice) => JSON.stringify(choice))
+	const quotedChoices = envVarDeclaration.values
+		.map((declaredChoice) => JSON.stringify(declaredChoice))
 		.join(', ');
 
 	return `${quotedName} is ${JSON.stringify(castValue)}, which is not one of`

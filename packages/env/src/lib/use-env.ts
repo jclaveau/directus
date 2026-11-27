@@ -2,7 +2,7 @@ import type { Env } from '../types/env.js';
 import type { EnvSources } from '../types/env-sources.js';
 import {
 	createEnv,
-	readEnvRawValues,
+	readEnvVarRawValues,
 	readEnvSources,
 } from './create-env.js';
 
@@ -34,8 +34,8 @@ export const useEnvSources = (): EnvSources => {
  * Each variable as it was set, before any cast, off the same build as
  * `useEnv`.
  */
-export const useEnvRawValues = (): Record<string, unknown> => {
+export const useEnvVarRawValues = (): Record<string, unknown> => {
 	useEnv();
 
-	return readEnvRawValues();
+	return readEnvVarRawValues();
 };

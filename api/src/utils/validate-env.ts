@@ -1,4 +1,4 @@
-import { type EnvName, useEnv } from '@directus/env';
+import { type EnvVarName, useEnv } from '@directus/env';
 import { parse as parseBytesConfiguration } from 'bytes';
 import { validateHeaderName } from 'node:http';
 import { useLogger } from '../logger/index.js';
@@ -34,7 +34,7 @@ const BOOLEANS = ['true', 'false', '1', '0'];
  * Read off `useEnv`, so an unset variable takes its default. `ms` reads a value
  * over 100 characters, 401 digits included, as none.
  */
-export function validateDurationEnv(keys: EnvName[]): void {
+export function validateDurationEnv(keys: EnvVarName[]): void {
 	const env = useEnv();
 	const logger = useLogger();
 
@@ -59,7 +59,7 @@ export function validateDurationEnv(keys: EnvName[]): void {
  * {@link validateDurationEnv}. Read off `useEnv`, so an unset variable takes its
  * default; declared a number, `ten` fails the boot before it gets here.
  */
-export function validateCountEnv(keys: EnvName[]): void {
+export function validateCountEnv(keys: EnvVarName[]): void {
 	const env = useEnv();
 	const logger = useLogger();
 
@@ -91,7 +91,7 @@ const SIZE_PATTERN = /^\d+(?:\.\d+)?\s*(?:b|kb|mb|gb|tb|pb)?$/i;
  * {@link validateDurationEnv}. Read off `useEnv`, so an unset variable takes its
  * default.
  */
-export function validateBytesEnv(keys: EnvName[], nonzeroMinimum = 0): void {
+export function validateBytesEnv(keys: EnvVarName[], nonzeroMinimum = 0): void {
 	const env = useEnv();
 	const logger = useLogger();
 
@@ -127,7 +127,7 @@ export function validateBytesEnv(keys: EnvName[], nonzeroMinimum = 0): void {
  * default.
  */
 export function validateChoiceEnv(
-	key: EnvName,
+	key: EnvVarName,
 	choices: readonly string[],
 ): void {
 	const env = useEnv();
@@ -184,7 +184,7 @@ export function validateDatabaseClientEnv(keys: string[]): void {
  * boolean is refused too: the variable turns its feature on by being set, so
  * `false` would turn it on under a header named `false`.
  */
-export function validateHeaderNameEnv(key: EnvName): void {
+export function validateHeaderNameEnv(key: EnvVarName): void {
 	const env = useEnv();
 
 	if (BOOLEANS.includes(String(env[key]).toLowerCase())) {

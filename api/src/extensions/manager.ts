@@ -1,4 +1,4 @@
-import { useEnv, useEnvRawValues } from '@directus/env';
+import { useEnv, useEnvVarRawValues } from '@directus/env';
 import { APP_SHARED_DEPS } from '@directus/extensions';
 import { HYBRID_EXTENSION_TYPES } from '@directus/constants';
 import { generateExtensionsEntrypoint } from '@directus/extensions/node';
@@ -39,7 +39,7 @@ import getDatabase, { outstandingMigrations } from '../database/index.js';
 import runMigrations from '../database/migrations/run.js';
 import type { ExtensionMigration } from '../database/migrations/list.js';
 import {
-	type ExtensionEnv,
+	type ExtensionEnvVars,
 	readBundleEntries,
 } from '@directus/extensions/scalabus';
 import { createHash } from 'node:crypto';
@@ -57,11 +57,11 @@ import { loadIsolatedVm } from '../utils/load-isolated-vm.js';
 import { clone, debounce, isPlainObject } from '../utils/lodash-es-used.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
 import {
-	applyExtensionEnv,
-	type ExtensionEnvDeclarers,
-	findUndeclaredEnv,
-	restoreCoreEnv,
-} from './lib/apply-extension-env.js';
+	applyExtensionEnvVars,
+	type ExtensionEnvVarDeclarers,
+	findUndeclaredEnvVars,
+	restoreCoreEnvVars,
+} from './lib/apply-extension-env-vars.js';
 import { getRegistryRootPath } from './lib/get-registry-root-path.js';
 import { getExtensionsSettings } from './lib/get-extensions-settings.js';
 import {
@@ -153,7 +153,7 @@ export class ExtensionManager {
 	 * Which extension declared each extension variable, and the prefixes they
 	 * declared them under
 	 */
-	private envDeclarers: ExtensionEnvDeclarers = new Map();
+	private envVarDeclarers: ExtensionEnvVarDeclarers = new Map();
 
 	private extensionEnvPrefixes: Set<string> = new Set();
 
@@ -357,9 +357,9 @@ export class ExtensionManager {
 
 		await Promise.all([this.registerInternalOperations(), this.registerApiExtensions()]);
 
-		const undeclaredNames = findUndeclaredEnv({
-			rawNames: Object.keys(useEnvRawValues()),
-			envDeclarers: this.envDeclarers,
+		const undeclaredNames = findUndeclaredEnvVars({
+			rawEnvVarNames: Object.keys(useEnvVarRawValues()),
+			envVarDeclarers: this.envVarDeclarers,
 			extensionPrefixes: this.extensionEnvPrefixes,
 		});
 
@@ -997,21 +997,21 @@ export class ExtensionManager {
 				),
 			);
 
-			const extensionEnvs = new Map<unknown, ExtensionEnv>();
+			const extensionEnvVars = new Map<unknown, ExtensionEnvVars>();
 
 			for (const { env: entryEnv } of bundleEntries) {
 				if (entryEnv) {
-					extensionEnvs.set(entryEnv.vars, entryEnv);
+					extensionEnvVars.set(entryEnv.vars, entryEnv);
 				}
 			}
 
 			try {
-				applyExtensionEnv({
+				applyExtensionEnvVars({
 					extensionName: bundle.name,
-					extensionEnvs: [...extensionEnvs.values()],
-					envDeclarers: this.envDeclarers,
-					rawValues: useEnvRawValues(),
-					env,
+					extensionEnvVars: [...extensionEnvVars.values()],
+					envVarDeclarers: this.envVarDeclarers,
+					rawEnvVarValues: useEnvVarRawValues(),
+					liveEnv: env,
 				});
 			}
 			catch (error) {
@@ -1024,7 +1024,7 @@ export class ExtensionManager {
 				throw error;
 			}
 
-			for (const { prefix } of extensionEnvs.values()) {
+			for (const { prefix } of extensionEnvVars.values()) {
 				this.extensionEnvPrefixes.add(prefix);
 			}
 
@@ -1226,13 +1226,13 @@ export class ExtensionManager {
 
 		await Promise.all(unregisterFunctions.map((fn) => fn()));
 
-		restoreCoreEnv({
-			envDeclarers: this.envDeclarers,
-			rawValues: useEnvRawValues(),
-			env,
+		restoreCoreEnvVars({
+			envVarDeclarers: this.envVarDeclarers,
+			rawEnvVarValues: useEnvVarRawValues(),
+			liveEnv: env,
 		});
 
-		this.envDeclarers.clear();
+		this.envVarDeclarers.clear();
 		this.extensionEnvPrefixes.clear();
 	}
 

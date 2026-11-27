@@ -1,12 +1,12 @@
 import type {
-	CoreEnvDeclaration,
-	CoreEnvDeclarations,
-} from '../types/env-declaration.js';
-import type { EnvDeclarationType } from '../types/env-type.js';
+	CoreEnvVarDeclaration,
+	CoreEnvVarDeclarations,
+} from '../types/env-var-declaration.js';
+import type { EnvVarDeclaredType } from '../types/env-type.js';
 import {
-	ENV_DECLARATIONS,
-	ENV_PATTERN_DECLARATIONS,
-} from './env-declarations.js';
+	ENV_VAR_DECLARATIONS,
+	ENV_VAR_PATTERN_DECLARATIONS,
+} from './env-var-declarations.js';
 
 /** The pattern of the names `glob` matches, each `*` one or more characters. */
 export const globPattern = (glob: string): RegExp => {
@@ -21,15 +21,18 @@ export const globPattern = (glob: string): RegExp => {
  * Each declaration with the pattern its name matches, literal names first. A
  * literal name is a glob matching only itself.
  */
-export const DECLARATION_PATTERNS: [RegExp, CoreEnvDeclaration][] = Object.entries({
-	...ENV_DECLARATIONS,
-	...ENV_PATTERN_DECLARATIONS,
-} as CoreEnvDeclarations) // const objects widened to the declared shape
-	.map(([nameGlob, envDeclaration]) => [globPattern(nameGlob), envDeclaration]);
+export const ENV_VAR_NAME_PATTERNS: [RegExp, CoreEnvVarDeclaration][] =
+	Object.entries({
+		...ENV_VAR_DECLARATIONS,
+		...ENV_VAR_PATTERN_DECLARATIONS,
+	} as CoreEnvVarDeclarations) // const objects widened to the declared shape
+		.map(([nameGlob, envVarDeclaration]) => {
+			return [globPattern(nameGlob), envVarDeclaration];
+		});
 
-export const TYPE_MAP_REGEX: [RegExp, EnvDeclarationType][] = DECLARATION_PATTERNS
-	.flatMap(([namePattern, envDeclaration]) => {
-		return 'type' in envDeclaration
-			? [[namePattern, envDeclaration.type]]
+export const TYPE_MAP_REGEX: [RegExp, EnvVarDeclaredType][] =
+	ENV_VAR_NAME_PATTERNS.flatMap(([namePattern, envVarDeclaration]) => {
+		return 'type' in envVarDeclaration
+			? [[namePattern, envVarDeclaration.type]]
 			: [];
 	});

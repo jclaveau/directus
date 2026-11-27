@@ -1,4 +1,4 @@
-import type { DeclaredEnv, Env, EnvDeclarations } from '@directus/env';
+import type { DeclaredEnvVars, Env, EnvVarDeclarations } from '@directus/env';
 import type {
 	EndpointConfig,
 	EndpointExtensionContext,
@@ -21,51 +21,58 @@ import {
 	type MigrationEntry,
 	type OperationApiEntry,
 } from './define-entry.js';
-import { refuseInvalidExtensionEnv } from './refuse-invalid-extension-env.js';
+import {
+	refuseInvalidExtensionEnvVars,
+} from './refuse-invalid-extension-env-vars.js';
 
 /** The variables an extension declares, every one named under `prefix`. */
-export interface ExtensionEnv<
-	Declarations extends EnvDeclarations = EnvDeclarations,
+export interface ExtensionEnvVars<
+	ExactDeclarations extends EnvVarDeclarations = EnvVarDeclarations,
 > {
 	prefix: string;
-	vars: Declarations;
+	vars: ExactDeclarations;
 }
 
 /** `Context` with `env` typed: core's variables and the extension's. */
-export type WithDeclaredEnv<Context, Declarations extends EnvDeclarations> =
-	Omit<Context, 'env'> & { env: Env & DeclaredEnv<Declarations> };
+export type WithDeclaredEnvVars<
+	Context,
+	ExactDeclarations extends EnvVarDeclarations,
+> =
+	Omit<Context, 'env'> & { env: Env & DeclaredEnvVars<ExactDeclarations> };
 
-type EnvEndpointHandler<Declarations extends EnvDeclarations> = (
+type EnvEndpointHandler<ExactDeclarations extends EnvVarDeclarations> = (
 	router: Router,
-	context: WithDeclaredEnv<EndpointExtensionContext, Declarations>,
+	context: WithDeclaredEnvVars<EndpointExtensionContext, ExactDeclarations>,
 ) => void;
 
-type EnvOperationApiConfig<Options, Declarations extends EnvDeclarations> = {
+type EnvOperationApiConfig<Options, ExactDeclarations extends EnvVarDeclarations> = {
 	id: string;
 	handler: (
 		options: Options,
-		context: WithDeclaredEnv<OperationContext, Declarations>,
+		context: WithDeclaredEnvVars<OperationContext, ExactDeclarations>,
 	) => unknown;
 };
 
-export interface ExtensionEnvHelpers<Declarations extends EnvDeclarations>
-	extends ExtensionEnv<Declarations> {
+export interface ExtensionEnvVarsHelpers<
+	ExactDeclarations extends EnvVarDeclarations,
+>
+	extends ExtensionEnvVars<ExactDeclarations> {
 	defineHook: (
 		name: string,
 		config: (
 			register: RegisterFunctions,
-			context: WithDeclaredEnv<HookExtensionContext, Declarations>,
+			context: WithDeclaredEnvVars<HookExtensionContext, ExactDeclarations>,
 		) => void,
 	) => HookEntry;
 	defineEndpoint: (
 		name: string,
 		config:
-			| EnvEndpointHandler<Declarations>
-			| { id: string; handler: EnvEndpointHandler<Declarations> },
+			| EnvEndpointHandler<ExactDeclarations>
+			| { id: string; handler: EnvEndpointHandler<ExactDeclarations> },
 	) => EndpointEntry;
 	defineOperationApi: <Options = Record<string, unknown>>(
 		name: string,
-		config: EnvOperationApiConfig<Options, Declarations>,
+		config: EnvOperationApiConfig<Options, ExactDeclarations>,
 	) => OperationApiEntry;
 	defineMigration: (name: string, config: MigrationConfig) => MigrationEntry;
 }
@@ -87,17 +94,19 @@ export interface ExtensionEnvHelpers<Declarations extends EnvDeclarations>
  * });
  * ```
  */
-export function defineEnv<const Declarations extends EnvDeclarations>(
-	extensionEnv: ExtensionEnv<Declarations>,
-): ExtensionEnvHelpers<Declarations> {
+export function defineEnv<const ExactDeclarations extends EnvVarDeclarations>(
+	extensionEnv: ExtensionEnvVars<ExactDeclarations>,
+): ExtensionEnvVarsHelpers<ExactDeclarations> {
 	const { prefix, vars } = extensionEnv;
 
-	refuseInvalidExtensionEnv(extensionEnv);
+	refuseInvalidExtensionEnvVars(extensionEnv);
 
-	const declaredEnv: ExtensionEnv = { prefix, vars };
+	const declaredEnvVars: ExtensionEnvVars = { prefix, vars };
 
-	const stampEnv = <Entry extends BundleApiEntry>(entry: Entry): Entry => {
-		return { ...entry, env: declaredEnv };
+	const stampEnvVars = <StampedEntry extends BundleApiEntry>(
+		entry: StampedEntry,
+	): StampedEntry => {
+		return { ...entry, env: declaredEnvVars };
 	};
 
 	return {
@@ -105,22 +114,22 @@ export function defineEnv<const Declarations extends EnvDeclarations>(
 		vars,
 		// as: the typed env context is a narrower view of the one core passes
 		defineHook: (name, config) => {
-			return stampEnv(defineHook(name, config as HookConfig));
+			return stampEnvVars(defineHook(name, config as HookConfig));
 		},
 		defineEndpoint: (name, config) => {
-			return stampEnv(defineEndpoint(name, config as EndpointConfig));
+			return stampEnvVars(defineEndpoint(name, config as EndpointConfig));
 		},
 		defineOperationApi: <Options,>(
 			name: string,
-			config: EnvOperationApiConfig<Options, Declarations>,
+			config: EnvOperationApiConfig<Options, ExactDeclarations>,
 		) => {
-			return stampEnv(defineOperationApi<Options>(
+			return stampEnvVars(defineOperationApi<Options>(
 				name,
 				config as OperationApiConfig<Options>,
 			));
 		},
 		defineMigration: (name, config) => {
-			return stampEnv(defineMigration(name, config));
+			return stampEnvVars(defineMigration(name, config));
 		},
 	};
 }

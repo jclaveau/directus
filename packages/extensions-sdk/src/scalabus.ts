@@ -20,9 +20,9 @@ export type {
 	BundleApiEntry,
 	BundleAppEntry,
 	BundleEntries,
-	ExtensionEnv,
-	ExtensionEnvHelpers,
+	ExtensionEnvVars,
+	ExtensionEnvVarsHelpers,
 	MigrationConfig,
 	MigrationPhase,
-	WithDeclaredEnv,
+	WithDeclaredEnvVars,
 } from '@directus/extensions/scalabus';

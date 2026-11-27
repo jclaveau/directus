@@ -7,7 +7,7 @@
  * (`SESSION_MANAGER`), and `REDIS_`, `EMAIL_`, `AUTH_` or `STORAGE_` hand
  * whatever follows them to a driver core does not list.
  */
-export const CORE_ENV_PREFIXES = [
+export const CORE_ENV_VAR_PREFIXES = [
 	'ASSETS_CONTENT_SECURITY_POLICY_',
 	'CACHE_',
 	'CONTENT_SECURITY_POLICY_',

@@ -1,6 +1,6 @@
 import { toArray, toBoolean } from '@directus/utils/values';
-import type { EnvDeclaration } from '../types/env-declaration.js';
-import type { EnvDeclarationType, EnvType } from '../types/env-type.js';
+import type { EnvVarDeclaration } from '../types/env-var-declaration.js';
+import type { EnvVarDeclaredType, EnvType } from '../types/env-type.js';
 import { getDefaultType } from '../utils/get-default-type.js';
 import { guessType } from '../utils/guess-type.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
@@ -16,7 +16,7 @@ export const DISABLED_BY_FALSE_TYPES = {
 
 const castToType = (
 	value: unknown,
-	type: EnvType | EnvDeclarationType,
+	type: EnvType | EnvVarDeclaredType,
 ): unknown => {
 	switch (type) {
 		case 'string':
@@ -71,18 +71,18 @@ export const stripCastFlag = (value: unknown): unknown => {
 export const cast = (value: unknown, key?: string): unknown => {
 	const castFlag = getCastFlag(value);
 
-	const type = castFlag ?? getDefaultType(key) ?? guessType(value);
+	const castType = castFlag ?? getDefaultType(key) ?? guessType(value);
 
-	return castToType(stripCastFlag(value), type);
+	return castToType(stripCastFlag(value), castType);
 };
 
 /**
- * `value` cast to the type `envDeclaration` declares, whatever it looks like:
+ * `value` cast to the type `envVarDeclaration` declares, whatever it looks like:
  * a string declaration keeps `"0123"` as `"0123"`.
  */
-export const castDeclaredValue = (
+export const castDeclaredEnvVarValue = (
 	value: unknown,
-	envDeclaration: EnvDeclaration,
+	envVarDeclaration: EnvVarDeclaration,
 ): unknown => {
-	return castToType(stripCastFlag(value), envDeclaration.type);
+	return castToType(stripCastFlag(value), envVarDeclaration.type);
 };

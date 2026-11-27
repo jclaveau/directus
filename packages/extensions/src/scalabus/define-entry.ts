@@ -11,8 +11,10 @@ import type {
 	Theme,
 } from '@directus/types';
 import type { Knex } from 'knex';
-import type { ExtensionEnv } from './define-env.js';
-import { refuseInvalidExtensionEnv } from './refuse-invalid-extension-env.js';
+import type { ExtensionEnvVars } from './define-env.js';
+import {
+	refuseInvalidExtensionEnvVars,
+} from './refuse-invalid-extension-env-vars.js';
 
 export const BUNDLE_ENTRIES_FORMAT = 'scalabus/1';
 
@@ -30,7 +32,7 @@ export interface MigrationConfig {
 }
 
 /** The variables the extension of an api entry declares, if it declares any. */
-type DeclaringEntry = { env?: ExtensionEnv };
+type DeclaringEntry = { env?: ExtensionEnvVars };
 
 export type HookEntry = DeclaringEntry & {
 	type: 'hook';
@@ -191,7 +193,7 @@ function refuseRepeatedNames(entries: { name: string }[]): void {
  * once for the bundle.
  */
 export function defineBundleApi(
-	bundleApi: BundleApiEntry[] | { env: ExtensionEnv; entries: BundleApiEntry[] },
+	bundleApi: BundleApiEntry[] | { env: ExtensionEnvVars; entries: BundleApiEntry[] },
 ): BundleEntries<BundleApiEntry> {
 	if (Array.isArray(bundleApi)) {
 		refuseRepeatedNames(bundleApi);
@@ -200,9 +202,9 @@ export function defineBundleApi(
 	}
 
 	refuseRepeatedNames(bundleApi.entries);
-	refuseInvalidExtensionEnv(bundleApi.env);
+	refuseInvalidExtensionEnvVars(bundleApi.env);
 
-	const bundleEnv: ExtensionEnv = {
+	const bundleEnv: ExtensionEnvVars = {
 		prefix: bundleApi.env.prefix,
 		vars: bundleApi.env.vars,
 	};

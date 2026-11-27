@@ -1,16 +1,16 @@
 import { DEFAULT_CHUNK_SIZE } from '@directus/constants';
 import { resolve } from 'node:path';
 import { cwd } from 'node:process';
-import type { CoreEnvDeclaration } from '../types/env-declaration.js';
+import type { CoreEnvVarDeclaration } from '../types/env-var-declaration.js';
 
 /**
  * Every variable core reads: its type, its default when it has one, and the
  * values it may take when only some are meant; one without a type has its value
  * guessed. The defaults, the types the loader casts by, the names an extension
  * may not declare and the names read off a `_FILE` are read off this one table
- * and {@link ENV_PATTERN_DECLARATIONS}, and so is the type of `useEnv()`.
+ * and {@link ENV_VAR_PATTERN_DECLARATIONS}, and so is the type of `useEnv()`.
  */
-export const ENV_DECLARATIONS = {
+export const ENV_VAR_DECLARATIONS = {
 	HOST: { type: 'string', default: '0.0.0.0' },
 	PORT: { type: 'string', default: '8055' },
 
@@ -546,7 +546,7 @@ export const ENV_DECLARATIONS = {
 	RATE_LIMITER_REGISTRATION_EXEC_EVENLY_MIN_DELAY_MS: { type: 'number' },
 	RATE_LIMITER_REGISTRATION_IN_MEMORY_BLOCK_ON_CONSUMED: { type: 'number' },
 	RATE_LIMITER_REGISTRATION_IN_MEMORY_BLOCK_DURATION: { type: 'number' },
-} as const satisfies Record<string, CoreEnvDeclaration>;
+} as const satisfies Record<string, CoreEnvVarDeclaration>;
 
 /**
  * The variables of a named connection, location or provider, whose names hold
@@ -554,7 +554,7 @@ export const ENV_DECLARATIONS = {
  * more characters. The first glob a name matches declares it, so the typed ones
  * come before the guessed, and the passthroughs a library reads last.
  */
-export const ENV_PATTERN_DECLARATIONS = {
+export const ENV_VAR_PATTERN_DECLARATIONS = {
 	'DB_CONNECTION_*_PRIORITY': { type: 'number' },
 	'DB_CONNECTION_*_PORT': { type: 'number' },
 	'DB_CONNECTION_*_DATABASE': { type: 'string' },
@@ -660,4 +660,4 @@ export const ENV_PATTERN_DECLARATIONS = {
 	'DB_CONNECTION_*_SSL__*': {},
 	'CONTENT_SECURITY_POLICY_DIRECTIVES__*': {},
 	'ASSETS_CONTENT_SECURITY_POLICY_DIRECTIVES__*': {},
-} as const satisfies Record<string, CoreEnvDeclaration>;
+} as const satisfies Record<string, CoreEnvVarDeclaration>;

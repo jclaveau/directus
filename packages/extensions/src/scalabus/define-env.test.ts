@@ -18,38 +18,44 @@ describe('defineEnv', () => {
 
 		const endpointConfig = () => {};
 
-		const handler = () => null;
+		const operationHandler = () => null;
 
-		const up = async () => {};
+		const migrationUp = async () => {};
 
-		const down = async () => {};
+		const migrationDown = async () => {};
 
-		const declaredEnv = { prefix: 'SUBSCRIPTIONS_', vars: subscriptionsVars };
+		const declaredEnvVars = { prefix: 'SUBSCRIPTIONS_', vars: subscriptionsVars };
 
 		expect([
 			subscriptionsEnv.defineHook('trials', hookConfig),
 			subscriptionsEnv.defineEndpoint('checkout', endpointConfig),
-			subscriptionsEnv.defineOperationApi('notify', { id: 'notify', handler }),
-			subscriptionsEnv.defineMigration('20261124A-add-plans', { up, down }),
+			subscriptionsEnv.defineOperationApi('notify', {
+				id: 'notify',
+				handler: operationHandler,
+			}),
+			subscriptionsEnv.defineMigration('20261124A-add-plans', {
+				up: migrationUp,
+				down: migrationDown,
+			}),
 		]).toEqual([
-			{ type: 'hook', name: 'trials', config: hookConfig, env: declaredEnv },
+			{ type: 'hook', name: 'trials', config: hookConfig, env: declaredEnvVars },
 			{
 				type: 'endpoint',
 				name: 'checkout',
 				config: endpointConfig,
-				env: declaredEnv,
+				env: declaredEnvVars,
 			},
 			{
 				type: 'operation',
 				name: 'notify',
-				config: { id: 'notify', handler },
-				env: declaredEnv,
+				config: { id: 'notify', handler: operationHandler },
+				env: declaredEnvVars,
 			},
 			{
 				type: 'migration',
 				name: '20261124A-add-plans',
-				config: { up, down, phase: 'before-schema' },
-				env: declaredEnv,
+				config: { up: migrationUp, down: migrationDown, phase: 'before-schema' },
+				env: declaredEnvVars,
 			},
 		]);
 	});
@@ -100,14 +106,14 @@ describe('defineEnv', () => {
 
 	test.each(['SUBSCRIPTIONS_', 'SUBSCRIPTIONS_FOO_'])(
 		'refuses a variable named %j, ending in "_"',
-		(name) => {
+		(envVarName) => {
 			expect(() => {
 				return defineEnv({
 					prefix: 'SUBSCRIPTIONS_',
-					vars: { [name]: { type: 'number' } },
+					vars: { [envVarName]: { type: 'number' } },
 				});
 			}).toThrow(new Error(
-				`Env variable ${JSON.stringify(name)} must not end with "_"`,
+				`Env variable ${JSON.stringify(envVarName)} must not end with "_"`,
 			));
 		},
 	);

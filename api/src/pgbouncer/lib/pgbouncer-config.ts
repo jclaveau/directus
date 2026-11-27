@@ -59,24 +59,24 @@ export function pgbouncerQueryTimeoutMs(): number {
 	return getMilliseconds(useEnv()['PGBOUNCER_QUERY_TIMEOUT'], 2000);
 }
 
-type AdminSuffix =
+type PgbouncerAdminEnvVarSuffix =
 	| 'ADMIN_HOSTS'
 	| 'ADMIN_DATABASE'
 	| 'ADMIN_USER'
 	| 'ADMIN_PASSWORD';
 
-function envKey<Suffix extends AdminSuffix>(
+function envVarName<AdminSuffix extends PgbouncerAdminEnvVarSuffix>(
 	connection: string,
-	suffix: Suffix,
-): `PGBOUNCER_${string}_${Suffix}` {
-	return `PGBOUNCER_${connection.toUpperCase()}_${suffix}`;
+	adminSuffix: AdminSuffix,
+): `PGBOUNCER_${string}_${AdminSuffix}` {
+	return `PGBOUNCER_${connection.toUpperCase()}_${adminSuffix}`;
 }
 
-function stringEnv(
+function readStringEnvVar(
 	connection: string,
-	suffix: Exclude<AdminSuffix, 'ADMIN_HOSTS'>,
+	adminSuffix: Exclude<PgbouncerAdminEnvVarSuffix, 'ADMIN_HOSTS'>,
 ): string | null {
-	const value = useEnv()[envKey(connection, suffix)];
+	const value = useEnv()[envVarName(connection, adminSuffix)];
 
 	return typeof value === 'string' && value !== ''
 		? value
@@ -93,7 +93,7 @@ function adminHostsOf(
 	connection: string,
 	config: Record<string, any>,
 ): { host: string; port: number }[] {
-	const configured = useEnv()[envKey(connection, 'ADMIN_HOSTS')];
+	const configured = useEnv()[envVarName(connection, 'ADMIN_HOSTS')];
 
 	if (Array.isArray(configured) === false || configured.length === 0) {
 		return [{
@@ -175,9 +175,9 @@ export function resolvePgBouncerEndpoints(): PgBouncerEndpoint[] {
 				id,
 				host,
 				port,
-				database: stringEnv(name, 'ADMIN_DATABASE') ?? DEFAULT_ADMIN_DATABASE,
-				user: stringEnv(name, 'ADMIN_USER') ?? String(config['user'] ?? ''),
-				password: stringEnv(name, 'ADMIN_PASSWORD')
+				database: readStringEnvVar(name, 'ADMIN_DATABASE') ?? DEFAULT_ADMIN_DATABASE,
+				user: readStringEnvVar(name, 'ADMIN_USER') ?? String(config['user'] ?? ''),
+				password: readStringEnvVar(name, 'ADMIN_PASSWORD')
 					?? String(config['password'] ?? ''),
 				connections: [reference],
 			});

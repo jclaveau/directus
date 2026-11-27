@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { isCoreEnvName } from './is-core-env-name.js';
+import { isCoreEnvVarName } from './is-core-env-var-name.js';
 
 test.each([
 	['CACHE_TTL', true],
@@ -20,6 +20,6 @@ test.each([
 	['CACHE_TTLL', false],
 	['WEBSOCKETS_ENABLD', false],
 	['SUBSCRIPTIONS_TRIAL_DAYS', false],
-])('%s is core\'s: %s', (name, isCore) => {
-	expect(isCoreEnvName(name)).toBe(isCore);
+])('%s is core\'s: %s', (envVarName, isCoreName) => {
+	expect(isCoreEnvVarName(envVarName)).toBe(isCoreName);
 });

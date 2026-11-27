@@ -1,20 +1,20 @@
-export { ENV_DECLARATIONS } from './constants/env-declarations.js';
-export { cast, castDeclaredValue } from './lib/cast.js';
-export { checkDeclaredValue } from './lib/check-declared-value.js';
-export { useEnv, useEnvRawValues, useEnvSources } from './lib/use-env.js';
+export { ENV_VAR_DECLARATIONS } from './constants/env-var-declarations.js';
+export { cast, castDeclaredEnvVarValue } from './lib/cast.js';
+export { checkDeclaredEnvVarValue } from './lib/check-declared-env-var-value.js';
+export { useEnv, useEnvVarRawValues, useEnvSources } from './lib/use-env.js';
 export type {
-	CoreEnvDeclaration,
-	DeclaredEnv,
-	DeclaredValue,
-	EnvDeclaration,
-	EnvDeclarations,
-	EnvTypeValue,
-	GlobName,
-	GuessedEnvDeclaration,
-} from './types/env-declaration.js';
+	CoreEnvVarDeclaration,
+	DeclaredEnvVars,
+	DeclaredEnvVarValue,
+	EnvVarDeclaration,
+	EnvVarDeclarations,
+	EnvVarValueByType,
+	EnvVarNamePattern,
+	GuessedEnvVarDeclaration,
+} from './types/env-var-declaration.js';
 export type { EnvSources, EnvValueSource } from './types/env-sources.js';
-export type { EnvDeclarationType, EnvType } from './types/env-type.js';
-export type { Env, EnvName } from './types/env.js';
-export { findEnvDeclaration } from './utils/find-env-declaration.js';
-export { CORE_ENV_PREFIXES } from './constants/core-env-prefixes.js';
-export { isCoreEnvName } from './utils/is-core-env-name.js';
+export type { EnvVarDeclaredType, EnvType } from './types/env-type.js';
+export type { Env, EnvVarName } from './types/env.js';
+export { findEnvVarDeclaration } from './utils/find-env-var-declaration.js';
+export { CORE_ENV_VAR_PREFIXES } from './constants/core-env-var-prefixes.js';
+export { isCoreEnvVarName } from './utils/is-core-env-var-name.js';

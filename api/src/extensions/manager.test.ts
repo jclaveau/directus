@@ -67,7 +67,7 @@ vi.mock('@directus/env', async (importOriginal) => {
 	return {
 		...(await importOriginal<typeof import('@directus/env')>()),
 		useEnv: () => mocks.env,
-		useEnvRawValues: () => ({}),
+		useEnvVarRawValues: () => ({}),
 	};
 });
 

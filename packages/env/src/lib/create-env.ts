@@ -4,13 +4,13 @@ import type { Env } from '../types/env.js';
 import type { EnvSources, EnvValueSource } from '../types/env-sources.js';
 import { getConfigPath } from '../utils/get-config-path.js';
 import { getDefaultType } from '../utils/get-default-type.js';
-import { isCoreEnvName } from '../utils/is-core-env-name.js';
+import { isCoreEnvVarName } from '../utils/is-core-env-var-name.js';
 import { isFileKey } from '../utils/is-file-key.js';
 import { readConfigurationFromProcess } from '../utils/read-configuration-from-process.js';
 import { removeFileSuffix } from '../utils/remove-file-suffix.js';
-import { findEnvDeclaration } from '../utils/find-env-declaration.js';
+import { findEnvVarDeclaration } from '../utils/find-env-var-declaration.js';
 import { cast } from './cast.js';
-import { checkDeclaredValue } from './check-declared-value.js';
+import { checkDeclaredEnvVarValue } from './check-declared-env-var-value.js';
 import { readConfigurationFromFile } from './read-configuration-from-file.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
 
@@ -73,10 +73,10 @@ export const readEnvSources = (): EnvSources => sources;
  * Each variable as it was set, before any cast: what an extension declaring it
  * casts from, rather than from what core guessed it to be.
  */
-let rawValues: Record<string, unknown> = {};
+let rawEnvVarValues: Record<string, unknown> = {};
 
 /** The values the env `createEnv` last built was cast from. */
-export const readEnvRawValues = (): Record<string, unknown> => rawValues;
+export const readEnvVarRawValues = (): Record<string, unknown> => rawEnvVarValues;
 
 export const createEnv = (): Env => {
 	const baseConfiguration = readConfigurationFromProcess();
@@ -89,10 +89,10 @@ export const createEnv = (): Env => {
 	const fileKeys = new Set(Object.keys(fileConfiguration ?? {}));
 
 	const output: Record<string, unknown> = {};
-	const refusals: string[] = [];
+	const valueRefusals: string[] = [];
 
 	sources = {};
-	rawValues = {};
+	rawEnvVarValues = {};
 
 	for (const [key, value] of Object.entries(DEFAULTS)) {
 		output[key] = getDefaultType(key) ? cast(value, key) : value;
@@ -104,10 +104,10 @@ export const createEnv = (): Env => {
 			? 'file'
 			: 'process';
 
-		const isCoreFileKey = isFileKey(key)
-			&& isCoreEnvName(removeFileSuffix(key));
+		const isCoreFileEnvVarName = isFileKey(key)
+			&& isCoreEnvVarName(removeFileSuffix(key));
 
-		if (isCoreFileKey && typeof value === 'string') {
+		if (isCoreFileEnvVarName && typeof value === 'string') {
 			try {
 				// get the path to the file
 				const castFlag = getCastFlag(value);
@@ -134,25 +134,25 @@ export const createEnv = (): Env => {
 			}
 		}
 
-		const envDeclaration = findEnvDeclaration(key);
+		const envVarDeclaration = findEnvVarDeclaration(key);
 
-		const refusal = envDeclaration
-			&& 'type' in envDeclaration
-			&& checkDeclaredValue(key, value, envDeclaration);
+		const valueRefusal = envVarDeclaration
+			&& 'type' in envVarDeclaration
+			&& checkDeclaredEnvVarValue(key, value, envVarDeclaration);
 
-		if (refusal) {
-			refusals.push(refusal);
+		if (valueRefusal) {
+			valueRefusals.push(valueRefusal);
 
 			continue;
 		}
 
 		output[key] = cast(readBooleanSpelling(key, value), key);
 		sources[key] = source;
-		rawValues[key] = value;
+		rawEnvVarValues[key] = value;
 	}
 
-	if (refusals.length > 0) {
-		throw new Error(refusals.join('\n'));
+	if (valueRefusals.length > 0) {
+		throw new Error(valueRefusals.join('\n'));
 	}
 
 	return output as Env; // keys checked above, one by one
