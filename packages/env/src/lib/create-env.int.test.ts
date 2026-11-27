@@ -193,6 +193,41 @@ test('Reads a value cast to boolean in capitals as a boolean', () => {
 	});
 });
 
+test('Reads FALSE as false on the boolean auth and storage globs', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		AUTH_CORP_ALLOW_PUBLIC_REGISTRATION: 'FALSE',
+		AUTH_CORP_SYNC_USER_INFO: 'FALSE',
+		STORAGE_S3_FORCE_PATH_STYLE: 'FALSE',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+
+	expect(createEnv()).toEqual({
+		AUTH_CORP_ALLOW_PUBLIC_REGISTRATION: false,
+		AUTH_CORP_SYNC_USER_INFO: false,
+		STORAGE_S3_FORCE_PATH_STYLE: false,
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
+});
+
+test('Refuses a boolean storage glob that is not one', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		STORAGE_S3_FORCE_PATH_STYLE: 'yes',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+
+	expect(() => createEnv()).toThrow(
+		new Error(
+			'"STORAGE_S3_FORCE_PATH_STYLE" Environment Variable is "yes", '
+				+ 'which is not a boolean. Use one of true, false, 1, 0.',
+		),
+	);
+});
+
 // Docker and Kubernetes write a secret with a trailing newline.
 test('Trims a secret file holding a boolean', () => {
 	vi.mocked(readConfigurationFromProcess).mockReturnValue({
