@@ -111,7 +111,8 @@ export async function loginSsoIdentity(
 }
 
 /**
- * The claims of `userInfo`, never a token: those stay in the hidden `auth_data`.
+ * The claims of `userInfo`, never a token at any depth: those stay in the hidden
+ * `auth_data`.
  */
 export function toStoredUserInfo(
 	userInfo: Record<string, unknown> | null,
@@ -120,7 +121,24 @@ export function toStoredUserInfo(
 		return null;
 	}
 
-	return omit(userInfo, TOKEN_CLAIM_KEYS);
+	return withoutTokenClaims(userInfo) as Record<string, unknown>;
+}
+
+function withoutTokenClaims(claimValue: unknown): unknown {
+	if (Array.isArray(claimValue)) {
+		return claimValue.map(withoutTokenClaims);
+	}
+
+	if (claimValue === null || typeof claimValue !== 'object') {
+		return claimValue;
+	}
+
+	return Object.fromEntries(
+		Object.entries(omit(claimValue, TOKEN_CLAIM_KEYS))
+			.map(([claimKey, nestedValue]) => {
+				return [claimKey, withoutTokenClaims(nestedValue)];
+			}),
+	);
 }
 
 async function updateSsoIdentity(

@@ -738,6 +738,9 @@ class FlowManager {
 						['**', 'payload', 'user_info'],
 						['**', 'identities', '**', 'value'],
 						['**', 'identities', '**', 'user_info'],
+						['**', 'primary_identity', 'value'],
+						['**', 'primary_identity', 'auth_data'],
+						['**', 'primary_identity', 'user_info'],
 						...isIdentityTrigger(keyedData)
 							? [['**', 'payload', 'value']]
 							: [],
