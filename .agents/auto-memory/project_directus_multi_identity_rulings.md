@@ -129,15 +129,14 @@ logout call the provider that opened the session.
   trimmed + lowercased from every layer (`TRUE`, `" true\n"` read true), `yes`/`on`/`""`/
   `null` refused. #772 rebased on it; its `validateBooleanEnv` call in `auth.ts`
   dropped (`b5618c6381`): TYPE_MAP's `AUTH_.+_REQUIRE_VERIFIED_EMAIL` covers it.
-- **#772 /pr-autoreview done 2026-11-27, not merged** (head `669d6f3b01`, CI green,
-  100% of added lines reviewed). Results, with 30 choice blocks verbatim:
-  https://github.com/jclaveau/directus/pull/772#issuecomment-7227424338 . Awaiting
-  jean, none ruled yet: (1) now / A / B per choice (1-11 = the `OPEN(#772)` markers,
-  12-30 = points the rulings are silent on); (2) go on the held coarse module/route
-  renames; (3) `utils/user-name.ts` literal `'email'` vs importing
-  `EMAIL_IDENTITY_KIND` (pulls knex helpers + scoped cache into a display util);
-  (4) Flows redaction misses a nested `primary_identity.value` (admin-only nested
-  create): fix in #772 or issue.
+- **#772 /pr-autoreview done 2026-11-27, not merged** (head `ad30fcea43`, CI green,
+  100% of added lines reviewed). Results, 30 choice blocks + one recommendation each:
+  https://github.com/jclaveau/directus/pull/772#issuecomment-7227424338 . Fixed as
+  ruling-backed (11 C): M12 Flow log redacts nested `primary_identity` value/auth_data/
+  user_info; M13 token claims dropped from `user_info` at any depth (was choice 28).
+  Awaiting jean, none ruled yet: (1) now / A / B on choices 1-27, 29-30; (2) go on the
+  held coarse module/route renames; (3) keep `utils/user-name.ts` literal `'email'`
+  (recommended) vs importing `EMAIL_IDENTITY_KIND`.
 - **Dropped by that review (reviewer's call, not jean's):** `verifyPassword` skipping
   an unconfigured provider (ends in `InvalidCredentialsError`); misleading log text on
   concurrent email syncs; concurrent first logins of one subject → 403 (predates #772).
