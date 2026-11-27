@@ -92,12 +92,14 @@ export const createEnv = (): Env => {
 
 		const envVarDeclaration = findEnvVarDeclaration(key);
 
-		// A `boolean:` prefix on a name with no declared type is checked as one.
-		const typedDeclaration = envVarDeclaration && 'type' in envVarDeclaration
+		let typedDeclaration = envVarDeclaration && 'type' in envVarDeclaration
 			? envVarDeclaration
-			: getCastFlag(value) === 'boolean'
-				? { type: 'boolean' as const }
-				: undefined;
+			: undefined;
+
+		// A `boolean:` prefix on a name with no declared type is checked as one.
+		if (!typedDeclaration && getCastFlag(value) === 'boolean') {
+			typedDeclaration = { type: 'boolean' };
+		}
 
 		const valueRefusal = typedDeclaration
 			&& checkDeclaredEnvVarValue(key, value, typedDeclaration);

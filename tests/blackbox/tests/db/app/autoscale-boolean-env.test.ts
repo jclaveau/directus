@@ -36,8 +36,7 @@ type Run = { code: number | null; output: string };
 
 /** What the refusal says, which is what a deployment has to read to fix it. */
 function refusal(key: string): string {
-	return `"${key}" is "${REFUSED_SPELLING}", which is not a boolean:`
-		+ ' use true, false, 1 or 0.';
+	return `"${key}" Environment Variable is "${REFUSED_SPELLING}"`;
 }
 
 /**
