@@ -13,6 +13,25 @@ vi.mock('../../src/database/index', () => {
 	};
 });
 
+const scopedCache = vi.hoisted(() => {
+	return { purgeEnabled: false, purgeForMutatedRows: vi.fn() };
+});
+
+vi.mock('../extensions/lib/scoped-cache-handle.js', () => {
+	return {
+		createScopedCacheExtensionHandle: () => {
+			return { purgeForMutatedRows: scopedCache.purgeForMutatedRows };
+		},
+	};
+});
+
+vi.mock('../scoped-cache/index.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../scoped-cache/index.js')>(),
+		scopedCachePurgeEnabled: () => scopedCache.purgeEnabled,
+	};
+});
+
 vi.mock('@directus/env', () => {
 	return {
 		useEnv: vi.fn().mockReturnValue({
@@ -47,6 +66,8 @@ const service = new UsersService({ knex: pgDatabase, schema });
 
 afterEach(() => {
 	tracker.reset();
+	scopedCache.purgeEnabled = false;
+	scopedCache.purgeForMutatedRows.mockReset();
 });
 
 test('refuses an identity of another account', async () => {
@@ -194,4 +215,66 @@ test('moves the primary to an SSO identity without an email left', async () => {
 	]);
 
 	expect(deleteOne).toHaveBeenCalledWith('identity-removed');
+});
+
+test('purges the account whose primary identity moved', async () => {
+	scopedCache.purgeEnabled = true;
+
+	tracker.on.select('directus_user_identities').response([
+		{
+			id: 'identity-github',
+			kind: 'github',
+			verified: true,
+		},
+		{
+			id: 'identity-removed',
+			kind: 'email',
+			verified: true,
+		},
+	]);
+
+	tracker.on.update('directus_users').response(1);
+
+	const deleteOne = vi.spyOn(ItemsService.prototype, 'deleteOne')
+		.mockResolvedValue('identity-removed');
+
+	onTestFinished(() => {
+		deleteOne.mockRestore();
+	});
+
+	await service.removeIdentity('user-id-1', 'identity-removed');
+
+	expect(scopedCache.purgeForMutatedRows.mock.calls).toStrictEqual([
+		['directus_users', [{ id: 'user-id-1' }]],
+	]);
+});
+
+test('purges no account when the primary identity stayed', async () => {
+	scopedCache.purgeEnabled = true;
+
+	tracker.on.select('directus_user_identities').response([
+		{
+			id: 'identity-github',
+			kind: 'github',
+			verified: true,
+		},
+		{
+			id: 'identity-removed',
+			kind: 'email',
+			verified: true,
+		},
+	]);
+
+	tracker.on.update('directus_users').response(0);
+
+	const deleteOne = vi.spyOn(ItemsService.prototype, 'deleteOne')
+		.mockResolvedValue('identity-removed');
+
+	onTestFinished(() => {
+		deleteOne.mockRestore();
+	});
+
+	await service.removeIdentity('user-id-1', 'identity-removed');
+
+	expect(scopedCache.purgeForMutatedRows).not.toHaveBeenCalled();
 });

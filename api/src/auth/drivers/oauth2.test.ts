@@ -22,6 +22,7 @@ const mockedDeps = vi.hoisted(() => {
 		updateOne: vi.fn(),
 		profileGroups: [] as string[],
 		emailVerified: true as unknown,
+		email: 'ada@example.com' as string | undefined,
 	};
 });
 
@@ -37,7 +38,7 @@ vi.mock('openid-client', () => {
 						userinfo: async () => {
 							return {
 								login: 'Ada',
-								email: 'ada@example.com',
+								email: mockedDeps.email,
 								groups: mockedDeps.profileGroups,
 								verified: mockedDeps.emailVerified,
 							};
@@ -128,6 +129,7 @@ afterEach(() => {
 	vi.resetAllMocks();
 	mockedDeps.profileGroups = [];
 	mockedDeps.emailVerified = true;
+	mockedDeps.email = 'ada@example.com';
 });
 
 describe('OAuth2AuthDriver getUserID with a verified email required', () => {
@@ -179,6 +181,59 @@ describe('OAuth2AuthDriver getUserID with a verified email required', () => {
 
 		expect(mockedDeps.createOne).not.toHaveBeenCalled();
 		expect(mockedDeps.createIdentity).not.toHaveBeenCalled();
+	});
+
+	test('a first login without an email creates the user', async () => {
+		knexTracker.on.select('"id" = ?').response({
+			id: 'identity-1',
+			user: 'user-1',
+			kind: 'github',
+			value: 'Ada',
+		});
+
+		knexTracker.on.select('directus_user_identities').response(undefined);
+		knexTracker.on.update('directus_users').response(1);
+		mockedDeps.createOne.mockResolvedValue('user-1');
+		mockedDeps.createIdentity.mockResolvedValueOnce('identity-1');
+		mockedDeps.email = undefined;
+		mockedDeps.emailVerified = undefined;
+
+		const userId = await new OAuth2AuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				provider: 'github',
+				authorizeUrl: 'https://idp.example.com/authorize',
+				accessUrl: 'https://idp.example.com/token',
+				profileUrl: 'https://idp.example.com/profile',
+				clientId: 'client-id',
+				clientSecret: 'client-secret',
+				identifierKey: 'login',
+				emailVerifiedKey: 'verified',
+				allowPublicRegistration: true,
+			},
+		).getUserID({ code: 'code', codeVerifier: 'verifier', state: 'state' });
+
+		expect(userId).toBe('user-1');
+
+		expect(mockedDeps.createIdentity.mock.calls).toEqual([
+			[{
+				user: 'user-1',
+				kind: 'github',
+				value: 'Ada',
+				verified: true,
+				auth_data: '{"refreshToken":"refresh"}',
+				user_info: {
+					login: 'Ada',
+					groups: [],
+				},
+				scope: 'email',
+			}],
+		]);
+
+		expect(knexTracker.history.update).toMatchObject([{
+			sql: 'update "directus_users" set "primary_identity" = ? where "id" = ?',
+			bindings: ['identity-1', 'user-1'],
+		}]);
 	});
 
 	test('a first login creates the user when not required', async () => {

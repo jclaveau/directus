@@ -36,3 +36,16 @@ test('refuses a link asked without a logged-in session', () => {
 		reason: 'Linking an identity requires a logged-in session',
 	}));
 });
+
+test('refuses a link made with a query token, not the session cookie', () => {
+	expect(() => {
+		return getLinkUser({
+			accountability: { user: '0d2f8a3e-6d1c-4a5b-9e7f-1c2b3a4d5e6f' },
+			token: 'query-token',
+			query: { access_token: 'query-token' },
+			cookies: { directus_session_token: 'session-token' },
+		} as unknown as Request, 'true');
+	}).toThrow(new ForbiddenError({
+		reason: 'Linking an identity requires a logged-in session',
+	}));
+});

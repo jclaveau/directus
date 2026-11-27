@@ -31,6 +31,25 @@ const mockedDeps = vi.hoisted(() => {
 	};
 });
 
+const scopedCache = vi.hoisted(() => {
+	return { purgeEnabled: false, purgeForMutatedRows: vi.fn() };
+});
+
+vi.mock('../../extensions/lib/scoped-cache-handle.js', () => {
+	return {
+		createScopedCacheExtensionHandle: () => {
+			return { purgeForMutatedRows: scopedCache.purgeForMutatedRows };
+		},
+	};
+});
+
+vi.mock('../../scoped-cache/index.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../../scoped-cache/index.js')>(),
+		scopedCachePurgeEnabled: () => scopedCache.purgeEnabled,
+	};
+});
+
 vi.mock('../../logger/index.js', () => {
 	return {
 		useLogger: () => mockedDeps.logger,
@@ -96,6 +115,7 @@ beforeEach(() => {
 afterEach(() => {
 	knexTracker.reset();
 	vi.resetAllMocks();
+	scopedCache.purgeEnabled = false;
 });
 
 describe('toStoredUserInfo', () => {
@@ -362,6 +382,51 @@ describe('loginSsoIdentity for a new account', () => {
 });
 
 describe('loginSsoIdentity syncing the email of a known account', () => {
+	test('purges the account a new email became the primary identity of', async () => {
+		scopedCache.purgeEnabled = true;
+
+		vi.mocked(fetchIdentity)
+			.mockResolvedValueOnce({
+				id: 'identity-1',
+				user: 'known-user',
+				kind: 'github',
+				value: 'ada-sub',
+			} as any)
+			.mockResolvedValueOnce(undefined);
+
+		mockedDeps.createIdentity.mockResolvedValueOnce('email-identity');
+
+		vi.mocked(fetchIdentityById).mockResolvedValueOnce({
+			id: 'identity-1',
+			user: 'known-user',
+		} as any);
+
+		knexTracker.on.update('directus_users').response(1);
+
+		await expect(loginSsoIdentity(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				logPrefix: '[OAuth2]',
+				provider: 'github',
+				identifier: 'ada-sub',
+				email: 'ada@example.com',
+				emailVerified: true,
+				emailUnverified: false,
+				userInfo: null,
+				scope: null,
+				updatePayload: { email: 'ada@example.com' },
+				createPayload: {},
+				hookMeta: {},
+				allowPublicRegistration: true,
+				linkUser: null,
+			},
+		)).resolves.toStrictEqual({ id: 'identity-1', user: 'known-user' });
+
+		expect(scopedCache.purgeForMutatedRows.mock.calls).toStrictEqual([
+			['directus_users', [{ id: 'known-user' }]],
+		]);
+	});
+
 	test('verifies the account\'s own unverified email', async () => {
 		vi.mocked(fetchIdentity)
 			.mockResolvedValueOnce({
