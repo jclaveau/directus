@@ -117,7 +117,7 @@ export async function CreateUser(vendor: Vendor, options: Partial<OptionsCreateU
 	const userResponse = await request(getUrl(vendor))
 		.get(`/users`)
 		.query({
-			filter: { email: { _eq: options.email } },
+			filter: { primary_identity: { value: { _eq: options.email } } },
 		})
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`);
 

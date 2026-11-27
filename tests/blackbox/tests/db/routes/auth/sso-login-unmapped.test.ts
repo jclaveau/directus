@@ -45,7 +45,7 @@ defineSsoFeature(
 				.query({
 					fields: 'id',
 					filter: JSON.stringify({
-						email: { _ends_with: '@nomap.example.com' },
+						primary_identity: { value: { _ends_with: '@nomap.example.com' } },
 					}),
 				})
 				.set('Authorization', AUTH);

@@ -74,7 +74,7 @@ defineSsoFeature(
 				.query({
 					fields: 'id',
 					filter: JSON.stringify({
-						email: { _ends_with: '@sso.example.com' },
+						primary_identity: { value: { _ends_with: '@sso.example.com' } },
 					}),
 				})
 				.set('Authorization', AUTH);
