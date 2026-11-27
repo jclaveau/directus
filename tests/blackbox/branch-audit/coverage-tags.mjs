@@ -32,32 +32,32 @@ export function isInstrumentedSource(path) {
 }
 
 // The tag ending `sourceLine`, line `line` of `path`: `{ tag }`, `{ error }`
-// when it is malformed, or null when the line carries none. `place` names it
+// when it is malformed, or null when the line carries none. `tagPlace` names it
 // in the error.
-export function parseTag(path, line, sourceLine, place) {
-	const match = TAG_PATTERN.exec(sourceLine);
+export function parseTag(path, line, sourceLine, tagPlace) {
+	const tagMatch = TAG_PATTERN.exec(sourceLine);
 
-	if (!match) {
+	if (!tagMatch) {
 		return null;
 	}
 
-	const [, code, kind, rawText] = match;
-	const tag = { path, line, kind, text: rawText.trim() };
+	const [, codeText, tagKind, rawText] = tagMatch;
+	const tag = { path, line, kind: tagKind, text: rawText.trim() };
 
-	if (code.trim() === '') {
+	if (codeText.trim() === '') {
 		return {
-			error: `${place} is alone on its line: end the code line `
+			error: `${tagPlace} is alone on its line: end the code line `
 				+ 'it covers with it.',
 		};
 	}
 
 	if (tag.text === '') {
-		return { error: `${place} gives no reason.` };
+		return { error: `${tagPlace} gives no reason.` };
 	}
 
-	if (kind === 'out-of-scope' && !/^#\d+\b/.test(tag.text)) {
+	if (tagKind === 'out-of-scope' && !/^#\d+\b/.test(tag.text)) {
 		return {
-			error: `${place} names no issue: `
+			error: `${tagPlace} names no issue: `
 				+ `${JSON.stringify(tag.text)} does not start with "#<number>".`,
 		};
 	}
@@ -105,39 +105,39 @@ export function rangesOfTag(tag, fileCoverage) {
 // Resolves the tags of a file against its coverage. Returns the tag ranges,
 // and the tags covering nothing.
 export function resolveTags(tags, fileCoverage) {
-	const uncovering = [];
+	const uncoveringTags = [];
 
 	const tagRanges = tags.flatMap((tag) => {
-		const ranges = rangesOfTag(tag, fileCoverage);
+		const coveredRanges = rangesOfTag(tag, fileCoverage);
 
-		if (ranges.length === 0) {
-			uncovering.push(tag);
+		if (coveredRanges.length === 0) {
+			uncoveringTags.push(tag);
 		}
 
-		return ranges.map((range) => ({ tag, range }));
+		return coveredRanges.map((range) => ({ tag, range }));
 	});
 
-	return { tagRanges, uncovering };
+	return { tagRanges, uncoveringTags };
 }
 
 // The innermost tag holding `position`: the covering range starting last.
 export function innermostTagAt(tagRanges, position) {
-	const holding = tagRanges
+	const holdingRanges = tagRanges
 		.filter(({ range }) => rangeHolds(range, position))
 		.sort((left, right) => {
 			return comparePositions(right.range.start, left.range.start)
 				|| comparePositions(left.range.end, right.range.end);
 		});
 
-	return holding[0]?.tag;
+	return holdingRanges[0]?.tag;
 }
 
 // Where a branch arm starts: an arm with no location of its own starts where
 // its branch does.
 export function armStartOf(branch, arm) {
-	const location = branch.locations[arm];
+	const armLocation = branch.locations[arm];
 
-	return location?.start?.line === undefined
+	return armLocation?.start?.line === undefined
 		? branch.loc.start
-		: location.start;
+		: armLocation.start;
 }

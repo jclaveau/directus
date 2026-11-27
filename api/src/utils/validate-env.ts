@@ -348,35 +348,41 @@ const OUT_OF_SCOPE_AUTH_DRIVERS = ['ldap', 'oauth2', 'openid', 'saml'];
  */
 export function validateOutOfScopeFeaturesEnv(): void {
 	const env = useEnv();
-	const knownFeatures = Object.keys(OUT_OF_SCOPE_FEATURES);
+	const knownFeatureNames = Object.keys(OUT_OF_SCOPE_FEATURES);
 
-	const allowedFeatures = allowedOutOfScopeFeatures();
+	const allowedFeatureNames = allowedOutOfScopeFeatures();
 
-	const refusalMessages = allowedFeatures
-		.filter((feature) => knownFeatures.includes(feature) === false)
-		.map((feature) => {
+	const refusalMessages = allowedFeatureNames
+		.filter((featureName) => knownFeatureNames.includes(featureName) === false)
+		.map((featureName) => {
 			return '"OUT_OF_SCOPE_FEATURES_ALLOWED" Environment Variable names '
-				+ `${JSON.stringify(feature)}, which is not one of `
-				+ `${knownFeatures.join(', ')}.`;
+				+ `${JSON.stringify(featureName)}, which is not one of `
+				+ `${knownFeatureNames.join(', ')}.`;
 		});
 
-	const usedFeatures: { key: string; value: unknown; feature: string }[] = [];
+	const usedFeatures: {
+		envVarName: string;
+		envVarValue: unknown;
+		featureName: string;
+	}[] = [];
 
 	for (const providerName of String(env['AUTH_PROVIDERS'] ?? '').split(',')) {
-		const trimmedName = providerName.trim();
+		const trimmedProviderName = providerName.trim();
 
-		if (trimmedName === '') {
+		if (trimmedProviderName === '') {
 			continue;
 		}
 
-		const driverKey = `AUTH_${trimmedName.toUpperCase()}_DRIVER`;
-		const driverName = String(env[driverKey]);
+		const driverEnvVarName
+			= `AUTH_${trimmedProviderName.toUpperCase()}_DRIVER`;
+
+		const driverName = String(env[driverEnvVarName]);
 
 		if (OUT_OF_SCOPE_AUTH_DRIVERS.includes(driverName)) {
 			usedFeatures.push({
-				key: driverKey,
-				value: driverName,
-				feature: driverName,
+				envVarName: driverEnvVarName,
+				envVarValue: driverName,
+				featureName: driverName,
 			});
 		}
 	}
@@ -387,30 +393,30 @@ export function validateOutOfScopeFeaturesEnv(): void {
 		&& env['WEBSOCKETS_GRAPHQL_ENABLED'] === true
 	) {
 		usedFeatures.push({
-			key: 'WEBSOCKETS_GRAPHQL_ENABLED',
-			value: true,
-			feature: 'websockets-graphql',
+			envVarName: 'WEBSOCKETS_GRAPHQL_ENABLED',
+			envVarValue: true,
+			featureName: 'websockets-graphql',
 		});
 	}
 
 	if (env['EXTENSIONS_AUTO_RELOAD'] === true) {
 		usedFeatures.push({
-			key: 'EXTENSIONS_AUTO_RELOAD',
-			value: true,
-			feature: 'extensions-auto-reload',
+			envVarName: 'EXTENSIONS_AUTO_RELOAD',
+			envVarValue: true,
+			featureName: 'extensions-auto-reload',
 		});
 	}
 
-	for (const { key, value, feature } of usedFeatures) {
-		if (allowedFeatures.includes(feature)) {
+	for (const { envVarName, envVarValue, featureName } of usedFeatures) {
+		if (allowedFeatureNames.includes(featureName)) {
 			continue;
 		}
 
 		refusalMessages.push(
-			`${JSON.stringify(key)} Environment Variable is `
-				+ `${JSON.stringify(value)}, a feature out of the tested scope `
-				+ `(${OUT_OF_SCOPE_FEATURES[feature]}): add `
-				+ `${JSON.stringify(feature)} to OUT_OF_SCOPE_FEATURES_ALLOWED `
+			`${JSON.stringify(envVarName)} Environment Variable is `
+				+ `${JSON.stringify(envVarValue)}, a feature out of the tested scope `
+				+ `(${OUT_OF_SCOPE_FEATURES[featureName]}): add `
+				+ `${JSON.stringify(featureName)} to OUT_OF_SCOPE_FEATURES_ALLOWED `
 				+ 'to run it untested.',
 		);
 	}

@@ -47,7 +47,7 @@ import {
 	TAG_SEARCH,
 } from './coverage-tags.mjs';
 
-const { values: options } = parseArgs({
+const { values: cliOptions } = parseArgs({
 	options: {
 		'blackbox': { type: 'string' },
 		'base': { type: 'string' },
@@ -58,8 +58,8 @@ const { values: options } = parseArgs({
 	},
 });
 
-if (!options.blackbox || !options.base || !options.head
-	|| Boolean(options.unit) !== Boolean(options['unit-head'])) {
+if (!cliOptions.blackbox || !cliOptions.base || !cliOptions.head
+	|| Boolean(cliOptions.unit) !== Boolean(cliOptions['unit-head'])) {
 	console.error(
 		'usage: branch-audit.mjs --blackbox <dir> --base <ref> --head <ref> '
 		+ '[--unit <dir> --unit-head <ref>] [--report <out.md>]',
@@ -82,20 +82,20 @@ function findCoverageFiles(dir) {
 	});
 }
 
-function addCounts(target, source, coveredPath, counter) {
-	for (const [id, hits] of Object.entries(source)) {
-		const known = target[id];
+function addCounts(targetHits, sourceHits, coveredPath, counterKind) {
+	for (const [id, hits] of Object.entries(sourceHits)) {
+		const knownHits = targetHits[id];
 
-		if (known === undefined) {
+		if (knownHits === undefined) {
 			throw new Error(
-				`Shards disagree on ${counter} ${JSON.stringify(id)} `
+				`Shards disagree on ${counterKind} ${JSON.stringify(id)} `
 				+ `of ${JSON.stringify(coveredPath)}: they built different sources.`,
 			);
 		}
 
-		target[id] = Array.isArray(hits)
-			? known.map((count, arm) => count + hits[arm])
-			: known + hits;
+		targetHits[id] = Array.isArray(hits)
+			? knownHits.map((count, arm) => count + hits[arm])
+			: knownHits + hits;
 	}
 }
 
@@ -122,16 +122,16 @@ function readCoverage(dir) {
 				);
 			}
 
-			const known = coverageByPath.get(repoPath);
+			const knownCoverage = coverageByPath.get(repoPath);
 
-			if (!known) {
+			if (!knownCoverage) {
 				coverageByPath.set(repoPath, structuredClone(fileCoverage));
 				continue;
 			}
 
-			addCounts(known.s, fileCoverage.s, coveredPath, 'statement');
-			addCounts(known.f, fileCoverage.f, coveredPath, 'function');
-			addCounts(known.b, fileCoverage.b, coveredPath, 'branch');
+			addCounts(knownCoverage.s, fileCoverage.s, coveredPath, 'statement');
+			addCounts(knownCoverage.f, fileCoverage.f, coveredPath, 'function');
+			addCounts(knownCoverage.b, fileCoverage.b, coveredPath, 'branch');
 		}
 	}
 
@@ -191,19 +191,19 @@ function countersOf(fileCoverage) {
 const sourceByRef = new Map();
 
 function sourceLinesAt(ref, path) {
-	const key = `${ref}:${path}`;
+	const refPathKey = `${ref}:${path}`;
 
-	if (!sourceByRef.has(key)) {
-		const text = execFileSync('git', ['show', key], {
+	if (!sourceByRef.has(refPathKey)) {
+		const sourceText = execFileSync('git', ['show', refPathKey], {
 			encoding: 'utf8',
 			maxBuffer: 64 * 1024 * 1024,
 			stdio: ['ignore', 'pipe', 'ignore'],
 		});
 
-		sourceByRef.set(key, text.split('\n'));
+		sourceByRef.set(refPathKey, sourceText.split('\n'));
 	}
 
-	return sourceByRef.get(key);
+	return sourceByRef.get(refPathKey);
 }
 
 const tagErrors = [];
@@ -244,8 +244,8 @@ function readTags(ref) {
 		}
 
 		const line = Number(lineText);
-		const place = `Tag on ${path}:${line} at ${ref}`;
-		const { tag, error } = parseTag(path, line, sourceLine, place);
+		const tagPlace = `Tag on ${path}:${line} at ${ref}`;
+		const { tag, error } = parseTag(path, line, sourceLine, tagPlace);
 
 		if (error) {
 			tagErrors.push(error);
@@ -261,29 +261,29 @@ function readTags(ref) {
 // Resolves a file's tags against its coverage, then the innermost tag of each
 // counter: the covering range starting last.
 function tagCounters(tags, fileCoverage, ref) {
-	const { tagRanges, uncovering } = resolveTags(tags, fileCoverage);
+	const { tagRanges, uncoveringTags } = resolveTags(tags, fileCoverage);
 
-	for (const tag of uncovering) {
+	for (const tag of uncoveringTags) {
 		tagErrors.push(`Tag on ${tag.path}:${tag.line} at ${ref} covers no `
 			+ 'statement, function or branch: end the line one starts on.');
 	}
 
-	const counters = countersOf(fileCoverage);
+	const fileCounters = countersOf(fileCoverage);
 
-	for (const counter of counters) {
+	for (const counter of fileCounters) {
 		counter.tag = innermostTagAt(tagRanges, counter.start);
 	}
 
-	return counters;
+	return fileCounters;
 }
 
-const blackbox = readCoverage(options.blackbox);
-const headTags = readTags(options.head);
+const blackboxCoverage = readCoverage(cliOptions.blackbox);
+const headTags = readTags(cliOptions.head);
 
 const diffText = execFileSync(
 	'git',
 	['diff', '--unified=0', '--no-color', '--no-renames']
-		.concat([options.base, options.head, '--', 'api/src']),
+		.concat([cliOptions.base, cliOptions.head, '--', 'api/src']),
 	{ encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
 );
 
@@ -292,26 +292,26 @@ let currentPath = null;
 
 for (const diffLine of diffText.split('\n')) {
 	if (diffLine.startsWith('+++ ')) {
-		const target = diffLine.slice(4);
+		const targetPath = diffLine.slice(4);
 
-		currentPath = target === '/dev/null'
+		currentPath = targetPath === '/dev/null'
 			? null
-			: target.replace(/^b\//, '');
+			: targetPath.replace(/^b\//, '');
 
 		continue;
 	}
 
-	const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(diffLine);
+	const hunkMatch = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(diffLine);
 
-	if (!hunk || !currentPath || !isInstrumentedSource(currentPath)) {
+	if (!hunkMatch || !currentPath || !isInstrumentedSource(currentPath)) {
 		continue;
 	}
 
-	const firstLine = Number(hunk[1]);
+	const firstLine = Number(hunkMatch[1]);
 
-	const lineCount = hunk[2] === undefined
+	const lineCount = hunkMatch[2] === undefined
 		? 1
-		: Number(hunk[2]);
+		: Number(hunkMatch[2]);
 
 	// A hunk that only deletes adds no line.
 	if (lineCount === 0) {
@@ -332,46 +332,50 @@ for (const diffLine of diffText.split('\n')) {
 const countersByPath = new Map();
 
 for (const [path, tags] of headTags) {
-	const fileCoverage = blackbox.coverageByPath.get(path);
+	const fileCoverage = blackboxCoverage.coverageByPath.get(path);
 
 	// A file no server loaded: its unit-only tags are checked on the unit side.
 	if (!fileCoverage) {
 		continue;
 	}
 
-	const counters = tagCounters(tags, fileCoverage, options.head);
-	countersByPath.set(path, counters);
+	const fileCounters = tagCounters(tags, fileCoverage, cliOptions.head);
+	countersByPath.set(path, fileCounters);
 
 	for (const tag of tags) {
-		const tagged = counters.filter((counter) => counter.tag === tag);
+		const taggedCounters = fileCounters
+			.filter((counter) => counter.tag === tag);
 
-		if (tagged.length > 0 && tagged.every(({ hits }) => hits > 0)) {
+		if (
+			taggedCounters.length > 0
+			&& taggedCounters.every(({ hits }) => hits > 0)
+		) {
 			tagErrors.push(`Blackbox runs all the tag on ${path}:${tag.line} `
 				+ `covers: drop the tag.`);
 		}
 	}
 }
 
-const findings = [];
+const unrunFindings = [];
 
-const totals = {
+const counterTotals = {
 	arm: { added: 0, run: 0 },
 	statement: { added: 0, run: 0 },
 };
 
 for (const [path, addedLines] of [...addedLinesByPath].sort()) {
-	const fileCoverage = blackbox.coverageByPath.get(path);
+	const fileCoverage = blackboxCoverage.coverageByPath.get(path);
 
 	// A file no server loaded: every added line is out of the run.
 	if (!fileCoverage) {
 		const line = Math.min(...addedLines);
-		findings.push({ path, line, detail: 'file never loaded' });
+		unrunFindings.push({ path, line, detail: 'file never loaded' });
 		continue;
 	}
 
-	const counters = countersByPath.get(path) ?? countersOf(fileCoverage);
+	const fileCounters = countersByPath.get(path) ?? countersOf(fileCoverage);
 
-	for (const counter of counters) {
+	for (const counter of fileCounters) {
 		const line = counter.start.line;
 
 		const isAdded = addedLines.has(line)
@@ -381,18 +385,18 @@ for (const [path, addedLines] of [...addedLinesByPath].sort()) {
 			continue;
 		}
 
-		totals[counter.kind].added++;
+		counterTotals[counter.kind].added++;
 
 		if (counter.hits > 0) {
-			totals[counter.kind].run++;
+			counterTotals[counter.kind].run++;
 			continue;
 		}
 
-		findings.push({ path, line, detail: counter.name, tag: counter.tag });
+		unrunFindings.push({ path, line, detail: counter.name, tag: counter.tag });
 	}
 }
 
-findings.sort((left, right) => {
+unrunFindings.sort((left, right) => {
 	return left.path.localeCompare(right.path) || left.line - right.line;
 });
 
@@ -400,31 +404,34 @@ findings.sort((left, right) => {
 const gapRows = new Map();
 const outOfScopeRows = new Map();
 
-for (const finding of findings) {
+for (const unrunFinding of unrunFindings) {
 	// A unit-only counter is reported by the unit check below, not here.
-	if (finding.tag?.kind === 'unit-only') {
+	if (unrunFinding.tag?.kind === 'unit-only') {
 		continue;
 	}
 
-	const rows = finding.tag?.kind === 'out-of-scope'
+	const findingRows = unrunFinding.tag?.kind === 'out-of-scope'
 		? outOfScopeRows
 		: gapRows;
 
-	const key = `${finding.path}:${finding.line}`;
-	const row = rows.get(key) ?? { ...finding, details: new Set() };
-	row.details.add(finding.detail);
-	rows.set(key, row);
+	const rowKey = `${unrunFinding.path}:${unrunFinding.line}`;
+
+	const findingRow = findingRows.get(rowKey)
+		?? { ...unrunFinding, details: new Set() };
+
+	findingRow.details.add(unrunFinding.detail);
+	findingRows.set(rowKey, findingRow);
 }
 
 function sourceLineOf(path, line) {
-	const text = sourceLinesAt(options.head, path)[line - 1]
+	const shownSource = sourceLinesAt(cliOptions.head, path)[line - 1]
 		.trim()
 		.replaceAll('`', '\'')
 		.replaceAll('|', '\\|');
 
-	return text.length > 90
-		? `${text.slice(0, 87)}...`
-		: text;
+	return shownSource.length > 90
+		? `${shownSource.slice(0, 87)}...`
+		: shownSource;
 }
 
 function percentOf(part, whole) {
@@ -433,47 +440,51 @@ function percentOf(part, whole) {
 		: `${((100 * part) / whole).toFixed(1)}%`;
 }
 
-function rowLine(row, lastCell) {
-	const details = [...row.details].join(', ');
-	return `| \`${row.path}:${row.line}\` | ${details} | ${lastCell} |`;
+function rowLine(findingRow, lastCell) {
+	const detailText = [...findingRow.details].join(', ');
+	const rowPlace = `${findingRow.path}:${findingRow.line}`;
+	return `| \`${rowPlace}\` | ${detailText} | ${lastCell} |`;
 }
 
-function sourceCellOf(row) {
-	return row.details.has('file never loaded')
+function sourceCellOf(findingRow) {
+	return findingRow.details.has('file never loaded')
 		? ''
-		: `\`${sourceLineOf(row.path, row.line)}\``;
+		: `\`${sourceLineOf(findingRow.path, findingRow.line)}\``;
 }
 
 function totalRow(label, { added, run }) {
 	return `| ${label} | ${run} | ${added} | ${percentOf(run, added)} |`;
 }
 
-const report = [
+const reportLines = [
 	'## Blackbox branch audit',
 	'',
-	`Added lines of \`api/src\` between \`${options.base}\` and `
-	+ `\`${options.head}\`, ${blackbox.reportCount} blackbox shard report(s).`,
+	`Added lines of \`api/src\` between \`${cliOptions.base}\` and `
+	+ `\`${cliOptions.head}\`, ${blackboxCoverage.reportCount} blackbox `
+	+ 'shard report(s).',
 	'',
 	'| added | run by blackbox | total | run |',
 	'|---|---|---|---|',
-	totalRow('branch arms', totals.arm),
-	totalRow('statements', totals.statement),
+	totalRow('branch arms', counterTotals.arm),
+	totalRow('statements', counterTotals.statement),
 	'',
 	`### Not run by blackbox: ${gapRows.size} line(s)`,
 	'',
 ];
 
 if (gapRows.size === 0) {
-	report.push('Every added line is run by blackbox or tagged.');
+	reportLines.push('Every added line is run by blackbox or tagged.');
 }
 else {
-	report.push(
+	reportLines.push(
 		'Each needs a blackbox scenario reaching it. When no request can reach',
 		'it, end the line its statement starts on with `// bb-unit-only: <why>`.',
 		'',
 		'| line | not run | source |',
 		'|---|---|---|',
-		...[...gapRows.values()].map((row) => rowLine(row, sourceCellOf(row))),
+		...[...gapRows.values()].map((findingRow) => {
+			return rowLine(findingRow, sourceCellOf(findingRow));
+		}),
 	);
 }
 
@@ -483,11 +494,11 @@ const unitOnlyTags = [...headTags.values()]
 	.flat()
 	.filter(({ kind }) => kind === 'unit-only');
 
-report.push('', `### Unit-only: ${unitOnlyTags.length} tag(s)`, '');
+reportLines.push('', `### Unit-only: ${unitOnlyTags.length} tag(s)`, '');
 
-if (options.unit) {
-	const unitHead = options['unit-head'];
-	const unit = readCoverage(options.unit);
+if (cliOptions.unit) {
+	const unitHead = cliOptions['unit-head'];
+	const unitCoverage = readCoverage(cliOptions.unit);
 	const unitRows = [];
 
 	for (const [path, tags] of readTags(unitHead)) {
@@ -497,35 +508,35 @@ if (options.unit) {
 			continue;
 		}
 
-		const fileCoverage = unit.coverageByPath.get(path);
+		const fileCoverage = unitCoverage.coverageByPath.get(path);
 
-		const counters = fileCoverage
+		const fileCounters = fileCoverage
 			? tagCounters(tags, fileCoverage, unitHead)
 			: [];
 
 		for (const tag of unitOnlyOfFile) {
-			const unrunNames = counters
+			const unrunNames = fileCounters
 				.filter((counter) => counter.tag === tag && counter.hits === 0)
 				.map(({ name, start }) => `${name} on ${start.line}`);
 
-			let verdict = 'run';
+			let unitVerdict = 'run';
 
 			if (!fileCoverage) {
-				verdict = 'no unit coverage of the file';
+				unitVerdict = 'no unit coverage of the file';
 			}
 			else if (unrunNames.length > 0) {
-				verdict = `not run: ${[...new Set(unrunNames)].join(', ')}`;
+				unitVerdict = `not run: ${[...new Set(unrunNames)].join(', ')}`;
 			}
 
-			if (verdict !== 'run') {
-				unitFailures.push(`Unit-only tag on ${path}:${tag.line}: ${verdict}`);
+			if (unitVerdict !== 'run') {
+				unitFailures.push(`Unit-only tag on ${path}:${tag.line}: ${unitVerdict}`);
 			}
 
-			unitRows.push(`| \`${path}:${tag.line}\` | ${verdict} | ${tag.text} |`);
+			unitRows.push(`| \`${path}:${tag.line}\` | ${unitVerdict} | ${tag.text} |`);
 		}
 	}
 
-	report.push(
+	reportLines.push(
 		`Checked against the api unit tests at \`${unitHead}\`.`,
 		'',
 		'| tag | unit tests | why blackbox cannot reach it |',
@@ -534,16 +545,18 @@ if (options.unit) {
 	);
 }
 else {
-	report.push('Not checked: no unit coverage given.');
+	reportLines.push('Not checked: no unit coverage given.');
 }
 
-report.push('', `### Out of scope: ${outOfScopeRows.size} line(s)`, '');
+reportLines.push('', `### Out of scope: ${outOfScopeRows.size} line(s)`, '');
 
 if (outOfScopeRows.size > 0) {
-	report.push(
+	reportLines.push(
 		'| line | not run | issue |',
 		'|---|---|---|',
-		...[...outOfScopeRows.values()].map((row) => rowLine(row, row.tag.text)),
+		...[...outOfScopeRows.values()].map((findingRow) => {
+			return rowLine(findingRow, findingRow.tag.text);
+		}),
 	);
 }
 
@@ -552,7 +565,7 @@ const FEATURE_ENTRY = /^\t'([a-z0-9-]+)': '(#\d+)',$/;
 const driftFailures = [];
 
 // The `'<feature>': '#<issue>',` lines of OUT_OF_SCOPE_FEATURES at --head.
-const featureLines = sourceLinesAt(options.head, FEATURES_PATH);
+const featureLines = sourceLinesAt(cliOptions.head, FEATURES_PATH);
 
 const LIST_OPENING = 'export const OUT_OF_SCOPE_FEATURES';
 const listStart = featureLines.findIndex((line) => line.startsWith(LIST_OPENING));
@@ -566,7 +579,7 @@ const issueByFeature = new Map(featureLines
 	.map(([, featureName, issue]) => [featureName, issue]));
 
 if (listStart === -1 || issueByFeature.size !== listEnd - listStart - 1) {
-	driftFailures.push(`${FEATURES_PATH} at ${options.head}: no `
+	driftFailures.push(`${FEATURES_PATH} at ${cliOptions.head}: no `
 		+ 'OUT_OF_SCOPE_FEATURES list of `\'<feature>\': \'#<issue>\',` lines '
 		+ 'to check the tags against.');
 }
@@ -598,7 +611,7 @@ for (const tag of outOfScopeTags) {
 	}
 }
 
-report.push(
+reportLines.push(
 	'',
 	`### Out-of-scope features: ${issueByFeature.size} refused`,
 	'',
@@ -613,20 +626,25 @@ report.push(
 	}),
 );
 
-const failures = [...tagErrors, ...unitFailures, ...driftFailures];
+const auditFailures = [...tagErrors, ...unitFailures, ...driftFailures];
 
-if (failures.length > 0) {
-	report.push('', '### Failures', '', ...failures.map((text) => `- ${text}`));
+if (auditFailures.length > 0) {
+	reportLines.push(
+		'',
+		'### Failures',
+		'',
+		...auditFailures.map((failureText) => `- ${failureText}`),
+	);
 }
 
-const reportText = `${report.join('\n')}\n`;
+const reportText = `${reportLines.join('\n')}\n`;
 
-if (options.report) {
-	writeFileSync(options.report, reportText);
+if (cliOptions.report) {
+	writeFileSync(cliOptions.report, reportText);
 }
 
 console.log(reportText);
 
-if (failures.length > 0) {
+if (auditFailures.length > 0) {
 	process.exit(1);
 }

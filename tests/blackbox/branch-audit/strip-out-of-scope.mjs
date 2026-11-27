@@ -38,7 +38,7 @@ import {
 const { createCoverageMap } = libCoverage;
 const { createContext } = libReport;
 
-const { values: options } = parseArgs({
+const { values: cliOptions } = parseArgs({
 	options: {
 		coverage: { type: 'string' },
 		root: { type: 'string' },
@@ -46,22 +46,22 @@ const { values: options } = parseArgs({
 	},
 });
 
-if (!options.coverage || !options.root || !options.out) {
+if (!cliOptions.coverage || !cliOptions.root || !cliOptions.out) {
 	console.error('usage: strip-out-of-scope.mjs --coverage '
 		+ '<coverage-final.json> --root <repo root> --out <dir>');
 
 	process.exit(2);
 }
 
-const failures = [];
+const stripFailures = [];
 
 function readSourceLines(repoPath) {
 	try {
-		return readFileSync(join(options.root, repoPath), 'utf8').split('\n');
+		return readFileSync(join(cliOptions.root, repoPath), 'utf8').split('\n');
 	}
 	catch (error) {
-		failures.push(`Source ${JSON.stringify(repoPath)} of the coverage `
-			+ `report is unreadable under ${JSON.stringify(options.root)}: `
+		stripFailures.push(`Source ${JSON.stringify(repoPath)} of the coverage `
+			+ `report is unreadable under ${JSON.stringify(cliOptions.root)}: `
 			+ `${error.message}`);
 
 		return null;
@@ -69,26 +69,26 @@ function readSourceLines(repoPath) {
 }
 
 function readTagsOf(repoPath, sourceLines) {
-	const tags = [];
+	const fileTags = [];
 
 	for (const [index, sourceLine] of sourceLines.entries()) {
 		const line = index + 1;
-		const place = `Tag on ${repoPath}:${line}`;
-		const parsed = parseTag(repoPath, line, sourceLine, place);
+		const tagPlace = `Tag on ${repoPath}:${line}`;
+		const parsedTag = parseTag(repoPath, line, sourceLine, tagPlace);
 
-		if (parsed === null) {
+		if (parsedTag === null) {
 			continue;
 		}
 
-		if (parsed.error) {
-			failures.push(parsed.error);
+		if (parsedTag.error) {
+			stripFailures.push(parsedTag.error);
 			continue;
 		}
 
-		tags.push(parsed.tag);
+		fileTags.push(parsedTag.tag);
 	}
 
-	return tags;
+	return fileTags;
 }
 
 function keepEntries(map, isKept) {
@@ -97,10 +97,10 @@ function keepEntries(map, isKept) {
 
 // The counts of a file, less the counters an out-of-scope tag covers.
 function stripFile(fileCoverage, tags) {
-	const { tagRanges, uncovering } = resolveTags(tags, fileCoverage);
+	const { tagRanges, uncoveringTags } = resolveTags(tags, fileCoverage);
 
-	for (const tag of uncovering) {
-		failures.push(`Tag on ${tag.path}:${tag.line} covers no statement, `
+	for (const tag of uncoveringTags) {
+		stripFailures.push(`Tag on ${tag.path}:${tag.line} covers no statement, `
 			+ 'function or branch: end the line one starts on.');
 	}
 
@@ -147,7 +147,7 @@ function stripFile(fileCoverage, tags) {
 	};
 }
 
-const reportCoverage = JSON.parse(readFileSync(options.coverage, 'utf8'));
+const reportCoverage = JSON.parse(readFileSync(cliOptions.coverage, 'utf8'));
 const strippedCoverage = {};
 let strippedFiles = 0;
 
@@ -177,20 +177,20 @@ for (const [coveredPath, fileCoverage] of Object.entries(reportCoverage)) {
 	strippedFiles++;
 }
 
-if (failures.length > 0) {
-	console.error(failures.join('\n'));
+if (stripFailures.length > 0) {
+	console.error(stripFailures.join('\n'));
 	process.exit(1);
 }
 
-mkdirSync(options.out, { recursive: true });
+mkdirSync(cliOptions.out, { recursive: true });
 
-const context = createContext({
-	dir: options.out,
+const reportContext = createContext({
+	dir: cliOptions.out,
 	coverageMap: createCoverageMap(strippedCoverage),
 });
 
-reports.create('json', { file: 'coverage-final.json' }).execute(context);
-reports.create('lcovonly', { file: 'lcov.info' }).execute(context);
+reports.create('json', { file: 'coverage-final.json' }).execute(reportContext);
+reports.create('lcovonly', { file: 'lcov.info' }).execute(reportContext);
 
 console.log(`stripped the out-of-scope counters of ${strippedFiles} file(s) `
-	+ `→ ${join(options.out, 'coverage-final.json')}, lcov.info`);
+	+ `→ ${join(cliOptions.out, 'coverage-final.json')}, lcov.info`);
