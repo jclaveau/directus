@@ -46,6 +46,10 @@ logout call the provider that opened the session.
   planned with `Related: #772`. Same subject as issue #477 (wide `toBoolean` fix,
   [[project_directus_shared_settings_source_of_truth]]); jean was not recorded asking
   for a link to it.
+- **#773 MERGED 2026-11-27 (`e1f5f44c92`), case ruled A:** a boolean-typed value is
+  trimmed + lowercased from every layer (`TRUE`, `" true\n"` read true), `yes`/`on`/`""`/
+  `null` refused. #772 rebased on it; its `validateBooleanEnv` call in `auth.ts`
+  dropped (`b5618c6381`): TYPE_MAP's `AUTH_.+_REQUIRE_VERIFIED_EMAIL` covers it.
 
 **Why:** today one provider per user (`authentication.ts:142`), one email, one auth_data.
 **How to apply:** do not re-raise linking or S3 placement; see [[project_directus_pr749_c_rulings]].
