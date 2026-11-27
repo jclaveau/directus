@@ -281,6 +281,7 @@ async function createConflictsView(knex: Knex): Promise<void> {
 		[EMAIL_INDEX_NAME, IDENTITIES_TABLE, 'user_info'],
 	);
 
+	// A view takes no bound value: the email kind is written into its SQL
 	await knex.raw(
 		`CREATE VIEW ?? AS
 		SELECT
@@ -292,11 +293,11 @@ async function createConflictsView(knex: Knex): Promise<void> {
 			held."user" AS held_user
 		FROM ?? AS sso
 		INNER JOIN ?? AS held
-			ON held.kind = ?
+			ON held.kind = '${EMAIL_KIND}'
 			AND lower(held.value) = lower(sso.user_info->>'email')
 			AND held."user" <> sso."user"
-		WHERE sso.kind <> ?`,
-		[CONFLICTS_VIEW, IDENTITIES_TABLE, IDENTITIES_TABLE, EMAIL_KIND, EMAIL_KIND],
+		WHERE sso.kind <> '${EMAIL_KIND}'`,
+		[CONFLICTS_VIEW, IDENTITIES_TABLE, IDENTITIES_TABLE],
 	);
 }
 
