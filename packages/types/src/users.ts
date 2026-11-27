@@ -13,20 +13,30 @@ export type Avatar = {
 	id: string;
 };
 
+export type UserIdentity = {
+	id: string;
+	user: string | User;
+	/** `email`, or the name of the auth provider that vouches for `value` */
+	kind: string;
+	value: string;
+	verified: boolean;
+	auth_data: Record<string, any> | null;
+	user_info: Record<string, unknown> | null;
+	scope: string | null;
+};
+
 export type User = {
 	id: string;
 	status: 'draft' | 'invited' | 'unverified' | 'active' | 'suspended' | 'archived';
 	first_name: string | null;
 	last_name: string | null;
-	email: string | null;
+	primary_identity: string | UserIdentity | null;
+	identities: (string | UserIdentity)[];
 	password: string | null;
 	token: string | null;
 	last_access: string | null;
 	last_page: string | null;
-	external_identifier: string | null;
 	tfa_secret: string | null;
-	auth_data: Record<string, any> | null;
-	provider: string;
 	appearance: 'auto' | 'dark' | 'light' | null;
 	theme_light: string | null;
 	theme_dark: string | null;
@@ -45,7 +55,7 @@ export type User = {
 };
 
 export type RegisterUserInput = {
-	email: NonNullable<User['email']>;
+	email: string;
 	password: NonNullable<User['password']>;
 	verification_url?: string | null;
 	first_name?: User['first_name'];

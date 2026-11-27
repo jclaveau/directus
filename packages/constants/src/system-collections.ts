@@ -15,6 +15,7 @@ export const SYSTEM_COLLECTION_NAMES = [
 	'directus_roles',
 	'directus_sessions',
 	'directus_settings',
+	'directus_user_identities',
 	'directus_users',
 	'directus_webhooks',
 	'directus_dashboards',

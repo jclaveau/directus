@@ -104,6 +104,36 @@
     user_created:
       _eq: $CURRENT_USER
 
+- collection: directus_user_identities
+  action: read
+  permissions:
+    _and:
+      - user:
+          _eq: $CURRENT_USER
+      - kind:
+          _eq: email
+  fields:
+    - id
+    - user
+    - kind
+    - value
+    - verified
+
+- collection: directus_user_identities
+  action: read
+  permissions:
+    _and:
+      - user:
+          _eq: $CURRENT_USER
+      - kind:
+          _neq: email
+  fields:
+    - id
+    - user
+    - kind
+    - verified
+    - scope
+
 - collection: directus_users
   action: read
   permissions:
@@ -114,7 +144,8 @@
     - first_name
     - last_name
     - last_page
-    - email
+    - primary_identity
+    - identities
     - password
     - location
     - title
