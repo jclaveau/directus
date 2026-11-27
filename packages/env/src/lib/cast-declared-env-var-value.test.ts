@@ -54,3 +54,27 @@ test('an array: prefix wins over the CORS_ORIGIN guess', () => {
 test('a WEBSOCKETS_*_CONN_LIMIT reads Infinity as a number', () => {
 	expect(cast('Infinity', 'WEBSOCKETS_REST_CONN_LIMIT')).toBe(Infinity);
 });
+
+// As the base read it: CORS_ORIGIN='["https://a.com"]' is the list.
+test('a boolean | number | string | string[] declaration parses a JSON list', () => {
+	expect(castDeclaredEnvVarValue('["https://a.com"]', {
+		type: 'boolean | number | string | string[]',
+	})).toEqual(['https://a.com']);
+});
+
+test('the items of an undeclared array: value are guessed', () => {
+	expect(cast('array:1,true')).toEqual([1, true]);
+});
+
+test('the items of a declared string[] stay strings under array:', () => {
+	expect(cast('array:1,true', 'AUTH_PROVIDERS')).toEqual(['1', 'true']);
+});
+
+// A prefix wins in core and in an extension alike.
+test('array:false casts to a list on a false | string[] declaration', () => {
+	expect(cast('array:false', 'FLOWS_ENV_ALLOW_LIST')).toEqual(['false']);
+
+	expect(castDeclaredEnvVarValue('array:false', {
+		type: 'false | string[]',
+	})).toEqual(['false']);
+});

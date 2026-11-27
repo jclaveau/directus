@@ -177,4 +177,62 @@ describe('checkDeclaredEnvVarValue', () => {
 			'"CACHE_STORE" is "memcache", which is not one of "memory", "redis".',
 		);
 	});
+
+	test('refuses an object for a boolean | number | string | string[]', () => {
+		expect(checkDeclaredEnvVarValue('CORS_ORIGIN', { a: 1 }, {
+			type: 'boolean | number | string | string[]',
+		})).toBe(
+			'"CORS_ORIGIN" is {"a":1}, which is neither a boolean, a number, a'
+				+ ' string nor a list of strings.',
+		);
+	});
+
+	test.each([
+		[
+			'SUBS_API_KEY',
+			'sk_live_abc',
+			{ type: 'number' },
+			'"SUBS_API_KEY" is not a number.',
+		],
+		[
+			'SUBS_API_KEY',
+			'number:sk_live_abc',
+			{ type: 'number' },
+			'"SUBS_API_KEY" is not a number.',
+		],
+		[
+			'SUBS_TOKEN_TTL',
+			'sk_live_abc',
+			{ type: 'false | number' },
+			'"SUBS_TOKEN_TTL" is neither false nor a number.',
+		],
+		[
+			'SUBS_SECRET_ON',
+			'sk_live_abc',
+			{ type: 'boolean' },
+			'"SUBS_SECRET_ON" Environment Variable is not a boolean.'
+				+ ' Use one of true, false, 1, 0.',
+		],
+		[
+			'SUBS_KEY_PATTERN',
+			'sk_(live',
+			{ type: 'regex' },
+			'"SUBS_KEY_PATTERN" is not a regex.',
+		],
+		[
+			'SUBS_PRIVATE_MODE',
+			'sk_live_abc',
+			{ type: 'string', values: ['a', 'b'] },
+			'"SUBS_PRIVATE_MODE" is not one of "a", "b".',
+		],
+	] as const)(
+		'leaves the value of %s out of its refusal',
+		(envVarName, envVarValue, envVarDeclaration, refusal) => {
+			expect(checkDeclaredEnvVarValue(
+				envVarName,
+				envVarValue,
+				envVarDeclaration,
+			)).toBe(refusal);
+		},
+	);
 });
