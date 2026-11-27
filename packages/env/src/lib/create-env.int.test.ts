@@ -268,24 +268,19 @@ test('refuses every declared variable its value does not fit, at once', () => {
 	));
 });
 
-test('refuses every name under a core prefix that core does not declare', () => {
+// Refused after the extensions load, unless one declares it.
+test('keeps a name under a core prefix that core does not declare', () => {
 	vi.mocked(readConfigurationFromProcess).mockReturnValue({
-		DB_HOST: 'localhost',
-		DB_HOTS: 'localhost',
-		HSTS_MAX_AGES: '60',
-		DB_SSL__CA: 'ca.pem',
-		PM2_HOME: '/root/.pm2',
-		UNDECLARED_NAME: 'abc',
+		DB_VACUUM_CRON_FREQUENCY: '0 6 * * *',
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
 
-	expect(() => createEnv()).toThrow(new Error(
-		'"DB_HOTS" is under the core prefix "DB_",'
-			+ ' but core declares no such variable.\n'
-			+ '"HSTS_MAX_AGES" is under the core prefix "HSTS_",'
-			+ ' but core declares no such variable.',
-	));
+	expect(createEnv()).toEqual({
+		DB_VACUUM_CRON_FREQUENCY: '0 6 * * *',
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
 });
 
 test('keeps each value as it was set beside the cast one', () => {

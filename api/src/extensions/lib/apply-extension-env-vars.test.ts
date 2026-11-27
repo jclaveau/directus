@@ -131,8 +131,7 @@ test('refuses a name another extension declares with another default', () => {
 	expect(liveEnv).toEqual({});
 });
 
-// A typo under a core prefix already refused the boot, in createEnv.
-test('finds the names set under an extension prefix that nobody declares', () => {
+test('finds the names set under a declared prefix that nobody declares', () => {
 	expect(findUndeclaredEnvVars({
 		rawEnvVarNames: [
 			'CACHE_TTL',
@@ -147,5 +146,13 @@ test('finds the names set under an extension prefix that nobody declares', () =>
 			{ extensionName: 'subscriptions', envVarDeclaration: { type: 'number' } },
 		]]),
 		extensionPrefixes: new Set(['SUBSCRIPTIONS_']),
-	})).toEqual(['SUBSCRIPTIONS_TRIAL_DAY']);
+	})).toEqual(['CACHE_TTLL', 'SUBSCRIPTIONS_TRIAL_DAY']);
+});
+
+test('finds a typo under a library prefix core forwards', () => {
+	expect(findUndeclaredEnvVars({
+		rawEnvVarNames: ['DB_HOST', 'DB_HOTS', 'HSTS_MAX_AGES', 'DB_SSL__CA'],
+		envVarDeclarers: new Map(),
+		extensionPrefixes: new Set(),
+	})).toEqual(['DB_HOTS', 'HSTS_MAX_AGES']);
 });

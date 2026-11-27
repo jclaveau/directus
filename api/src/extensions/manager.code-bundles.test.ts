@@ -565,6 +565,109 @@ test('fails the boot on a variable a code bundle misdeclares', async () => {
 	expect(hookConfig).not.toHaveBeenCalled();
 });
 
+test('lets a code bundle declare a name under a core prefix', async () => {
+	const exitSpy = vi.spyOn(process, 'exit')
+		// process.exit returns never: the stub returns so the test goes on.
+		.mockImplementation(() => undefined as never);
+
+	const hookConfig = vi.fn();
+
+	mocks.extensions = {
+		module: new Map([
+			[
+				'maintenance',
+				{
+					type: 'bundle',
+					name: 'maintenance',
+					path: '/extensions/maintenance',
+					entrypoint: { app: 'app.js', api: 'api.js' },
+					entriesFrom: 'code',
+					entries: [],
+				},
+			],
+		]),
+		registry: new Map(),
+	};
+
+	mocks.settings = [
+		{
+			id: 'maintenance-id',
+			source: 'module',
+			folder: 'maintenance',
+			bundle: null,
+			enabled: true,
+		},
+		{
+			id: 'vacuum-id',
+			source: 'module',
+			folder: 'vacuum',
+			bundle: 'maintenance-id',
+			enabled: true,
+		},
+	];
+
+	mocks.rawEnvVarValues = { DB_VACUUM_CRON_FREQUENCY: '0 6 * * *' };
+
+	mocks.importCodeBundles.mockResolvedValue({
+		codeBundles: [
+			{
+				source: 'module',
+				folder: 'maintenance',
+				name: 'maintenance',
+				apiPath: '/extensions/maintenance/api.js',
+				entries: [
+					{
+						type: 'hook',
+						name: 'vacuum',
+						config: hookConfig,
+						env: {
+							prefix: 'DB_VACUUM_',
+							vars: { DB_VACUUM_CRON_FREQUENCY: { type: 'string' } },
+						},
+					},
+				],
+			},
+		],
+		failures: [],
+	});
+
+	mocks.pathExists.mockResolvedValue(false);
+
+	await new ExtensionManager().initialize({ schedule: false, watch: false });
+
+	expect(mocks.env).toEqual({
+		SERVE_APP: true,
+		TEMP_PATH: '/tmp/directus-test',
+		EXTENSIONS_SANDBOX_MEMORY: 128,
+		EXTENSIONS_SANDBOX_TIMEOUT: 10000,
+		DB_VACUUM_CRON_FREQUENCY: '0 6 * * *',
+	});
+
+	expect(hookConfig).toHaveBeenCalledTimes(1);
+	expect(exitSpy).not.toHaveBeenCalled();
+});
+
+test('fails the boot on a name under a core prefix nothing declares', async () => {
+	const exitSpy = vi.spyOn(process, 'exit')
+		// process.exit returns never: the stub returns so the test goes on.
+		.mockImplementation(() => undefined as never);
+
+	mocks.extensions = { module: new Map(), registry: new Map() };
+	mocks.settings = [];
+	mocks.rawEnvVarValues = { DB_HOTS: 'localhost' };
+	mocks.importCodeBundles.mockResolvedValue({ codeBundles: [], failures: [] });
+	mocks.pathExists.mockResolvedValue(false);
+
+	await new ExtensionManager().initialize({ schedule: false, watch: false });
+
+	expect(mocks.logger.error).toHaveBeenCalledWith(new Error(
+		'"DB_HOTS" is under the core prefix "DB_",'
+			+ ' but core declares no such variable.',
+	));
+
+	expect(exitSpy).toHaveBeenCalledWith(1);
+});
+
 test('gives core its guess back on a reload without the bundle', async () => {
 	mocks.extensions = {
 		module: new Map([
