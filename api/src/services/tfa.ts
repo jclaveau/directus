@@ -4,6 +4,7 @@ import type { Knex } from 'knex';
 import { authenticator } from 'otplib';
 import getDatabase from '../database/index.js';
 import { ItemsService } from './items.js';
+import { fetchUserEmail } from '../auth/utils/user-identities.js';
 
 export class TFAService {
 	knex: Knex;
@@ -29,13 +30,19 @@ export class TFAService {
 	}
 
 	async generateTFA(key: PrimaryKey): Promise<Record<string, string>> {
-		const user = await this.knex.select('email', 'tfa_secret').from('directus_users').where({ id: key }).first();
+		const user = await this.knex
+			.select('tfa_secret')
+			.from('directus_users')
+			.where({ id: key })
+			.first();
+
+		const userEmail = await fetchUserEmail(this.knex, String(key));
 
 		if (user?.tfa_secret !== null) {
 			throw new InvalidPayloadError({ reason: 'TFA Secret is already set for this user' });
 		}
 
-		if (!user?.email) {
+		if (!userEmail) {
 			throw new InvalidPayloadError({ reason: 'User must have a valid email to enable TFA' });
 		}
 
@@ -44,7 +51,11 @@ export class TFAService {
 
 		return {
 			secret,
-			url: authenticator.keyuri(user.email, project?.project_name || 'Directus', secret),
+			url: authenticator.keyuri(
+				userEmail,
+				project?.project_name || 'Directus',
+				secret,
+			),
 		};
 	}
 

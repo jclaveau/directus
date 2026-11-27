@@ -128,6 +128,7 @@ import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
+import { fetchUserEmail } from '../auth/utils/user-identities.js';
 
 /**
  * A whole number inside the range the field accepts, or the answer saying it
@@ -1003,13 +1004,7 @@ export class UtilsService {
 		}
 
 		try {
-			const row = await this.knex
-				.select('email')
-				.from('directus_users')
-				.where({ id: user })
-				.first();
-
-			return row?.email ?? null;
+			return await fetchUserEmail(this.knex, user);
 		}
 		catch {
 			// The key is editable by hand, and a database asked to match a uuid

@@ -1,3 +1,7 @@
+import {
+	EMAIL_IDENTITY_KIND,
+	fetchIdentity,
+} from '../../../auth/utils/user-identities.js';
 import getDatabase from '../../../database/index.js';
 import { useLogger } from '../../../logger/index.js';
 import { UsersService } from '../../../services/users.js';
@@ -18,11 +22,11 @@ export default async function usersPasswd({ email, password }: { email?: string;
 		const schema = await getSchema();
 		const service = new UsersService({ schema, knex: database });
 
-		const user = await service.knex
-			.select('id')
-			.from('directus_users')
-			.whereRaw('LOWER(??) = ?', ['email', email.toLowerCase()])
-			.first();
+		const identity = await fetchIdentity(database, EMAIL_IDENTITY_KIND, email);
+
+		const user = identity
+			? { id: identity.user }
+			: undefined;
 
 		if (user) {
 			await service.knex('directus_users').update({ password: passwordHashed }).where({ id: user.id });
