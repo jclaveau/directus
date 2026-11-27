@@ -1,12 +1,15 @@
 ---
 name: project_directus_db_clients
-description: Canonical Directus DB client list lives in api/src/types/database.ts; which clients return all IDs after batch insert vs. only the last
+description: Canonical Directus DB client list lives in packages/types/src/database.ts (PR #769 drops mssql/oracle); which clients return all IDs after batch insert vs. only the last
 metadata:
   author: Jean Claveau
   type: project
 ---
 
-The 7 Directus DB clients are defined in `api/src/types/database.ts:3`:
+PR #769 (open on 2026-11-26) drops `mssql` and `oracle` and refuses them at boot; once
+merged, ignore their entries below and re-read the list.
+
+The 7 Directus DB clients are defined in `packages/types/src/database.ts:3`:
 
 ```
 DatabaseClients = ['mysql', 'postgres', 'cockroachdb', 'sqlite', 'oracle', 'mssql', 'redshift']
@@ -30,4 +33,4 @@ Batch-insert ID return behavior (relevant to `ItemsService.createMany` fallback 
 
 **Why:** answering DB-capability questions about Directus by reciting generic SQL knowledge produced an imprecise answer (omitted Redshift, miscounted MariaDB as a separate client). Grounding on the source file gives the right list.
 
-**How to apply:** when asked which DBMSes Directus supports — or how a given DB capability behaves across them — open `api/src/types/database.ts` first, and remember that Knex's driver path is the gate, not just raw DB capability.
+**How to apply:** when asked which DBMSes Directus supports — or how a given DB capability behaves across them — open `packages/types/src/database.ts` first, and remember that Knex's driver path is the gate, not just raw DB capability.

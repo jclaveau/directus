@@ -2,6 +2,7 @@
 
 Full hooks for this area. The routing keys live in `../MEMORY.md`.
 
+- [bb teardown on the owning instance](../project_directus_bb_teardown_own_instance.md) — main instance never learns a spawned instance's collections; swallowed 403 → 500 on self-relation delete; new bb files reshuffle shards; FAIL block prints at shard end
 - [Directus blackbox run + logs](../project_directus_blackbox_run_and_logs.md) — server logs of every spawned instance = run artifact `blackbox-server-logs-<vendor>-<shard>`; bb runs on EVERY code PR by itself (Decide job, since 2026-08-05); `Run Blackbox` label is NOT required and, added after the push, cancels the in-flight run; REST job logs lack containerized vitest output (use the run-logs ZIP); never run bb locally as a pre-push gate — CI fans out 8 free shards, local is serial
 - [Blackbox/integration coverage](../project_directus_blackbox_coverage.md) — rolldown-plugin-istanbul instruments tsdown api build (gated COVERAGE_DIR), server dumps __coverage__ on terminus shutdown, CI merges→lcov→`-F blackbox`; needs tsdown so can't reach the tsc-built runtime feat stack until recompose
 - [Blackbox coverage exit-0 teardown crash](../reference_blackbox_coverage_exit0_teardown.md) — COVERAGE_DIR builds gracefully exit servers code 0 (terminus); upstream setup.ts throws on non-null exit → fix `code !== null && code !== 0`

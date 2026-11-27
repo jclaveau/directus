@@ -35,3 +35,5 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [Bench deep MISS gate is noise-edge](../project_directus_bench_deep_miss_gate_noise.md) — missVsFull 1.40 vs measured 1.23-1.44; blocks only when diff touches cache files; rerun --failed first
 - [Admin bundle await bug (#732)](../project_directus_admin_bundle_await_bug.md) — `import(await …)` blanks the built admin while the build is green; admin-smoke.yml + build-time chunk parse guard it
 - [Blackbox coverage upload broken by pnpm 12](../project_directus_blackbox_merge_coverage_pnpm12.md) — merge-coverage lost devDeps, bb never uploaded 09-24→10-16; verify real uploads (#615)
+- [Blackbox branch audit tags](../project_directus_bb_branch_audit.md) — bb-unit-only / bb-out-of-scope: tag from coverage; gaps never fail, an over-tag does; function tag on the body `{` line
+- [Keep bb tags in source](../feedback_directus_keep_bb_tags_in_source.md) — never propose moving the tags to a side list; cover, ignore dead files, or drop dead code instead

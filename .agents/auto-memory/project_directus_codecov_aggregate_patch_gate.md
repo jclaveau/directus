@@ -70,6 +70,39 @@ Also: the flagged `codecov/patch/api` and the unflagged `codecov/patch` can repo
 `informational: true`, so always SUCCESS; the gate's target is 95% and blocks. A green
 `patch/api` says nothing about the blocking check.
 
+**A comment appended to an upstream line puts it in the patch (#769, 2026-11-26).**
+About 330 `bb-out-of-scope` tags held the patch at 50-60% while the added code was
+57/57 covered; more bb scenarios moved it 57.0 → 60.6% only.
+- `codecov.yaml` `ignore` takes paths, never lines. `/* v8 ignore */` also blinds the
+  branch audit, which reads the same coverage.
+- `database/index.ts` answers `'mysql'` for MariaDB: `dialects/mysql.ts` is supported
+  code, never ignore it as dead.
+- API rate-limited → download the run's unit + blackbox `coverage-final.json`
+  artifacts and intersect with the diff. Compare two heads with the SAME diff command
+  (a diff missing files gave 62.9% instead of 60.1%).
+- An artifact count still reads high: on `151f8a1780` it gave 44 missing lines,
+  codecov's per-line status 72. Codecov marks a handler's first line
+  (`asyncHandler(async (req, res, next) => {`) uncovered while its body has unrun
+  parts. Take the final list from codecov's per-line status when the API answers.
+- Tests alone cannot reach 95% there: all 72 misses were tagged lines (added lines
+  73/73 covered), 35 of them MariaDB/sqlite/cockroachdb/redshift/non-PG branches
+  (#610) a Postgres-only CI never runs; the ~30 coverable ones top out near 87%.
+
+**Chosen lever (jean "go A", 2026-11-26): strip tagged ranges from the codecov copy.**
+A script beside `branch-audit.mjs` removes the counters of each `// bb-out-of-scope:`
+tag's whole range (the audit's tag-to-range logic) before the `blackbox.yml` and
+`check.yml` uploads. The `coverage-final.json` artifacts stay raw for the audit.
+`bb-unit-only` stays counted: codecov merges unit + bb, and none of #769's 4 such tags
+was among the 72 misses. Landed in `635129ce9b` (`strip-out-of-scope.mjs`):
+`codecov/patch` 74.00 → 100.00%, all CI runs green.
+- Reading `coverage-final.json` in any script: unit coverage ends some ranges at
+  `column: null` (= end of line); a plain position compare gets NaN and silently
+  matches nothing.
+- Rejected: ignore comments (blind the audit and unit coverage); a separate oos
+  `flag` (a flag adds a status, cannot take lines out of the unflagged check);
+  dedicated oos jobs as the fix (~30 lines, ~87% ceiling) — possible later PR, their
+  artifacts named so the audit skips them.
+
 **A lazy `await import()` inside an action body is an uncovered line until something
 runs the action (PR #492, 2026-09-15).** Making every CLI command lazy turned 16
 one-line `.action(...)` bodies into misses and failed the gate. What cleared it: an

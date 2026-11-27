@@ -45,6 +45,11 @@ number branch, so `'0'` falls through to `'json'` → `tryJson('0')` → **numbe
 the s-maxage header silently never emits. So it MUST be `'number'`. Before registering, read the consumer and pick the
 type it expects; a leading-`0` numeric default or a `Number.isInteger`/arithmetic consumer is the tell.
 
+Declaring a new var `'array'` turns its unset value `""` into `[]`: record it in
+`packages/env` `declared-types-vs-guessed.test.ts` or CI goes red (#771). Also on
+#771: `validate-env.ts` importing the `@directus/utils` bundle broke
+`processes/autoscale/index.graph.test.ts` (the autoscaler must not load it).
+
 **Cron rules are `'string'`, and untyped they are worse than they look.** `guessType` sends a plain rule
 (`0 3 * * *`) down the `json` path — `tryJson` hands the string back unparsed — and a rule carrying a comma
 (`0 3,15 * * *`) down the **array** path, arriving as `["0 3", "15 * * *"]`. Both survive a consumer that does

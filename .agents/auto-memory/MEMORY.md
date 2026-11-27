@@ -19,7 +19,7 @@ line appended below.
 - [The admin preview is not a CI check](feedback_directus_ci_watch_skip_preview.md) — never wait on it, never mention it in a CI report
 - [New bb files are Gherkin](feedback_directus_blackbox_gherkin_standard.md) — `.feature` + step `.test.ts`
 
-## settled (44) — per-PR accepted exceptions; read before reviewing that PR
+## settled (45) — per-PR accepted exceptions; read before reviewing that PR
 `.agents/auto-memory/index/settled.md`
 
 - [PR #607 accepted exceptions](project_directus_pr607_accepted_exceptions.md) — context.transaction on mutation filters; non-PG → #610
@@ -41,7 +41,7 @@ line appended below.
 - [Cache layers fail differently](project_directus_cache_failure_semantics.md) — ioredis raises, Keyv swallows, bus fire-and-forget
 - [Cache tier switches](project_directus_cache_tier_switches.md) — only response+schema switchable
 
-## blackbox (34) — seeds, sharding, flakes, spawned instances
+## blackbox (35) — seeds, sharding, flakes, spawned instances
 `.agents/auto-memory/index/blackbox.md`
 
 - [Directus blackbox run + logs](project_directus_blackbox_run_and_logs.md) — bb runs on every code PR; the label is NOT required and cancels the run
@@ -49,7 +49,7 @@ line appended below.
 - [Isolate new blackbox fixtures](project_directus_bb_fixture_isolation.md) — `fields=*` splices every alias; new scenarios get own collections
 - [bb pins its own toolchain](reference_directus_blackbox_pins_own_toolchain.md) — CI resolved vitest 4.1.11; check the run log before relying on `expect.poll`
 
-## ci (32) — workflows, codecov, lint gates, bench, preview
+## ci (34) — workflows, codecov, lint gates, bench, preview
 `.agents/auto-memory/index/ci.md`
 
 - [Two eslint configs](project_directus_two_eslint_configs.md) — Lint vs Style (changes); run both before push
