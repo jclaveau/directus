@@ -27,6 +27,9 @@ describe('checkDeclaredEnvVarValue', () => {
 		['boolean | number | string | string[]', 'array:*'],
 		// A config file's scalar reads as its string: `PORT: 8055` in yaml.
 		['string', 8055],
+		// `toBoolean`'s spellings in any case, spaces around them.
+		['boolean', ' TRUE\n'],
+		['boolean', 'boolean:False'],
 		['string[]', ['a', 'b']],
 		['string[]', [1, 2]],
 		['false | string', false],
@@ -47,8 +50,8 @@ describe('checkDeclaredEnvVarValue', () => {
 		[
 			'boolean',
 			'yes',
-			'"VARIABLE_NAME" is "yes", which is not a boolean:'
-				+ ' use true, false, 1 or 0.',
+			'"VARIABLE_NAME" Environment Variable is "yes", which is not a'
+				+ ' boolean. Use one of true, false, 1, 0.',
 		],
 		['regex', '(', '"VARIABLE_NAME" is "(", which is not a regex.'],
 		[

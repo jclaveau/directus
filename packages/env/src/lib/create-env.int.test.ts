@@ -263,8 +263,8 @@ test('refuses every declared variable its value does not fit, at once', () => {
 	expect(() => createEnv()).toThrow(new Error(
 		'"DB_PORT" is "abc", which is not a number.\n'
 			+ '"CACHE_STORE" is "memcache", which is not one of "memory", "redis".\n'
-			+ '"CACHE_ENABLED" is "yes", which is not a boolean:'
-			+ ' use true, false, 1 or 0.',
+			+ '"CACHE_ENABLED" Environment Variable is "yes", which is not a'
+			+ ' boolean. Use one of true, false, 1, 0.',
 	));
 });
 
@@ -281,6 +281,22 @@ test('keeps a name under a core prefix that core does not declare', () => {
 		DEFAULT: 'test-default',
 		DEFAULT_ARRAY: 'one,two,three',
 	});
+});
+
+test('lists a boolean refusal beside the others', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		DB_PORT: 'abc',
+		CACHE_ENABLED: 'TRUE',
+		HSTS_PRELOAD: 'yes',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+
+	expect(() => createEnv()).toThrow(new Error(
+		'"DB_PORT" is "abc", which is not a number.\n'
+			+ '"HSTS_PRELOAD" Environment Variable is "yes", which is not a'
+			+ ' boolean. Use one of true, false, 1, 0.',
+	));
 });
 
 test('keeps each value as it was set beside the cast one', () => {
