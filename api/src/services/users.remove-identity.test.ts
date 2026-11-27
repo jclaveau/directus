@@ -14,7 +14,12 @@ vi.mock('../../src/database/index', () => {
 });
 
 vi.mock('@directus/env', () => {
-	return { useEnv: vi.fn().mockReturnValue({ AUTH_PROVIDERS: [] }) };
+	return {
+		useEnv: vi.fn().mockReturnValue({
+			AUTH_PROVIDERS: [],
+			EMAIL_TEMPLATES_PATH: './templates',
+		}),
+	};
 });
 
 const schema = new SchemaBuilder()
