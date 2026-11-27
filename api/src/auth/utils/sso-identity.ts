@@ -26,9 +26,21 @@ import {
  * identity rows, not on `directus_users`: the payloads keep their pre-identity
  * shape so the hooks extensions already register keep working.
  */
-const IDENTITY_PAYLOAD_KEYS = ['provider', 'external_identifier', 'email', 'auth_data'];
+const IDENTITY_PAYLOAD_KEYS = [
+	'provider',
+	'external_identifier',
+	'email',
+	'auth_data',
+];
 
-const TOKEN_CLAIM_KEYS = ['access_token', 'id_token', 'refresh_token', 'accessToken', 'idToken', 'refreshToken'];
+const TOKEN_CLAIM_KEYS = [
+	'access_token',
+	'id_token',
+	'refresh_token',
+	'accessToken',
+	'idToken',
+	'refreshToken',
+];
 
 export type SsoLogin = {
 	/** The log prefix of the driver, `[OpenID]` */
@@ -38,7 +50,10 @@ export type SsoLogin = {
 	email: string | undefined;
 	/** The provider vouches for `email` */
 	emailVerified: boolean;
-	/** The email can't create an account: unverified, and the provider requires a verified one */
+	/**
+	 * The email can't create an account: unverified, and the provider requires
+	 * a verified one
+	 */
 	emailUnverified: boolean;
 	userInfo: Record<string, unknown> | null;
 	scope: string | null;
@@ -62,10 +77,18 @@ type SsoContext = {
  *
  * @throws InvalidCredentialsError when no account can be found or created
  * @throws InvalidProviderError when the provider's email is held by another account
- * @throws RecordNotUniqueError when the identity, linked from a session, is held by another account
+ * @throws RecordNotUniqueError when the identity, linked from a session, is
+ * held by another account
  */
-export async function loginSsoIdentity(context: SsoContext, ssoLogin: SsoLogin): Promise<UserIdentity> {
-	const knownIdentity = await fetchIdentity(context.knex, ssoLogin.provider, ssoLogin.identifier);
+export async function loginSsoIdentity(
+	context: SsoContext,
+	ssoLogin: SsoLogin,
+): Promise<UserIdentity> {
+	const knownIdentity = await fetchIdentity(
+		context.knex,
+		ssoLogin.provider,
+		ssoLogin.identifier,
+	);
 
 	if (knownIdentity) {
 		if (ssoLogin.linkUser && knownIdentity.user !== ssoLogin.linkUser) {
@@ -89,7 +112,9 @@ export async function loginSsoIdentity(context: SsoContext, ssoLogin: SsoLogin):
 /**
  * The claims of `userInfo`, never a token: those stay in the hidden `auth_data`.
  */
-export function toStoredUserInfo(userInfo: Record<string, unknown> | null): Record<string, unknown> | null {
+export function toStoredUserInfo(
+	userInfo: Record<string, unknown> | null,
+): Record<string, unknown> | null {
 	if (userInfo === null) {
 		return null;
 	}
@@ -122,13 +147,16 @@ async function updateSsoIdentity(
 	};
 
 	if (updatedPayload['auth_data'] !== undefined) {
-		identityFields.auth_data = updatedPayload['auth_data'] as UserIdentity['auth_data'];
+		identityFields.auth_data = updatedPayload['auth_data'] as
+			UserIdentity['auth_data'];
 	}
 
 	await identitiesService(context).updateOne(knownIdentity.id, identityFields);
 
-	if (typeof updatedPayload['email'] === 'string' && updatedPayload['email'] !== '') {
-		await syncEmailIdentity(context, ssoLogin, knownIdentity.user, updatedPayload['email']);
+	const updatedEmail = updatedPayload['email'];
+
+	if (typeof updatedEmail === 'string' && updatedEmail !== '') {
+		await syncEmailIdentity(context, ssoLogin, knownIdentity.user, updatedEmail);
 	}
 
 	return (await fetchIdentityById(context.knex, knownIdentity.id))!;
@@ -138,18 +166,24 @@ async function updateSsoIdentity(
  * Linking B: an identity no account holds, sent by a login made from a session,
  * is added to that session's account.
  */
-async function linkSsoIdentity(context: SsoContext, ssoLogin: SsoLogin, linkUser: string): Promise<UserIdentity> {
+async function linkSsoIdentity(
+	context: SsoContext,
+	ssoLogin: SsoLogin,
+	linkUser: string,
+): Promise<UserIdentity> {
 	const identityId = await identitiesService(context).createOne({
 		user: linkUser,
 		kind: ssoLogin.provider,
 		value: ssoLogin.identifier,
 		verified: true,
-		auth_data: (ssoLogin.updatePayload['auth_data'] ?? null) as UserIdentity['auth_data'],
+		auth_data: (ssoLogin.updatePayload['auth_data'] ?? null) as
+			UserIdentity['auth_data'],
 		user_info: toStoredUserInfo(ssoLogin.userInfo),
 		scope: ssoLogin.scope,
 	});
 
-	// OPEN(#772): a linked provider's email is added like a known user's, sync on or off
+	// OPEN(#772): a linked provider's email is added like a known user's, sync
+	// on or off
 	if (ssoLogin.email) {
 		await syncEmailIdentity(context, ssoLogin, linkUser, ssoLogin.email);
 	}
@@ -157,7 +191,10 @@ async function linkSsoIdentity(context: SsoContext, ssoLogin: SsoLogin, linkUser
 	return (await fetchIdentityById(context.knex, identityId as string))!;
 }
 
-async function createSsoAccount(context: SsoContext, ssoLogin: SsoLogin): Promise<UserIdentity> {
+async function createSsoAccount(
+	context: SsoContext,
+	ssoLogin: SsoLogin,
+): Promise<UserIdentity> {
 	const logger = useLogger();
 
 	if (ssoLogin.emailUnverified) {
@@ -185,12 +222,17 @@ async function createSsoAccount(context: SsoContext, ssoLogin: SsoLogin): Promis
 		{ database: context.knex, schema: context.schema, accountability: null },
 	);
 
-	const accountEmail = typeof createdPayload['email'] === 'string' && createdPayload['email'] !== ''
-		? createdPayload['email']
+	const createdEmail = createdPayload['email'];
+
+	const accountEmail = typeof createdEmail === 'string' && createdEmail !== ''
+		? createdEmail
 		: null;
 
 	// Linking B: never added to the account holding the email, by email match alone
-	if (accountEmail && await fetchIdentity(context.knex, EMAIL_IDENTITY_KIND, accountEmail)) {
+	const isEmailHeld = accountEmail !== null
+		&& await fetchIdentity(context.knex, EMAIL_IDENTITY_KIND, accountEmail);
+
+	if (isEmailHeld) {
 		logger.warn(
 			`${ssoLogin.logPrefix} Failed to register user. Email held by another user`
 			+ ` for provider ${JSON.stringify(ssoLogin.provider)}`,
@@ -215,7 +257,8 @@ async function createSsoAccount(context: SsoContext, ssoLogin: SsoLogin): Promis
 				kind: ssoLogin.provider,
 				value: identityValue,
 				verified: true,
-				auth_data: (createdPayload['auth_data'] ?? null) as UserIdentity['auth_data'],
+				auth_data: (createdPayload['auth_data'] ?? null) as
+					UserIdentity['auth_data'],
 				user_info: toStoredUserInfo(ssoLogin.userInfo),
 				scope: ssoLogin.scope,
 			});
@@ -235,9 +278,14 @@ async function createSsoAccount(context: SsoContext, ssoLogin: SsoLogin): Promis
 
 			return (await fetchIdentityById(trx, ssoIdentityId as string))!;
 		});
-	} catch (error) {
+	}
+ catch (error) {
 		if (isDirectusError(error, ErrorCode.RecordNotUnique)) {
-			logger.warn(error, `${ssoLogin.logPrefix} Failed to register user. User not unique`);
+			logger.warn(
+				error,
+				`${ssoLogin.logPrefix} Failed to register user. User not unique`,
+			);
+
 			throw new InvalidProviderError();
 		}
 
@@ -258,11 +306,17 @@ async function syncEmailIdentity(
 	emailAddress: string,
 ): Promise<void> {
 	const logger = useLogger();
-	const heldIdentity = await fetchIdentity(context.knex, EMAIL_IDENTITY_KIND, emailAddress);
+
+	const heldIdentity = await fetchIdentity(
+		context.knex,
+		EMAIL_IDENTITY_KIND,
+		emailAddress,
+	);
 
 	if (heldIdentity && heldIdentity.user === userId) {
 		if (ssoLogin.emailVerified && !heldIdentity.verified) {
-			await identitiesService(context).updateOne(heldIdentity.id, { verified: true });
+			await identitiesService(context)
+				.updateOne(heldIdentity.id, { verified: true });
 		}
 
 		return;
@@ -289,7 +343,8 @@ async function syncEmailIdentity(
 			value: emailAddress,
 			verified: ssoLogin.emailVerified,
 		});
-	} catch (error) {
+	}
+ catch (error) {
 		if (isDirectusError(error, ErrorCode.RecordNotUnique)) {
 			warnConflict();
 			return;

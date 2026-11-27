@@ -45,7 +45,8 @@ export async function up(knex: Knex): Promise<void> {
 	refuseDuplicateIdentities(identityRows);
 
 	await knex.schema.createTable(IDENTITIES_TABLE, (table) => {
-		table.uuid('id').primary().notNullable();
+		table.uuid('id').primary()
+.notNullable();
 
 		table.uuid('user')
 			.notNullable()
@@ -55,7 +56,10 @@ export async function up(knex: Knex): Promise<void> {
 
 		table.string('kind', 128).notNullable();
 		table.string('value', 255).notNullable();
-		table.boolean('verified').notNullable().defaultTo(false);
+
+		table.boolean('verified').notNullable()
+.defaultTo(false);
+
 		table.json('auth_data');
 		table.jsonb('user_info');
 		table.text('scope');
@@ -82,7 +86,8 @@ export async function up(knex: Knex): Promise<void> {
 	});
 
 	for (let start = 0; start < identityRows.length; start += INSERT_CHUNK_SIZE) {
-		await knex(IDENTITIES_TABLE).insert(identityRows.slice(start, start + INSERT_CHUNK_SIZE));
+		await knex(IDENTITIES_TABLE)
+			.insert(identityRows.slice(start, start + INSERT_CHUNK_SIZE));
 	}
 
 	await setPrimaryIdentities(knex);
@@ -103,7 +108,10 @@ export async function down(knex: Knex): Promise<void> {
 
 	await knex.schema.alterTable('directus_users', (table) => {
 		table.string('email', 128).unique();
-		table.string('provider', 128).notNullable().defaultTo(DEFAULT_PROVIDER);
+
+		table.string('provider', 128).notNullable()
+.defaultTo(DEFAULT_PROVIDER);
+
 		table.string('external_identifier').unique();
 		table.json('auth_data');
 	});
@@ -161,13 +169,22 @@ function refuseDuplicateIdentities(identityRows: IdentityRow[]): void {
 	const usersByIdentity = new Map<string, string[]>();
 
 	for (const identityRow of identityRows) {
-		const identityKey = JSON.stringify([identityRow.kind, identityRow.value.toLowerCase()]);
-		usersByIdentity.set(identityKey, [...usersByIdentity.get(identityKey) ?? [], identityRow.user]);
+		const identityKey = JSON.stringify([
+			identityRow.kind,
+			identityRow.value.toLowerCase(),
+		]);
+
+		usersByIdentity.set(identityKey, [
+			...usersByIdentity.get(identityKey) ?? [],
+			identityRow.user,
+		]);
 	}
 
 	const duplicateList = [...usersByIdentity]
 		.filter(([, userIds]) => userIds.length > 1)
-		.map(([identityKey, userIds]) => `${identityKey} (users ${JSON.stringify(userIds)})`);
+		.map(([identityKey, userIds]) => {
+			return `${identityKey} (users ${JSON.stringify(userIds)})`;
+		});
 
 	if (duplicateList.length > 0) {
 		throw new Error(
@@ -214,7 +231,9 @@ async function setSessionIdentities(knex: Knex): Promise<void> {
 }
 
 async function restoreLegacyColumns(knex: Knex): Promise<void> {
-	const identityRows: (IdentityRow & { primary_identity: string | null })[] = await knex({
+	type OwnedIdentityRow = IdentityRow & { primary_identity: string | null };
+
+	const identityRows: OwnedIdentityRow[] = await knex({
 		identity: IDENTITIES_TABLE,
 	})
 		.select('identity.*', 'owner.primary_identity')
@@ -242,7 +261,8 @@ async function restoreLegacyColumns(knex: Knex): Promise<void> {
 	}
 
 	for (const [userId, legacyRow] of legacyByUser) {
-		await knex('directus_users').update(legacyRow).where('id', userId);
+		await knex('directus_users').update(legacyRow)
+.where('id', userId);
 	}
 }
 

@@ -245,7 +245,8 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			auth_data: userPayload.auth_data,
 		};
 
-		// Make sure a user's role gets updated if their oauth2 group or role mapping changes
+		// Make sure a user's role gets updated if their oauth2 group or role mapping
+		// changes
 		if (this.config['roleMapping']) {
 			updatePayload['role'] = role;
 		}
@@ -359,7 +360,12 @@ export function createOAuth2AuthRouter(providerName: string): Router { // bb-out
 				throw new InvalidPayloadError({ reason: `URL "${redirect}" can't be used to redirect after login` });
 			}
 
-			const token = jwt.sign({ verifier: codeVerifier, redirect, prompt, linkUser }, getSecret(), {
+			const token = jwt.sign({
+				verifier: codeVerifier,
+				redirect,
+				prompt,
+				linkUser,
+			}, getSecret(), {
 				expiresIn: '5m',
 				issuer: 'directus',
 			});
@@ -438,7 +444,11 @@ export function createOAuth2AuthRouter(providerName: string): Router { // bb-out
 			} catch (error: any) {
 				// Prompt user for a new refresh_token if invalidated
 				if (isDirectusError(error, ErrorCode.InvalidToken) && !prompt) {
-					return res.redirect(`./?${redirect ? `redirect=${redirect}&` : ''}${linkUser ? 'link=true&' : ''}prompt=true`);
+					return res.redirect(`./?${redirect
+? `redirect=${redirect}&`
+: ''}${linkUser
+? 'link=true&'
+: ''}prompt=true`);
 				}
 
 				if (redirect) {

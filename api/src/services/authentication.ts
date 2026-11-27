@@ -28,7 +28,12 @@ import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { RateLimiterRes, createRateLimiter } from '../rate-limiter.js';
 import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
-import type { DirectusTokenPayload, Session, User, UserIdentity } from '../types/index.js';
+import type {
+	DirectusTokenPayload,
+	Session,
+	User,
+	UserIdentity,
+} from '../types/index.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';
 import { clone, cloneDeep } from '../utils/lodash-es-used.js';
@@ -112,12 +117,23 @@ export class AuthenticationService {
 		const userRow = await this.knex
 			.select<
 				Omit<User, 'identity'> & { tfa_secret: string | null }
-			>('id', 'first_name', 'last_name', 'password', 'status', 'role', 'tfa_secret', 'primary_identity')
+			>(
+				'id',
+				'first_name',
+				'last_name',
+				'password',
+				'status',
+				'role',
+				'tfa_secret',
+				'primary_identity',
+			)
 			.from('directus_users')
 			.where('id', identity.user)
 			.first();
 
-		const user = userRow ? { ...userRow, identity } : undefined;
+		const user = userRow
+? { ...userRow, identity }
+: undefined;
 
 		const updatedPayload = await emitter.emitFilter(
 			'auth.login',
@@ -548,7 +564,16 @@ export class AuthenticationService {
 		const record = await this.knex
 			.select<
 				Omit<User, 'identity'> & Session & { identity_id: string | null }
-			>('u.id', 'u.first_name', 'u.last_name', 'u.password', 'u.status', 'u.role', 'u.primary_identity', { identity_id: 's.identity' })
+			>(
+				'u.id',
+				'u.first_name',
+				'u.last_name',
+				'u.password',
+				'u.status',
+				'u.role',
+				'u.primary_identity',
+				{ identity_id: 's.identity' },
+			)
 			.from('directus_sessions as s')
 			.innerJoin('directus_users as u', 's.user', 'u.id')
 			.where('s.token', refreshToken)
@@ -561,7 +586,10 @@ export class AuthenticationService {
 				? await fetchIdentityById(this.knex, identityId) ?? null
 				: null;
 
-			const provider = getAuthProvider(toSessionProvider(userRow.id, identity?.kind ?? null)!);
+			const provider = getAuthProvider(
+				toSessionProvider(userRow.id, identity?.kind ?? null)!,
+			);
+
 			await provider.logout(clone({ ...userRow, identity }));
 
 			await this.knex.delete().from('directus_sessions').where('token', refreshToken);
@@ -616,7 +644,8 @@ export class AuthenticationService {
 			try {
 				await provider.verify(clone({ ...userRow, identity }), password);
 				return;
-			} catch (error) {
+			}
+ catch (error) {
 				if (!(error instanceof InvalidCredentialsError)) {
 					throw error;
 				}
@@ -631,10 +660,15 @@ export class AuthenticationService {
  * A session opened before identities existed, or by a token, names none: the
  * default provider refreshes and ends it, as a no-op.
  */
-function toSessionProvider(userId: string | null, identityKind: string | null): string | null {
+function toSessionProvider(
+	userId: string | null,
+	identityKind: string | null,
+): string | null {
 	if (identityKind) {
 		return toProviderName(identityKind);
 	}
 
-	return userId ? DEFAULT_AUTH_PROVIDER : null;
+	return userId
+? DEFAULT_AUTH_PROVIDER
+: null;
 }

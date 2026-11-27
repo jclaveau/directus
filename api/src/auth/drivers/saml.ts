@@ -75,7 +75,9 @@ export class SAMLAuthDriver extends LocalAuthDriver {
 			logPrefix: '[SAML]',
 			provider,
 			identifier: identifier.toLowerCase(),
-			email: email ? String(email) : undefined,
+			email: email
+? String(email)
+: undefined,
 			emailVerified: false,
 			emailUnverified: isEmailUnverified(this.config, undefined),
 			userInfo: { ...payload },

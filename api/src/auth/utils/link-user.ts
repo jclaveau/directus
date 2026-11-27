@@ -17,7 +17,9 @@ export function getLinkUser(req: Request, linkRequested: unknown): string | null
 	const sessionUser = req.accountability?.user;
 
 	if (!sessionUser) {
-		throw new ForbiddenError({ reason: 'Linking an identity requires a logged-in session' });
+		throw new ForbiddenError({
+			reason: 'Linking an identity requires a logged-in session',
+		});
 	}
 
 	return sessionUser;
