@@ -1,27 +1,30 @@
 import * as validator from '@authenio/samlify-node-xmllint';
 import { useEnv } from '@directus/env';
 import {
-	ErrorCode,
 	InvalidCredentialsError,
 	InvalidPayloadError,
-	InvalidProviderError,
 	isDirectusError,
 } from '@directus/errors';
 import express, { Router } from 'express';
 import * as samlify from 'samlify';
 import { getAuthProvider } from '../../auth.js';
 import { REFRESH_COOKIE_OPTIONS, SESSION_COOKIE_OPTIONS } from '../../constants.js';
-import getDatabase from '../../database/index.js';
-import emitter from '../../emitter.js';
 import { useLogger } from '../../logger/index.js';
 import { respond } from '../../middleware/respond.js';
 import { AuthenticationService } from '../../services/authentication.js';
 import { UsersService } from '../../services/users.js';
-import type { AuthDriverOptions, User } from '../../types/index.js';
+import type {
+	AuthDriverOptions,
+	IdentityLookupOptions,
+	User,
+	UserIdentity,
+} from '../../types/index.js';
 import asyncHandler from '../../utils/async-handler.js';
 import { getConfigFromEnv } from '../../utils/get-config-from-env.js';
 import { LocalAuthDriver } from './local.js';
 import { isLoginRedirectAllowed } from '../../utils/is-login-redirect-allowed.js';
+import { loginSsoIdentity } from '../utils/sso-identity.js';
+import { isEmailUnverified } from '../utils/verified-email.js';
 
 // Register the samlify schema validator
 samlify.setSchemaValidator(validator);
@@ -42,17 +45,17 @@ export class SAMLAuthDriver extends LocalAuthDriver {
 		this.idp = samlify.IdentityProvider(getConfigFromEnv(`AUTH_${config['provider'].toUpperCase()}_IDP`));
 	}
 
-	async fetchUserID(identifier: string) {
-		const user = await this.knex
-			.select('id')
-			.from('directus_users')
-			.whereRaw('LOWER(??) = ?', ['external_identifier', identifier.toLowerCase()])
-			.first();
+	override async getUserID(payload: Record<string, any>): Promise<string> {
+		const identity = await this.getIdentity(payload, { linkUser: null });
 
-		return user?.id;
+		return identity.user;
 	}
 
-	override async getUserID(payload: Record<string, any>) { // bb-out-of-scope: #622 SAML login
+	// OPEN(#772): no linking from a session: the ACS callback carries no session state
+	override async getIdentity( // bb-out-of-scope: #622 SAML login
+		payload: Record<string, any>,
+		_options: IdentityLookupOptions,
+	): Promise<UserIdentity> {
 		const logger = useLogger();
 
 		const { provider, emailKey, identifierKey, givenNameKey, familyNameKey, allowPublicRegistration } = this.config;
@@ -65,46 +68,35 @@ export class SAMLAuthDriver extends LocalAuthDriver {
 			throw new InvalidCredentialsError();
 		}
 
-		const userID = await this.fetchUserID(identifier);
-
-		if (userID) return userID;
-
-		if (!allowPublicRegistration) {
-			logger.warn(`[SAML] User doesn't exist, and public registration not allowed for provider "${provider}"`);
-			throw new InvalidCredentialsError();
-		}
-
 		const firstName = payload[givenNameKey ?? 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname'];
 		const lastName = payload[familyNameKey ?? 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname'];
 
-		const userPayload = {
+		return await loginSsoIdentity({ knex: this.knex, schema: this.schema }, {
+			logPrefix: '[SAML]',
 			provider,
-			first_name: firstName,
-			last_name: lastName,
-			email: email,
-			external_identifier: identifier.toLowerCase(),
-			role: this.config['defaultRoleId'],
-		};
-
-		// Run hook so the end user has the chance to augment the
-		// user that is about to be created
-		const updatedUserPayload = await emitter.emitFilter(
-			`auth.create`,
-			userPayload,
-			{ identifier: identifier.toLowerCase(), provider: this.config['provider'], providerPayload: { ...payload } },
-			{ database: getDatabase(), schema: this.schema, accountability: null },
-		);
-
-		try {
-			return await this.usersService.createOne(updatedUserPayload);
-		} catch (error) {
-			if (isDirectusError(error, ErrorCode.RecordNotUnique)) {
-				logger.warn(error, '[SAML] Failed to register user. User not unique');
-				throw new InvalidProviderError();
-			}
-
-			throw error;
-		}
+			identifier: identifier.toLowerCase(),
+			email: email ? String(email) : undefined,
+			emailVerified: false,
+			emailUnverified: isEmailUnverified(this.config, undefined),
+			userInfo: { ...payload },
+			scope: null,
+			updatePayload: {},
+			createPayload: {
+				provider,
+				first_name: firstName,
+				last_name: lastName,
+				email: email,
+				external_identifier: identifier.toLowerCase(),
+				role: this.config['defaultRoleId'],
+			},
+			hookMeta: {
+				identifier: identifier.toLowerCase(),
+				provider: this.config['provider'],
+				providerPayload: { ...payload },
+			},
+			allowPublicRegistration: Boolean(allowPublicRegistration),
+			linkUser: null,
+		});
 	}
 
 	// There's no local checks to be done when the user is authenticated in the IdP

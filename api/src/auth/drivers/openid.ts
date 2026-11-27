@@ -19,14 +19,18 @@ import type { Client } from 'openid-client';
 import { custom, errors, generators, Issuer } from 'openid-client';
 import { getAuthProvider } from '../../auth.js';
 import { REFRESH_COOKIE_OPTIONS, SESSION_COOKIE_OPTIONS } from '../../constants.js';
-import getDatabase from '../../database/index.js';
-import emitter from '../../emitter.js';
 import { useLogger } from '../../logger/index.js';
 import { respond } from '../../middleware/respond.js';
 import { createDefaultAccountability } from '../../permissions/utils/create-default-accountability.js';
 import { AuthenticationService } from '../../services/authentication.js';
 import { UsersService } from '../../services/users.js';
-import type { AuthData, AuthDriverOptions, User } from '../../types/index.js';
+import type {
+	AuthData,
+	AuthDriverOptions,
+	IdentityLookupOptions,
+	User,
+	UserIdentity,
+} from '../../types/index.js';
 import type { RoleMap } from '../../types/rolemap.js';
 import asyncHandler from '../../utils/async-handler.js';
 import { getConfigFromEnv } from '../../utils/get-config-from-env.js';
@@ -36,7 +40,11 @@ import { isLoginRedirectAllowed } from '../../utils/is-login-redirect-allowed.js
 import { verifyJWT } from '../../utils/jwt.js';
 import { Url } from '../../utils/url.js';
 import { LocalAuthDriver } from './local.js';
-import { isEmailUnverified } from '../utils/verified-email.js';
+import { getLinkUser } from '../utils/link-user.js';
+import { loginSsoIdentity, updateIdentityAuthData } from '../utils/sso-identity.js';
+import { isEmailUnverified, isEmailVouched } from '../utils/verified-email.js';
+
+const DEFAULT_SCOPE = 'openid profile email';
 
 export class OpenIDAuthDriver extends LocalAuthDriver {
 	client: null | Client;
@@ -189,7 +197,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			const paramsConfig = typeof this.config['params'] === 'object' ? this.config['params'] : {};
 
 			return client.authorizationUrl({
-				scope: this.config['scope'] ?? 'openid profile email',
+				scope: this.config['scope'] ?? DEFAULT_SCOPE,
 				access_type: 'offline',
 				prompt: prompt ? 'consent' : undefined,
 				...paramsConfig,
@@ -204,17 +212,16 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		}
 	}
 
-	private async fetchUserId(identifier: string): Promise<string | undefined> {
-		const user = await this.knex
-			.select('id')
-			.from('directus_users')
-			.whereRaw('LOWER(??) = ?', ['external_identifier', identifier.toLowerCase()])
-			.first();
+	override async getUserID(payload: Record<string, any>): Promise<string> {
+		const identity = await this.getIdentity(payload, { linkUser: null });
 
-		return user?.id;
+		return identity.user;
 	}
 
-	override async getUserID(payload: Record<string, any>): Promise<string> { // bb-out-of-scope: #622 OpenID login
+	override async getIdentity( // bb-out-of-scope: #622 OpenID login
+		payload: Record<string, any>,
+		options: IdentityLookupOptions,
+	): Promise<UserIdentity> {
 		const logger = useLogger();
 
 		if (!payload['code'] || !payload['codeVerifier'] || !payload['state']) {
@@ -312,97 +319,41 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			throw new InvalidCredentialsError();
 		}
 
-		const userId = await this.fetchUserId(identifier);
+		const updatePayload: Record<string, unknown> = {
+			auth_data: userPayload.auth_data,
+		};
 
-		if (userId) {
-			// Run hook so the end user has the chance to augment the
-			// user that is about to be updated
-			let emitPayload: Record<string, unknown> = {
-				auth_data: userPayload.auth_data,
-			};
-
-			// Make sure a user's role gets updated if their openid group or role mapping changes
-			if (this.config['roleMapping']) {
-				emitPayload['role'] = role;
-			}
-
-			if (syncUserInfo) {
-				emitPayload = {
-					...emitPayload,
-					first_name: userPayload.first_name,
-					last_name: userPayload.last_name,
-				};
-
-				if (emailUnverified) {
-					logger.warn(oneLine`
-						[OpenID] Unverified email not synced for provider
-						${JSON.stringify(provider)}
-					`);
-				}
-				else {
-					emitPayload['email'] = userPayload.email;
-				}
-			}
-
-			const updatedUserPayload = await emitter.emitFilter(
-				`auth.update`,
-				emitPayload,
-				{
-					identifier,
-					provider: this.config['provider'],
-					providerPayload: { accessToken: tokenSet.access_token, idToken: tokenSet.id_token, userInfo },
-				},
-				{ database: getDatabase(), schema: this.schema, accountability: null },
-			);
-
-			// Update user to update refresh_token and other properties that might have changed
-			if (Object.values(updatedUserPayload).some((value) => value !== undefined)) {
-				await this.usersService.updateOne(userId, updatedUserPayload);
-			}
-
-			return userId;
+		// Make sure a user's role gets updated if their openid group or role mapping changes
+		if (this.config['roleMapping']) {
+			updatePayload['role'] = role;
 		}
 
-		if (emailUnverified) {
-			logger.warn(oneLine`
-				[OpenID] Unverified email can't create a user for provider
-				${JSON.stringify(provider)}
-			`);
-
-			throw new InvalidCredentialsError();
+		// OPEN(#772): the email still syncs only with syncUserInfo, as before identities
+		if (syncUserInfo) {
+			updatePayload['first_name'] = userPayload.first_name;
+			updatePayload['last_name'] = userPayload.last_name;
+			updatePayload['email'] = userPayload.email;
 		}
 
-		// Is public registration allowed?
-		if (!allowPublicRegistration) {
-			logger.warn(`[OpenID] User doesn't exist, and public registration not allowed for provider "${provider}"`);
-			throw new InvalidCredentialsError();
-		}
-
-		// Run hook so the end user has the chance to augment the
-		// user that is about to be created
-		const updatedUserPayload = await emitter.emitFilter(
-			`auth.create`,
-			userPayload,
-			{
+		return await loginSsoIdentity({ knex: this.knex, schema: this.schema }, {
+			logPrefix: '[OpenID]',
+			provider,
+			identifier,
+			email,
+			emailVerified: isEmailVouched(userInfo['email_verified']),
+			emailUnverified,
+			userInfo,
+			scope: tokenSet.scope ?? this.config['scope'] ?? DEFAULT_SCOPE,
+			updatePayload,
+			createPayload: userPayload,
+			hookMeta: {
 				identifier,
 				provider: this.config['provider'],
 				providerPayload: { accessToken: tokenSet.access_token, idToken: tokenSet.id_token, userInfo },
 			},
-			{ database: getDatabase(), schema: this.schema, accountability: null },
-		);
-
-		try {
-			await this.usersService.createOne(updatedUserPayload);
-		} catch (e) {
-			if (isDirectusError(e, ErrorCode.RecordNotUnique)) {
-				logger.warn(e, '[OpenID] Failed to register user. User not unique');
-				throw new InvalidProviderError();
-			}
-
-			throw e;
-		}
-
-		return (await this.fetchUserId(identifier)) as string;
+			allowPublicRegistration: Boolean(allowPublicRegistration),
+			linkUser: options.linkUser,
+		});
 	}
 
 	override async login(user: User): Promise<void> {
@@ -412,7 +363,7 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 	override async refresh(user: User): Promise<void> { // bb-out-of-scope: #622 OpenID login
 		const logger = useLogger();
 
-		let authData = user.auth_data as AuthData;
+		let authData = user.identity?.auth_data as AuthData;
 
 		if (typeof authData === 'string') {
 			try {
@@ -428,10 +379,12 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 				const tokenSet = await client.refresh(authData['refreshToken']);
 
 				// Update user refreshToken if provided
-				if (tokenSet.refresh_token) {
-					await this.usersService.updateOne(user.id, {
-						auth_data: JSON.stringify({ refreshToken: tokenSet.refresh_token }),
-					});
+				if (tokenSet.refresh_token && user.identity) {
+					await updateIdentityAuthData(
+						{ knex: this.knex, schema: this.schema },
+						user.identity.id,
+						JSON.stringify({ refreshToken: tokenSet.refresh_token }),
+					);
 				}
 			} catch (e) {
 				throw handleError(e);
@@ -477,12 +430,13 @@ export function createOpenIDAuthRouter(providerName: string): Router { // bb-out
 			const codeVerifier = provider.generateCodeVerifier();
 			const prompt = !!req.query['prompt'];
 			const redirect = req.query['redirect'];
+			const linkUser = getLinkUser(req, req.query['link']);
 
 			if (isLoginRedirectAllowed(redirect, providerName) === false) {
 				throw new InvalidPayloadError({ reason: `URL "${redirect}" can't be used to redirect after login` });
 			}
 
-			const token = jwt.sign({ verifier: codeVerifier, redirect, prompt }, getSecret(), {
+			const token = jwt.sign({ verifier: codeVerifier, redirect, prompt, linkUser }, getSecret(), {
 				expiresIn: (env[`AUTH_${providerName.toUpperCase()}_LOGIN_TIMEOUT`] ?? '5m') as StringValue | number,
 				issuer: 'directus',
 			});
@@ -528,6 +482,7 @@ export function createOpenIDAuthRouter(providerName: string): Router { // bb-out
 					verifier: string;
 					redirect?: string;
 					prompt: boolean;
+					linkUser?: string | null;
 				};
 			} catch (e: any) {
 				logger.warn(e, `[OpenID] Couldn't verify OpenID cookie`);
@@ -535,7 +490,7 @@ export function createOpenIDAuthRouter(providerName: string): Router { // bb-out
 				return res.redirect(`${url.toString()}?reason=${ErrorCode.InvalidCredentials}`);
 			}
 
-			const { verifier, redirect, prompt } = tokenData;
+			const { verifier, redirect, prompt, linkUser } = tokenData;
 
 			const accountability: Accountability = createDefaultAccountability({ ip: getIPFromReq(req) });
 
@@ -565,12 +520,12 @@ export function createOpenIDAuthRouter(providerName: string): Router { // bb-out
 						state: req.query['state'],
 						iss: req.query['iss'],
 					},
-					{ session: authMode === 'session' },
+					{ session: authMode === 'session', linkUser: linkUser ?? null },
 				);
 			} catch (error: any) {
 				// Prompt user for a new refresh_token if invalidated
 				if (isDirectusError(error, ErrorCode.InvalidToken) && !prompt) {
-					return res.redirect(`./?${redirect ? `redirect=${redirect}&` : ''}prompt=true`);
+					return res.redirect(`./?${redirect ? `redirect=${redirect}&` : ''}${linkUser ? 'link=true&' : ''}prompt=true`);
 				}
 
 				logger.warn(error);

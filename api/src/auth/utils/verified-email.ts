@@ -11,7 +11,15 @@ export function isEmailUnverified(
 		return false;
 	}
 
-	return verifiedFlag !== true && verifiedFlag !== 'true';
+	return !isEmailVouched(verifiedFlag);
+}
+
+/**
+ * Whether a provider's verified flag vouches for its email: the `verified` of
+ * the email identity it adds.
+ */
+export function isEmailVouched(verifiedFlag: unknown): boolean {
+	return verifiedFlag === true || verifiedFlag === 'true';
 }
 
 /**

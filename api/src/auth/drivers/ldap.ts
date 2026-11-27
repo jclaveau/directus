@@ -4,7 +4,6 @@ import {
 	InvalidCredentialsError,
 	InvalidPayloadError,
 	InvalidProviderConfigError,
-	InvalidProviderError,
 	ServiceUnavailableError,
 	UnexpectedResponseError,
 	isDirectusError,
@@ -15,17 +14,24 @@ import Joi from 'joi';
 import type { Client, Error, LDAPResult, SearchCallbackResponse, SearchEntry } from 'ldapjs';
 import ldap from 'ldapjs';
 import { REFRESH_COOKIE_OPTIONS, SESSION_COOKIE_OPTIONS } from '../../constants.js';
-import getDatabase from '../../database/index.js';
-import emitter from '../../emitter.js';
 import { useLogger } from '../../logger/index.js';
 import { respond } from '../../middleware/respond.js';
 import { createDefaultAccountability } from '../../permissions/utils/create-default-accountability.js';
 import { AuthenticationService } from '../../services/authentication.js';
 import { UsersService } from '../../services/users.js';
-import type { AuthDriverOptions, AuthenticationMode, User } from '../../types/index.js';
+import type {
+	AuthDriverOptions,
+	AuthenticationMode,
+	IdentityLookupOptions,
+	User,
+	UserIdentity,
+} from '../../types/index.js';
 import asyncHandler from '../../utils/async-handler.js';
 import { getIPFromReq } from '../../utils/get-ip-from-req.js';
 import { AuthDriver } from '../auth.js';
+import { getLinkUser } from '../utils/link-user.js';
+import { loginSsoIdentity } from '../utils/sso-identity.js';
+import { isEmailUnverified } from '../utils/verified-email.js';
 
 interface UserInfo {
 	dn: string;
@@ -226,22 +232,19 @@ export class LDAPAuthDriver extends AuthDriver {
 		});
 	}
 
-	private async fetchUserId(userDn: string): Promise<string | undefined> { // bb-out-of-scope: #619 LDAP login
-		const user = await this.knex
-			.select('id')
-			.from('directus_users')
-			.orWhereRaw('LOWER(??) = ?', ['external_identifier', userDn.toLowerCase()])
-			.first();
+	async getUserID(payload: Record<string, any>): Promise<string> {
+		const identity = await this.getIdentity(payload, { linkUser: null });
 
-		return user?.id;
+		return identity.user;
 	}
 
-	async getUserID(payload: Record<string, any>): Promise<string> { // bb-out-of-scope: #619 LDAP login
+	override async getIdentity( // bb-out-of-scope: #619 LDAP login
+		payload: Record<string, any>,
+		options: IdentityLookupOptions,
+	): Promise<UserIdentity> {
 		if (!payload['identifier']) {
 			throw new InvalidCredentialsError();
 		}
-
-		const logger = useLogger();
 
 		await this.validateBindClient();
 
@@ -285,80 +288,62 @@ export class LDAPAuthDriver extends AuthDriver {
 			}
 		}
 
-		const userId = await this.fetchUserId(userInfo.dn);
+		const updatePayload: Record<string, unknown> = {};
 
-		if (userId) {
-			// Run hook so the end user has the chance to augment the
-			// user that is about to be updated
-			let emitPayload = {};
-
-			// Only sync roles if the AD groups are configured
-			if (groupDn) { // bb-out-of-scope: #753 provider roles
-				emitPayload = {
-					role: userRole?.id ?? defaultRoleId ?? null,
-				};
-			}
-
-			if (syncUserInfo) {
-				emitPayload = {
-					...emitPayload,
-					first_name: userInfo.firstName,
-					last_name: userInfo.lastName,
-					email: userInfo.email,
-				};
-			}
-
-			const updatedUserPayload = await emitter.emitFilter(
-				`auth.update`,
-				emitPayload,
-				{ identifier: userInfo.dn, provider: this.config['provider'], providerPayload: { userInfo, userRole } },
-				{ database: getDatabase(), schema: this.schema, accountability: null },
-			);
-
-			// Update user to update properties that might have changed
-			await this.usersService.updateOne(userId, updatedUserPayload);
-
-			return userId;
+		// Only sync roles if the AD groups are configured
+		if (groupDn) { // bb-out-of-scope: #753 provider roles
+			updatePayload['role'] = userRole?.id ?? defaultRoleId ?? null;
 		}
 
-		if (!userInfo) {
-			throw new InvalidCredentialsError();
+		if (syncUserInfo) {
+			updatePayload['first_name'] = userInfo.firstName;
+			updatePayload['last_name'] = userInfo.lastName;
+			updatePayload['email'] = userInfo.email;
 		}
 
-		const userPayload = {
+		// Linked before the login binds: the bind proves the DN is the user's first
+		if (options.linkUser) {
+			await this.bindAs(userInfo.dn, payload['password']);
+		}
+
+		return await loginSsoIdentity({ knex: this.knex, schema: this.schema }, {
+			logPrefix: '[LDAP]',
 			provider: this.config['provider'],
-			first_name: userInfo.firstName,
-			last_name: userInfo.lastName,
+			identifier: userInfo.dn,
 			email: userInfo.email,
-			external_identifier: userInfo.dn,
-			role: userRole?.id ?? defaultRoleId,
-		};
-
-		// Run hook so the end user has the chance to augment the
-		// user that is about to be created
-		const updatedUserPayload = await emitter.emitFilter(
-			`auth.create`,
-			userPayload,
-			{ identifier: userInfo.dn, provider: this.config['provider'], providerPayload: { userInfo, userRole } },
-			{ database: getDatabase(), schema: this.schema, accountability: null },
-		);
-
-		try {
-			await this.usersService.createOne(updatedUserPayload);
-		} catch (e) {
-			if (isDirectusError(e, ErrorCode.RecordNotUnique)) {
-				logger.warn(e, '[LDAP] Failed to register user. User not unique');
-				throw new InvalidProviderError();
-			}
-
-			throw e;
-		}
-
-		return (await this.fetchUserId(userInfo.dn)) as string;
+			emailVerified: false,
+			emailUnverified: isEmailUnverified(this.config, undefined),
+			userInfo: { ...userInfo },
+			scope: null,
+			updatePayload,
+			createPayload: {
+				provider: this.config['provider'],
+				first_name: userInfo.firstName,
+				last_name: userInfo.lastName,
+				email: userInfo.email,
+				external_identifier: userInfo.dn,
+				role: userRole?.id ?? defaultRoleId,
+			},
+			hookMeta: {
+				identifier: userInfo.dn,
+				provider: this.config['provider'],
+				providerPayload: { userInfo, userRole },
+			},
+			allowPublicRegistration: true,
+			linkUser: options.linkUser,
+		});
 	}
 
 	async verify(user: User, password?: string): Promise<void> { // bb-out-of-scope: #619 LDAP login
-		if (!user.external_identifier || !password) {
+		if (user.identity?.kind !== this.identityKind || !password) {
+			throw new InvalidCredentialsError();
+		}
+
+		await this.bindAs(user.identity.value, password);
+	}
+
+	private async bindAs(userDn: string, password: string | undefined): Promise<void> { // bb-out-of-scope: #619 LDAP login
+		if (!password) {
 			throw new InvalidCredentialsError();
 		}
 
@@ -375,7 +360,7 @@ export class LDAPAuthDriver extends AuthDriver {
 				reject(handleError(err));
 			});
 
-			client.bind(user.external_identifier!, password, (err: Error | null) => {
+			client.bind(userDn, password, (err: Error | null) => {
 				if (err) {
 					reject(handleError(err));
 				} else {
@@ -394,7 +379,11 @@ export class LDAPAuthDriver extends AuthDriver {
 	override async refresh(user: User): Promise<void> { // bb-out-of-scope: #619 LDAP login
 		await this.validateBindClient();
 
-		const userInfo = await this.fetchUserInfo(user.external_identifier!);
+		if (!user.identity) {
+			throw new InvalidCredentialsError();
+		}
+
+		const userInfo = await this.fetchUserInfo(user.identity.value);
 
 		if (userInfo?.userAccountControl && userInfo.userAccountControl & INVALID_ACCOUNT_FLAGS) {
 			throw new InvalidCredentialsError();
@@ -441,6 +430,7 @@ export function createLDAPAuthRouter(provider: string): Router { // bb-out-of-sc
 		password: Joi.string().required(),
 		mode: Joi.string().valid('cookie', 'json', 'session'),
 		otp: Joi.string(),
+		link: Joi.boolean(),
 	}).unknown();
 
 	router.post(
@@ -474,6 +464,7 @@ export function createLDAPAuthRouter(provider: string): Router { // bb-out-of-sc
 			const { accessToken, refreshToken, expires } = await authenticationService.login(provider, req.body, {
 				session: mode === 'session',
 				otp: req.body?.otp,
+				linkUser: getLinkUser(req, req.body.link),
 			});
 
 			const payload = { access_token: accessToken, expires } as {
