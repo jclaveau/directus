@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { toArray } from '@directus/utils/values';
 import { DEFAULTS } from '../constants/defaults.js';
 import type { Env } from '../types/env.js';
@@ -13,6 +12,7 @@ import { findEnvVarDeclaration } from '../utils/find-env-var-declaration.js';
 import { castEnvVarValue, stripCastFlag } from './cast.js';
 import { checkDeclaredEnvVarValue } from './check-declared-env-var-value.js';
 import { readConfigurationFromFile } from './read-configuration-from-file.js';
+import { readEnvVarFile } from './read-env-var-file.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
 
 /** The prefixes whose value may not fit them: `number:abc` refuses the boot. */
@@ -100,30 +100,14 @@ export const createEnv = (): Env => {
 			&& isCoreEnvVarName(removeFileSuffix(key));
 
 		if (isCoreFileEnvVarName && typeof value === 'string') {
-			try {
-				// get the path to the file
-				const castFlag = getCastFlag(value);
-				const castPrefix = castFlag ? castFlag + ':' : '';
-				const filePath = castFlag ? value.replace(castPrefix, '') : value;
+			value = readEnvVarFile(
+				key,
+				value,
+				getDefaultType(removeFileSuffix(key)),
+			);
 
-				// read file content
-				const fileContent = readFileSync(filePath, { encoding: 'utf8' });
-
-				// override key value pair
-				key = removeFileSuffix(key);
-
-				const declaredType = castFlag ?? getDefaultType(key);
-
-				// A secret is written with a trailing newline, which no boolean or
-				// number parses with; a string, a password, keeps its exact bytes.
-				value = castPrefix + (declaredType && declaredType !== 'string'
-					? fileContent.trim()
-					: fileContent);
-
-				source = 'secret-file';
-			} catch {
-				throw new Error(`Failed to read value from file "${value}", defined in environment variable "${key}".`);
-			}
+			key = removeFileSuffix(key);
+			source = 'secret-file';
 		}
 
 		const envVarDeclaration = findEnvVarDeclaration(key);
