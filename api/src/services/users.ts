@@ -176,7 +176,14 @@ export class UsersService extends ItemsService {
 	private async getUserByEmail(
 		email: string,
 		identityLookup: 'any' | 'password-login' = 'any',
-	): Promise<{ id: string; role: string; status: string; password: string; email: string } | undefined> {
+	): Promise<{
+		id: string;
+		role: string;
+		status: string;
+		password: string;
+		email: string;
+		emailIdentity: string;
+	} | undefined> {
 		const identity = identityLookup === 'any'
 			? await fetchIdentity(this.knex, EMAIL_IDENTITY_KIND, email)
 			: await fetchPasswordLoginIdentity(this.knex, email);
@@ -192,7 +199,7 @@ export class UsersService extends ItemsService {
 			.first();
 
 		return user
-? { ...user, email: identity.value }
+? { ...user, email: identity.value, emailIdentity: identity.id }
 : undefined;
 	}
 
@@ -942,6 +949,13 @@ export class UsersService extends ItemsService {
 		}
 
 		await this.updateOne(user.id, { status: 'active' });
+
+		// The registration mail reached this address
+		await new ItemsService(IDENTITIES_COLLECTION, {
+			knex: this.knex,
+			schema: this.schema,
+			accountability: null,
+		}).updateOne(user.emailIdentity, { verified: true });
 
 		return user.id;
 	}
