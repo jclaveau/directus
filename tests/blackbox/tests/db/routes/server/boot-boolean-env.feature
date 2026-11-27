@@ -1,24 +1,25 @@
 Feature: A boolean variable that holds no boolean ends the boot before it listens
 
-  A variable typed boolean reads true from true or 1, and false from false or 0.
-  Any other value used to read as false without a word: CACHE_ENABLED=TRUE
-  turned the cache off. The env now refuses it while it is built, whichever
-  layer supplied it (the process env, the config file or a _FILE secret), so the
-  instance exits with code 1 before it listens, and its stderr says why.
+  A variable typed boolean reads true from true or 1, and false from false or 0,
+  in any case and with spaces around it: TRUE and " true\n" read as true. Any
+  other value used to read as false without a word: CACHE_ENABLED=yes turned the
+  cache off. The env now refuses it while it is built, whichever layer supplied
+  it (the process env, the config file or a _FILE secret), so the instance exits
+  with code 1 before it listens, and its stderr says why.
 
   An empty value is refused too: a deployment that wrote CACHE_ENABLED= to mean
   false has to write false (the upgrade note of #773).
 
-  A _FILE secret is trimmed before it is read as a boolean: docker and k8s write
-  a secret with a trailing newline, which no boolean parses with.
+  Upgrade note of #773: a deployment that wrote TRUE ran with the feature off,
+  and now runs with it on.
 
-  Scenario: TRUE in the process env ends the boot
-    Given the process env sets CACHE_ENABLED to "TRUE"
+  Scenario: yes in the process env ends the boot
+    Given the process env sets CACHE_ENABLED to "yes"
     When an instance starts
     Then the instance exits with code 1, never having answered /server/ping
     And its stderr holds this error:
       """
-      "CACHE_ENABLED" Environment Variable is "TRUE", which is not a boolean.
+      "CACHE_ENABLED" Environment Variable is "yes", which is not a boolean.
       Use one of true, false, 1, 0.
       """
 
@@ -57,6 +58,20 @@ Feature: A boolean variable that holds no boolean ends the boot before it listen
   # untrimmed "true\n" read as false and refused it.
   Scenario: true and a newline in a _FILE secret reads as true
     Given the secret file of GRAPHQL_INTROSPECTION_FILE holds "true\n"
+    When an instance starts
+    Then the instance answers /server/ping
+    And these requests get these responses:
+      | request                                 | response              |
+      | method: POST                            | code: 200             |+
+      | path: /graphql                          | body:                 |
+      | payload:                                |   data:               |
+      |   query: '{ __schema { queryType { name |     __schema:         |
+      |     } } }'                              |       queryType:      |
+      |                                         |         name: Query   |
+
+  # TRUE used to read as false, and refused the schema query.
+  Scenario: TRUE in the process env reads as true
+    Given the process env sets GRAPHQL_INTROSPECTION to "TRUE"
     When an instance starts
     Then the instance answers /server/ping
     And these requests get these responses:

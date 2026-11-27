@@ -134,7 +134,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	const refusedBoots = [
 		{
-			title: 'TRUE in the process env ends the boot',
+			title: 'yes in the process env ends the boot',
 			givenMatcher: PROCESS_ENV_STEP,
 			givenStep: givenProcessEnv,
 		},
@@ -165,10 +165,22 @@ describe.each(vendors)('%s', (vendor) => {
 			}, 60_000);
 		}
 
-		scenario(
-			'true and a newline in a _FILE secret reads as true',
-			({ given, when, then, and }) => {
-				given(SECRET_FILE_STEP, givenSecretFile);
+		const introspectionBoots = [
+			{
+				title: 'true and a newline in a _FILE secret reads as true',
+				givenMatcher: SECRET_FILE_STEP,
+				givenStep: givenSecretFile,
+			},
+			{
+				title: 'TRUE in the process env reads as true',
+				givenMatcher: PROCESS_ENV_STEP,
+				givenStep: givenProcessEnv,
+			},
+		];
+
+		for (const { title, givenMatcher, givenStep } of introspectionBoots) {
+			scenario(title, ({ given, when, then, and }) => {
+				given(givenMatcher, givenStep);
 
 				when('an instance starts', startInstance);
 
@@ -199,8 +211,7 @@ describe.each(vendors)('%s', (vendor) => {
 						}
 					},
 				);
-			},
-			60_000,
-		);
+			}, 60_000);
+		}
 	});
 });

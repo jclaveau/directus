@@ -90,10 +90,10 @@ test('Named-connection USER/PASSWORD stay string, not guessType', () => {
 });
 
 // `toBoolean` reads anything but these four spellings as false, so a deployment
-// that meant `TRUE` would turn the feature off and get no line saying it did.
+// that meant `yes` would turn the feature off and get no line saying it did.
 test('Refuses a boolean variable from the process that is not one', () => {
 	vi.mocked(readConfigurationFromProcess).mockReturnValue({
-		CACHE_ENABLED: 'TRUE',
+		CACHE_ENABLED: 'yes',
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
@@ -101,10 +101,31 @@ test('Refuses a boolean variable from the process that is not one', () => {
 
 	expect(() => createEnv()).toThrow(
 		new Error(
-			'"CACHE_ENABLED" Environment Variable is "TRUE", which is not a boolean. '
+			'"CACHE_ENABLED" Environment Variable is "yes", which is not a boolean. '
 				+ 'Use one of true, false, 1, 0.',
 		),
 	);
+});
+
+test.each([
+	{ value: 'TRUE', expected: true },
+	{ value: ' True ', expected: true },
+	{ value: 'true\n', expected: true },
+	{ value: 'FALSE', expected: false },
+	{ value: ' 0 ', expected: false },
+])('Reads $value from the process as a boolean', ({ value, expected }) => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		CACHE_ENABLED: value,
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isDirectusVariable).mockReturnValue(true);
+
+	expect(createEnv()).toEqual({
+		CACHE_ENABLED: expected,
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
 });
 
 test('Refuses a boolean variable from the config file that is not one', () => {
@@ -143,7 +164,7 @@ test('Refuses a boolean variable from a secret file that is not one', () => {
 
 test('Refuses a value cast to boolean that is not one', () => {
 	vi.mocked(readConfigurationFromProcess).mockReturnValue({
-		UNMAPPED_FLAG: 'boolean:TRUE',
+		UNMAPPED_FLAG: 'boolean:yes',
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
@@ -151,10 +172,25 @@ test('Refuses a value cast to boolean that is not one', () => {
 
 	expect(() => createEnv()).toThrow(
 		new Error(
-			'"UNMAPPED_FLAG" Environment Variable is "TRUE", which is not a boolean. '
+			'"UNMAPPED_FLAG" Environment Variable is "yes", which is not a boolean. '
 				+ 'Use one of true, false, 1, 0.',
 		),
 	);
+});
+
+test('Reads a value cast to boolean in capitals as a boolean', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		UNMAPPED_FLAG: 'boolean:TRUE',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isDirectusVariable).mockReturnValue(true);
+
+	expect(createEnv()).toEqual({
+		UNMAPPED_FLAG: true,
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
 });
 
 // Docker and Kubernetes write a secret with a trailing newline.
