@@ -1,6 +1,6 @@
 ---
 name: project_directus_multi_identity_rulings
-description: Multi-identity design round (several emails / SSO providers per account) — jean's rulings 2026-11-26; table sketch, linking, S3 placement
+description: Multi-identity design round (several emails / SSO providers per account) — jean's rulings 2026-11-26/27; table sketch, linking, S3, points 1-4, email dropped for primary_identity (8 E)
 metadata:
   type: project
 ---
@@ -18,23 +18,42 @@ logout call the provider that opened the session.
 - **S3 unverified new email = A, in the multi-identity PR (jean 2026-11-26):** a known
   user's unverified new email from the provider lands as an identity `verified: false`;
   #749 will NOT merge before multi-identity.
-- **Columns stay (jean "2 => fine", 2026-11-26):** `password` stays on `directus_users`;
-  `email` stays as a code-written copy of the primary identity (a PATCH may only pick
-  one of the user's own verified email identities). Rejected: jean's own first idea of
-  dropping both so identities are the only source — breaks `$CURRENT_USER.email`,
-  presets, Flows, SDK/GraphQL, app forms, extensions. Password norm (web): one per
-  account (Microsoft, Google, Apple, GitHub, Keycloak, Supabase); per-email only in
-  Auth0 linked db identities.
+- **Columns (superseded 2026-11-27 by point 8 = E below):** `password` stays on
+  `directus_users`. The earlier "`email` stays as a code-written copy" ruling is void.
+  Password norm (web): one per account (Microsoft, Google, Apple, GitHub, Keycloak,
+  Supabase); per-email only in Auth0 linked db identities.
 - **Old email after a provider-side change (jean 2026-11-27, agreed):** when the provider
   sends a new verified email, the old email stays a verified identity the user can
   remove, shipped only together with a remove endpoint.
-- **Points 2-4 (jean 2026-11-27):** 2 = B: an unverified email identity blocks no
-  one; the unique index on `(kind, lower(value))` covers verified rows only. 3 = A: the
-  password login takes any verified email identity of the account. 4 = A: removing an
-  identity ends the sessions it opened (`directus_sessions.identity` FK ON DELETE
-  CASCADE); the account's last identity can't be removed (400). Point 1 (migrated
-  emails verified or not) asked back: Directus keeps no verified flag, only
-  `status: unverified` for a pending registration.
+- **Points 1-4 (jean 2026-11-27):** 1 = every migrated email identity is
+  `verified: false` (Directus keeps no verified flag, only `status: unverified` for a
+  pending registration; the consumer has never verified one). 2 = B: an unverified
+  email identity blocks no one; the unique index on `(kind, lower(value))` covers
+  verified rows only. 3 = A refined: the password login takes the account's primary
+  identity whatever its verified flag, plus any verified email identity. 4 = A:
+  removing an identity ends the sessions it opened (`directus_sessions.identity` FK
+  ON DELETE CASCADE); the account's last identity can't be removed (400); an account
+  may hold zero identities (token-only user).
+- **Point 8 = E (jean 2026-11-27):** `directus_users.email` is DROPPED.
+  `directus_users.primary_identity` (nullable M2O → `directus_user_identities.id`) is
+  the only source; it may point at an SSO identity (providers sending no email:
+  GitHub private, Apple after 1st login, openid without `email` scope, LDAP without
+  `mail`, opaque SAML NameID). Single-column FK, so `@directus/schema` and
+  `directus_relations` model it as a plain M2O (no composite-FK probe needed).
+  Request params keep the key `email` (`POST /auth/login`, invite, password
+  request/reset, SDK `LocalLoginPayload`): the api resolves it through identities
+  (kind email, `lower(value)`). Rejected: C (email as composite FK `(id, email)`),
+  D (rename `primary_email`), F (email kept as a trigger-derived read-only copy).
+  Why E is affordable: the fork has one consumer, auditable (its code + its
+  permissions/presets/Flows rows reading `email`); upstream merges are bounded to
+  BSL v11.x. Blast radius in-repo (grep 2026-11-27): ~39 api, ~29 app, 8 sdk, 15
+  packages files, 89 test files. The consumer's audit + PR ride the fork bump that
+  brings #772.
+- **Open, not yet put to jean:** 7 = verifying an email another account holds as its
+  primary. 9 = with `email` dropped nothing keeps two accounts' unverified primary
+  emails apart (2 B leaves unverified rows non-unique), so 3's "primary logs in
+  unverified" can match two accounts. 5 (`provider`/`external_identifier`/`auth_data`
+  columns) and 6 (permissions on `directus_user_identities`) still to propose.
 - **Focus (jean 2026-11-27):** stay on #772 until it merges; do not raise the #749
   rebase or other PRs meanwhile.
 - **Today, from code (not run):** a password user's SSO login with the same email is a
