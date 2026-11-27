@@ -56,7 +56,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			throw new InvalidProviderConfigError({ provider: additionalConfig['provider'] });
 		}
 
-		const redirectUrl = new Url(env['PUBLIC_URL'] as string).addPath(
+		const redirectUrl = new Url(env['PUBLIC_URL']).addPath(
 			'auth',
 			'login',
 			additionalConfig['provider'],
@@ -425,7 +425,8 @@ export function createOAuth2AuthRouter(providerName: string): Router { // bb-out
 				schema: req.schema,
 			});
 
-			const authMode = (env[`AUTH_${providerName.toUpperCase()}_MODE`] ?? 'session') as string;
+			const authModeEnvVarName = `AUTH_${providerName.toUpperCase()}_MODE` as const;
+			const authMode = env[authModeEnvVarName] ?? 'session';
 
 			let authResponse;
 
@@ -467,9 +468,17 @@ export function createOAuth2AuthRouter(providerName: string): Router { // bb-out
 
 			if (redirect) {
 				if (authMode === 'session') {
-					res.cookie(env['SESSION_COOKIE_NAME'] as string, accessToken, SESSION_COOKIE_OPTIONS);
+					res.cookie(
+						env['SESSION_COOKIE_NAME'],
+						accessToken,
+						SESSION_COOKIE_OPTIONS,
+					);
 				} else {
-					res.cookie(env['REFRESH_TOKEN_COOKIE_NAME'] as string, refreshToken, REFRESH_COOKIE_OPTIONS);
+					res.cookie(
+						env['REFRESH_TOKEN_COOKIE_NAME'],
+						refreshToken,
+						REFRESH_COOKIE_OPTIONS,
+					);
 				}
 
 				return res.redirect(redirect);

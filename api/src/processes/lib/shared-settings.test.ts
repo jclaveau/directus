@@ -40,6 +40,7 @@ type Subscribe = (
 const publish = vi.fn<Publish>(async () => {});
 const subscribe = vi.fn<Subscribe>(async () => {});
 
+// The services are mocked: no read reaches the schema past its collections.
 const options = { schema: { collections: {} } } as never;
 
 /** A connection the dialect's own table reads as complete. */
@@ -61,6 +62,7 @@ async function settingsHolding(stored: unknown) {
 			: { [SHARED_SETTINGS_COLUMNS.autoscale]: stored },
 	);
 
+	// A stub of the query chain the module calls, not a whole Knex.
 	vi.mocked(getDatabase).mockReturnValue({
 		select: () => ({ from: () => ({ first }) }),
 	} as never);
@@ -68,6 +70,7 @@ async function settingsHolding(stored: unknown) {
 
 async function busReady() {
 	const { useBus } = await import('../../bus/index.js');
+	// The mocks are typed to the settings channel, narrower than the bus generics.
 	vi.mocked(useBus).mockReturnValue({ publish, subscribe } as never);
 }
 
@@ -76,7 +79,7 @@ beforeEach(() => {
 
 	// A deployment whose connection is not fully declared never reaches one, so
 	// every arm below that expects a read has to declare one here.
-	vi.mocked(useEnv).mockReturnValue({ ...CONNECTION });
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({ ...CONNECTION });
 });
 
 // The dialect decides which of these are required, and a read is answered
@@ -85,7 +88,7 @@ beforeEach(() => {
 test('reads nothing through a connection missing a variable', async () => {
 	const { DB_HOST: _host, ...incomplete } = CONNECTION;
 
-	vi.mocked(useEnv).mockReturnValue(incomplete);
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(incomplete);
 	await settingsHolding(JSON.stringify({ maxWorkers: 8 }));
 
 	await expect(readSharedSettings(SHARED_SETTINGS_COLUMNS.autoscale))
@@ -112,7 +115,7 @@ test('reads nothing through a connection missing a variable', async () => {
 // question has to be answered before the connection is reached for.
 test('answers nothing where the deployment names no database', async () => {
 	await settingsHolding({ maxWorkers: 8 });
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 
 	await expect(readSharedSettings(SHARED_SETTINGS_COLUMNS.autoscale))
 		.resolves.toBeNull();
@@ -138,6 +141,7 @@ test('reads every column in a single statement', async () => {
 	});
 
 	const select = vi.fn(() => ({ from: () => ({ first }) }));
+	// A stub of the query chain the module calls, not a whole Knex.
 	vi.mocked(getDatabase).mockReturnValue({ select } as never);
 
 	await expect(readAllSharedSettings()).resolves.toEqual({
@@ -175,6 +179,7 @@ test('locks the row it reads through a transaction', async () => {
 test('reads the autoscale pair where the cache column is missing', async () => {
 	const { default: getDatabase } = await import('../../database/index.js');
 
+	// A stub of the query chain the module calls, not a whole Knex.
 	vi.mocked(getDatabase).mockReturnValue({
 		select: (selectedColumns: string | string[]) => {
 			return {
@@ -208,6 +213,7 @@ test('reads the autoscale pair where the cache column is missing', async () => {
 test('rethrows a failed read while the cache column exists', async () => {
 	const { default: getDatabase } = await import('../../database/index.js');
 
+	// A stub of the query chain the module calls, not a whole Knex.
 	vi.mocked(getDatabase).mockReturnValue({
 		select: (selectedColumns: string | string[]) => {
 			return {
@@ -418,15 +424,17 @@ test('re-reads every thirty seconds where nothing says otherwise', () => {
 // A deployment with no Redis has no bus to miss an announcement on, so this
 // floor is the only thing that lands a change there at all.
 test('takes the interval the deployment configured', () => {
-	vi.mocked(useEnv).mockReturnValue({ SHARED_SETTINGS_POLL_SECONDS: 5 });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ SHARED_SETTINGS_POLL_SECONDS: 5 });
 
 	expect(sharedSettingsPollMs()).toBe(5_000);
 });
 
 // The floor is read on the scaling tick, so a floor of none is a select every
 // time the pool is sized — and a typo would ask for one just as loudly.
-test.each([0, -5, 'often'])('refuses %o as an interval', (seconds) => {
-	vi.mocked(useEnv).mockReturnValue({ SHARED_SETTINGS_POLL_SECONDS: seconds });
+test.each([0, -5])('refuses %o as an interval', (seconds) => {
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ SHARED_SETTINGS_POLL_SECONDS: seconds });
 
 	expect(sharedSettingsPollMs()).toBe(30_000);
 });

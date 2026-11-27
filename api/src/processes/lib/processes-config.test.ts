@@ -26,47 +26,65 @@ afterEach(() => {
 });
 
 test('The report is served only where it was turned on', () => {
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_ENABLED: true });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PROCESSES_REPORT_ENABLED: true });
+
 	expect(processesReportEnabled()).toBe(true);
 
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_ENABLED: false });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PROCESSES_REPORT_ENABLED: false });
+
 	expect(processesReportEnabled()).toBe(false);
 
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 	expect(processesReportEnabled()).toBe(false);
 });
 
 test('Only the halves this node is configured to report are reported', () => {
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'env'] });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'env'] });
+
 	expect(reportedProcessDetails()).toEqual(['stats', 'env']);
 
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: [' stats '] });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PROCESSES_REPORT_DETAILS: [' stats '] });
+
 	expect(reportedProcessDetails()).toEqual(['stats']);
 
 	// A name that is not a half is dropped rather than reported back.
-	vi.mocked(useEnv)
+	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'secrets'] });
 
 	expect(reportedProcessDetails()).toEqual(['stats']);
 
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: [''] });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PROCESSES_REPORT_DETAILS: [''] });
+
 	expect(reportedProcessDetails()).toEqual([]);
 
 	// Anything that is not a list at all reports nothing.
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: 'stats' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({
+			// @ts-expect-error a bare string where string[] is declared
+			PROCESSES_REPORT_DETAILS: 'stats',
+		});
+
 	expect(reportedProcessDetails()).toEqual([]);
 
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 	expect(reportedProcessDetails()).toEqual([]);
 });
 
 test('The service is named by configuration first', () => {
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_SERVICE_NAME: '  api  ' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PROCESSES_SERVICE_NAME: '  api  ' });
+
 	expect(processesServiceName()).toBe('api');
 });
 
 test('Then by the platform, then by the supervisor, then by nothing', () => {
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_SERVICE_NAME: '   ' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PROCESSES_SERVICE_NAME: '   ' });
 
 	process.env['RAILWAY_SERVICE_NAME'] = 'from-the-platform';
 	expect(processesServiceName()).toBe('from-the-platform');
@@ -88,15 +106,18 @@ test('The replica is the platform id, else the host it runs on', () => {
 });
 
 test('The collection window is a duration, and 750ms by default', () => {
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_COLLECT_TIMEOUT: '3s' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PROCESSES_COLLECT_TIMEOUT: '3s' });
+
 	expect(processesCollectTimeoutMs()).toBe(3000);
 
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 	expect(processesCollectTimeoutMs()).toBe(750);
 });
 
 test('A request asking for nothing gets what the node reports', () => {
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'env'] });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'env'] });
 
 	expect(requestedProcessDetails(undefined)).toEqual(['stats', 'env']);
 	expect(requestedProcessDetails('')).toEqual(['stats', 'env']);
@@ -104,7 +125,8 @@ test('A request asking for nothing gets what the node reports', () => {
 });
 
 test('A request narrows the halves, in a list or comma-separated', () => {
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'env'] });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'env'] });
 
 	expect(requestedProcessDetails(['stats'])).toEqual(['stats']);
 	expect(requestedProcessDetails('stats')).toEqual(['stats']);
@@ -115,14 +137,16 @@ test('A request narrows the halves, in a list or comma-separated', () => {
 // configuration: a caller must not be able to ask for more than the deployment
 // chose to expose.
 test('A request cannot widen what the node reports', () => {
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats'] });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats'] });
 
 	expect(requestedProcessDetails(['stats', 'env'])).toEqual(['stats']);
 	expect(requestedProcessDetails(['env'])).toEqual([]);
 });
 
 test('A half that is not a half is dropped, not passed on', () => {
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'env'] });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'env'] });
 
 	// nothing recognisable left, so the request reads as "no preference"
 	expect(requestedProcessDetails(['secrets'])).toEqual(['stats', 'env']);
@@ -130,7 +154,7 @@ test('A half that is not a half is dropped, not passed on', () => {
 });
 
 test('A node that reports nothing answers nothing, however it is asked', () => {
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 
 	expect(requestedProcessDetails(['stats', 'env'])).toEqual([]);
 	expect(requestedProcessDetails(undefined)).toEqual([]);

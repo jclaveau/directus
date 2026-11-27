@@ -203,7 +203,9 @@ export class CommentsService extends ItemsService {
 
 					comment = `> ${comment.replace(/\n+/gm, '\n> ')}`;
 
-					const href = new Url(env['PUBLIC_URL'] as string).addPath('admin', 'content', collection, itemKey).toString();
+					const href = new Url(env['PUBLIC_URL'])
+						.addPath('admin', 'content', collection, itemKey)
+						.toString();
 
 					const message = `
 Hello ${userName(user)},

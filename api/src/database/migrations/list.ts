@@ -139,7 +139,7 @@ export async function listMigrations(
 		(file: string) => CORE_FILE_PATTERN.test(file),
 	);
 
-	const customMigrationsPath = path.resolve(env['MIGRATIONS_PATH'] as string);
+	const customMigrationsPath = path.resolve(env['MIGRATIONS_PATH']);
 
 	const customFiles = (
 		(

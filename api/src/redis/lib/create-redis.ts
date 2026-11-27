@@ -80,7 +80,7 @@ export function withRedisDatabase(url: string, database: number): string {
 export const createRedis = (database?: number) => {
 	const env = useEnv();
 	const options: RedisOptions = { retryStrategy: retryStrategyFromEnv() };
-	const url = env['REDIS'] as string | undefined;
+	const url = env['REDIS'];
 
 	let redis: Redis;
 

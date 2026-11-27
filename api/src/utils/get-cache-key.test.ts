@@ -75,7 +75,7 @@ const requests = [
 const cases = requests.map(({ name, params, key }) => [name, params, key]);
 
 beforeEach(() => {
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 });
 
 afterEach(() => {
@@ -167,7 +167,8 @@ describe('get cache key', async () => {
 
 	describe('CACHE_KEY_HASH_ENABLED=false (readable dev key)', () => {
 		beforeEach(() => {
-			vi.mocked(useEnv).mockReturnValue({ CACHE_KEY_HASH_ENABLED: false });
+			vi.mocked(useEnv, { partial: true })
+				.mockReturnValue({ CACHE_KEY_HASH_ENABLED: false });
 		});
 
 		test('returns the readable request descriptor instead of a hash', async () => {
@@ -236,7 +237,7 @@ function acceptLanguage(value: string): Request {
 
 describe('Accept-Language dimension (always on)', () => {
 	beforeEach(() => {
-		vi.mocked(useEnv).mockReturnValue({});
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 	});
 
 	test('a header-less request keeps the language-agnostic key', async () => {
@@ -280,7 +281,7 @@ describe('Accept-Language dimension (always on)', () => {
 
 describe('CACHE_VARY_CONTENT_TYPES dimension (opt-in)', () => {
 	test('unset: the negotiated content type does not enter the key', async () => {
-		vi.mocked(useEnv).mockReturnValue({});
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 
 		const csv = await getCacheKey(varyRequest({ accepts: () => 'csv' }));
 		const json = await getCacheKey(varyRequest({ accepts: () => 'json' }));
@@ -289,7 +290,8 @@ describe('CACHE_VARY_CONTENT_TYPES dimension (opt-in)', () => {
 	});
 
 	test('set: negotiates the request against the declared list', async () => {
-		vi.mocked(useEnv).mockReturnValue({ CACHE_VARY_CONTENT_TYPES: ['json', 'csv'] });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValue({ CACHE_VARY_CONTENT_TYPES: ['json', 'csv'] });
 
 		const accepts = vi.fn().mockReturnValue('csv');
 		await getCacheKey(varyRequest({ accepts }));
@@ -298,7 +300,8 @@ describe('CACHE_VARY_CONTENT_TYPES dimension (opt-in)', () => {
 	});
 
 	test('set: each type and the unsupported bucket get their own key', async () => {
-		vi.mocked(useEnv).mockReturnValue({ CACHE_VARY_CONTENT_TYPES: ['json', 'csv'] });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValue({ CACHE_VARY_CONTENT_TYPES: ['json', 'csv'] });
 
 		const csv = await getCacheKey(varyRequest({ accepts: () => 'csv' }));
 		const json = await getCacheKey(varyRequest({ accepts: () => 'json' }));
@@ -310,7 +313,7 @@ describe('CACHE_VARY_CONTENT_TYPES dimension (opt-in)', () => {
 	});
 
 	test('trims and dedupes the list, preserving order (not sorted)', async () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			CACHE_VARY_CONTENT_TYPES: ['json', ' csv ', 'json'],
 		});
 
@@ -324,7 +327,8 @@ describe('CACHE_VARY_CONTENT_TYPES dimension (opt-in)', () => {
 
 describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
 	function varyHeaders(patterns: string[]): void {
-		vi.mocked(useEnv).mockReturnValue({ CACHE_VARY_REQUEST_HEADERS: patterns });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValue({ CACHE_VARY_REQUEST_HEADERS: patterns });
 	}
 
 	function tenant(value: string): Request {
@@ -336,7 +340,7 @@ describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
 	}
 
 	test('unset: request headers do not enter the key', async () => {
-		vi.mocked(useEnv).mockReturnValue({});
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 
 		const a = await getCacheKey(tenant('a'));
 		const b = await getCacheKey(tenant('b'));
@@ -430,7 +434,7 @@ describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
 	});
 
 	test('CACHE_VARY_REQUEST_HEADERS_EXCLUDED extends the glob denylist', async () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			CACHE_VARY_REQUEST_HEADERS: ['x-*'],
 			CACHE_VARY_REQUEST_HEADERS_EXCLUDED: ['x-tenant-id'],
 		});

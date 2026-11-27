@@ -12,6 +12,8 @@ import {
 } from 'vitest';
 
 const env: Record<string, any> = {
+	// `useEnv` merges defaults.ts, so the real one always carries this.
+	AUTH_PROVIDERS: [],
 	CACHE_SCHEMA: false,
 	CACHE_SCHEMA_MAX_ITERATIONS: 100,
 	CACHE_SCHEMA_SYNC_TIMEOUT: 10000,

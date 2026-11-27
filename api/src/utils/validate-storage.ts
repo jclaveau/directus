@@ -1,5 +1,4 @@
 import { useEnv } from '@directus/env';
-import { toArray } from '@directus/utils';
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
@@ -21,15 +20,19 @@ export async function validateStorage(): Promise<void> {
 		}
 	}
 
-	const usedStorageDrivers = toArray(env['STORAGE_LOCATIONS'] as string).map(
-		(location) => env[`STORAGE_${location.toUpperCase()}_DRIVER`],
+	const usedStorageDrivers = env['STORAGE_LOCATIONS'].map(
+		(location) => env[`STORAGE_${location.toUpperCase()}_DRIVER` as const],
 	);
 
 	if (usedStorageDrivers.includes('local')) {
 		try {
-			await access(env['STORAGE_LOCAL_ROOT'] as string, constants.R_OK | constants.W_OK);
+			await access(env['STORAGE_LOCAL_ROOT'], constants.R_OK | constants.W_OK);
 		} catch {
-			logger.warn(`Upload directory (${path.resolve(env['STORAGE_LOCAL_ROOT'] as string)}) is not read/writeable!`);
+			const uploadDirectory = path.resolve(env['STORAGE_LOCAL_ROOT']);
+
+			logger.warn(
+				`Upload directory (${uploadDirectory}) is not read/writeable!`,
+			);
 		}
 	}
 }

@@ -67,7 +67,8 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			throw new InvalidProviderConfigError({ provider });
 		}
 
-		const redirectUrl = new Url(env['PUBLIC_URL'] as string).addPath('auth', 'login', provider, 'callback');
+		const redirectUrl = new Url(env['PUBLIC_URL'])
+			.addPath('auth', 'login', provider, 'callback');
 
 		this.redirectUrl = redirectUrl.toString();
 		this.usersService = new UsersService({ knex: this.knex, schema: this.schema });
@@ -446,7 +447,9 @@ export function createOpenIDAuthRouter(providerName: string): Router { // bb-out
 			}
 
 			const token = jwt.sign({ verifier: codeVerifier, redirect, prompt }, getSecret(), {
-				expiresIn: (env[`AUTH_${providerName.toUpperCase()}_LOGIN_TIMEOUT`] ?? '5m') as StringValue | number,
+				expiresIn: (
+					env[`AUTH_${providerName.toUpperCase()}_LOGIN_TIMEOUT` as const] ?? '5m'
+				) as StringValue | number,
 				issuer: 'directus',
 			});
 
@@ -459,7 +462,7 @@ export function createOpenIDAuthRouter(providerName: string): Router { // bb-out
 				return res.redirect(await provider.generateAuthUrl(codeVerifier, prompt));
 			} catch {
 				return res.redirect(
-					new Url(env['PUBLIC_URL'] as string)
+					new Url(env['PUBLIC_URL'])
 						.addPath('admin', 'login')
 						.setQuery('reason', ErrorCode.ServiceUnavailable)
 						.toString(),
@@ -494,7 +497,7 @@ export function createOpenIDAuthRouter(providerName: string): Router { // bb-out
 				};
 			} catch (e: any) {
 				logger.warn(e, `[OpenID] Couldn't verify OpenID cookie`);
-				const url = new Url(env['PUBLIC_URL'] as string).addPath('admin', 'login');
+				const url = new Url(env['PUBLIC_URL']).addPath('admin', 'login');
 				return res.redirect(`${url.toString()}?reason=${ErrorCode.InvalidCredentials}`);
 			}
 
@@ -513,7 +516,8 @@ export function createOpenIDAuthRouter(providerName: string): Router { // bb-out
 				schema: req.schema,
 			});
 
-			const authMode = (env[`AUTH_${providerName.toUpperCase()}_MODE`] ?? 'session') as string;
+			const authModeEnvVarName = `AUTH_${providerName.toUpperCase()}_MODE` as const;
+			const authMode = env[authModeEnvVarName] ?? 'session';
 
 			let authResponse;
 
@@ -558,9 +562,17 @@ export function createOpenIDAuthRouter(providerName: string): Router { // bb-out
 
 			if (redirect) {
 				if (authMode === 'session') {
-					res.cookie(env['SESSION_COOKIE_NAME'] as string, accessToken, SESSION_COOKIE_OPTIONS);
+					res.cookie(
+						env['SESSION_COOKIE_NAME'],
+						accessToken,
+						SESSION_COOKIE_OPTIONS,
+					);
 				} else {
-					res.cookie(env['REFRESH_TOKEN_COOKIE_NAME'] as string, refreshToken, REFRESH_COOKIE_OPTIONS);
+					res.cookie(
+						env['REFRESH_TOKEN_COOKIE_NAME'],
+						refreshToken,
+						REFRESH_COOKIE_OPTIONS,
+					);
 				}
 
 				return res.redirect(redirect);

@@ -38,8 +38,8 @@ test('isLoginRedirectAllowed returns false with invalid redirect', () => {
 test('isLoginRedirectAllowed returns true for allowed URL', () => {
 	const provider = 'local';
 
-	vi.mocked(useEnv).mockReturnValue({
-		[`AUTH_${provider.toUpperCase()}_REDIRECT_ALLOW_LIST`]:
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
+		AUTH_LOCAL_REDIRECT_ALLOW_LIST:
 			'http://external.example.com,https://external.example.com,http://external.example.com:8055/test',
 		PUBLIC_URL: 'http://public.example.com',
 	});
@@ -53,8 +53,8 @@ test('isLoginRedirectAllowed returns true for allowed URL', () => {
 test('isLoginRedirectAllowed returns false for denied URL', () => {
 	const provider = 'local';
 
-	vi.mocked(useEnv).mockReturnValue({
-		[`AUTH_${provider.toUpperCase()}_REDIRECT_ALLOW_LIST`]: 'http://external.example.com',
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
+		AUTH_LOCAL_REDIRECT_ALLOW_LIST: 'http://external.example.com',
 		PUBLIC_URL: 'http://public.example.com',
 	});
 
@@ -66,8 +66,8 @@ test('isLoginRedirectAllowed returns false for denied URL', () => {
 test('isLoginRedirectAllowed returns true for relative paths', () => {
 	const provider = 'local';
 
-	vi.mocked(useEnv).mockReturnValue({
-		[`AUTH_${provider.toUpperCase()}_REDIRECT_ALLOW_LIST`]: 'http://external.example.com',
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
+		AUTH_LOCAL_REDIRECT_ALLOW_LIST: 'http://external.example.com',
 		PUBLIC_URL: 'http://public.example.com',
 	});
 
@@ -81,8 +81,8 @@ test('isLoginRedirectAllowed returns true for relative paths', () => {
 test('isLoginRedirectAllowed returns false if missing protocol', () => {
 	const provider = 'local';
 
-	vi.mocked(useEnv).mockReturnValue({
-		[`AUTH_${provider.toUpperCase()}_REDIRECT_ALLOW_LIST`]: 'http://example.com',
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
+		AUTH_LOCAL_REDIRECT_ALLOW_LIST: 'http://example.com',
 		PUBLIC_URL: 'http://example.com',
 	});
 
@@ -93,7 +93,7 @@ test('isLoginRedirectAllowed returns false if missing protocol', () => {
 test('isLoginRedirectAllowed throws error if PUBLIC_URL is misconfigured', () => {
 	const provider = 'local';
 
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		PUBLIC_URL: '/',
 	});
 

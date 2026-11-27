@@ -17,7 +17,7 @@ beforeEach(() => {
 		return mockRedis;
 	} as unknown as typeof Redis);
 
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 });
 
 afterEach(() => {

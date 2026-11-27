@@ -569,7 +569,7 @@ describe('Services / Collections / readByQuery', () => {
 			accountability: nonAdmin,
 		});
 
-		vi.mocked(useEnv).mockReturnValueOnce({});
+		vi.mocked(useEnv, { partial: true }).mockReturnValueOnce({});
 
 		expect(await service.readByQuery()).toEqual([
 			{ collection: 'articles', meta: { collection: 'articles' }, schema: null },

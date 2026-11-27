@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 test('the caller value wins over DEFAULT_MUTATION_BATCHING', () => {
-	vi.mocked(useEnv)
+	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ DEFAULT_MUTATION_BATCHING: 'disableBatching' });
 
 	expect(resolveMutationBatching({ mutationBatching: 'preserveMutationOrder' }))
@@ -17,20 +17,20 @@ test('the caller value wins over DEFAULT_MUTATION_BATCHING', () => {
 });
 
 test('DEFAULT_MUTATION_BATCHING decides when the caller passes nothing', () => {
-	vi.mocked(useEnv)
+	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ DEFAULT_MUTATION_BATCHING: 'disableBatching' });
 
 	expect(resolveMutationBatching({})).toBe('disableBatching');
 });
 
 test('an env without DEFAULT_MUTATION_BATCHING preserves the order', () => {
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 
 	expect(resolveMutationBatching({})).toBe('preserveMutationOrder');
 });
 
 test('an unknown DEFAULT_MUTATION_BATCHING is refused', () => {
-	vi.mocked(useEnv)
+	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ DEFAULT_MUTATION_BATCHING: 'batchEverything' });
 
 	expect(() => resolveMutationBatching({})).toThrowError(new Error(
@@ -40,7 +40,7 @@ test('an unknown DEFAULT_MUTATION_BATCHING is refused', () => {
 });
 
 test('an unknown mutationBatching is refused', () => {
-	vi.mocked(useEnv)
+	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ DEFAULT_MUTATION_BATCHING: 'minimizeMutations' });
 
 	expect(() => {
@@ -54,7 +54,7 @@ test('an unknown mutationBatching is refused', () => {
 });
 
 test('refuseChildJoiningSeveralRows is refused under disableBatching', () => {
-	vi.mocked(useEnv)
+	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ DEFAULT_MUTATION_BATCHING: 'disableBatching' });
 
 	expect(() => {
@@ -66,7 +66,7 @@ test('refuseChildJoiningSeveralRows is refused under disableBatching', () => {
 });
 
 test('refuseChildJoiningSeveralRows runs under the other modes', () => {
-	vi.mocked(useEnv)
+	vi.mocked(useEnv, { partial: true })
 		.mockReturnValue({ DEFAULT_MUTATION_BATCHING: 'disableBatching' });
 
 	expect(resolveMutationBatching({

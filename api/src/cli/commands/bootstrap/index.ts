@@ -50,7 +50,7 @@ export default async function bootstrap({
 			logger.info('Skipping creation of default Admin user and role...');
 		}
 
-		if (env['PROJECT_NAME'] && typeof env['PROJECT_NAME'] === 'string' && env['PROJECT_NAME'].length > 0) {
+		if (env['PROJECT_NAME']) {
 			const settingsService = new SettingsService({ schema });
 			await settingsService.upsertSingleton({ project_name: env['PROJECT_NAME'] });
 		}

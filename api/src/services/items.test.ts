@@ -64,6 +64,8 @@ import { UsersService } from './users.js';
 // useEnv() at import time) sees an initialized env.
 const env = vi.hoisted<Record<string, any>>(() => {
 	return {
+		// `useEnv` merges defaults.ts, so the real one always carries this.
+		AUTH_PROVIDERS: [],
 		CACHE_AUTO_PURGE: true,
 		CACHE_AUTO_PURGE_IGNORE_LIST: [],
 		CACHE_NAMESPACE: 'scalabus',
@@ -1260,6 +1262,7 @@ describe('Integration Tests', () => {
 				const updatedKeys = await service.updateMany([1, 2], { name: 'after' }, {
 					allowFilterCancel: true,
 					onHookAddedRows: hookAddedSpy,
+					// upsertMany's own option, absent from the public overloads.
 				} as never);
 
 				expect(updatedKeys).toEqual([1, null]);
@@ -1738,7 +1741,8 @@ describe('Integration Tests', () => {
 
 				await expect(new ItemsService('test', { knex: db, schema: stringKeySchema })
 					.updateOne(
-						undefined as never,
+						// @ts-expect-error a caller can pass no key, which PrimaryKey refuses
+						undefined,
 						{ id: 'k5', children: { create: [{}] } },
 					))
 					.rejects

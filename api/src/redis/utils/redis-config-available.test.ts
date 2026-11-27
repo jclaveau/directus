@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 test('Returns true if REDIS_ENABLED is true', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		REDIS_ENABLED: true,
 	});
 
@@ -18,7 +18,7 @@ test('Returns true if REDIS_ENABLED is true', () => {
 });
 
 test('Returns false if REDIS_ENABLED is false', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		REDIS_ENABLED: false,
 	});
 
@@ -26,7 +26,7 @@ test('Returns false if REDIS_ENABLED is false', () => {
 });
 
 test('Returns true if REDIS exists in environment', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		REDIS: 'redis://test',
 	});
 
@@ -34,7 +34,7 @@ test('Returns true if REDIS exists in environment', () => {
 });
 
 test('Returns true if one or more environment variables start with REDIS_', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		REDIS_HOST: 'test',
 		REDIS_PORT: 1234,
 	});
@@ -43,5 +43,5 @@ test('Returns true if one or more environment variables start with REDIS_', () =
 });
 
 test('Returns false if no Redis environment variables exist', () => {
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 });

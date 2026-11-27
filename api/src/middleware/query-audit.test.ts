@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 test('writes the audit of the request when its headers flush', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -61,7 +61,7 @@ test('writes the audit of the request when its headers flush', () => {
 });
 
 test('adds its audit to the store of the request it audits', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -91,7 +91,7 @@ test('adds its audit to the store of the request it audits', () => {
 });
 
 test('takes the level the request sends over QUERY_AUDIT_LEVEL', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -128,7 +128,7 @@ test('takes the level the request sends over QUERY_AUDIT_LEVEL', () => {
 });
 
 test('reports the bound values to an admin asking bindings', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -169,7 +169,7 @@ test('reports the bound values to an admin asking bindings', () => {
 });
 
 test('lists every run in order to an admin asking full', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -219,7 +219,7 @@ test('lists every run in order to an admin asking full', () => {
 test.each(['bindings', 'full'])(
 	'withholds the bound values from anyone else asking %s',
 	(requestedLevel) => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			QUERY_AUDIT_HEADER: 'X-Query-Audit',
 			QUERY_AUDIT_LEVEL: 'counts',
 			QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -269,7 +269,7 @@ test.each([
 	'statements; no-timings; timings',
 	'statements;',
 ])('refuses %j', (askedValue) => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
 	});
@@ -296,7 +296,7 @@ test.each([
 });
 
 test('writes the request entry alone for a request that ran no statement', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -324,7 +324,7 @@ test('writes the request entry alone for a request that ran no statement', () =>
 });
 
 test('caps nothing when QUERY_AUDIT_HEADER_MAX_SIZE is 0', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '0',
@@ -396,7 +396,7 @@ test.each([
 			+ '[{"stmt":"select articles..."}]}]}',
 	},
 ])('reports the durations $askedValue asks for', ({ askedValue, auditHeader }) => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -429,7 +429,7 @@ test.each([
 // A connection pool first filled during the request runs its callbacks in the
 // request's store long after the response left.
 test('records nothing once the headers flushed', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -454,7 +454,7 @@ test('records nothing once the headers flushed', () => {
 });
 
 test('records nothing once the connection closed', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -488,7 +488,7 @@ test.each([
 		endRequest: (res: Response) => res.emit('close'),
 	},
 ])('lets go of the statements once $flush', ({ endRequest }) => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'full',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
@@ -518,7 +518,7 @@ test.each([
 });
 
 test('records no bound value once anyone else authenticated', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',

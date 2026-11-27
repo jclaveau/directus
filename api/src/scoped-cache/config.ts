@@ -32,7 +32,7 @@ export function scopedCachePurgeEnabled(): boolean {
  * 0 purges whole whenever a rule reaches a row.
  */
 export function scopedCacheMaxOnDeleteRows(): number {
-	return env['CACHE_SCOPED_MAX_ON_DELETE_ROWS'] as number;
+	return env['CACHE_SCOPED_MAX_ON_DELETE_ROWS'];
 }
 
 /**

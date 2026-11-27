@@ -44,7 +44,7 @@ export function getCacheControlHeader(
 	if (
 		globalCacheSettings &&
 		Number.isInteger(env['CACHE_CONTROL_S_MAXAGE']) &&
-		(env['CACHE_CONTROL_S_MAXAGE'] as number) >= 0
+		env['CACHE_CONTROL_S_MAXAGE'] >= 0
 	) {
 		headerValues.push(`s-maxage=${env['CACHE_CONTROL_S_MAXAGE']}`);
 	}

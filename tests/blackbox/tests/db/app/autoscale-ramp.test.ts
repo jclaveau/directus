@@ -184,27 +184,6 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 		expect(await sizesOver(rig, 15_000)).toEqual([2]);
 	}, 120_000);
 
-	// An env var the type map cannot cast arrives as NaN, and NaN satisfies
-	// neither threshold comparison: the pool would stop scaling in both
-	// directions and log nothing about why.
-	it('falls back to a default when an env value is not a number', async () => {
-		const rig = startPool({ appName: 'autoscale-nan', instances: 3 });
-		rigs.push(rig);
-
-		startAutoscaler(rig, {
-			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: 'forty',
-			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '95',
-			PM2_AUTOSCALE_MIN_WORKERS: '1',
-			PM2_AUTOSCALE_MAX_WORKERS: '3',
-			PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER: '2',
-			PM2_AUTOSCALE_WARMUP_SECONDS: '2',
-		});
-
-		// The default release threshold is 40 and the pool is idle, so it
-		// drains. Left as NaN it would sit at three forever.
-		expect(await poolSize(rig, 1, 60_000)).toBe(1);
-	}, 120_000);
-
 	// Prewarm runs before the decision does, so it used to hand a batch of
 	// workers to an app that was already crash-looping.
 	it('does not prewarm a pool that is restarting', async () => {

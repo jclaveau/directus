@@ -208,7 +208,7 @@ describe('get cache headers', () => {
 				}),
 			} as Partial<Request>;
 
-			vi.mocked(useEnv).mockReturnValue(scenario.input.env);
+			vi.mocked(useEnv, { partial: true }).mockReturnValue(scenario.input.env);
 
 			const { ttl, globalCacheSettings, personalized } = scenario.input;
 

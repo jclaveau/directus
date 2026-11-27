@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => {
 		SERVE_APP: false,
 		EXTENSIONS_SANDBOX_MEMORY: 128,
 		EXTENSIONS_SANDBOX_TIMEOUT: 10000,
+		TEMP_PATH: '/nonexistent-temp-path',
 	};
 
 	return {
@@ -62,7 +63,14 @@ vi.mock('chokidar', () => {
 	return { default: { watch: () => watcher } };
 });
 
-vi.mock('@directus/env', () => ({ useEnv: () => mocks.env }));
+vi.mock('@directus/env', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('@directus/env')>()),
+		useEnv: () => mocks.env,
+		useEnvVarRawValues: () => ({}),
+	};
+});
+
 vi.mock('../logger/index.js', () => ({ useLogger: () => mocks.logger }));
 vi.mock('../bus/index.js', () => ({ useBus: () => mocks.bus }));
 vi.mock('../database/index.js', () => ({ default: () => ({}) }));
@@ -521,4 +529,12 @@ test.each([
 		reloadFailure,
 		'Failed to reload the extensions on a change in the extension packages',
 	);
+});
+
+test('answers no chunk for one the temp folder does not hold', async () => {
+	const manager = new ExtensionManager();
+
+	Object.assign(manager, { appExtensionChunks: ['missing.js'] });
+
+	expect(await manager.getAppExtensionChunk('missing.js')).toBe(null);
 });

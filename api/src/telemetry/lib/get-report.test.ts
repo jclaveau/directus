@@ -1,4 +1,4 @@
-import { useEnv } from '@directus/env';
+import { useEnv, type Env } from '@directus/env';
 import { version } from 'directus/version';
 import { type Knex } from 'knex';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
@@ -26,6 +26,8 @@ vi.mock('../../database/helpers/index.js', () => ({
 // reduce to just mock the file when logger is also using useLogger everywhere @TODO
 vi.mock('@directus/env', () => ({
 	useEnv: vi.fn().mockReturnValue({
+		// `useEnv` merges defaults.ts, so the real one always carries this.
+		AUTH_PROVIDERS: [],
 		EMAIL_TEMPLATES_PATH: './templates',
 	}),
 }));
@@ -39,7 +41,7 @@ vi.mock('../../utils/fetch-user-count/fetch-user-count.js');
 vi.mock('../utils/get-filesize-sum.js');
 vi.mock('../utils/get-project-id.js');
 
-let mockEnv: Record<string, unknown>;
+let mockEnv: Partial<Env>;
 let mockDb: Knex;
 let mockUserCounts: UserCount;
 let mockUserItemCounts: UserItemCount;
@@ -67,7 +69,7 @@ beforeEach(() => {
 
 	mockProjectId = 'test-project-id';
 
-	vi.mocked(useEnv).mockReturnValue(mockEnv);
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(mockEnv);
 	vi.mocked(getDatabase).mockReturnValue(mockDb);
 
 	vi.mocked(getItemCount).mockResolvedValue({});

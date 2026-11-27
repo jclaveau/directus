@@ -165,7 +165,9 @@ export class UsersService extends ItemsService {
 			issuer: 'directus',
 		});
 
-		return (url ? new Url(url) : new Url(env['PUBLIC_URL'] as string).addPath('admin', 'accept-invite'))
+		return (url
+			? new Url(url)
+			: new Url(env['PUBLIC_URL']).addPath('admin', 'accept-invite'))
 			.setQuery('token', token)
 			.toString();
 	}
@@ -454,7 +456,7 @@ export class UsersService extends ItemsService {
 		const opts: MutationOptions = {};
 
 		try {
-			if (url && isUrlAllowed(url, env['USER_INVITE_URL_ALLOW_LIST'] as string) === false) {
+			if (url && isUrlAllowed(url, env['USER_INVITE_URL_ALLOW_LIST']) === false) {
 				throw new InvalidPayloadError({ reason: `URL "${url}" can't be used to invite users` });
 			}
 		} catch (err: any) {
@@ -536,14 +538,17 @@ export class UsersService extends ItemsService {
 	async registerUser(input: RegisterUserInput) {
 		if (
 			input.verification_url &&
-			isUrlAllowed(input.verification_url, env['USER_REGISTER_URL_ALLOW_LIST'] as string) === false
+			isUrlAllowed(
+				input.verification_url,
+				env['USER_REGISTER_URL_ALLOW_LIST'],
+			) === false
 		) {
 			throw new InvalidPayloadError({
 				reason: `URL "${input.verification_url}" can't be used to verify registered users`,
 			});
 		}
 
-		const STALL_TIME = env['REGISTER_STALL_TIME'] as number;
+		const STALL_TIME = env['REGISTER_STALL_TIME'];
 		const timeStart = performance.now();
 		const serviceOptions: AbstractServiceOptions = { accountability: this.accountability, schema: this.schema };
 		const settingsService = new SettingsService(serviceOptions);
@@ -611,7 +616,7 @@ export class UsersService extends ItemsService {
 			const verificationUrl = (
 				input.verification_url
 					? new Url(input.verification_url)
-					: new Url(env['PUBLIC_URL'] as string).addPath('users', 'register', 'verify-email')
+					: new Url(env['PUBLIC_URL']).addPath('users', 'register', 'verify-email')
 			)
 				.setQuery('token', token)
 				.toString();
@@ -673,7 +678,7 @@ export class UsersService extends ItemsService {
 			});
 		}
 
-		if (url && isUrlAllowed(url, env['PASSWORD_RESET_URL_ALLOW_LIST'] as string) === false) {
+		if (url && isUrlAllowed(url, env['PASSWORD_RESET_URL_ALLOW_LIST']) === false) {
 			throw new InvalidPayloadError({ reason: `URL "${url}" can't be used to reset passwords` });
 		}
 
@@ -686,7 +691,9 @@ export class UsersService extends ItemsService {
 		const payload = { email: user.email, scope: 'password-reset', hash: getSimpleHash('' + user.password) };
 		const token = jwt.sign(payload, getSecret(), { expiresIn: '1d', issuer: 'directus' });
 
-		const acceptUrl = (url ? new Url(url) : new Url(env['PUBLIC_URL'] as string).addPath('admin', 'reset-password'))
+		const acceptUrl = (url
+			? new Url(url)
+			: new Url(env['PUBLIC_URL']).addPath('admin', 'reset-password'))
 			.setQuery('token', token)
 			.toString();
 

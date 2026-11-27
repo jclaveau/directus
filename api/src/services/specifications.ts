@@ -110,7 +110,10 @@ class OASSpecsService implements SpecificationSubService {
 		});
 
 		const isDefaultPublicUrl = env['PUBLIC_URL'] === '/';
-		const url = isDefaultPublicUrl && host ? host : (env['PUBLIC_URL'] as string);
+
+		const url = isDefaultPublicUrl && host
+			? host
+			: env['PUBLIC_URL'];
 
 		const hashedVersion = hash({
 			now: new Date().toISOString(),
@@ -210,7 +213,10 @@ class OASSpecsService implements SpecificationSubService {
 					// tailoring, and an `x-` field is how OAS 3.0.1 says to add one.
 					const enabledBy = (pathItem as Record<string, unknown>)['x-enabled-by'];
 
-					if (typeof enabledBy === 'string' && env[enabledBy] !== true) {
+					const isSwitchedOff = typeof enabledBy === 'string'
+						&& (env as Record<string, unknown>)[enabledBy] !== true;
+
+					if (isSwitchedOff) {
 						continue;
 					}
 

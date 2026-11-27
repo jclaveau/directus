@@ -123,8 +123,9 @@ export async function createServer(): Promise<http.Server> {
 
 	const terminusOptions: TerminusOptions = {
 		timeout:
-			(env['SERVER_SHUTDOWN_TIMEOUT'] as number) >= 0 && (env['SERVER_SHUTDOWN_TIMEOUT'] as number) < Infinity
-				? (env['SERVER_SHUTDOWN_TIMEOUT'] as number)
+			env['SERVER_SHUTDOWN_TIMEOUT'] >= 0
+			&& env['SERVER_SHUTDOWN_TIMEOUT'] < Infinity
+				? env['SERVER_SHUTDOWN_TIMEOUT']
 				: 1000,
 		signals: ['SIGINT', 'SIGTERM', 'SIGHUP'],
 		beforeShutdown,
@@ -194,9 +195,9 @@ export async function startServer(): Promise<void> {
 
 	void watchOutstandingMigrations();
 
-	const host = env['HOST'] as string;
-	const path = env['UNIX_SOCKET_PATH'] as string | undefined;
-	const port = env['PORT'] as string;
+	const host = env['HOST'];
+	const path = env['UNIX_SOCKET_PATH'];
+	const port = env['PORT'];
 
 	let listenOptions: ListenOptions;
 

@@ -22,25 +22,11 @@ export function getBaseConnectionName(): string {
 		: 'base';
 }
 
-/**
- * Names of the extra connections from `DB_CONNECTIONS` (array when cast, CSV
- * at runtime).
- */
+/** Names of the extra connections from `DB_CONNECTIONS`. */
 export function getExtraConnectionNames(): string[] {
-	const value = useEnv()['DB_CONNECTIONS'];
+	const connectionNames = useEnv()['DB_CONNECTIONS'] ?? [];
 
-	if (Array.isArray(value)) {
-		return value.map(String).filter(Boolean);
-	}
-
-	if (typeof value === 'string') {
-		return value
-			.split(',')
-			.map((name) => name.trim())
-			.filter(Boolean);
-	}
-
-	return [];
+	return connectionNames.map(String).filter(Boolean);
 }
 
 /** Base `DB_*` config, with every named-connection namespace stripped off. */
@@ -71,7 +57,7 @@ export function getConnectionPriority(name: string): number {
 	const key =
 		name === getBaseConnectionName()
 			? 'DB_BASE_CONNECTION_PRIORITY'
-			: `DB_CONNECTION_${name.toUpperCase()}_PRIORITY`;
+			: `DB_CONNECTION_${name.toUpperCase()}_PRIORITY` as const;
 
 	const priority = useEnv()[key];
 

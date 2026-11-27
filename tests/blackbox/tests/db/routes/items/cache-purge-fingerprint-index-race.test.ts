@@ -80,7 +80,7 @@ describe(oneLine`
 		env[vendor]['REDIS_HOST'] = 'localhost';
 		env[vendor]['REDIS_PORT'] = String(REDIS_PORT);
 		env[vendor]['CACHE_NAMESPACE'] = namespace;
-		env[vendor]['CACHE_RACE_READ_HOLD_MS'] = String(readHoldMs);
+		env[vendor]['BLACKBOX_CACHE_RACE_READ_HOLD_MS'] = String(readHoldMs);
 
 		// These two instances have no business finishing anyone else's failed purges.
 		// The pending-purge table is shared by every instance in the shard while the

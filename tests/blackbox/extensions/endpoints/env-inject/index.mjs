@@ -1,4 +1,4 @@
-import { cast } from '@directus/env';
+import { castEnvVarValue, getDefaultType } from '@directus/env';
 
 export default (router, { env }) => {
 	router.post('/set', (req, res) => {
@@ -14,7 +14,7 @@ export default (router, { env }) => {
 
 		// Cast exactly as @directus/env would on a real env var (type-map + guess),
 		// so an injected value is typed the same as one loaded from the environment.
-		env[key] = cast(value, key);
+		env[key] = castEnvVarValue(value, getDefaultType(key));
 		res.json({ data: { key, value: env[key] } });
 	});
 };

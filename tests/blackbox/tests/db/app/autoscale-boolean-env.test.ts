@@ -119,6 +119,22 @@ describe.each(vendors)('%s', (vendor) => {
 			// leave the lines that connection logs behind it.
 			expect(run.output).not.toContain('[autoscale]');
 		}, 120_000);
+
+		// Read as NaN, a threshold satisfies neither comparison: the pool
+		// would stop scaling both ways and log nothing about why.
+		it('the autoscaler, on a number that is not one', async () => {
+			const run = await runToEnd(vendor, ['autoscale'], {
+				PM2_HOME: mkdtempSync(join(tmpdir(), 'bb-number-env-')),
+				PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: 'forty',
+			});
+
+			expect(run.code, run.output).toBe(1);
+
+			expect(run.output).toContain('"PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD"'
+				+ ' is "forty", which is not a number.');
+
+			expect(run.output).not.toContain('[autoscale]');
+		}, 120_000);
 	});
 
 	it('a spelling the cast can read boots', async () => {

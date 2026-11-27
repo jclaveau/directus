@@ -318,5 +318,5 @@ export function scopedCacheMaxPinsPerCollection(): number {
  * wider and never staler. Raise it for hit ratio, lower it for memory.
  */
 export function scopedCacheMaxQueryCases(): number {
-	return env['CACHE_SCOPED_MAX_QUERY_CASES'] as number;
+	return env['CACHE_SCOPED_MAX_QUERY_CASES'];
 }

@@ -1,4 +1,4 @@
-import { useEnv } from '@directus/env';
+import { CORE_ENV_VAR_PREFIXES, useEnv, useEnvVarRawValues } from '@directus/env';
 import { APP_SHARED_DEPS } from '@directus/extensions';
 import { HYBRID_EXTENSION_TYPES } from '@directus/constants';
 import { generateExtensionsEntrypoint } from '@directus/extensions/node';
@@ -38,7 +38,10 @@ import { useBus } from '../bus/index.js';
 import getDatabase, { outstandingMigrations } from '../database/index.js';
 import runMigrations from '../database/migrations/run.js';
 import type { ExtensionMigration } from '../database/migrations/list.js';
-import { readBundleEntries } from '@directus/extensions/scalabus';
+import {
+	type ExtensionEnvVars,
+	readBundleEntries,
+} from '@directus/extensions/scalabus';
 import { createHash } from 'node:crypto';
 import emitter, { Emitter } from '../emitter.js';
 import { getFlowManager } from '../flows.js';
@@ -53,6 +56,12 @@ import { JobQueue } from '../utils/job-queue.js';
 import { loadIsolatedVm } from '../utils/load-isolated-vm.js';
 import { clone, debounce, isPlainObject } from '../utils/lodash-es-used.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
+import {
+	applyExtensionEnvVars,
+	type ExtensionEnvVarDeclarers,
+	findUndeclaredEnvVars,
+	restoreCoreEnvVars,
+} from './lib/apply-extension-env-vars.js';
 import { getRegistryRootPath } from './lib/get-registry-root-path.js';
 import { getExtensionsSettings } from './lib/get-extensions-settings.js';
 import {
@@ -79,7 +88,7 @@ type ReloadOptions = { forceSync?: boolean; migrate?: boolean };
 
 const defaultOptions: ExtensionManagerOptions = {
 	schedule: true,
-	watch: env['EXTENSIONS_AUTO_RELOAD'] as boolean,
+	watch: env['EXTENSIONS_AUTO_RELOAD'],
 };
 
 export class ExtensionManager {
@@ -139,6 +148,14 @@ export class ExtensionManager {
 	 * Callbacks to be able to unregister extensions
 	 */
 	private unregisterFunctionMap: Map<string, PromiseCallback> = new Map();
+
+	/**
+	 * Which extension declared each extension variable, and the prefixes they
+	 * declared them under
+	 */
+	private envVarDeclarers: ExtensionEnvVarDeclarers = new Map();
+
+	private extensionEnvPrefixes: Set<string> = new Set();
 
 	/**
 	 * A local-to-extensions scoped emitter that can be used to fire and listen to custom events
@@ -339,6 +356,41 @@ export class ExtensionManager {
 		}
 
 		await Promise.all([this.registerInternalOperations(), this.registerApiExtensions()]);
+
+		const undeclaredNames = findUndeclaredEnvVars({
+			rawEnvVarNames: Object.keys(useEnvVarRawValues()),
+			envVarDeclarers: this.envVarDeclarers,
+			extensionPrefixes: this.extensionEnvPrefixes,
+		});
+
+		const corePrefixRefusals: string[] = [];
+
+		for (const undeclaredName of undeclaredNames) {
+			const matchedCorePrefix = CORE_ENV_VAR_PREFIXES.find((corePrefix) => {
+				return undeclaredName.startsWith(corePrefix);
+			});
+
+			if (matchedCorePrefix === undefined) {
+				logger.warn(
+					`${JSON.stringify(undeclaredName)} is set but nothing declares it.`,
+				);
+			}
+			else {
+				corePrefixRefusals.push(`${JSON.stringify(undeclaredName)} is under`
+					+ ` the core prefix ${JSON.stringify(matchedCorePrefix)},`
+					+ ' but core declares no such variable.');
+			}
+		}
+
+		// Checked once the extensions declared theirs, so one may claim a name
+		// under a core prefix; nothing claiming it fails the boot.
+		if (corePrefixRefusals.length > 0) {
+			logger.error(new Error(corePrefixRefusals.join('\n')));
+
+			if (!this.hasLoadedBefore) {
+				process.exit(1);
+			}
+		}
 
 		this.hasLoadedBefore = true;
 
@@ -546,7 +598,7 @@ export class ExtensionManager {
 
 		if (!file) return null;
 
-		const tempDir = join(env['TEMP_PATH'] as string, 'app-extensions');
+		const tempDir = join(env['TEMP_PATH'], 'app-extensions');
 		const tmpStorage = new DriverLocal({ root: tempDir });
 
 		if ((await tmpStorage.exists(file)) === false) return null;
@@ -699,7 +751,7 @@ export class ExtensionManager {
 				plugins: [virtual({ entry: entrypoint }), alias({ entries: internalImports }), nodeResolve({ browser: true })],
 			});
 
-			const tempDir = join(env['TEMP_PATH'] as string, 'app-extensions');
+			const tempDir = join(env['TEMP_PATH'], 'app-extensions');
 
 			const { output } = await bundle.generate({ format: 'es' });
 
@@ -968,6 +1020,37 @@ export class ExtensionManager {
 				),
 			);
 
+			const extensionEnvVars = new Map<unknown, ExtensionEnvVars>();
+
+			for (const { env: entryEnv } of bundleEntries) {
+				if (entryEnv) {
+					extensionEnvVars.set(entryEnv.vars, entryEnv);
+				}
+			}
+
+			try {
+				applyExtensionEnvVars({
+					extensionName: bundle.name,
+					extensionEnvVars: [...extensionEnvVars.values()],
+					envVarDeclarers: this.envVarDeclarers,
+					rawEnvVarValues: useEnvVarRawValues(),
+					liveEnv: env,
+				});
+			}
+			catch (error) {
+				// A misdeclared variable fails the boot, as core's own do.
+				if (!this.hasLoadedBefore) {
+					useLogger().error(error);
+					process.exit(1);
+				}
+
+				throw error;
+			}
+
+			for (const { prefix } of extensionEnvVars.values()) {
+				this.extensionEnvPrefixes.add(prefix);
+			}
+
 			const unregisterFunctions: PromiseCallback[] = [];
 
 			for (const entry of bundleEntries) {
@@ -1165,6 +1248,15 @@ export class ExtensionManager {
 		const unregisterFunctions = Array.from(this.unregisterFunctionMap.values());
 
 		await Promise.all(unregisterFunctions.map((fn) => fn()));
+
+		restoreCoreEnvVars({
+			envVarDeclarers: this.envVarDeclarers,
+			rawEnvVarValues: useEnvVarRawValues(),
+			liveEnv: env,
+		});
+
+		this.envVarDeclarers.clear();
+		this.extensionEnvPrefixes.clear();
 	}
 
 	/**

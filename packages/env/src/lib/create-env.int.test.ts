@@ -1,14 +1,14 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { readConfigurationFromProcess } from '../utils/read-configuration-from-process.js';
-import { createEnv } from './create-env.js';
+import { createEnv, readEnvVarRawValues } from './create-env.js';
 import { readConfigurationFromFile } from './read-configuration-from-file.js';
-import { isDirectusVariable } from '../utils/is-directus-variable.js';
+import { isCoreEnvVarName } from '../utils/is-core-env-var-name.js';
 import { readFileSync } from 'node:fs';
 
 vi.mock('../utils/get-config-path.js');
 vi.mock('../utils/read-configuration-from-process.js');
 vi.mock('./read-configuration-from-file.js');
-vi.mock('../utils/is-directus-variable.js');
+vi.mock('../utils/is-core-env-var-name.js');
 vi.mock('node:fs');
 
 vi.mock('../constants/defaults.js', () => ({
@@ -42,7 +42,7 @@ test('Defaults that have a type set is casted', () => {
 
 	vi.mocked(readConfigurationFromProcess).mockReturnValue(processConfigs);
 	vi.mocked(readConfigurationFromFile).mockReturnValue(fileConfigs);
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 	vi.mocked(readFileSync).mockReturnValueOnce('file-content');
 	vi.mocked(readFileSync).mockReturnValueOnce('one,two,three');
 	vi.mocked(readFileSync).mockReturnValueOnce('ran,d0m,from-file');
@@ -78,7 +78,7 @@ test('Named-connection USER/PASSWORD stay string, not guessType', () => {
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 
 	expect(createEnv()).toEqual({
 		DB_CONNECTION_PREMIUM_PASSWORD: '12345',
@@ -97,7 +97,7 @@ test('Refuses a boolean variable from the process that is not one', () => {
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 
 	expect(() => createEnv()).toThrow(
 		new Error(
@@ -119,7 +119,7 @@ test.each([
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 
 	expect(createEnv()).toEqual({
 		CACHE_ENABLED: expected,
@@ -135,7 +135,7 @@ test('Refuses a boolean variable from the config file that is not one', () => {
 		CACHE_ENABLED: 'yes',
 	});
 
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 
 	expect(() => createEnv()).toThrow(
 		new Error(
@@ -151,7 +151,7 @@ test('Refuses a boolean variable from a secret file that is not one', () => {
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 	vi.mocked(readFileSync).mockReturnValueOnce('on\n');
 
 	expect(() => createEnv()).toThrow(
@@ -168,7 +168,7 @@ test('Refuses a value cast to boolean that is not one', () => {
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 
 	expect(() => createEnv()).toThrow(
 		new Error(
@@ -184,13 +184,48 @@ test('Reads a value cast to boolean in capitals as a boolean', () => {
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 
 	expect(createEnv()).toEqual({
 		UNMAPPED_FLAG: true,
 		DEFAULT: 'test-default',
 		DEFAULT_ARRAY: 'one,two,three',
 	});
+});
+
+test('Reads FALSE as false on the boolean auth and storage globs', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		AUTH_CORP_ALLOW_PUBLIC_REGISTRATION: 'FALSE',
+		AUTH_CORP_SYNC_USER_INFO: 'FALSE',
+		STORAGE_S3_FORCE_PATH_STYLE: 'FALSE',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+
+	expect(createEnv()).toEqual({
+		AUTH_CORP_ALLOW_PUBLIC_REGISTRATION: false,
+		AUTH_CORP_SYNC_USER_INFO: false,
+		STORAGE_S3_FORCE_PATH_STYLE: false,
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
+});
+
+test('Refuses a boolean storage glob that is not one', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		STORAGE_S3_FORCE_PATH_STYLE: 'yes',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+
+	expect(() => createEnv()).toThrow(
+		new Error(
+			'"STORAGE_S3_FORCE_PATH_STYLE" Environment Variable is "yes", '
+				+ 'which is not a boolean. Use one of true, false, 1, 0.',
+		),
+	);
 });
 
 // Docker and Kubernetes write a secret with a trailing newline.
@@ -200,7 +235,7 @@ test('Trims a secret file holding a boolean', () => {
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 	vi.mocked(readFileSync).mockReturnValueOnce('true\n');
 
 	expect(createEnv()).toEqual({
@@ -217,7 +252,7 @@ test('Keeps a secret file holding a string as it is', () => {
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 	vi.mocked(readFileSync).mockReturnValueOnce(' p4ss\n');
 
 	expect(createEnv()).toEqual({
@@ -241,11 +276,141 @@ test.each([
 		CACHE_ENABLED: value,
 	});
 
-	vi.mocked(isDirectusVariable).mockReturnValue(true);
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
 
 	expect(createEnv()).toEqual({
 		CACHE_ENABLED: expected,
 		DEFAULT: 'test-default',
 		DEFAULT_ARRAY: 'one,two,three',
 	});
+});
+
+test('refuses every declared variable its value does not fit, at once', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		DB_PORT: 'abc',
+		CACHE_STORE: 'memcache',
+		CACHE_ENABLED: 'yes',
+		UNDECLARED_NAME: 'abc',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+
+	expect(() => createEnv()).toThrow(new Error(
+		'"DB_PORT" is "abc", which is not a number.\n'
+			+ '"CACHE_STORE" is "memcache", which is not one of "memory", "redis".\n'
+			+ '"CACHE_ENABLED" Environment Variable is "yes", which is not a'
+			+ ' boolean. Use one of true, false, 1, 0.',
+	));
+});
+
+// Refused after the extensions load, unless one declares it.
+test('keeps a name under a core prefix that core does not declare', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		DB_VACUUM_CRON_FREQUENCY: '0 6 * * *',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+
+	expect(createEnv()).toEqual({
+		DB_VACUUM_CRON_FREQUENCY: '0 6 * * *',
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
+});
+
+test('lists a boolean refusal beside the others', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		DB_PORT: 'abc',
+		CACHE_ENABLED: 'TRUE',
+		HSTS_PRELOAD: 'yes',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+
+	expect(() => createEnv()).toThrow(new Error(
+		'"DB_PORT" is "abc", which is not a number.\n'
+			+ '"HSTS_PRELOAD" Environment Variable is "yes", which is not a'
+			+ ' boolean. Use one of true, false, 1, 0.',
+	));
+});
+
+test('keeps each value as it was set beside the cast one', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		DB_PORT: '5432',
+		UNDECLARED_NAME: '0123',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+
+	expect(createEnv()).toEqual({
+		DB_PORT: 5432,
+		UNDECLARED_NAME: '0123',
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
+
+	expect(readEnvVarRawValues()).toEqual({
+		DB_PORT: '5432',
+		UNDECLARED_NAME: '0123',
+	});
+});
+
+test.each([
+	[
+		'UNMAPPED_COUNT',
+		'number:abc',
+		'"UNMAPPED_COUNT" is "number:abc", which is not a number.',
+	],
+	[
+		'UNMAPPED_COUNT',
+		'number:',
+		'"UNMAPPED_COUNT" is "number:", which is not a number.',
+	],
+	['SUBS_API_KEY', 'number:abc', '"SUBS_API_KEY" is not a number.'],
+	[
+		'UNMAPPED_PATTERN',
+		'regex:(',
+		'"UNMAPPED_PATTERN" is "(", which is not a regex.',
+	],
+	['UNMAPPED_JSON', 'json:{bad', '"UNMAPPED_JSON" is not JSON.'],
+])('Refuses %s=%s, a prefix its value does not fit', (
+	envVarName,
+	envVarValue,
+	refusalMessage,
+) => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		[envVarName]: envVarValue,
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+
+	expect(() => createEnv()).toThrow(new Error(refusalMessage));
+});
+
+test('Refuses a number: prefix from a secret file that is not a number', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		UNMAPPED_COUNT_FILE: 'number:./file.txt',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+	vi.mocked(readFileSync).mockReturnValueOnce('abc\n');
+
+	expect(() => createEnv()).toThrow(
+		new Error('"UNMAPPED_COUNT" is "number:abc", which is not a number.'),
+	);
+});
+
+test('Refuses an item of an array: value its own prefix does not fit', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		UNMAPPED_LIST: 'array:1,number:abc',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+
+	expect(() => createEnv()).toThrow(
+		new Error('"UNMAPPED_LIST" is "number:abc", which is not a number.'),
+	);
 });

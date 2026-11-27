@@ -8,21 +8,13 @@ import {
 vi.mock('@directus/env');
 
 beforeEach(() => {
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 });
 
 describe('allowedOutOfScopeFeatures', () => {
 	test('reads a list, trimming each name and dropping the empty ones', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [' shares', '', 'comments '],
-		});
-
-		expect(allowedOutOfScopeFeatures()).toEqual(['shares', 'comments']);
-	});
-
-	test('reads a comma-separated string', () => {
-		vi.mocked(useEnv).mockReturnValue({
-			OUT_OF_SCOPE_FEATURES_ALLOWED: 'shares,comments',
 		});
 
 		expect(allowedOutOfScopeFeatures()).toEqual(['shares', 'comments']);
@@ -35,7 +27,7 @@ describe('allowedOutOfScopeFeatures', () => {
 
 describe('refuseOutOfScopeFeature', () => {
 	test('lets an allowed feature through', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			OUT_OF_SCOPE_FEATURES_ALLOWED: ['shares'],
 		});
 
@@ -43,7 +35,7 @@ describe('refuseOutOfScopeFeature', () => {
 	});
 
 	test('refuses a feature the list leaves out, naming its issue', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			OUT_OF_SCOPE_FEATURES_ALLOWED: ['shares'],
 		});
 

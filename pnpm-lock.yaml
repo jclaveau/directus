@@ -2186,6 +2186,9 @@ importers:
       '@directus/constants':
         specifier: workspace:*
         version: link:../constants
+      '@directus/env':
+        specifier: workspace:*
+        version: link:../env
       '@directus/types':
         specifier: workspace:*
         version: link:../types

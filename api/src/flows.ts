@@ -155,7 +155,10 @@ class FlowManager {
 		const logger = useLogger();
 
 		this.reloadQueue = new JobQueue();
-		this.envs = env['FLOWS_ENV_ALLOW_LIST'] ? pick(env, toArray(env['FLOWS_ENV_ALLOW_LIST'] as string)) : {};
+
+		this.envs = env['FLOWS_ENV_ALLOW_LIST']
+			? pick(env, env['FLOWS_ENV_ALLOW_LIST'])
+			: {};
 
 		const messenger = useBus();
 
