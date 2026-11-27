@@ -483,6 +483,7 @@ export const ENV_VAR_DECLARATIONS = {
 	DB_DECIMAL_NUMBERS: { type: 'boolean' },
 	DB_POOL__PROPAGATE_CREATE_ERROR: { type: 'boolean' },
 	// true for pg; its tls options go under DB_SSL__.
+	// TODO(#610): mysql2 also takes an ssl profile name here.
 	DB_SSL: { type: 'boolean' },
 	// Read off LOGGER_ by pino, LOGGER_HTTP by pino-http, camelCased.
 	LOGGER_LEVELS: { type: 'string[]' },
@@ -697,6 +698,7 @@ export const ENV_VAR_PATTERN_DECLARATIONS = {
 	'DB_CONNECTION_*_DATE_STRINGS': { type: 'boolean' },
 	'DB_CONNECTION_*_DECIMAL_NUMBERS': { type: 'boolean' },
 	'DB_CONNECTION_*_POOL__PROPAGATE_CREATE_ERROR': { type: 'boolean' },
+	// TODO(#610): mysql2 also takes an ssl profile name here.
 	'DB_CONNECTION_*_SSL': { type: 'boolean' },
 	// Open option sets a reader forwards whole: the tls options knex hands to
 	// the driver, and the CSP directives helmet takes by any name.
