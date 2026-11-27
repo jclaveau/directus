@@ -27,6 +27,22 @@ const DECLARED_CAST_FLAGS: Record<EnvVarDeclaredType, readonly string[]> = {
 	],
 };
 
+/**
+ * The names whose value may be a credential: a refusal leaves their value out,
+ * as the json one does for every name.
+ */
+const SECRET_ENV_VAR_NAME_PATTERN =
+	/PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL|SALT|PRIVATE/;
+
+/** A config file's number or boolean reads as its string, an object does not. */
+const isScalarValue = (bareValue: unknown): boolean => {
+	return ['string', 'number', 'boolean'].includes(typeof bareValue);
+};
+
+const isScalarListValue = (bareValue: unknown): boolean => {
+	return Array.isArray(bareValue) && bareValue.every(isScalarValue);
+};
+
 const isNumberValue = (bareValue: unknown): boolean => {
 	return (typeof bareValue === 'number' || typeof bareValue === 'string')
 		&& String(bareValue).trim() !== ''
@@ -42,6 +58,12 @@ const readTypeRefusal = (
 	envVarDeclaration: EnvVarDeclaration,
 ): string | null => {
 	const quotedValue = JSON.stringify(bareValue);
+
+	const describeShapeRefusal = (expectedShape: string): string => {
+		return SECRET_ENV_VAR_NAME_PATTERN.test(quotedName)
+			? `${quotedName} is ${expectedShape}.`
+			: `${quotedName} is ${quotedValue}, which is ${expectedShape}.`;
+	};
 
 	switch (envVarDeclaration.type) {
 		case 'number':
@@ -83,6 +105,25 @@ const readTypeRefusal = (
 			catch {
 				return `${quotedName} is not JSON.`;
 			}
+
+		case 'string':
+			return isScalarValue(bareValue)
+				? null
+				: describeShapeRefusal('not a string');
+		case 'false | string':
+			return isScalarValue(bareValue)
+				? null
+				: describeShapeRefusal('neither false nor a string');
+		case 'string[]':
+			return isScalarValue(bareValue) || isScalarListValue(bareValue)
+				? null
+				: describeShapeRefusal('neither a string nor a list of strings');
+		case 'false | string[]':
+			return isScalarValue(bareValue) || isScalarListValue(bareValue)
+				? null
+				: describeShapeRefusal(
+					'neither false, a string nor a list of strings',
+				);
 
 		default:
 			return null;
