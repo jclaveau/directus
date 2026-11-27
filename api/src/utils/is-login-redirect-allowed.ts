@@ -1,5 +1,4 @@
 import { useEnv } from '@directus/env';
-import { toArray } from '@directus/utils';
 import { useLogger } from '../logger/index.js';
 import isUrlAllowed from './is-url-allowed.js';
 
@@ -28,7 +27,7 @@ export function isLoginRedirectAllowed(redirect: unknown, provider: string): boo
 	const envKey = `AUTH_${provider.toUpperCase()}_REDIRECT_ALLOW_LIST` as const;
 
 	if (envKey in env) {
-		const allowedUrls = [...toArray(env[envKey]), publicUrl];
+		const allowedUrls = [...(env[envKey] ?? []), publicUrl];
 
 		if (isUrlAllowed(redirect, allowedUrls)) {
 			return true;
