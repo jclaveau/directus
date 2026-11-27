@@ -129,6 +129,8 @@ describe.each(vendors)('%s', (vendor) => {
 
 	const givenSecretFile = async (key: string, quotedContent: string) => {
 		env = cloneDeep(config.envs);
+		// The base env sets CACHE_ENABLED; beside its _FILE that refuses the boot
+		delete env[vendor][key.slice(0, -'_FILE'.length)];
 		env[vendor][key] = await writeTempFile(key, JSON.parse(quotedContent));
 	};
 
