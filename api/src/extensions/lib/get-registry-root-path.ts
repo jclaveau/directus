@@ -11,7 +11,7 @@ export const getRegistryRootPath = () => {
 	const env = useEnv();
 
 	if (env['EXTENSIONS_LOCATION']) {
-		return join(env['TEMP_PATH'] as string, 'extensions');
+		return join(env['TEMP_PATH'], 'extensions');
 	}
 
 	return REGISTRY_STORAGE_ROOT;

@@ -26,13 +26,16 @@ export class LogsController extends SocketController {
 		logger.info(`Logs WebSocket Server started at ws://${env['HOST']}:${env['PORT']}${this.endpoint}`);
 	}
 
-	override getEnvironmentConfig(configPrefix: string) {
+	override getEnvironmentConfig(configPrefix: `WEBSOCKETS_${string}`) {
 		const env = useEnv();
 
-		const endpoint = String(env[`${configPrefix}_PATH`]);
+		const endpoint = String(env[`${configPrefix}_PATH` as const]);
 
-		const maxConnections =
-			`${configPrefix}_CONN_LIMIT` in env ? Number(env[`${configPrefix}_CONN_LIMIT`]) : Number.POSITIVE_INFINITY;
+		const connectionLimit = env[`${configPrefix}_CONN_LIMIT` as const];
+
+		const maxConnections = `${configPrefix}_CONN_LIMIT` in env
+			? Number(connectionLimit)
+			: Number.POSITIVE_INFINITY;
 
 		return {
 			endpoint,

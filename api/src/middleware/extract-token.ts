@@ -38,14 +38,14 @@ const extractToken: RequestHandler = (req, _res, next) => {
 		}
 	}
 
-	if (req.cookies && req.cookies[env['SESSION_COOKIE_NAME'] as string]) {
+	if (req.cookies && req.cookies[env['SESSION_COOKIE_NAME']]) {
 		/*
 		 * Exclude session cookie from "RFC6750 multi auth method" rule, e.g.
 		 * - allow using a different token to perform requests from within the Data Studio (static token in WYSIWYG interface / Extensions)
 		 * - to not break external apps running under the same domain as the Data Studio while using a different method
 		 */
 		if (token === null) {
-			token = req.cookies[env['SESSION_COOKIE_NAME'] as string];
+			token = req.cookies[env['SESSION_COOKIE_NAME']];
 		}
 	}
 

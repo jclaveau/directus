@@ -16,7 +16,7 @@ router.get(
 		}
 
 		// support Bearer Token of type `Metrics`
-		const metricTokens = env['METRICS_TOKENS'] as string[] | undefined;
+		const metricTokens = env['METRICS_TOKENS'];
 
 		if (!req.headers || !req.headers.authorization || !metricTokens) {
 			throw new ForbiddenError({

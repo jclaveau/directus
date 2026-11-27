@@ -5,7 +5,7 @@ import { CORE_MOUNTS, coreMountPaths, coreRootPaths } from './core-mounts.js';
 vi.mock('@directus/env');
 
 beforeEach(() => {
-	vi.mocked(useEnv).mockReturnValue({});
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({});
 });
 
 test('mounts only what the environment turns on, in mount order', () => {
@@ -19,7 +19,7 @@ test('mounts only what the environment turns on, in mount order', () => {
 	expect(off.indexOf('/auth')).toBe(0);
 	expect(off.indexOf('/graphql')).toBe(1);
 
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		TUS_ENABLED: true,
 		SYSTEM_MCP_ENABLED: true,
 		METRICS_ENABLED: true,
@@ -33,7 +33,8 @@ test('mounts only what the environment turns on, in mount order', () => {
 });
 
 test('lists each root once, the root handlers first', () => {
-	vi.mocked(useEnv).mockReturnValue({ TUS_ENABLED: true, SERVE_APP: true });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ TUS_ENABLED: true, SERVE_APP: true });
 
 	const roots = coreRootPaths();
 
@@ -55,7 +56,7 @@ test('leaves the admin app out when it is not served', () => {
 });
 
 test('adds each websocket controller on, on the root of its own path', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		WEBSOCKETS_ENABLED: true,
 		WEBSOCKETS_REST_ENABLED: true,
 		WEBSOCKETS_REST_PATH: '/websocket',
@@ -79,7 +80,7 @@ test('adds each websocket controller on, on the root of its own path', () => {
 });
 
 test('leaves the websocket paths out when websockets are off', () => {
-	vi.mocked(useEnv).mockReturnValue({
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		WEBSOCKETS_ENABLED: false,
 		WEBSOCKETS_REST_ENABLED: true,
 		WEBSOCKETS_REST_PATH: '/websocket',

@@ -10,10 +10,13 @@ vi.mock('fs-extra');
 const noop = async () => {};
 
 beforeEach(() => {
-	vi.mocked(useEnv).mockReturnValue({ MIGRATIONS_PATH: '/custom-migrations' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ MIGRATIONS_PATH: '/custom-migrations' });
 
+	// The callback overload of pathExists types the resolved value as void.
 	vi.mocked(fse.pathExists).mockResolvedValue(true as never);
 
+	// readdir's overloads type the list as Dirents, not the names it returns.
 	vi.mocked(fse.readdir).mockImplementation((async (directory: string) => {
 		return directory === path.resolve('/custom-migrations')
 			? ['20990102A-custom.js', 'readme.md']
@@ -112,6 +115,7 @@ describe('listMigrations', () => {
 	});
 
 	test('refuses a MIGRATIONS_PATH file without a date', async () => {
+		// readdir's overloads type the list as Dirents, not the names it returns.
 		vi.mocked(fse.readdir).mockImplementation((async (directory: string) => {
 			return directory === path.resolve('/custom-migrations')
 				? ['custom-add-foo.js']

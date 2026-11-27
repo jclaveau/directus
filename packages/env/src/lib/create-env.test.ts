@@ -2,16 +2,16 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { getConfigPath } from '../utils/get-config-path.js';
 import { getDefaultType } from '../utils/get-default-type.js';
-import { isDirectusVariable } from '../utils/is-directus-variable.js';
+import { isCoreEnvVarName } from '../utils/is-core-env-var-name.js';
 import { isFileKey } from '../utils/is-file-key.js';
 import { readConfigurationFromProcess } from '../utils/read-configuration-from-process.js';
 import { removeFileSuffix } from '../utils/remove-file-suffix.js';
-import { cast } from './cast.js';
+import { castEnvVarValue } from './cast.js';
 import { createEnv } from './create-env.js';
 import { readConfigurationFromFile } from './read-configuration-from-file.js';
 
 vi.mock('../utils/get-config-path.js');
-vi.mock('../utils/is-directus-variable.js');
+vi.mock('../utils/is-core-env-var-name.js');
 vi.mock('../utils/is-file-key.js');
 vi.mock('../utils/read-configuration-from-process.js');
 vi.mock('../utils/remove-file-suffix.js');
@@ -31,7 +31,7 @@ let processConfig: Record<string, string>;
 let fileConfig: Record<string, unknown>;
 
 beforeEach(() => {
-	vi.mocked(cast).mockImplementation((value) => value);
+	vi.mocked(castEnvVarValue).mockImplementation((value) => value);
 
 	processConfig = { PROCESS: 'test-process' };
 	fileConfig = { FILE: 'test-file' };
@@ -47,12 +47,18 @@ afterEach(() => {
 describe('Casting of default configuration', () => {
 	test('Default config with default type gets casted', () => {
 		vi.mocked(getDefaultType).mockImplementation((key) => {
-			if (key === 'DEFAULT_ARRAY') return 'array';
+			if (key === 'DEFAULT_ARRAY') {
+				return 'string[]';
+			}
+
 			return null;
 		});
 
-		vi.mocked(cast).mockImplementation((value, key) => {
-			if (key === 'DEFAULT_ARRAY') return String(value).split(',');
+		vi.mocked(castEnvVarValue).mockImplementation((value, declaredType) => {
+			if (declaredType === 'string[]') {
+				return String(value).split(',');
+			}
+
 			return value;
 		});
 
@@ -66,7 +72,7 @@ describe('Casting of default configuration', () => {
 		});
 
 		expect(getDefaultType).toHaveBeenCalledTimes(4);
-		expect(cast).toHaveBeenCalledTimes(3);
+		expect(castEnvVarValue).toHaveBeenCalledTimes(3);
 	});
 
 	test('Default config without default type gets not casted', () => {
@@ -82,7 +88,7 @@ describe('Casting of default configuration', () => {
 		});
 
 		expect(getDefaultType).toHaveBeenCalledTimes(4);
-		expect(cast).toHaveBeenCalledTimes(2);
+		expect(castEnvVarValue).toHaveBeenCalledTimes(2);
 	});
 });
 
@@ -111,8 +117,8 @@ describe('File based configuration', () => {
 			return key === 'PROCESS_FILE';
 		});
 
-		vi.mocked(isDirectusVariable).mockImplementation((key) => {
-			return key === 'PROCESS_FILE';
+		vi.mocked(isCoreEnvVarName).mockImplementation((name) => {
+			return name === 'PROCESS';
 		});
 
 		vi.mocked(removeFileSuffix).mockReturnValue('PROCESS');
@@ -149,7 +155,7 @@ describe('File based configuration', () => {
 
 		expect(removeFileSuffix).toHaveBeenCalledWith('PROCESS_FILE');
 		expect(readFileSync).toHaveBeenCalledWith('./test/path', { encoding: 'utf8' });
-		expect(cast).toHaveBeenCalledWith('array:file-content', 'PROCESS');
+		expect(castEnvVarValue).toHaveBeenCalledWith('array:file-content', undefined);
 	});
 });
 
@@ -158,7 +164,7 @@ test('Passthrough file variables that are not Directus configuration flags', () 
 		TEST_FILE: './test/path',
 	});
 
-	vi.mocked(isDirectusVariable).mockImplementation(() => {
+	vi.mocked(isCoreEnvVarName).mockImplementation(() => {
 		return false;
 	});
 
@@ -183,8 +189,8 @@ test('Throws error if file could not be read', () => {
 		return key === 'TEST_FILE';
 	});
 
-	vi.mocked(isDirectusVariable).mockImplementation((key) => {
-		return key === 'TEST_FILE';
+	vi.mocked(isCoreEnvVarName).mockImplementation((name) => {
+		return name === 'TEST';
 	});
 
 	vi.mocked(removeFileSuffix).mockReturnValue('TEST');
@@ -199,7 +205,7 @@ test('Throws error if file could not be read', () => {
 });
 
 test('Casts regular values', () => {
-	vi.mocked(cast).mockImplementation((value) => `cast-${value}`);
+	vi.mocked(castEnvVarValue).mockImplementation((value) => `cast-${value}`);
 
 	const env = createEnv();
 

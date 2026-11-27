@@ -11,7 +11,9 @@ export async function getSharpInstance(): Promise<Sharp> {
 	const sharp = await loadSharp();
 
 	return sharp({
-		limitInputPixels: Math.trunc(Math.pow(env['ASSETS_TRANSFORM_IMAGE_MAX_DIMENSION'] as number, 2)),
+		limitInputPixels: Math.trunc(
+			Math.pow(env['ASSETS_TRANSFORM_IMAGE_MAX_DIMENSION'], 2),
+		),
 		sequentialRead: true,
 		failOn: env['ASSETS_INVALID_IMAGE_SENSITIVITY_LEVEL'] as FailOnOptions,
 	});

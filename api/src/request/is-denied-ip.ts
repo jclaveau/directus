@@ -8,7 +8,7 @@ export function isDeniedIp(ip: string): boolean {
 	const env = useEnv();
 	const logger = useLogger();
 
-	const ipDenyList = env['IMPORT_IP_DENY_LIST'] as string[];
+	const ipDenyList = env['IMPORT_IP_DENY_LIST'];
 
 	if (ipDenyList.length === 0) return false;
 

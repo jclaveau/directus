@@ -44,6 +44,23 @@ describe('Integration Tests', () => {
 	describe('Services / Specifications', () => {
 		describe('oas', () => {
 			describe('generate', () => {
+				it('serves the request host while PUBLIC_URL is the default', async () => {
+					const service = new SpecificationService({
+						knex: db,
+						schema,
+						accountability: { role: 'admin', admin: true } as Accountability,
+					});
+
+					const spec = await service.oas.generate('https://api.example.com');
+
+					expect(spec.servers).toEqual([
+						{
+							url: 'https://api.example.com',
+							description: 'Your current Directus instance.',
+						},
+					]);
+				});
+
 				describe('schema', () => {
 					it('returns untyped schema for json fields', async () => {
 						const service = new SpecificationService({

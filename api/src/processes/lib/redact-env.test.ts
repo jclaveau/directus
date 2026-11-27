@@ -1,4 +1,4 @@
-import { useEnv, useEnvSources } from '@directus/env';
+import { useEnv, useEnvSources, type EnvSources } from '@directus/env';
 import { afterEach, expect, test, vi } from 'vitest';
 import { resolveReportedEnv } from './redact-env.js';
 
@@ -14,16 +14,19 @@ afterEach(() => {
 
 function reportedEnv(
 	env: Record<string, unknown>,
-	sources: Record<string, string> = {},
+	sources: EnvSources = {},
 ) {
-	vi.mocked(useEnv).mockReturnValue(env);
-	vi.mocked(useEnvSources).mockReturnValue(sources as never);
+	// The cases hold values as a raw env does, PORT as a number among them,
+	// which its declared string type refuses: PORT may be a socket path.
+	vi.mocked(useEnv, { partial: true }).mockReturnValue(env as never);
+	vi.mocked(useEnvSources).mockReturnValue(sources);
 
 	return resolveReportedEnv();
 }
 
 function variable(env: Record<string, unknown>, key: string) {
-	return reportedEnv(env, { [key]: 'process' }).find((one) => one.key === key);
+	return reportedEnv(env, { [key]: 'process' as const })
+		.find((one) => one.key === key);
 }
 
 test('Reports every variable, sorted, with the layer it came from', () => {

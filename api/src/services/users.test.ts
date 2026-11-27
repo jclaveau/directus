@@ -37,14 +37,16 @@ vi.mock('./mail', () => {
 
 vi.mock('@directus/env', () => ({
 	useEnv: vi.fn().mockReturnValue({
+		// `useEnv` merges defaults.ts, so the real one always carries this.
+		AUTH_PROVIDERS: [],
 		EMAIL_TEMPLATES_PATH: './templates',
 		USERS_ADMIN_ACCESS_LIMIT: 3,
 		USERS_APP_ACCESS_LIMIT: 3,
 		USERS_API_ACCESS_LIMIT: 3,
 		PUBLIC_URL: 'http://localhost:8055',
-		USER_INVITE_URL_ALLOW_LIST: 'https://app.example.com/invite',
-		USER_REGISTER_URL_ALLOW_LIST: 'https://app.example.com/verify',
-		PASSWORD_RESET_URL_ALLOW_LIST: 'https://app.example.com/reset',
+		USER_INVITE_URL_ALLOW_LIST: ['https://app.example.com/invite'],
+		USER_REGISTER_URL_ALLOW_LIST: ['https://app.example.com/verify'],
+		PASSWORD_RESET_URL_ALLOW_LIST: ['https://app.example.com/reset'],
 	}),
 }));
 

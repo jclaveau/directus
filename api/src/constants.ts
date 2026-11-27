@@ -68,7 +68,7 @@ export const UUID_REGEX = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 export const REFRESH_COOKIE_OPTIONS: CookieOptions = {
 	httpOnly: true,
 	domain: env['REFRESH_TOKEN_COOKIE_DOMAIN'] as string,
-	maxAge: getMilliseconds(env['REFRESH_TOKEN_TTL'] as string),
+	maxAge: getMilliseconds(env['REFRESH_TOKEN_TTL']),
 	secure: Boolean(env['REFRESH_TOKEN_COOKIE_SECURE']),
 	sameSite: (env['REFRESH_TOKEN_COOKIE_SAME_SITE'] || 'strict') as 'lax' | 'strict' | 'none',
 };
@@ -76,7 +76,7 @@ export const REFRESH_COOKIE_OPTIONS: CookieOptions = {
 export const SESSION_COOKIE_OPTIONS: CookieOptions = {
 	httpOnly: true,
 	domain: env['SESSION_COOKIE_DOMAIN'] as string,
-	maxAge: getMilliseconds(env['SESSION_COOKIE_TTL'] as string),
+	maxAge: getMilliseconds(env['SESSION_COOKIE_TTL']),
 	secure: Boolean(env['SESSION_COOKIE_SECURE']),
 	sameSite: (env['SESSION_COOKIE_SAME_SITE'] || 'strict') as 'lax' | 'strict' | 'none',
 };
@@ -99,10 +99,10 @@ export const SUPPORTED_IMAGE_METADATA_FORMATS = [
 /** Resumable uploads */
 export const RESUMABLE_UPLOADS = {
 	ENABLED: toBoolean(env['TUS_ENABLED']),
-	CHUNK_SIZE: bytes.parse(env['TUS_CHUNK_SIZE'] as string),
+	CHUNK_SIZE: bytes.parse(env['TUS_CHUNK_SIZE']),
 	MAX_SIZE: bytes.parse(env['FILES_MAX_UPLOAD_SIZE'] as string),
 	EXPIRATION_TIME: getMilliseconds(env['TUS_UPLOAD_EXPIRATION'], 600_000 /* 10min */),
-	SCHEDULE: String(env['TUS_CLEANUP_SCHEDULE'] as string),
+	SCHEDULE: String(env['TUS_CLEANUP_SCHEDULE']),
 };
 
 export const ALLOWED_DB_DEFAULT_FUNCTIONS = ['gen_random_uuid()'];

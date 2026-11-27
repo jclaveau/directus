@@ -41,6 +41,7 @@ vi.mock('pm2', () => {
 	};
 });
 
+import { getStorage } from '../../storage/index.js';
 import { createMetrics } from './create-metrics.js';
 
 beforeEach(() => {
@@ -212,5 +213,29 @@ describe('getCacheErrorMetric', () => {
 			.find((metric) => metric.name === 'directus_cache_redis_connection_errors');
 
 		expect(entry?.values[0]?.value).toBe(0);
+	});
+});
+
+describe('the storage check', () => {
+	it('probes every location STORAGE_LOCATIONS names', async () => {
+		env['METRICS_SERVICES'] = ['storage'];
+		env['STORAGE_LOCATIONS'] = ['local', 'remote'];
+
+		const location = vi.fn(() => {
+			return {
+				write: vi.fn(async () => {
+					throw new Error('ECONNREFUSED');
+				}),
+			};
+		});
+
+		// as: the metrics read only the storage's location
+		vi.mocked(getStorage).mockResolvedValue({ location } as any);
+
+		await createMetrics().generate();
+
+		delete env['STORAGE_LOCATIONS'];
+
+		expect(location.mock.calls).toEqual([['local'], ['remote']]);
 	});
 });

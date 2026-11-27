@@ -241,3 +241,123 @@ describe('SAMLAuthDriver getUserID', () => {
 		]]);
 	});
 });
+
+describe('createSAMLAuthRouter /logout', () => {
+	test('ends the session of its cookie and clears it', async () => {
+		const { getAuthProvider } = await import('../../auth.js');
+
+		const {
+			AuthenticationService,
+		} = await import('../../services/authentication.js');
+
+		const { SESSION_COOKIE_OPTIONS } = await import('../../constants.js');
+		const { createSAMLAuthRouter } = await import('./saml.js');
+		const logout = vi.fn();
+
+		// as any: provider and service stubs carry only what the route calls
+		vi.mocked(getAuthProvider).mockReturnValue({
+			sp: {
+				createLogoutRequest: vi.fn(() => {
+					return { context: 'https://idp.example.com/logout' };
+				}),
+			},
+			idp: {},
+		} as any);
+
+		vi.mocked(AuthenticationService).mockImplementation(function () {
+			return { logout } as any;
+		});
+
+		const clearCookie = vi.fn();
+		const redirect = vi.fn();
+
+		// as any: request and response stubs carry only what the handler reads
+		await createSAMLAuthRouter('saml').stack.find(
+			(l: any) => l.route?.path === '/logout' && l.route.methods['post'],
+		)!.route!.stack[0]!.handle(
+			{
+				body: {},
+				cookies: { directus_session_token: 'session-token' },
+				schema: {},
+			} as any,
+			{ clearCookie, redirect } as any,
+			vi.fn(),
+		);
+
+		expect(logout).toHaveBeenCalledWith('session-token');
+
+		expect(clearCookie).toHaveBeenCalledWith(
+			'directus_session_token',
+			SESSION_COOKIE_OPTIONS,
+		);
+
+		expect(redirect).toHaveBeenCalledWith('https://idp.example.com/logout');
+	});
+});
+
+describe('createSAMLAuthRouter /acs', () => {
+	afterEach(async () => {
+		const { useEnv } = await import('@directus/env');
+
+		delete useEnv()['AUTH_SAML_MODE'];
+	});
+
+	test('sets the refresh cookie of a cookie-mode login', async () => {
+		const { useEnv } = await import('@directus/env');
+		const { getAuthProvider } = await import('../../auth.js');
+
+		const {
+			AuthenticationService,
+		} = await import('../../services/authentication.js');
+
+		const { REFRESH_COOKIE_OPTIONS } = await import('../../constants.js');
+		const { createSAMLAuthRouter } = await import('./saml.js');
+
+		useEnv()['AUTH_SAML_MODE'] = 'cookie';
+
+		// as any: provider and service stubs carry only what the route calls
+		vi.mocked(getAuthProvider).mockReturnValue({
+			sp: {
+				parseLoginResponse: vi.fn(async () => {
+					return { extract: { attributes: {} } };
+				}),
+			},
+			idp: {},
+		} as any);
+
+		vi.mocked(AuthenticationService).mockImplementation(function () {
+			return {
+				login: vi.fn(async () => {
+					return {
+						accessToken: 'access-token',
+						refreshToken: 'refresh-token',
+						expires: 900_000,
+					};
+				}),
+			} as any;
+		});
+
+		const cookie = vi.fn();
+		const redirect = vi.fn();
+
+		// as any: request and response stubs carry only what the handler reads
+		await createSAMLAuthRouter('saml').stack.find(
+			(l: any) => l.route?.path === '/acs' && l.route.methods['post'],
+		)!.route!.stack[1]!.handle(
+			{
+				body: { RelayState: 'https://app.example.com/' },
+				schema: {},
+			} as any,
+			{ cookie, redirect, locals: {} } as any,
+			vi.fn(),
+		);
+
+		expect(cookie).toHaveBeenCalledWith(
+			'directus_refresh_token',
+			'refresh-token',
+			REFRESH_COOKIE_OPTIONS,
+		);
+
+		expect(redirect).toHaveBeenCalledWith('https://app.example.com/');
+	});
+});

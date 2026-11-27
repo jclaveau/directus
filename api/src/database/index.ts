@@ -8,7 +8,7 @@ import knex from 'knex';
 import { performance } from 'node:perf_hooks';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
-import { isArray, toArray } from '../utils/lodash-es-used.js';
+import { isArray } from '../utils/lodash-es-used.js';
 import { nodeId } from '../utils/node-id.js';
 import { trackTransactionsOf } from '../utils/transaction.js';
 import { validateDatabaseClientEnv, validateEnv } from '../utils/validate-env.js';
@@ -372,7 +372,7 @@ async function validateDatabaseCharset(database?: Knex): Promise<void> {
 
 		const columns = await helpers.schema.getColumnsWithInvalidCollation(env['DB_DATABASE'] as string, collation);
 
-		const excludedTables: string[] = toArray(env['DB_EXCLUDE_TABLES']);
+		const excludedTables = env['DB_EXCLUDE_TABLES'];
 
 		let inconsistencies = '';
 

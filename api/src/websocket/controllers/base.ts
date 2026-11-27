@@ -37,7 +37,7 @@ export default abstract class SocketController {
 	private rateLimiter: RateLimiterAbstract | null;
 	private authInterval: NodeJS.Timeout | null;
 
-	constructor(httpServer: httpServer, configPrefix: string) {
+	constructor(httpServer: httpServer, configPrefix: `WEBSOCKETS_${string}`) {
 		this.server = new WebSocketServer({
 			noServer: true,
 			// @ts-ignore TODO Remove once @types/ws has been updated
@@ -57,19 +57,23 @@ export default abstract class SocketController {
 		this.checkClientTokens();
 	}
 
-	protected getEnvironmentConfig(configPrefix: string): {
+	protected getEnvironmentConfig(configPrefix: `WEBSOCKETS_${string}`): {
 		endpoint: string;
 		authentication: WebSocketAuthentication;
 		maxConnections: number;
 	} {
 		const env = useEnv();
 
-		const endpoint = String(env[`${configPrefix}_PATH`]);
-		const authMode = AuthMode.safeParse(String(env[`${configPrefix}_AUTH`]).toLowerCase());
-		const authTimeout = Number(env[`${configPrefix}_AUTH_TIMEOUT`]) * 1000;
+		const endpoint = String(env[`${configPrefix}_PATH` as const]);
+		const configuredAuthMode = env[`${configPrefix}_AUTH` as const];
+		const authMode = AuthMode.safeParse(String(configuredAuthMode).toLowerCase());
+		const configuredAuthTimeout = env[`${configPrefix}_AUTH_TIMEOUT` as const];
+		const authTimeout = Number(configuredAuthTimeout) * 1000;
+		const connectionLimit = env[`${configPrefix}_CONN_LIMIT` as const];
 
-		const maxConnections =
-			`${configPrefix}_CONN_LIMIT` in env ? Number(env[`${configPrefix}_CONN_LIMIT`]) : Number.POSITIVE_INFINITY;
+		const maxConnections = `${configPrefix}_CONN_LIMIT` in env
+			? Number(connectionLimit)
+			: Number.POSITIVE_INFINITY;
 
 		if (!authMode.success) {
 			throw new InvalidProviderConfigError({
@@ -127,7 +131,7 @@ export default abstract class SocketController {
 
 		const env = useEnv();
 		const cookies = request.headers.cookie ? cookie.parse(request.headers.cookie) : {};
-		const sessionCookieName = env['SESSION_COOKIE_NAME'] as string;
+		const sessionCookieName = env['SESSION_COOKIE_NAME'];
 
 		const accountabilityOverrides: UpgradeContext['accountabilityOverrides'] = {
 			ip: getIPFromReq(request) ?? null,

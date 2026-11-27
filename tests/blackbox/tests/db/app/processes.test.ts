@@ -87,9 +87,9 @@ describe('Processes Report Tests', () => {
 			envReplicaA[vendor]['ROOT_REDIRECT_FILE'] = redirectFile;
 			// Redaction decoys: a credential in a key that names nothing secret, an
 			// over-long value, and a variable that is present but empty.
-			envReplicaA[vendor]['PROCESSES_TEST_ENDPOINT'] = 'redis://user:pw@host:6379';
-			envReplicaA[vendor]['PROCESSES_TEST_LONG'] = longValue;
-			envReplicaA[vendor]['PROCESSES_TEST_EMPTY'] = '';
+			envReplicaA[vendor]['BLACKBOX_PROCESSES_ENDPOINT'] = 'redis://user:pw@host:6379';
+			envReplicaA[vendor]['BLACKBOX_PROCESSES_LONG'] = longValue;
+			envReplicaA[vendor]['BLACKBOX_PROCESSES_EMPTY'] = '';
 
 			const envReplicaB = cloneDeep(envReplicaA);
 			envReplicaB[vendor]['RAILWAY_REPLICA_ID'] = `${vendor}-b`;
@@ -412,8 +412,8 @@ describe('Processes Report Tests', () => {
 
 			// The key names nothing secret; the value carries a credential, which is
 			// what the shape rule alone would have published.
-			expect(variableNamed(node, 'PROCESSES_TEST_ENDPOINT')).toEqual({
-				key: 'PROCESSES_TEST_ENDPOINT',
+			expect(variableNamed(node, 'BLACKBOX_PROCESSES_ENDPOINT')).toEqual({
+				key: 'BLACKBOX_PROCESSES_ENDPOINT',
 				value: null,
 				redacted: true,
 				isSet: true,
@@ -431,14 +431,14 @@ describe('Processes Report Tests', () => {
 			});
 
 			// Present but empty: reported, and reported as unset.
-			expect(variableNamed(node, 'PROCESSES_TEST_EMPTY')).toMatchObject({
+			expect(variableNamed(node, 'BLACKBOX_PROCESSES_EMPTY')).toMatchObject({
 				value: '',
 				redacted: false,
 				isSet: false,
 			});
 
 			// This is a diagnosis surface, not a config export.
-			const long = variableNamed(node, 'PROCESSES_TEST_LONG')!;
+			const long = variableNamed(node, 'BLACKBOX_PROCESSES_LONG')!;
 			expect(long.value).toHaveLength(513);
 			expect(long.value!.endsWith('…')).toBe(true);
 

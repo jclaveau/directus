@@ -59,7 +59,7 @@ export class ExtensionsService {
 
 		const describeOptions: DescribeOptions = {};
 
-		if (typeof env['MARKETPLACE_REGISTRY'] === 'string') {
+		if (env['MARKETPLACE_REGISTRY'] !== undefined) {
 			describeOptions.registry = env['MARKETPLACE_REGISTRY'];
 		}
 
@@ -70,7 +70,7 @@ export class ExtensionsService {
 			throw new ForbiddenError();
 		}
 
-		const limit = env['EXTENSIONS_LIMIT'] ? Number(env['EXTENSIONS_LIMIT']) : null;
+		const limit = env['EXTENSIONS_LIMIT'] || null;
 
 		if (limit !== null) {
 			const currentlyInstalledCount = this.extensionsManager.extensions.length;

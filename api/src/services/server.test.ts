@@ -124,7 +124,7 @@ describe('ServerService health', () => {
 		mockEnv['CACHE_ENABLED'] = false;
 		mockEnv['RATE_LIMITER_ENABLED'] = false;
 		mockEnv['RATE_LIMITER_GLOBAL_ENABLED'] = false;
-		mockEnv['STORAGE_LOCATIONS'] = '';
+		mockEnv['STORAGE_LOCATIONS'] = [];
 		mockEnv['EMAIL_TRANSPORT'] = 'sendmail';
 		mockEnv['PUBLIC_URL'] = 'http://localhost:8055';
 		holding.value = [];
@@ -252,6 +252,25 @@ describe('ServerService health', () => {
 
 		expect(data['status']).toBe('error');
 		expect(data['checks']['processes:pool']).toHaveLength(1);
+	});
+
+	it.each([
+		{ healthcheckThreshold: 40, threshold: 40 },
+		{ healthcheckThreshold: undefined, threshold: 150 },
+	])(oneLine`
+		gives the cache check a threshold of $threshold under
+		CACHE_HEALTHCHECK_THRESHOLD $healthcheckThreshold
+	`, async ({ healthcheckThreshold, threshold }) => {
+		mockEnv['CACHE_STORE'] = 'redis';
+		mockEnv['CACHE_HEALTHCHECK_THRESHOLD'] = healthcheckThreshold;
+
+		const data = await healthOf({ admin: true });
+
+		delete mockEnv['CACHE_STORE'];
+		delete mockEnv['CACHE_HEALTHCHECK_THRESHOLD'];
+
+		expect(data['checks']['cache:responseTime'][0]['threshold'])
+			.toBe(threshold);
 	});
 
 	it('tells a non-admin only the status', async () => {

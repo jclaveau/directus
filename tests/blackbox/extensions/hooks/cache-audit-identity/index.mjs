@@ -5,7 +5,7 @@
 // fill of the same key drops that local copy (#366). The outage case is about
 // the audit, so the request reaches it by looking nothing up in a cache.
 export default function registerHooks({ filter }, { env, database }) {
-	const token = env['CACHE_AUDIT_IDENTITY_TOKEN'];
+	const token = env['BLACKBOX_CACHE_AUDIT_IDENTITY_TOKEN'];
 
 	if (typeof token !== 'string' || token.length === 0) {
 		return;

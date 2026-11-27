@@ -7,7 +7,7 @@ vi.mock('@directus/env');
 
 describe('getIPFromReq', () => {
 	test('Removes null if ip is undefined', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			IP_TRUST_PROXY: true,
 		});
 
@@ -20,7 +20,7 @@ describe('getIPFromReq', () => {
 	});
 
 	test('Returns ip if provided', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			IP_TRUST_PROXY: true,
 		});
 
@@ -33,7 +33,7 @@ describe('getIPFromReq', () => {
 	});
 
 	test('Removes `::ffff:` prefix from IPV4 addressed in IPV6 format', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			IP_TRUST_PROXY: true,
 		});
 
@@ -46,7 +46,7 @@ describe('getIPFromReq', () => {
 	});
 
 	test('Returns overriden ip if IP_CUSTOM_HEADER is set with valid IP', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			IP_TRUST_PROXY: true,
 			IP_CUSTOM_HEADER: 'X-CUSTOM-IP',
 		});
@@ -61,7 +61,7 @@ describe('getIPFromReq', () => {
 
 	describe('IP_TRUST_PROXY', () => {
 		test('Returns remoteAddress when false', () => {
-			vi.mocked(useEnv).mockReturnValue({
+			vi.mocked(useEnv, { partial: true }).mockReturnValue({
 				IP_TRUST_PROXY: false,
 			});
 
@@ -74,7 +74,7 @@ describe('getIPFromReq', () => {
 		});
 
 		test('Returns left most x-forwarded-for value if true', () => {
-			vi.mocked(useEnv).mockReturnValue({
+			vi.mocked(useEnv, { partial: true }).mockReturnValue({
 				IP_TRUST_PROXY: true,
 			});
 
@@ -87,7 +87,7 @@ describe('getIPFromReq', () => {
 		});
 
 		test('Returns last trusted ip in the subnet if string value', () => {
-			vi.mocked(useEnv).mockReturnValue({
+			vi.mocked(useEnv, { partial: true }).mockReturnValue({
 				IP_TRUST_PROXY: '127.0.0.0/30',
 			});
 
@@ -100,7 +100,7 @@ describe('getIPFromReq', () => {
 		});
 
 		test('Returns next entry after last trusted ip in csv if csv string value', () => {
-			vi.mocked(useEnv).mockReturnValue({
+			vi.mocked(useEnv, { partial: true }).mockReturnValue({
 				IP_TRUST_PROXY: '127.0.0.1,128.1.0.3',
 			});
 
@@ -113,7 +113,7 @@ describe('getIPFromReq', () => {
 		});
 
 		test('Returns next entry after last trusted ip for array value', () => {
-			vi.mocked(useEnv).mockReturnValue({
+			vi.mocked(useEnv, { partial: true }).mockReturnValue({
 				IP_TRUST_PROXY: ['127.0.0.1', '127.0.0.4'],
 			});
 

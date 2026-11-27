@@ -15,7 +15,7 @@ import type {
 	Query,
 	SchemaOverview,
 } from '@directus/types';
-import { parseJSON, toArray } from '@directus/utils';
+import { parseJSON } from '@directus/utils';
 import { createTmpFile } from '@directus/utils/node';
 import { queue } from 'async';
 import destroyStream from 'destroy';
@@ -379,14 +379,17 @@ export class ExportService {
 				const count = query.limit && query.limit > -1 ? Math.min(totalCount, query.limit) : totalCount;
 
 				const requestedLimit = query.limit ?? -1;
-				const batchesRequired = Math.ceil(count / (env['EXPORT_BATCH_SIZE'] as number));
+				const batchesRequired = Math.ceil(count / env['EXPORT_BATCH_SIZE']);
 
 				let readCount = 0;
 
 				for (let batch = 0; batch < batchesRequired; batch++) {
-					let limit = env['EXPORT_BATCH_SIZE'] as number;
+					let limit = env['EXPORT_BATCH_SIZE'];
 
-					if (requestedLimit > 0 && (env['EXPORT_BATCH_SIZE'] as number) > requestedLimit - readCount) {
+					if (
+						requestedLimit > 0
+						&& env['EXPORT_BATCH_SIZE'] > requestedLimit - readCount
+					) {
 						limit = requestedLimit - readCount;
 					}
 
@@ -394,7 +397,7 @@ export class ExportService {
 						...query,
 						sort,
 						limit,
-						offset: batch * (env['EXPORT_BATCH_SIZE'] as number),
+						offset: batch * env['EXPORT_BATCH_SIZE'],
 					});
 
 					readCount += result.length;
@@ -440,7 +443,7 @@ export class ExportService {
 				schema: this.schema,
 			});
 
-			const storage: string = toArray(env['STORAGE_LOCATIONS'] as string)[0]!;
+			const storage: string = env['STORAGE_LOCATIONS'][0]!;
 
 			const title = `export-${collection}-${getDateFormatted()}`;
 			const filename = `${title}.${format}`;
@@ -473,7 +476,9 @@ export class ExportService {
 					],
 				});
 
-				const href = new Url(env['PUBLIC_URL'] as string).addPath('admin', 'files', savedFile).toString();
+				const href = new Url(env['PUBLIC_URL'])
+					.addPath('admin', 'files', savedFile)
+					.toString();
 
 				const message = `
 Hello ${userName(user)},

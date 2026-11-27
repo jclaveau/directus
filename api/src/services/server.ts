@@ -1,6 +1,6 @@
 import { useEnv } from '@directus/env';
 import type { AbstractServiceOptions, Accountability, SchemaOverview } from '@directus/types';
-import { toArray, toBoolean } from '@directus/utils';
+import { toBoolean } from '@directus/utils';
 import { version } from 'directus/version';
 import type { Knex } from 'knex';
 import { Readable } from 'node:stream';
@@ -124,7 +124,9 @@ export class ServerService {
 				info['websocket'].logs =
 					toBoolean(env['WEBSOCKETS_LOGS_ENABLED']) && this.accountability.admin
 						? {
-								allowedLogLevels: getAllowedLogLevels((env['WEBSOCKETS_LOGS_LEVEL'] as string) || 'info'),
+								allowedLogLevels: getAllowedLogLevels(
+									env['WEBSOCKETS_LOGS_LEVEL'] || 'info',
+								),
 							}
 						: false;
 			} else {
@@ -170,7 +172,7 @@ export class ServerService {
 		const data: HealthData = {
 			status: 'ok',
 			releaseId: version,
-			serviceId: env['PUBLIC_URL'] as string,
+			serviceId: env['PUBLIC_URL'],
 			checks: merge(
 				...(await Promise.all([
 					testDatabase(),
@@ -346,7 +348,7 @@ export class ServerService {
 						componentType: 'cache',
 						observedValue: 0,
 						observedUnit: 'ms',
-						threshold: env['CACHE_HEALTHCHECK_THRESHOLD'] ? +env['CACHE_HEALTHCHECK_THRESHOLD'] : 150,
+						threshold: env['CACHE_HEALTHCHECK_THRESHOLD'] || 150,
 					},
 				],
 			};
@@ -462,9 +464,11 @@ export class ServerService {
 
 			const checks: Record<string, HealthCheck[]> = {};
 
-			for (const location of toArray(env['STORAGE_LOCATIONS'] as string)) {
+			for (const location of env['STORAGE_LOCATIONS']) {
 				const disk = storage.location(location);
-				const envThresholdKey = `STORAGE_${location}_HEALTHCHECK_THRESHOLD`.toUpperCase();
+
+				const envThresholdKey
+					= `STORAGE_${location.toUpperCase()}_HEALTHCHECK_THRESHOLD` as const;
 
 				checks[`storage:${location}:responseTime`] = [
 					{

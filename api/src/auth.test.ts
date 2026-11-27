@@ -1,26 +1,32 @@
+import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { getAuthProvider, registerAuthProviders } from './auth.js';
 import { OAuth2AuthDriver, OpenIDAuthDriver } from './auth/drivers/index.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 
+// Hoisted: `constants.ts` reads the env as `auth.ts` imports it.
 const mockedDeps = vi.hoisted(() => {
 	return {
 		logger: { error: vi.fn(), warn: vi.fn() },
-		env: { AUTH_PROVIDERS: 'sso', AUTH_DISABLE_DEFAULT: true },
+		env: { AUTH_PROVIDERS: [] } as Record<string, unknown>,
 	};
 });
 
 vi.mock('@directus/env', () => ({ useEnv: () => mockedDeps.env }));
-vi.mock('./utils/get-config-from-env.js');
-vi.mock('./utils/get-schema.js', () => ({ getSchema: vi.fn() }));
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
+vi.mock('./utils/get-schema.js', () => ({ getSchema: vi.fn() }));
+vi.mock('./utils/get-config-from-env.js', () => ({ getConfigFromEnv: vi.fn() }));
 vi.mock('./logger/index.js', () => ({ useLogger: () => mockedDeps.logger }));
 
 vi.mock('./auth/drivers/index.js', () => {
 	return {
 		LDAPAuthDriver: vi.fn(),
-		LocalAuthDriver: vi.fn(),
-		OAuth2AuthDriver: vi.fn(),
+		LocalAuthDriver: vi.fn(function () {
+			return { driver: 'local' };
+		}),
+		OAuth2AuthDriver: vi.fn(function () {
+			return { driver: 'oauth2' };
+		}),
 		OpenIDAuthDriver: vi.fn(),
 		SAMLAuthDriver: vi.fn(),
 	};
@@ -33,12 +39,36 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	vi.unstubAllEnvs();
 	vi.restoreAllMocks();
-	vi.resetAllMocks();
+	vi.clearAllMocks();
+});
+
+test(oneLine`
+	registers the default provider alone when AUTH_PROVIDERS is empty
+`, async () => {
+	mockedDeps.env = { AUTH_PROVIDERS: [] };
+
+	await registerAuthProviders();
+
+	expect(getAuthProvider('default')).toEqual({ driver: 'local' });
+	expect(() => getAuthProvider('github')).toThrow(/^Invalid config\.$/);
+});
+
+test('registers each provider AUTH_PROVIDERS lists', async () => {
+	mockedDeps.env = { AUTH_PROVIDERS: ['github'] };
+
+	vi.mocked(getConfigFromEnv).mockReturnValue({
+		driver: 'oauth2',
+		requireVerifiedEmail: false,
+	});
+
+	await registerAuthProviders();
+
+	expect(getAuthProvider('github')).toEqual({ driver: 'oauth2' });
 });
 
 test('an oauth2 provider without the key fails the boot', async () => {
+	mockedDeps.env = { AUTH_PROVIDERS: ['sso'], AUTH_DISABLE_DEFAULT: true };
 	vi.mocked(getConfigFromEnv).mockReturnValue({ driver: 'oauth2' });
 
 	await expect(registerAuthProviders()).rejects.toThrow('process.exit');
@@ -54,6 +84,7 @@ test('an oauth2 provider without the key fails the boot', async () => {
 });
 
 test('an openid provider boots, requiring a verified email', async () => {
+	mockedDeps.env = { AUTH_PROVIDERS: ['sso'], AUTH_DISABLE_DEFAULT: true };
 	vi.mocked(getConfigFromEnv).mockReturnValue({ driver: 'openid' });
 
 	await registerAuthProviders();

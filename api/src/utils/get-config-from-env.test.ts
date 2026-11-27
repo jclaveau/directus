@@ -5,7 +5,9 @@ import { getConfigFromEnv } from './get-config-from-env.js';
 vi.mock('@directus/env');
 
 beforeEach(() => {
-	vi.mocked(useEnv).mockReturnValue({
+	// getConfigFromEnv reads any prefix: these names are ones no declaration has.
+	// as never: made-up names and a lower-case key, which no declaration matches
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
 		CASING_KEY: 'key',
 		CASING_KEY_value: 'value',
 		OBJECT_BRAND__COLOR: 'purple',
@@ -20,7 +22,7 @@ beforeEach(() => {
 		OMIT_KEY_FIRST_KEY: 'firstKey',
 		OMIT_KEY_FIRST_KEY_VALUE: 'firstValue',
 		AUTH_SAML_IDP_metadata: 'idp-xml',
-	});
+	} as never);
 });
 
 afterEach(() => {

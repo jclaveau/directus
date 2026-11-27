@@ -31,10 +31,11 @@ vi.mock('../logger');
 let mockLogger: Logger<never>;
 
 beforeAll(() => {
+	// process.exit returns never: the stub returns so the test goes on.
 	vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 
-	vi.mocked(useEnv).mockReturnValue({
-		PRESENT_TEST_VARIABLE: 'true',
+	vi.mocked(useEnv, { partial: true }).mockReturnValue({
+		PUBLIC_URL: 'true',
 	});
 });
 
@@ -51,7 +52,7 @@ afterEach(() => {
 });
 
 test('should not have any error when key is present', () => {
-	validateEnv(['PRESENT_TEST_VARIABLE']);
+	validateEnv(['PUBLIC_URL']);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -69,32 +70,34 @@ test('should have error when key is missing', () => {
 test.each([
 	{
 		value: '-5m',
-		message: '"DURATION_TEST_VARIABLE" Environment Variable is "-5m", '
+		message: '"CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX" Environment Variable is "-5m", '
 			+ 'which is not a duration of 0 or more.',
 	},
 	{
 		value: 'five minutes',
-		message: '"DURATION_TEST_VARIABLE" Environment Variable is '
+		message: '"CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX" Environment Variable is '
 			+ '"five minutes", which is not a duration of 0 or more.',
 	},
 	{
 		value: `1${'0'.repeat(400)}`,
-		message: '"DURATION_TEST_VARIABLE" Environment Variable is '
+		message: '"CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX" Environment Variable is '
 			+ `"1${'0'.repeat(400)}", which is not a duration of 0 or more.`,
 	},
 ])('refuses the duration $value', ({ value, message }) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ DURATION_TEST_VARIABLE: value });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: value });
 
-	validateDurationEnv(['DURATION_TEST_VARIABLE']);
+	validateDurationEnv(['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX']);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(message);
 	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
 });
 
 test.each(['0', '5m', '4.1m'])('takes the duration %j', (value) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ DURATION_TEST_VARIABLE: value });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: value });
 
-	validateDurationEnv(['DURATION_TEST_VARIABLE']);
+	validateDurationEnv(['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX']);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -103,64 +106,67 @@ test.each(['0', '5m', '4.1m'])('takes the duration %j', (value) => {
 test.each([
 	{
 		value: '-1kb',
-		message: '"BYTES_TEST_VARIABLE" Environment Variable is "-1kb", '
+		message: '"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is "-1kb", '
 			+ 'which is not a size of 0 or more.',
 	},
 	{
 		value: 'eight kilobytes',
-		message: '"BYTES_TEST_VARIABLE" Environment Variable is '
+		message: '"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is '
 			+ '"eight kilobytes", which is not a size of 0 or more.',
 	},
 	{
 		value: '16k',
-		message: '"BYTES_TEST_VARIABLE" Environment Variable is "16k", '
+		message: '"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is "16k", '
 			+ 'which is not a size of 0 or more.',
 	},
 	{
 		value: '8KiB',
-		message: '"BYTES_TEST_VARIABLE" Environment Variable is "8KiB", '
+		message: '"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is "8KiB", '
 			+ 'which is not a size of 0 or more.',
 	},
 	{
 		value: '8,192',
-		message: '"BYTES_TEST_VARIABLE" Environment Variable is "8,192", '
+		message: '"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is "8,192", '
 			+ 'which is not a size of 0 or more.',
 	},
 	{
 		value: '12abc',
-		message: '"BYTES_TEST_VARIABLE" Environment Variable is "12abc", '
+		message: '"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is "12abc", '
 			+ 'which is not a size of 0 or more.',
 	},
 	{
 		value: '1e3',
-		message: '"BYTES_TEST_VARIABLE" Environment Variable is "1e3", '
+		message: '"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is "1e3", '
 			+ 'which is not a size of 0 or more.',
 	},
 ])('refuses the size $value', ({ value, message }) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ QUERY_AUDIT_HEADER_MAX_SIZE: value });
 
-	validateBytesEnv(['BYTES_TEST_VARIABLE']);
+	validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE']);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(message);
 	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
 });
 
 test.each(['0', '8kb', '512', '1.5mb', '8 KB'])('takes the size %j', (value) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ QUERY_AUDIT_HEADER_MAX_SIZE: value });
 
-	validateBytesEnv(['BYTES_TEST_VARIABLE']);
+	validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE']);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
 });
 
 test('refuses a size below the minimum other than 0', () => {
-	vi.mocked(useEnv).mockReturnValueOnce({ BYTES_TEST_VARIABLE: '255' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ QUERY_AUDIT_HEADER_MAX_SIZE: '255' });
 
-	validateBytesEnv(['BYTES_TEST_VARIABLE'], 256);
+	validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE'], 256);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
-		'"BYTES_TEST_VARIABLE" Environment Variable is "255", '
+		'"QUERY_AUDIT_HEADER_MAX_SIZE" Environment Variable is "255", '
 			+ 'which is neither 0 nor a size of 256 bytes or more.',
 	);
 
@@ -168,9 +174,10 @@ test('refuses a size below the minimum other than 0', () => {
 });
 
 test.each(['0', '256', '1kb'])('takes the size %j past the minimum', (value) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ QUERY_AUDIT_HEADER_MAX_SIZE: value });
 
-	validateBytesEnv(['BYTES_TEST_VARIABLE'], 256);
+	validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE'], 256);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -179,49 +186,53 @@ test.each(['0', '256', '1kb'])('takes the size %j past the minimum', (value) => 
 test.each([
 	{
 		value: -1,
-		message: '"COUNT_TEST_VARIABLE" Environment Variable is "-1", '
+		message: '"CACHE_SCOPED_MAX_ON_DELETE_ROWS" Environment Variable is "-1", '
 			+ 'which is not a whole number of 0 or more.',
 	},
 	{
 		value: 2.5,
-		message: '"COUNT_TEST_VARIABLE" Environment Variable is "2.5", '
+		message: '"CACHE_SCOPED_MAX_ON_DELETE_ROWS" Environment Variable is "2.5", '
 			+ 'which is not a whole number of 0 or more.',
 	},
 	{
 		value: Number.NaN,
-		message: '"COUNT_TEST_VARIABLE" Environment Variable is "NaN", '
+		message: '"CACHE_SCOPED_MAX_ON_DELETE_ROWS" Environment Variable is "NaN", '
 			+ 'which is not a whole number of 0 or more.',
 	},
 	{
 		value: 'ten',
-		message: '"COUNT_TEST_VARIABLE" Environment Variable is "ten", '
+		message: '"CACHE_SCOPED_MAX_ON_DELETE_ROWS" Environment Variable is "ten", '
 			+ 'which is not a whole number of 0 or more.',
 	},
 ])('refuses the count $value', ({ value, message }) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ COUNT_TEST_VARIABLE: value });
+	vi.mocked(useEnv, { partial: true })
+		// @ts-expect-error a raw env can hold "ten", the declared number refuses it
+		.mockReturnValueOnce({ CACHE_SCOPED_MAX_ON_DELETE_ROWS: value });
 
-	validateCountEnv(['COUNT_TEST_VARIABLE']);
+	validateCountEnv(['CACHE_SCOPED_MAX_ON_DELETE_ROWS']);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(message);
 	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
 });
 
 test.each([0, 1000])('takes the count %j', (value) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ COUNT_TEST_VARIABLE: value });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ CACHE_SCOPED_MAX_ON_DELETE_ROWS: value });
 
-	validateCountEnv(['COUNT_TEST_VARIABLE']);
+	validateCountEnv(['CACHE_SCOPED_MAX_ON_DELETE_ROWS']);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
 });
 
 test('refuses a choice outside the list', () => {
-	vi.mocked(useEnv).mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'every' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ QUERY_AUDIT_LEVEL: 'every' });
 
-	validateChoiceEnv('CHOICE_TEST_VARIABLE', ['counts', 'full']);
+	validateChoiceEnv('QUERY_AUDIT_LEVEL', ['counts', 'full']);
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
-		'"CHOICE_TEST_VARIABLE" Environment Variable is "every", '
+		'"QUERY_AUDIT_LEVEL" Environment Variable is "every", '
 			+ 'which is not one of counts, full.',
 	);
 
@@ -229,9 +240,10 @@ test('refuses a choice outside the list', () => {
 });
 
 test('takes a choice from the list', () => {
-	vi.mocked(useEnv).mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'full' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ QUERY_AUDIT_LEVEL: 'full' });
 
-	validateChoiceEnv('CHOICE_TEST_VARIABLE', ['counts', 'full']);
+	validateChoiceEnv('QUERY_AUDIT_LEVEL', ['counts', 'full']);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -239,12 +251,13 @@ test('takes a choice from the list', () => {
 
 // Node throws on every `setHeader` of such a name: every response would fail.
 test('refuses a header name Node cannot write', () => {
-	vi.mocked(useEnv).mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'x query audit' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ QUERY_AUDIT_HEADER: 'x query audit' });
 
-	validateHeaderNameEnv('HEADER_TEST_VARIABLE');
+	validateHeaderNameEnv('QUERY_AUDIT_HEADER');
 
 	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
-		'"HEADER_TEST_VARIABLE" Environment Variable is "x query audit", '
+		'"QUERY_AUDIT_HEADER" Environment Variable is "x query audit", '
 			+ 'which is not a valid header name.',
 	);
 
@@ -255,12 +268,13 @@ test('refuses a header name Node cannot write', () => {
 test.each(['false', 'true', 'FALSE', '0', '1'])(
 	'refuses a header name that reads as the boolean %j',
 	(value) => {
-		vi.mocked(useEnv).mockReturnValueOnce({ HEADER_TEST_VARIABLE: value });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ QUERY_AUDIT_HEADER: value });
 
-		validateHeaderNameEnv('HEADER_TEST_VARIABLE');
+		validateHeaderNameEnv('QUERY_AUDIT_HEADER');
 
 		expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
-			`"HEADER_TEST_VARIABLE" Environment Variable is "${value}", `
+			`"QUERY_AUDIT_HEADER" Environment Variable is "${value}", `
 				+ 'which reads as a boolean, not a header name: leave it unset '
 				+ 'to send none.',
 		);
@@ -270,16 +284,18 @@ test.each(['false', 'true', 'FALSE', '0', '1'])(
 );
 
 test('takes a header name Node can write', () => {
-	vi.mocked(useEnv).mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'X-Query-Audit' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ QUERY_AUDIT_HEADER: 'X-Query-Audit' });
 
-	validateHeaderNameEnv('HEADER_TEST_VARIABLE');
+	validateHeaderNameEnv('QUERY_AUDIT_HEADER');
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
 });
 
 test('refuses EXTENSIONS_PATH, which this build does not read', () => {
-	vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_PATH: './extensions' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ EXTENSIONS_PATH: './extensions' });
 
 	validateUnreadEnv();
 
@@ -293,7 +309,8 @@ test('refuses EXTENSIONS_PATH, which this build does not read', () => {
 });
 
 test('passes an environment without EXTENSIONS_PATH', () => {
-	vi.mocked(useEnv).mockReturnValueOnce({ PACKAGE_FILE_LOCATION: '.' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValueOnce({ PACKAGE_FILE_LOCATION: '.' });
 
 	validateUnreadEnv();
 
@@ -305,7 +322,8 @@ describe('validateDatabaseClientEnv', () => {
 	test.each(['mssql', 'oracledb', 'oracle'])(
 		'refuses the dropped client %j',
 		(client) => {
-			vi.mocked(useEnv).mockReturnValueOnce({ DB_CLIENT: client });
+			vi.mocked(useEnv, { partial: true })
+				.mockReturnValueOnce({ DB_CLIENT: client });
 
 			validateDatabaseClientEnv(['DB_CLIENT']);
 
@@ -320,7 +338,7 @@ describe('validateDatabaseClientEnv', () => {
 	);
 
 	test('refuses a dropped client on a named connection', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv, { partial: true }).mockReturnValueOnce({
 			DB_CLIENT: 'pg',
 			DB_CONNECTION_REPORTS_CLIENT: 'mssql',
 		});
@@ -339,7 +357,8 @@ describe('validateDatabaseClientEnv', () => {
 	test.each(['pg', 'postgres', 'mysql', 'mysql2', 'sqlite3', 'cockroachdb'])(
 		'passes the client %j',
 		(client) => {
-			vi.mocked(useEnv).mockReturnValueOnce({ DB_CLIENT: client });
+			vi.mocked(useEnv, { partial: true })
+				.mockReturnValueOnce({ DB_CLIENT: client });
 
 			validateDatabaseClientEnv(['DB_CLIENT']);
 
@@ -357,7 +376,7 @@ describe('validateAutoMigrateEnv', () => {
 	test('refuses it in production', () => {
 		vi.stubEnv('NODE_ENV', 'production');
 
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv, { partial: true }).mockReturnValueOnce({
 			EXTENSIONS_AUTO_MIGRATE: true,
 			EXTENSIONS_AUTO_RELOAD: true,
 		});
@@ -376,7 +395,7 @@ describe('validateAutoMigrateEnv', () => {
 	test('refuses it without EXTENSIONS_AUTO_RELOAD', () => {
 		vi.stubEnv('NODE_ENV', 'development');
 
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv, { partial: true }).mockReturnValueOnce({
 			EXTENSIONS_AUTO_MIGRATE: true,
 			EXTENSIONS_AUTO_RELOAD: false,
 		});
@@ -395,7 +414,7 @@ describe('validateAutoMigrateEnv', () => {
 	test('takes it in development with EXTENSIONS_AUTO_RELOAD', () => {
 		vi.stubEnv('NODE_ENV', 'development');
 
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnv, { partial: true }).mockReturnValueOnce({
 			EXTENSIONS_AUTO_MIGRATE: true,
 			EXTENSIONS_AUTO_RELOAD: true,
 		});
@@ -409,7 +428,8 @@ describe('validateAutoMigrateEnv', () => {
 	test('takes it off in production', () => {
 		vi.stubEnv('NODE_ENV', 'production');
 
-		vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_AUTO_MIGRATE: false });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ EXTENSIONS_AUTO_MIGRATE: false });
 
 		validateAutoMigrateEnv();
 
@@ -425,7 +445,9 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 	test('refuses true in production', () => {
 		vi.stubEnv('NODE_ENV', 'production');
-		vi.mocked(useEnv).mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
+
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
 
 		validateMarketplaceEnabledEnv();
 
@@ -440,7 +462,9 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 	test('refuses true with NODE_ENV unset', () => {
 		vi.stubEnv('NODE_ENV', '');
-		vi.mocked(useEnv).mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
+
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
 
 		validateMarketplaceEnabledEnv();
 
@@ -455,7 +479,9 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 	test('takes false in production', () => {
 		vi.stubEnv('NODE_ENV', 'production');
-		vi.mocked(useEnv).mockReturnValueOnce({ MARKETPLACE_ENABLED: false });
+
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ MARKETPLACE_ENABLED: false });
 
 		validateMarketplaceEnabledEnv();
 
@@ -464,7 +490,9 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 	test('takes true in development', () => {
 		vi.stubEnv('NODE_ENV', 'development');
-		vi.mocked(useEnv).mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
+
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValueOnce({ MARKETPLACE_ENABLED: true });
 
 		validateMarketplaceEnabledEnv();
 
@@ -474,8 +502,8 @@ describe('validateMarketplaceEnabledEnv', () => {
 
 describe('validateOutOfScopeFeaturesEnv', () => {
 	test('refuses an ldap auth driver left out of the allowed list', () => {
-		vi.mocked(useEnv).mockReturnValue({
-			AUTH_PROVIDERS: 'corp',
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
+			AUTH_PROVIDERS: ['corp'],
 			AUTH_CORP_DRIVER: 'ldap',
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
 		});
@@ -492,8 +520,8 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('takes an ldap auth driver named in the allowed list', () => {
-		vi.mocked(useEnv).mockReturnValue({
-			AUTH_PROVIDERS: 'corp',
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
+			AUTH_PROVIDERS: ['corp'],
 			AUTH_CORP_DRIVER: 'ldap',
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [' ldap'],
 		});
@@ -505,8 +533,8 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('takes the local driver and an empty provider list', () => {
-		vi.mocked(useEnv).mockReturnValue({
-			AUTH_PROVIDERS: 'own,',
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
+			AUTH_PROVIDERS: ['own'],
 			AUTH_OWN_DRIVER: 'local',
 		});
 
@@ -517,8 +545,8 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('leaves an auth driver that is no feature to the auth setup', () => {
-		vi.mocked(useEnv).mockReturnValue({
-			AUTH_PROVIDERS: 'corp,own',
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
+			AUTH_PROVIDERS: ['corp', 'own'],
 			AUTH_CORP_DRIVER: 'shares',
 			AUTH_OWN_DRIVER: 'constructor',
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
@@ -531,7 +559,7 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('refuses the GraphQL websocket on a server serving websockets', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			WEBSOCKETS_ENABLED: true,
 			WEBSOCKETS_GRAPHQL_ENABLED: true,
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
@@ -549,7 +577,7 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('takes the GraphQL websocket flag on a server without websockets', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			WEBSOCKETS_ENABLED: false,
 			WEBSOCKETS_GRAPHQL_ENABLED: true,
 			OUT_OF_SCOPE_FEATURES_ALLOWED: [],
@@ -561,7 +589,7 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 	});
 
 	test('logs each refusal before one exit', () => {
-		vi.mocked(useEnv).mockReturnValue({
+		vi.mocked(useEnv, { partial: true }).mockReturnValue({
 			EXTENSIONS_AUTO_RELOAD: true,
 			OUT_OF_SCOPE_FEATURES_ALLOWED: ['ldapp'],
 		});

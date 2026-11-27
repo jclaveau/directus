@@ -11,6 +11,8 @@ vi.mock('../websocket/controllers/index');
 // reduce to just mock the file when logger is also using useLogger everywhere @TODO
 vi.mock('@directus/env', () => ({
 	useEnv: vi.fn().mockReturnValue({
+		// `useEnv` merges defaults.ts, so the real one always carries this.
+		AUTH_PROVIDERS: [],
 		WEBSOCKETS_ENABLED: true,
 		WEBSOCKETS_REST_ENABLED: true,
 		EMAIL_TEMPLATES_PATH: './templates',

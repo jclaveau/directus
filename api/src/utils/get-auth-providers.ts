@@ -1,27 +1,27 @@
 import { useEnv } from '@directus/env';
-import { toArray } from '@directus/utils';
 
 interface AuthProvider {
 	name: string;
 	driver: string;
-	icon?: string;
-	label?: string;
+	icon?: string | undefined;
+	label?: string | undefined;
 }
 
 export function getAuthProviders({ sessionOnly } = { sessionOnly: false }): AuthProvider[] {
 	const env = useEnv();
 
-	let providers = toArray(env['AUTH_PROVIDERS'] as string).filter(
-		(provider) => provider && env[`AUTH_${provider.toUpperCase()}_DRIVER`],
+	let providers = env['AUTH_PROVIDERS'].filter(
+		(provider) => provider && env[`AUTH_${provider.toUpperCase()}_DRIVER` as const],
 	);
 
 	if (sessionOnly) {
 		providers = providers.filter((provider) => {
-			const driver = env[`AUTH_${provider.toUpperCase()}_DRIVER`] as string;
+			const driver = env[`AUTH_${provider.toUpperCase()}_DRIVER` as const] as string;
 
 			// only the following 3 drivers require a mode selection
 			if (['oauth2', 'openid', 'saml'].includes(driver)) {
-				const mode = env[`AUTH_${provider.toUpperCase()}_MODE`] as string | undefined;
+				const authModeEnvVarName = `AUTH_${provider.toUpperCase()}_MODE` as const;
+				const mode = env[authModeEnvVarName];
 				// if mode is not defined it defaults to session
 				return !mode || mode === 'session';
 			}
@@ -32,8 +32,8 @@ export function getAuthProviders({ sessionOnly } = { sessionOnly: false }): Auth
 
 	return providers.map((provider) => ({
 		name: provider,
-		label: env[`AUTH_${provider.toUpperCase()}_LABEL`] as string,
-		driver: env[`AUTH_${provider.toUpperCase()}_DRIVER`] as string,
-		icon: env[`AUTH_${provider.toUpperCase()}_ICON`] as string,
+		label: env[`AUTH_${provider.toUpperCase()}_LABEL` as const],
+		driver: env[`AUTH_${provider.toUpperCase()}_DRIVER` as const] as string,
+		icon: env[`AUTH_${provider.toUpperCase()}_ICON` as const],
 	}));
 }

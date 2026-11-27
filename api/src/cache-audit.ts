@@ -412,7 +412,7 @@ class CacheAudit {
 		this.replay = options.replay ?? loopbackReplayer();
 
 		this.ignore = [
-			...((useEnv()['CACHE_AUDIT_IGNORE_PATHS'] as string[] | undefined) ?? []),
+			...useEnv()['CACHE_AUDIT_IGNORE_PATHS'],
 			...(options.ignore ?? []),
 		].map((glob) => glob.split('/').slice(1));
 	}
@@ -1026,7 +1026,7 @@ export function loopbackTarget(): LoopbackTarget {
 	const env = useEnv();
 
 	if (env['UNIX_SOCKET_PATH']) {
-		return { socketPath: String(env['UNIX_SOCKET_PATH']) };
+		return { socketPath: env['UNIX_SOCKET_PATH'] };
 	}
 
 	const host = String(env['HOST'] ?? '');

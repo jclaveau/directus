@@ -1431,7 +1431,7 @@ describe('The cache audit replays live entries against the database', () => {
 				// identity from the `cache-audit-identity` hook, looked up in no
 				// cache: the audit's own cache is the one under test.
 				cutOffEnv[vendor]['CACHE_SCHEMA'] = 'false';
-				cutOffEnv[vendor]['CACHE_AUDIT_IDENTITY_TOKEN'] = USER.ADMIN.TOKEN;
+				cutOffEnv[vendor]['BLACKBOX_CACHE_AUDIT_IDENTITY_TOKEN'] = USER.ADMIN.TOKEN;
 
 				const cutOffPort = await freePortOfWorker();
 				cutOffEnv[vendor].PORT = String(cutOffPort);

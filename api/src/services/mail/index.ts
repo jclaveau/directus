@@ -20,7 +20,10 @@ const logger = useLogger();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const liquidEngine = new Liquid({
-	root: [path.resolve(env['EMAIL_TEMPLATES_PATH'] as string), path.resolve(__dirname, 'templates')],
+	root: [
+		path.resolve(env['EMAIL_TEMPLATES_PATH']),
+		path.resolve(__dirname, 'templates'),
+	],
 	extname: '.liquid',
 });
 
@@ -72,7 +75,7 @@ export class MailService {
 			? emailOptions.from
 			: {
 					name: defaultTemplateData.projectName,
-					address: (emailOptions.from as string) || (env['EMAIL_FROM'] as string),
+					address: (emailOptions.from as string) || env['EMAIL_FROM'],
 				};
 
 		if (template) {
@@ -99,7 +102,11 @@ export class MailService {
 	}
 
 	private async renderTemplate(template: string, variables: Record<string, any>) {
-		const customTemplatePath = path.resolve(env['EMAIL_TEMPLATES_PATH'] as string, template + '.liquid');
+		const customTemplatePath = path.resolve(
+			env['EMAIL_TEMPLATES_PATH'],
+			`${template}.liquid`,
+		);
+
 		const systemTemplatePath = path.join(__dirname, 'templates', template + '.liquid');
 
 		const templatePath = (await fse.pathExists(customTemplatePath)) ? customTemplatePath : systemTemplatePath;
@@ -128,7 +135,7 @@ export class MailService {
 		};
 
 		function getProjectLogoURL(logoID?: string) {
-			const projectLogoUrl = new Url(env['PUBLIC_URL'] as string);
+			const projectLogoUrl = new Url(env['PUBLIC_URL']);
 
 			if (logoID) {
 				projectLogoUrl.addPath('assets', logoID);

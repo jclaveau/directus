@@ -15,7 +15,8 @@ vi.mock('node-schedule', () => ({
 vi.spyOn(schedule, 'validateCron');
 
 beforeEach(() => {
-	vi.mocked(useEnv).mockReturnValue({ METRICS_ENABLED: true, METRICS_SCHEDULE: '0 0 * * *' });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ METRICS_ENABLED: true, METRICS_SCHEDULE: '0 0 * * *' });
 });
 
 afterEach(() => {
@@ -24,7 +25,8 @@ afterEach(() => {
 
 describe('metrics', () => {
 	test('Returns early when metrics is disabled', async () => {
-		vi.mocked(useEnv).mockReturnValue({ METRICS_ENABLED: false, METRICS_SCHEDULE: '0 0 * * *' });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValue({ METRICS_ENABLED: false, METRICS_SCHEDULE: '0 0 * * *' });
 
 		const res = await metricsSchedule();
 
@@ -33,7 +35,8 @@ describe('metrics', () => {
 	});
 
 	test('Returns early for invalid metrics schedule', async () => {
-		vi.mocked(useEnv).mockReturnValue({ METRICS_ENABLED: true, METRICS_SCHEDULE: '#' });
+		vi.mocked(useEnv, { partial: true })
+			.mockReturnValue({ METRICS_ENABLED: true, METRICS_SCHEDULE: '#' });
 
 		const res = await metricsSchedule();
 

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
 			EXTENSIONS_SANDBOX_MEMORY: 128,
 			EXTENSIONS_SANDBOX_TIMEOUT: 10000,
 		} as Record<string, unknown>,
+		rawEnvVarValues: {} as Record<string, unknown>,
 		logger: {
 			info: vi.fn(),
 			warn: vi.fn(),
@@ -76,7 +77,14 @@ const mocks = vi.hoisted(() => {
 	};
 });
 
-vi.mock('@directus/env', () => ({ useEnv: () => mocks.env }));
+vi.mock('@directus/env', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('@directus/env')>()),
+		useEnv: () => mocks.env,
+		useEnvVarRawValues: () => mocks.rawEnvVarValues,
+	};
+});
+
 vi.mock('../logger/index.js', () => ({ useLogger: () => mocks.logger }));
 vi.mock('../bus/index.js', () => ({ useBus: () => mocks.bus }));
 vi.mock('../flows.js', () => ({ getFlowManager: () => mocks.flows }));
@@ -158,6 +166,19 @@ const { ExtensionManager } = await import('./manager.js');
 afterEach(() => {
 	vi.resetAllMocks();
 	vi.restoreAllMocks();
+
+	// The manager holds this object: a test's declared variables are taken out
+	// rather than the object replaced, so the next test starts from the base.
+	for (const envVarName of Object.keys(mocks.env)) {
+		Reflect.deleteProperty(mocks.env, envVarName);
+	}
+
+	Object.assign(mocks.env, {
+		SERVE_APP: true,
+		TEMP_PATH: '/tmp/directus-test',
+		EXTENSIONS_SANDBOX_MEMORY: 128,
+		EXTENSIONS_SANDBOX_TIMEOUT: 10000,
+	});
 });
 
 test('registers the entries of a code bundle from its api', async () => {
@@ -389,4 +410,361 @@ test('runs the before-schema migrations on a migrating reload', async () => {
 		'Migrations waiting on a schema snapshot: orders:20260212B-fill-orders;'
 			+ ' run "directus database migrate:latest --snapshot <path>"',
 	);
+});
+
+test('casts the variables a code bundle declares, and warns of a typo', async () => {
+	const hookConfig = vi.fn();
+
+	mocks.extensions = {
+		module: new Map([
+			[
+				'subscriptions',
+				{
+					type: 'bundle',
+					name: 'subscriptions',
+					path: '/extensions/subscriptions',
+					entrypoint: { app: 'app.js', api: 'api.js' },
+					entriesFrom: 'code',
+					entries: [],
+				},
+			],
+		]),
+		registry: new Map(),
+	};
+
+	mocks.settings = [
+		{
+			id: 'subscriptions-id',
+			source: 'module',
+			folder: 'subscriptions',
+			bundle: null,
+			enabled: true,
+		},
+		{
+			id: 'trials-id',
+			source: 'module',
+			folder: 'trials',
+			bundle: 'subscriptions-id',
+			enabled: true,
+		},
+	];
+
+	mocks.rawEnvVarValues = {
+		SUBSCRIPTIONS_CODE: '0123',
+		SUBSCRIPTIONS_TRIAL_DAY: '3',
+	};
+
+	mocks.importCodeBundles.mockResolvedValue({
+		codeBundles: [
+			{
+				source: 'module',
+				folder: 'subscriptions',
+				name: 'subscriptions',
+				apiPath: '/extensions/subscriptions/api.js',
+				entries: [
+					{
+						type: 'hook',
+						name: 'trials',
+						config: hookConfig,
+						env: {
+							prefix: 'SUBSCRIPTIONS_',
+							vars: {
+								SUBSCRIPTIONS_CODE: { type: 'string' },
+								SUBSCRIPTIONS_TRIAL_DAYS: { type: 'number', default: 14 },
+							},
+						},
+					},
+				],
+			},
+		],
+		failures: [],
+	});
+
+	mocks.pathExists.mockResolvedValue(false);
+
+	await new ExtensionManager().initialize({ schedule: false, watch: false });
+
+	expect(mocks.env).toEqual({
+		SERVE_APP: true,
+		TEMP_PATH: '/tmp/directus-test',
+		EXTENSIONS_SANDBOX_MEMORY: 128,
+		EXTENSIONS_SANDBOX_TIMEOUT: 10000,
+		SUBSCRIPTIONS_CODE: '0123',
+		SUBSCRIPTIONS_TRIAL_DAYS: 14,
+	});
+
+	expect(hookConfig).toHaveBeenCalledTimes(1);
+
+	expect(mocks.logger.warn).toHaveBeenCalledWith(
+		'"SUBSCRIPTIONS_TRIAL_DAY" is set but nothing declares it.',
+	);
+});
+
+test('fails the boot on a variable a code bundle misdeclares', async () => {
+	const exitSpy = vi.spyOn(process, 'exit')
+		// process.exit returns never: the stub returns so the test goes on.
+		.mockImplementation(() => undefined as never);
+
+	const hookConfig = vi.fn();
+
+	mocks.extensions = {
+		module: new Map([
+			[
+				'billing',
+				{
+					type: 'bundle',
+					name: 'billing',
+					path: '/extensions/billing',
+					entrypoint: { app: 'app.js', api: 'api.js' },
+					entriesFrom: 'code',
+					entries: [],
+				},
+			],
+		]),
+		registry: new Map(),
+	};
+
+	mocks.settings = [
+		{
+			id: 'billing-id',
+			source: 'module',
+			folder: 'billing',
+			bundle: null,
+			enabled: true,
+		},
+		{
+			id: 'invoices-id',
+			source: 'module',
+			folder: 'invoices',
+			bundle: 'billing-id',
+			enabled: true,
+		},
+	];
+
+	mocks.rawEnvVarValues = { BILLING_PORT: 'abc' };
+
+	mocks.importCodeBundles.mockResolvedValue({
+		codeBundles: [
+			{
+				source: 'module',
+				folder: 'billing',
+				name: 'billing',
+				apiPath: '/extensions/billing/api.js',
+				entries: [
+					{
+						type: 'hook',
+						name: 'invoices',
+						config: hookConfig,
+						env: {
+							prefix: 'BILLING_',
+							vars: { BILLING_PORT: { type: 'number' } },
+						},
+					},
+				],
+			},
+		],
+		failures: [],
+	});
+
+	mocks.pathExists.mockResolvedValue(false);
+
+	await new ExtensionManager().initialize({ schedule: false, watch: false });
+
+	expect(mocks.logger.error).toHaveBeenCalledWith(new Error(
+		'Extension "billing": "BILLING_PORT" is "abc", which is not a number.',
+	));
+
+	expect(exitSpy).toHaveBeenCalledWith(1);
+	expect(hookConfig).not.toHaveBeenCalled();
+});
+
+test('lets a code bundle declare a name under a core prefix', async () => {
+	const exitSpy = vi.spyOn(process, 'exit')
+		// process.exit returns never: the stub returns so the test goes on.
+		.mockImplementation(() => undefined as never);
+
+	const hookConfig = vi.fn();
+
+	mocks.extensions = {
+		module: new Map([
+			[
+				'maintenance',
+				{
+					type: 'bundle',
+					name: 'maintenance',
+					path: '/extensions/maintenance',
+					entrypoint: { app: 'app.js', api: 'api.js' },
+					entriesFrom: 'code',
+					entries: [],
+				},
+			],
+		]),
+		registry: new Map(),
+	};
+
+	mocks.settings = [
+		{
+			id: 'maintenance-id',
+			source: 'module',
+			folder: 'maintenance',
+			bundle: null,
+			enabled: true,
+		},
+		{
+			id: 'vacuum-id',
+			source: 'module',
+			folder: 'vacuum',
+			bundle: 'maintenance-id',
+			enabled: true,
+		},
+	];
+
+	mocks.rawEnvVarValues = { DB_VACUUM_CRON_FREQUENCY: '0 6 * * *' };
+
+	mocks.importCodeBundles.mockResolvedValue({
+		codeBundles: [
+			{
+				source: 'module',
+				folder: 'maintenance',
+				name: 'maintenance',
+				apiPath: '/extensions/maintenance/api.js',
+				entries: [
+					{
+						type: 'hook',
+						name: 'vacuum',
+						config: hookConfig,
+						env: {
+							prefix: 'DB_VACUUM_',
+							vars: { DB_VACUUM_CRON_FREQUENCY: { type: 'string' } },
+						},
+					},
+				],
+			},
+		],
+		failures: [],
+	});
+
+	mocks.pathExists.mockResolvedValue(false);
+
+	await new ExtensionManager().initialize({ schedule: false, watch: false });
+
+	expect(mocks.env).toEqual({
+		SERVE_APP: true,
+		TEMP_PATH: '/tmp/directus-test',
+		EXTENSIONS_SANDBOX_MEMORY: 128,
+		EXTENSIONS_SANDBOX_TIMEOUT: 10000,
+		DB_VACUUM_CRON_FREQUENCY: '0 6 * * *',
+	});
+
+	expect(hookConfig).toHaveBeenCalledTimes(1);
+	expect(exitSpy).not.toHaveBeenCalled();
+});
+
+test('fails the boot on a name under a core prefix nothing declares', async () => {
+	const exitSpy = vi.spyOn(process, 'exit')
+		// process.exit returns never: the stub returns so the test goes on.
+		.mockImplementation(() => undefined as never);
+
+	mocks.extensions = { module: new Map(), registry: new Map() };
+	mocks.settings = [];
+	mocks.rawEnvVarValues = { DB_HOTS: 'localhost' };
+	mocks.importCodeBundles.mockResolvedValue({ codeBundles: [], failures: [] });
+	mocks.pathExists.mockResolvedValue(false);
+
+	await new ExtensionManager().initialize({ schedule: false, watch: false });
+
+	expect(mocks.logger.error).toHaveBeenCalledWith(new Error(
+		'"DB_HOTS" is under the core prefix "DB_",'
+			+ ' but core declares no such variable.',
+	));
+
+	expect(exitSpy).toHaveBeenCalledWith(1);
+});
+
+test('gives core its guess back on a reload without the bundle', async () => {
+	mocks.extensions = {
+		module: new Map([
+			[
+				'subscriptions',
+				{
+					type: 'bundle',
+					name: 'subscriptions',
+					path: '/extensions/subscriptions',
+					entrypoint: { app: 'app.js', api: 'api.js' },
+					entriesFrom: 'code',
+					entries: [],
+				},
+			],
+		]),
+		registry: new Map(),
+	};
+
+	mocks.settings = [
+		{
+			id: 'subscriptions-id',
+			source: 'module',
+			folder: 'subscriptions',
+			bundle: null,
+			enabled: true,
+		},
+		{
+			id: 'trials-id',
+			source: 'module',
+			folder: 'trials',
+			bundle: 'subscriptions-id',
+			enabled: true,
+		},
+	];
+
+	mocks.rawEnvVarValues = { SUBSCRIPTIONS_CODE: '123' };
+
+	mocks.importCodeBundles.mockResolvedValue({
+		codeBundles: [
+			{
+				source: 'module',
+				folder: 'subscriptions',
+				name: 'subscriptions',
+				apiPath: '/extensions/subscriptions/api.js',
+				entries: [
+					{
+						type: 'hook',
+						name: 'trials',
+						config: vi.fn(),
+						env: {
+							prefix: 'SUBSCRIPTIONS_',
+							vars: {
+								SUBSCRIPTIONS_CODE: { type: 'string' },
+								SUBSCRIPTIONS_TRIAL_DAYS: { type: 'number', default: 14 },
+							},
+						},
+					},
+				],
+			},
+		],
+		failures: [],
+	});
+
+	mocks.pathExists.mockResolvedValue(false);
+
+	const manager = new ExtensionManager();
+
+	await manager.initialize({ schedule: false, watch: false });
+
+	mocks.extensions = { module: new Map(), registry: new Map() };
+	mocks.settings = [];
+
+	mocks.importCodeBundles.mockResolvedValue({
+		codeBundles: [],
+		failures: [],
+	});
+
+	await manager.reload();
+
+	expect(mocks.env).toEqual({
+		SERVE_APP: true,
+		TEMP_PATH: '/tmp/directus-test',
+		EXTENSIONS_SANDBOX_MEMORY: 128,
+		EXTENSIONS_SANDBOX_TIMEOUT: 10000,
+		SUBSCRIPTIONS_CODE: 123,
+	});
 });

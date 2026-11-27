@@ -124,22 +124,6 @@ test('Builds when a named connection only overrides the database', async () => {
 	expect(() => getDatabase()).not.toThrow();
 });
 
-test('Reads DB_CONNECTIONS as a CSV string (e.g. when set at runtime)', async () => {
-	mockEnv['DB_CONNECTIONS'] = 'premium, replica_a';
-	mockEnv['DB_CONNECTION_REPLICA_A_DATABASE'] = 'directus_replica';
-	mockEnv['DB_CONNECTION_REPLICA_A_PRIORITY'] = 10;
-
-	const { getDatabaseForAccountability } = await import('./index.js');
-
-	const db = getDatabaseForAccountability(
-		createDefaultAccountability({
-			grantedDbConnections: ['replica_a', 'premium'],
-		}),
-	) as KnexWithSettings;
-
-	expect(db.__knexConfig.connection.database).toBe('directus_premium');
-});
-
 test('Picks the higher priority regardless of grant order', async () => {
 	mockEnv['DB_CONNECTIONS'] = ['premium', 'replica_a'];
 	mockEnv['DB_CONNECTION_REPLICA_A_DATABASE'] = 'directus_replica';

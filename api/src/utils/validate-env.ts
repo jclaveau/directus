@@ -1,4 +1,4 @@
-import { useEnv } from '@directus/env';
+import { type EnvVarName, useEnv } from '@directus/env';
 import { parse as parseBytesConfiguration } from 'bytes';
 import { validateHeaderName } from 'node:http';
 import { useLogger } from '../logger/index.js';
@@ -34,7 +34,7 @@ const BOOLEANS = ['true', 'false', '1', '0'];
  * Read off `useEnv`, so an unset variable takes its default. `ms` reads a value
  * over 100 characters, 401 digits included, as none.
  */
-export function validateDurationEnv(keys: string[]): void {
+export function validateDurationEnv(keys: EnvVarName[]): void {
 	const env = useEnv();
 	const logger = useLogger();
 
@@ -57,9 +57,9 @@ export function validateDurationEnv(keys: string[]): void {
 /**
  * Refuse a count variable that is not a whole number of 0 or more, at boot like
  * {@link validateDurationEnv}. Read off `useEnv`, so an unset variable takes its
- * default; TYPE_MAP types it a number, which reads `ten` as NaN.
+ * default; declared a number, `ten` fails the boot before it gets here.
  */
-export function validateCountEnv(keys: string[]): void {
+export function validateCountEnv(keys: EnvVarName[]): void {
 	const env = useEnv();
 	const logger = useLogger();
 
@@ -91,7 +91,7 @@ const SIZE_PATTERN = /^\d+(?:\.\d+)?\s*(?:b|kb|mb|gb|tb|pb)?$/i;
  * {@link validateDurationEnv}. Read off `useEnv`, so an unset variable takes its
  * default.
  */
-export function validateBytesEnv(keys: string[], nonzeroMinimum = 0): void {
+export function validateBytesEnv(keys: EnvVarName[], nonzeroMinimum = 0): void {
 	const env = useEnv();
 	const logger = useLogger();
 
@@ -127,7 +127,7 @@ export function validateBytesEnv(keys: string[], nonzeroMinimum = 0): void {
  * default.
  */
 export function validateChoiceEnv(
-	key: string,
+	key: EnvVarName,
 	choices: readonly string[],
 ): void {
 	const env = useEnv();
@@ -161,7 +161,7 @@ const SUPPORTED_DATABASE_CLIENTS = [
  * would only say to install it.
  */
 export function validateDatabaseClientEnv(keys: string[]): void {
-	const env = useEnv();
+	const env: Record<string, unknown> = useEnv(); // names built per connection
 
 	for (const key of keys) {
 		if (DROPPED_DATABASE_CLIENTS.includes(env[key] as string) === false) {
@@ -184,7 +184,7 @@ export function validateDatabaseClientEnv(keys: string[]): void {
  * boolean is refused too: the variable turns its feature on by being set, so
  * `false` would turn it on under a header named `false`.
  */
-export function validateHeaderNameEnv(key: string): void {
+export function validateHeaderNameEnv(key: EnvVarName): void {
 	const env = useEnv();
 
 	if (BOOLEANS.includes(String(env[key]).toLowerCase())) {
@@ -220,7 +220,7 @@ const UNREAD_VARIABLE_ADVICE: Record<string, string> = {
  * for one that did.
  */
 export function validateUnreadEnv(): void {
-	const env = useEnv();
+	const env: Record<string, unknown> = useEnv(); // reads names no longer declared
 
 	for (const [key, advice] of Object.entries(UNREAD_VARIABLE_ADVICE)) {
 		if (env[key] === undefined) {
@@ -306,7 +306,7 @@ const OUT_OF_SCOPE_AUTH_DRIVERS = ['ldap', 'oauth2', 'openid', 'saml'];
  * half done, and keeps the refusal in one place blackbox can test.
  */
 export function validateOutOfScopeFeaturesEnv(): void {
-	const env = useEnv();
+	const env: Record<string, unknown> = useEnv(); // per-provider driver names
 	const knownFeatureNames = Object.keys(OUT_OF_SCOPE_FEATURE_ISSUES);
 
 	const allowedFeatureNames = allowedOutOfScopeFeatures();

@@ -10,7 +10,8 @@ vi.mock('@directus/env');
 async function deploymentWith(env: Record<string, unknown> = {}) {
 	const { useEnv } = await import('@directus/env');
 
-	vi.mocked(useEnv).mockReturnValue({ CACHE_NAMESPACE: 'scalabus', ...env });
+	vi.mocked(useEnv, { partial: true })
+		.mockReturnValue({ CACHE_NAMESPACE: 'scalabus', ...env });
 }
 
 test('refuses an option a restart cannot carry', () => {

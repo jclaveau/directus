@@ -62,7 +62,7 @@ if (env['RATE_LIMITER_ENABLED'] === true) {
 
 				res.set('Retry-After', String(Math.round(rateLimiterRes.msBeforeNext / 1000)));
 				throw new HitRateLimitError({
-					limit: +(env['RATE_LIMITER_POINTS'] as string),
+					limit: env['RATE_LIMITER_POINTS'],
 					reset: new Date(Date.now() + rateLimiterRes.msBeforeNext),
 				});
 			}

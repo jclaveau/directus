@@ -147,7 +147,7 @@ export function createSAMLAuthRouter(providerName: string) { // bb-out-of-scope:
 			const { context } = sp.createLogoutRequest(idp, 'redirect', req.body);
 
 			const authService = new AuthenticationService({ accountability: req.accountability, schema: req.schema });
-			const sessionCookieName = env['SESSION_COOKIE_NAME'] as string;
+			const sessionCookieName = env['SESSION_COOKIE_NAME'];
 
 			if (req.cookies[sessionCookieName]) {
 				await authService.logout(req.cookies[sessionCookieName]);
@@ -166,7 +166,8 @@ export function createSAMLAuthRouter(providerName: string) { // bb-out-of-scope:
 
 			const relayState: string | undefined = req.body?.RelayState;
 
-			const authMode = (env[`AUTH_${providerName.toUpperCase()}_MODE`] ?? 'session') as string;
+			const authModeEnvVarName = `AUTH_${providerName.toUpperCase()}_MODE` as const;
+			const authMode = env[authModeEnvVarName] ?? 'session';
 
 			try {
 				const { sp, idp } = getAuthProvider(providerName) as SAMLAuthDriver;
@@ -188,9 +189,17 @@ export function createSAMLAuthRouter(providerName: string) { // bb-out-of-scope:
 
 				if (relayState) {
 					if (authMode === 'session') {
-						res.cookie(env['SESSION_COOKIE_NAME'] as string, accessToken, SESSION_COOKIE_OPTIONS);
+						res.cookie(
+							env['SESSION_COOKIE_NAME'],
+							accessToken,
+							SESSION_COOKIE_OPTIONS,
+						);
 					} else {
-						res.cookie(env['REFRESH_TOKEN_COOKIE_NAME'] as string, refreshToken, REFRESH_COOKIE_OPTIONS);
+						res.cookie(
+							env['REFRESH_TOKEN_COOKIE_NAME'],
+							refreshToken,
+							REFRESH_COOKIE_OPTIONS,
+						);
 					}
 
 					return res.redirect(relayState);

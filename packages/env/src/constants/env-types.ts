@@ -3,3 +3,20 @@
  * `'1'`
  */
 export const ENV_TYPES = ['string', 'number', 'regex', 'array', 'json', 'boolean'] as const;
+
+/**
+ * What a variable may be declared as: a cast flag's types, but `string[]` for
+ * `array`, whose `array:` flag a `string[]` declaration accepts.
+ */
+export const ENV_VAR_DECLARED_TYPES = [
+	'string',
+	'number',
+	'regex',
+	'string[]',
+	'json',
+	'boolean',
+	'false | number',
+	'false | string',
+	'false | string[]',
+	'boolean | number | string | string[]',
+] as const;

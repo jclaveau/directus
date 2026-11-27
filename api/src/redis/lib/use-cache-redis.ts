@@ -81,7 +81,7 @@ function sharedRedisDatabases(): number[] | undefined {
 function readCacheRedisDatabase(): number | undefined {
 	const raw = useEnv()['CACHE_REDIS_DB'];
 
-	if (raw === undefined || raw === null || raw === '') {
+	if (raw === undefined) {
 		return undefined;
 	}
 
