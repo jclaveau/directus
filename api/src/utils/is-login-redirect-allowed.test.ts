@@ -39,8 +39,11 @@ test('isLoginRedirectAllowed returns true for allowed URL', () => {
 	const provider = 'local';
 
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
-		AUTH_LOCAL_REDIRECT_ALLOW_LIST:
-			'http://external.example.com,https://external.example.com,http://external.example.com:8055/test',
+		AUTH_LOCAL_REDIRECT_ALLOW_LIST: [
+			'http://external.example.com',
+			'https://external.example.com',
+			'http://external.example.com:8055/test',
+		],
 		PUBLIC_URL: 'http://public.example.com',
 	});
 
@@ -54,7 +57,7 @@ test('isLoginRedirectAllowed returns false for denied URL', () => {
 	const provider = 'local';
 
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
-		AUTH_LOCAL_REDIRECT_ALLOW_LIST: 'http://external.example.com',
+		AUTH_LOCAL_REDIRECT_ALLOW_LIST: ['http://external.example.com'],
 		PUBLIC_URL: 'http://public.example.com',
 	});
 
@@ -67,7 +70,7 @@ test('isLoginRedirectAllowed returns true for relative paths', () => {
 	const provider = 'local';
 
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
-		AUTH_LOCAL_REDIRECT_ALLOW_LIST: 'http://external.example.com',
+		AUTH_LOCAL_REDIRECT_ALLOW_LIST: ['http://external.example.com'],
 		PUBLIC_URL: 'http://public.example.com',
 	});
 
@@ -82,7 +85,7 @@ test('isLoginRedirectAllowed returns false if missing protocol', () => {
 	const provider = 'local';
 
 	vi.mocked(useEnv, { partial: true }).mockReturnValue({
-		AUTH_LOCAL_REDIRECT_ALLOW_LIST: 'http://example.com',
+		AUTH_LOCAL_REDIRECT_ALLOW_LIST: ['http://example.com'],
 		PUBLIC_URL: 'http://example.com',
 	});
 

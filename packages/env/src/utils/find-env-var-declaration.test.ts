@@ -27,7 +27,7 @@ test('finds a literal declaration with its default', () => {
 });
 
 test('finds a guessed declaration by the glob of its name', () => {
-	expect(findEnvVarDeclaration('AUTH_GOOGLE_CLIENT_HTTP_TIMEOUT')).toEqual({});
+	expect(findEnvVarDeclaration('AUTH_GOOGLE_CLIENT_HTTP_HEADERS')).toEqual({});
 });
 
 test('finds nothing for an undeclared name', () => {
@@ -70,11 +70,15 @@ test.each([
 });
 
 test.each([
-	'DB_SSL__REJECT_UNAUTHORIZED',
-	'CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC',
-	'ASSETS_CONTENT_SECURITY_POLICY_DIRECTIVES__IMG_SRC',
-])('finds %j under a pattern a reader forwards', (envVarName) => {
-	expect(findEnvVarDeclaration(envVarName)).toEqual({});
+	['DB_SSL__REJECT_UNAUTHORIZED', { type: 'boolean' }],
+	['DB_SSL__ALPN_PROTOCOLS', {}],
+	['CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC', { type: 'string[]' }],
+	['ASSETS_CONTENT_SECURITY_POLICY_DIRECTIVES__IMG_SRC', { type: 'string[]' }],
+])('finds %j under a pattern a reader forwards', (
+	envVarName,
+	envVarDeclaration,
+) => {
+	expect(findEnvVarDeclaration(envVarName)).toEqual(envVarDeclaration);
 });
 
 test('types no DB_HOTS on Env', () => {
