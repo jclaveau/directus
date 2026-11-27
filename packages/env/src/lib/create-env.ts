@@ -14,6 +14,9 @@ import { checkDeclaredEnvVarValue } from './check-declared-env-var-value.js';
 import { readConfigurationFromFile } from './read-configuration-from-file.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
 
+/** The prefixes whose value may not fit them: `number:abc` refuses the boot. */
+const CHECKED_CAST_FLAGS = ['number', 'boolean', 'regex', 'json'] as const;
+
 /**
  * Which layer supplied each variable's final value, recorded as the layers are
  * applied. Knowing a value is worth little without knowing which layer won it —
@@ -101,9 +104,12 @@ export const createEnv = (): Env => {
 			? envVarDeclaration
 			: undefined;
 
-		// A `boolean:` prefix on a name with no declared type is checked as one.
-		if (!typedDeclaration && getCastFlag(value) === 'boolean') {
-			typedDeclaration = { type: 'boolean' };
+		const valueCastFlag = CHECKED_CAST_FLAGS
+			.find((checkedFlag) => checkedFlag === getCastFlag(value));
+
+		// A prefix on a name with no declared type is checked as its type.
+		if (!typedDeclaration && valueCastFlag) {
+			typedDeclaration = { type: valueCastFlag };
 		}
 
 		const valueRefusal = typedDeclaration
