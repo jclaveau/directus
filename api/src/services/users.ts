@@ -14,6 +14,7 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import { getSimpleHash, toArray, validatePayload } from '@directus/utils';
 import { FailedValidationError, joiValidationErrorItemToErrorExtensions } from '@directus/validation';
 import Joi from 'joi';
+import type { Knex } from 'knex';
 import jwt from 'jsonwebtoken';
 import type { StringValue } from 'ms';
 import { performance } from 'node:perf_hooks';
@@ -31,11 +32,28 @@ import { stall } from '../utils/stall.js';
 import { transactionHoldingActions } from '../utils/transaction-holding-actions.js';
 import { Url } from '../utils/url.js';
 import { ItemsService } from './items.js';
+import {
+	EMAIL_IDENTITY_KIND,
+	fetchIdentity,
+	fetchPasswordLoginIdentity,
+	fetchUserEmail,
+	IDENTITIES_COLLECTION,
+	toIdentityKind,
+} from '../auth/utils/user-identities.js';
+import { DEFAULT_AUTH_PROVIDER } from '../constants.js';
+import { transaction } from '../utils/transaction.js';
 import { MailService } from './mail/index.js';
 import { SettingsService } from './settings.js';
 
 const env = useEnv();
 const logger = useLogger();
+
+type IdentityKeys = {
+	email: string | undefined;
+	provider: string | undefined;
+	externalIdentifier: string | undefined;
+	authData: unknown;
+};
 
 // Bounds the bind parameters of one update and the rows one cache snapshot holds.
 const UNLINK_CHUNK_SIZE = 10_000;
@@ -63,27 +81,28 @@ export class UsersService extends ItemsService {
 
 		if (duplicates.length) {
 			throw new RecordNotUniqueError({
-				collection: 'directus_users',
-				field: 'email',
+				collection: IDENTITIES_COLLECTION,
+				field: 'value',
 				value: '[' + String(duplicates) + ']',
 			});
 		}
 
 		const query = this.knex
-			.select('email')
-			.from('directus_users')
-			.whereRaw(`LOWER(??) IN (${emails.map(() => '?')})`, ['email', ...emails]);
+			.select('value')
+			.from(IDENTITIES_COLLECTION)
+			.where('kind', EMAIL_IDENTITY_KIND)
+			.whereRaw(`LOWER(??) IN (${emails.map(() => '?')})`, ['value', ...emails]);
 
 		if (excludeKeys.length > 0) {
-			query.whereNotIn('id', excludeKeys);
+			query.whereNotIn('user', excludeKeys);
 		}
 
 		const results = await query;
 
 		if (results.length) {
 			throw new RecordNotUniqueError({
-				collection: 'directus_users',
-				field: 'email',
+				collection: IDENTITIES_COLLECTION,
+				field: 'value',
 				value: '[' + String(emails) + ']',
 			});
 		}
@@ -146,12 +165,160 @@ export class UsersService extends ItemsService {
 	 */
 	private async getUserByEmail(
 		email: string,
+		identityLookup: 'any' | 'password-login' = 'any',
 	): Promise<{ id: string; role: string; status: string; password: string; email: string } | undefined> {
-		return this.knex
-			.select('id', 'role', 'status', 'password', 'email')
+		const identity = identityLookup === 'any'
+			? await fetchIdentity(this.knex, EMAIL_IDENTITY_KIND, email)
+			: await fetchPasswordLoginIdentity(this.knex, email);
+
+		if (!identity) {
+			return undefined;
+		}
+
+		const user = await this.knex
+			.select('id', 'role', 'status', 'password')
 			.from('directus_users')
-			.whereRaw(`LOWER(??) = ?`, ['email', email.toLowerCase()])
+			.where('id', identity.user)
 			.first();
+
+		return user
+? { ...user, email: identity.value }
+: undefined;
+	}
+
+	/**
+	 * The identity keys a users payload carries in their pre-identity shape:
+	 * `email` lands as an email identity, `provider` + `external_identifier`
+	 * as an SSO identity, `auth_data` on it.
+	 *
+	 * @throws InvalidPayloadError when a non-admin writes one, or `provider`
+	 * comes without `external_identifier`
+	 */
+	private takeIdentityKeys(
+		data: Partial<Item>,
+		isUpdate: boolean,
+	): IdentityKeys | null {
+		const identityKeys: IdentityKeys = {
+			email: data['email'] ?? undefined,
+			provider: data['provider'] ?? undefined,
+			externalIdentifier: data['external_identifier'] ?? undefined,
+			authData: data['auth_data'] ?? null,
+		};
+
+		const isWritten = ['email', 'provider', 'external_identifier', 'auth_data']
+			.some((identityKey) => identityKey in data);
+
+		delete data['email'];
+		delete data['provider'];
+		delete data['external_identifier'];
+		delete data['auth_data'];
+
+		if (!isWritten) {
+			return null;
+		}
+
+		const isPrivileged = !this.accountability || this.accountability.admin === true;
+
+		for (const [payloadKey, payloadValue] of [
+			['provider', identityKeys.provider],
+			['external_identifier', identityKeys.externalIdentifier],
+		] as const) {
+			if (payloadValue !== undefined && !isPrivileged) {
+				throw new InvalidPayloadError({
+					reason: `You can't change the ${JSON.stringify(payloadKey)} value`
+						+ ' manually',
+				});
+			}
+		}
+
+		// OPEN(#772): a non-admin adds an email through a verification flow, not here
+		if (isUpdate && identityKeys.email !== undefined && !isPrivileged) {
+			throw new InvalidPayloadError({
+				reason: `You can't change the "email" value manually`,
+			});
+		}
+
+		const isDefaultProvider = identityKeys.provider === undefined
+			|| identityKeys.provider === DEFAULT_AUTH_PROVIDER;
+
+		if (!isDefaultProvider && identityKeys.externalIdentifier === undefined) {
+			throw new InvalidPayloadError({
+				reason: `The provider ${JSON.stringify(identityKeys.provider)} needs an`
+					+ ' "external_identifier"',
+			});
+		}
+
+		return identityKeys;
+	}
+
+	/**
+	 * Writes the identities a users payload carried, in the transaction of the
+	 * users write: an email identity replaces the value of the account's email
+	 * identity shown first, unverified, or is added; an SSO identity is added.
+	 * The account without a primary identity gets the first written.
+	 */
+	private async writeIdentityKeys(
+		trx: Knex,
+		userId: PrimaryKey,
+		identityKeys: IdentityKeys,
+	): Promise<void> {
+		const identitiesService = new ItemsService(IDENTITIES_COLLECTION, {
+			knex: trx,
+			schema: this.schema,
+			accountability: null,
+		});
+
+		const writtenIds: PrimaryKey[] = [];
+
+		if (identityKeys.email) {
+			const shownEmail = await fetchUserEmail(trx, String(userId));
+
+			const emailIdentity = shownEmail === null
+				? undefined
+				: await fetchIdentity(trx, EMAIL_IDENTITY_KIND, shownEmail);
+
+			if (emailIdentity) {
+				await identitiesService.updateOne(emailIdentity.id, {
+					value: identityKeys.email,
+					verified: false,
+				});
+
+				writtenIds.push(emailIdentity.id);
+			}
+			else {
+				writtenIds.push(await identitiesService.createOne({
+					user: userId,
+					kind: EMAIL_IDENTITY_KIND,
+					value: identityKeys.email,
+					verified: false,
+				}));
+			}
+		}
+
+		const ssoKind = identityKeys.provider === undefined
+			? undefined
+			: toIdentityKind(identityKeys.provider);
+
+		const isSsoIdentity = ssoKind !== undefined
+			&& ssoKind !== EMAIL_IDENTITY_KIND
+			&& identityKeys.externalIdentifier !== undefined;
+
+		if (isSsoIdentity) {
+			writtenIds.push(await identitiesService.createOne({
+				user: userId,
+				kind: ssoKind,
+				value: identityKeys.externalIdentifier,
+				verified: true,
+				auth_data: identityKeys.authData,
+			}));
+		}
+
+		if (writtenIds.length > 0) {
+			await trx('directus_users')
+				.update({ primary_identity: writtenIds[0] })
+				.where('id', userId)
+				.whereNull('primary_identity');
+		}
 	}
 
 	/**
@@ -196,8 +363,21 @@ export class UsersService extends ItemsService {
 	 */
 	override async createMany(data: Partial<Item>[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
 		const emails = data
-			.filter((payload) => payload['email'] !== undefined)
+			.filter((payload) => {
+				return payload['email'] !== undefined && payload['email'] !== null;
+			})
 			.map((payload) => payload['email']);
+
+		const identityKeysByRow: (IdentityKeys | null)[] = [];
+
+		try {
+			for (const payload of data) {
+				identityKeysByRow.push(this.takeIdentityKeys(payload, false));
+			}
+		}
+ catch (err: any) {
+			opts.preMutationError = err;
+		}
 
 		const passwords = data
 			.filter((payload) => 'password' in payload && payload['password'] !== null)
@@ -226,15 +406,34 @@ export class UsersService extends ItemsService {
 			opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 		}
 
-		// Use generic ItemsService to avoid calling `UserService.createOne` to avoid additional work of validating emails,
-		// as this requires one query per email if done in `createOne`
-		const itemsService = new ItemsService(this.collection, {
-			schema: this.schema,
-			accountability: this.accountability,
-			knex: this.knex,
-		});
+		if (identityKeysByRow.every((identityKeys) => identityKeys === null)) {
+			// Use generic ItemsService to avoid calling `UserService.createOne` to
+			// avoid additional work of validating emails, as this requires one query
+			// per email if done in `createOne`
+			return await new ItemsService(this.collection, {
+				schema: this.schema,
+				accountability: this.accountability,
+				knex: this.knex,
+			}).createMany(data, opts);
+		}
 
-		return await itemsService.createMany(data, opts);
+		return await transaction(this.knex, async (trx) => {
+			const createdKeys = await new ItemsService(this.collection, {
+				schema: this.schema,
+				accountability: this.accountability,
+				knex: trx,
+			}).createMany(data, opts);
+
+			for (const [rowIndex, createdKey] of createdKeys.entries()) {
+				const identityKeys = identityKeysByRow[rowIndex];
+
+				if (identityKeys) {
+					await this.writeIdentityKeys(trx, createdKey, identityKeys);
+				}
+			}
+
+			return createdKeys;
+		});
 	}
 
 	/**
@@ -257,8 +456,20 @@ export class UsersService extends ItemsService {
 				return keys;
 			});
 
+		const identityWrites: { keys: PrimaryKey[]; identityKeys: IdentityKeys }[] = [];
+
 		for (const { data, keys } of groups) {
 			try {
+				const identityKeys = this.takeIdentityKeys(data, true);
+
+				if (identityKeys) {
+					identityWrites.push({ keys, identityKeys });
+				}
+
+				if (identityKeys?.email) {
+					data['email'] = identityKeys.email;
+				}
+
 				if (data['email']) {
 					const lowerEmail = String(data['email']).toLowerCase();
 
@@ -274,6 +485,7 @@ export class UsersService extends ItemsService {
 					claimedEmails.add(lowerEmail);
 					this.validateEmail(data['email']);
 					await this.checkUniqueEmails([data['email']], rewrittenEmailKeys);
+					delete data['email'];
 				}
 
 				if (data['password']) {
@@ -286,25 +498,6 @@ export class UsersService extends ItemsService {
 					});
 				}
 
-				if (data['provider'] !== undefined) {
-					if (this.accountability && this.accountability.admin !== true) {
-						throw new InvalidPayloadError({
-							reason: `You can't change the "provider" value manually`,
-						});
-					}
-
-					data['auth_data'] = null;
-				}
-
-				if (data['external_identifier'] !== undefined) {
-					if (this.accountability && this.accountability.admin !== true) {
-						throw new InvalidPayloadError({
-							reason: `You can't change the "external_identifier" value manually`,
-						});
-					}
-
-					data['auth_data'] = null;
-				}
 			}
 			catch (err: any) {
 				opts.preMutationErrorsByKey ??= new Map();
@@ -317,7 +510,31 @@ export class UsersService extends ItemsService {
 			}
 		}
 
-		return await super.updateGroups(groups, opts);
+		const updatedKeys = await super.updateGroups(groups, opts);
+
+		// OPEN(#772): written after the users update commits, not in its transaction
+		if (identityWrites.length > 0) {
+			await transaction(this.knex, async (trx) => {
+				for (const { keys, identityKeys } of identityWrites) {
+					for (const userKey of keys) {
+						await this.writeIdentityKeys(trx, userKey, identityKeys);
+					}
+				}
+			});
+
+			const emailRewrittenKeys = identityWrites
+				.filter(({ identityKeys }) => identityKeys.email !== undefined)
+				.flatMap(({ keys }) => keys);
+
+			if (emailRewrittenKeys.length > 0) {
+				await this.clearUserSessions(
+					emailRewrittenKeys,
+					this.accountability?.session,
+				);
+			}
+		}
+
+		return updatedKeys;
 	}
 
 	protected override requiredIntegrityChecks(
@@ -352,7 +569,7 @@ export class UsersService extends ItemsService {
 			if (data['status'] !== undefined && data['status'] !== 'active') {
 				await this.clearUserSessions(keys);
 			}
-			else if (data['password'] !== undefined || data['email'] !== undefined) {
+			else if (data['password'] !== undefined) {
 				await this.clearUserSessions(keys, this.accountability?.session);
 			}
 		}
@@ -664,12 +881,21 @@ export class UsersService extends ItemsService {
 		const STALL_TIME = 500;
 		const timeStart = performance.now();
 
-		const user = await this.getUserByEmail(email);
+		const user = await this.getUserByEmail(email, 'password-login');
 
 		if (user?.status !== 'active') {
 			await stall(STALL_TIME, timeStart);
 			throw new ForbiddenError({
 				reason: 'Inactive user',
+			});
+		}
+
+		// Point 10: a first password is set from a logged-in session only, so an
+		// account the IdP offboards stays locked out
+		if (!user.password) {
+			await stall(STALL_TIME, timeStart);
+			throw new ForbiddenError({
+				reason: 'No password is set on this account',
 			});
 		}
 
@@ -731,11 +957,17 @@ export class UsersService extends ItemsService {
 			opts.preMutationError = err;
 		}
 
-		const user = await this.getUserByEmail(email);
+		const user = await this.getUserByEmail(email, 'password-login');
 
 		if (user?.status !== 'active') {
 			throw new ForbiddenError({
 				reason: 'Inactive user',
+			});
+		}
+
+		if (!user.password) {
+			throw new ForbiddenError({
+				reason: 'No password is set on this account',
 			});
 		}
 
@@ -756,6 +988,63 @@ export class UsersService extends ItemsService {
 		});
 
 		await service.updateOne(user.id, { password, status: 'active' }, opts);
+	}
+
+	/**
+	 * Point 4: removes one of the account's identities and the sessions it
+	 * opened. The primary moves to a verified email, else any email, else any
+	 * identity left.
+	 *
+	 * @throws ForbiddenError when the identity isn't the account's
+	 * @throws InvalidPayloadError when it is the account's last identity
+	 */
+	async removeIdentity(userId: string, identityId: string): Promise<void> {
+		await transaction(this.knex, async (trx) => {
+			type OwnedIdentity = { id: string; kind: string; verified: boolean };
+
+			const userIdentities: OwnedIdentity[] = await trx
+				.select('id', 'kind', 'verified')
+				.from(IDENTITIES_COLLECTION)
+				.where('user', userId)
+				.forUpdate();
+
+			if (!userIdentities.some((userIdentity) => userIdentity.id === identityId)) {
+				throw new ForbiddenError({
+					reason: `The identity ${JSON.stringify(identityId)} isn't one of the`
+						+ ' account\'s',
+				});
+			}
+
+			if (userIdentities.length === 1) {
+				throw new InvalidPayloadError({
+					reason: `The identity ${JSON.stringify(identityId)} is the account's`
+						+ ' last identity',
+				});
+			}
+
+			const remainingIdentities = userIdentities
+				.filter((userIdentity) => userIdentity.id !== identityId);
+
+			// OPEN(#772): the primary that replaces a removed one
+			const nextPrimary = remainingIdentities.find((userIdentity) => {
+				return userIdentity.kind === EMAIL_IDENTITY_KIND && userIdentity.verified;
+			})
+				?? remainingIdentities.find((userIdentity) => {
+					return userIdentity.kind === EMAIL_IDENTITY_KIND;
+				})
+				?? remainingIdentities[0]!;
+
+			await trx('directus_users')
+				.update({ primary_identity: nextPrimary.id })
+				.where('id', userId)
+				.where('primary_identity', identityId);
+
+			await new ItemsService(IDENTITIES_COLLECTION, {
+				knex: trx,
+				schema: this.schema,
+				accountability: null,
+			}).deleteOne(identityId);
+		});
 	}
 
 	private async clearCaches(opts?: MutationOptions) {

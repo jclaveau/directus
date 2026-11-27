@@ -305,6 +305,25 @@ router.delete(
 );
 
 router.delete(
+	'/me/identities/:identity',
+	asyncHandler(async (req, _res, next) => {
+		if (!req.accountability?.user) {
+			throw new InvalidCredentialsError();
+		}
+
+		const service = new UsersService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		await service.removeIdentity(req.accountability.user, req.params['identity']!);
+
+		return next();
+	}),
+	respond,
+);
+
+router.delete(
 	'/:pk',
 	asyncHandler(async (req, _res, next) => {
 		const service = new UsersService({
