@@ -248,6 +248,14 @@ export class UsersService extends ItemsService {
 			});
 		}
 
+		// OPEN(#772): refused, not written onto the account's SSO identity
+		if (isDefaultProvider && identityKeys.externalIdentifier !== undefined) {
+			throw new InvalidPayloadError({
+				reason: 'An "external_identifier" needs a provider other than'
+					+ ` ${JSON.stringify(DEFAULT_AUTH_PROVIDER)}`,
+			});
+		}
+
 		return identityKeys;
 	}
 
