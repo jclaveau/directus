@@ -1,6 +1,6 @@
 /**
  * The prefixes whose every variable is core's: one set under them that core
- * neither declares nor reads is a typo, and is warned about at boot.
+ * neither declares nor reads is a typo, and refuses the boot.
  *
  * Listed rather than read off the declared names, whose first words are often
  * shared: `PM2_` is also pm2's own (`PM2_HOME`), `SESSION_` a desktop's
