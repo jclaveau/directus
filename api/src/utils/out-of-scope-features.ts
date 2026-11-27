@@ -5,7 +5,7 @@ import { ServiceUnavailableError } from '@directus/errors';
  * The features no blackbox scenario guards, by the name
  * `OUT_OF_SCOPE_FEATURES_ALLOWED` takes, each with the issue tracking it.
  */
-export const OUT_OF_SCOPE_FEATURES: Record<string, string> = {
+export const OUT_OF_SCOPE_FEATURE_ISSUES: Record<string, string> = {
 	'ldap': '#619',
 	'oauth2': '#622',
 	'openid': '#622',
@@ -38,7 +38,7 @@ export function refuseOutOfScopeFeature(featureName: string): void {
 	throw new ServiceUnavailableError({
 		service: featureName,
 		reason: 'It is out of the tested scope '
-			+ `(${OUT_OF_SCOPE_FEATURES[featureName]}): add `
+			+ `(${OUT_OF_SCOPE_FEATURE_ISSUES[featureName]}): add `
 			+ `${JSON.stringify(featureName)} to OUT_OF_SCOPE_FEATURES_ALLOWED `
 			+ 'to run it untested',
 	});

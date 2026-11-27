@@ -5,7 +5,7 @@ import { useLogger } from '../logger/index.js';
 import { getMilliseconds } from './get-milliseconds.js';
 import {
 	allowedOutOfScopeFeatures,
-	OUT_OF_SCOPE_FEATURES,
+	OUT_OF_SCOPE_FEATURE_ISSUES,
 } from './out-of-scope-features.js';
 
 export function validateEnv(requiredKeys: string[]): void {
@@ -348,7 +348,7 @@ const OUT_OF_SCOPE_AUTH_DRIVERS = ['ldap', 'oauth2', 'openid', 'saml'];
  */
 export function validateOutOfScopeFeaturesEnv(): void {
 	const env = useEnv();
-	const knownFeatureNames = Object.keys(OUT_OF_SCOPE_FEATURES);
+	const knownFeatureNames = Object.keys(OUT_OF_SCOPE_FEATURE_ISSUES);
 
 	const allowedFeatureNames = allowedOutOfScopeFeatures();
 
@@ -415,7 +415,7 @@ export function validateOutOfScopeFeaturesEnv(): void {
 		refusalMessages.push(
 			`${JSON.stringify(envVarName)} Environment Variable is `
 				+ `${JSON.stringify(envVarValue)}, a feature out of the tested scope `
-				+ `(${OUT_OF_SCOPE_FEATURES[featureName]}): add `
+				+ `(${OUT_OF_SCOPE_FEATURE_ISSUES[featureName]}): add `
 				+ `${JSON.stringify(featureName)} to OUT_OF_SCOPE_FEATURES_ALLOWED `
 				+ 'to run it untested.',
 		);

@@ -29,7 +29,7 @@
 //
 // Exits 1 when a tag is malformed or covers nothing, blackbox runs all a tag
 // covers, the unit tests leave a unit-only counter unrun, or the tags drift
-// from OUT_OF_SCOPE_FEATURES in api/src/utils/out-of-scope-features.ts: a
+// from OUT_OF_SCOPE_FEATURE_ISSUES in api/src/utils/out-of-scope-features.ts: a
 // feature whose issue no tag names, or a tag naming a feature with another
 // issue than the list gives it. Gaps alone never fail it.
 import { execFileSync } from 'node:child_process';
@@ -564,10 +564,10 @@ const FEATURES_PATH = 'api/src/utils/out-of-scope-features.ts';
 const FEATURE_ENTRY = /^\t'([a-z0-9-]+)': '(#\d+)',$/;
 const driftFailures = [];
 
-// The `'<feature>': '#<issue>',` lines of OUT_OF_SCOPE_FEATURES at --head.
+// The `'<feature>': '#<issue>',` lines of OUT_OF_SCOPE_FEATURE_ISSUES at --head.
 const featureLines = sourceLinesAt(cliOptions.head, FEATURES_PATH);
 
-const LIST_OPENING = 'export const OUT_OF_SCOPE_FEATURES';
+const LIST_OPENING = 'export const OUT_OF_SCOPE_FEATURE_ISSUES';
 const listStart = featureLines.findIndex((line) => line.startsWith(LIST_OPENING));
 
 const listEnd = featureLines.indexOf('};', listStart);
@@ -580,7 +580,7 @@ const issueByFeature = new Map(featureLines
 
 if (listStart === -1 || issueByFeature.size !== listEnd - listStart - 1) {
 	driftFailures.push(`${FEATURES_PATH} at ${cliOptions.head}: no `
-		+ 'OUT_OF_SCOPE_FEATURES list of `\'<feature>\': \'#<issue>\',` lines '
+		+ 'OUT_OF_SCOPE_FEATURE_ISSUES list of `\'<feature>\': \'#<issue>\',` lines '
 		+ 'to check the tags against.');
 }
 
