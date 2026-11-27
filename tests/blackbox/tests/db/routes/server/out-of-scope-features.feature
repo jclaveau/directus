@@ -131,14 +131,15 @@ Feature: An instance starts on a feature out of the tested scope only when allow
 
   Scenario: an instance allowing the ldap auth driver starts and serves its login
     When an instance starts with these variables:
-      | variable                      | value                   |
-      | AUTH_PROVIDERS                | corp                    |
-      | AUTH_CORP_DRIVER              | ldap                    |
-      | AUTH_CORP_CLIENT_URL          | ldap://127.0.0.1:1      |
-      | AUTH_CORP_BIND_DN             | cn=directus,dc=corp     |
-      | AUTH_CORP_BIND_PASSWORD       | bind-secret             |
-      | AUTH_CORP_USER_DN             | ou=users,dc=corp        |
-      | OUT_OF_SCOPE_FEATURES_ALLOWED | websockets-graphql,ldap |
+      | variable                         | value                   |
+      | AUTH_PROVIDERS                   | corp                    |
+      | AUTH_CORP_DRIVER                 | ldap                    |
+      | AUTH_CORP_CLIENT_URL             | ldap://127.0.0.1:1      |
+      | AUTH_CORP_BIND_DN                | cn=directus,dc=corp     |
+      | AUTH_CORP_BIND_PASSWORD          | bind-secret             |
+      | AUTH_CORP_USER_DN                | ou=users,dc=corp        |
+      | AUTH_CORP_REQUIRE_VERIFIED_EMAIL | false                   |
+      | OUT_OF_SCOPE_FEATURES_ALLOWED    | websockets-graphql,ldap |
     Then these requests get these responses:
       | request                | response                                 |
       | method: POST           | code: 400                                |+
@@ -170,15 +171,16 @@ Feature: An instance starts on a feature out of the tested scope only when allow
 
   Scenario: an instance with an oauth2 role mapping that is a list refuses to start
     When an instance starts with these variables:
-      | variable                | value                        |
-      | AUTH_PROVIDERS          | corp                         |
-      | AUTH_CORP_DRIVER        | oauth2                       |
-      | AUTH_CORP_AUTHORIZE_URL | http://127.0.0.1:1/authorize |
-      | AUTH_CORP_ACCESS_URL    | http://127.0.0.1:1/token     |
-      | AUTH_CORP_PROFILE_URL   | http://127.0.0.1:1/userinfo  |
-      | AUTH_CORP_CLIENT_ID     | corp-client                  |
-      | AUTH_CORP_CLIENT_SECRET | corp-secret                  |
-      | AUTH_CORP_ROLE_MAPPING  | json:["staff"]               |
+      | variable                         | value                        |
+      | AUTH_PROVIDERS                   | corp                         |
+      | AUTH_CORP_DRIVER                 | oauth2                       |
+      | AUTH_CORP_AUTHORIZE_URL          | http://127.0.0.1:1/authorize |
+      | AUTH_CORP_ACCESS_URL             | http://127.0.0.1:1/token     |
+      | AUTH_CORP_PROFILE_URL            | http://127.0.0.1:1/userinfo  |
+      | AUTH_CORP_CLIENT_ID              | corp-client                  |
+      | AUTH_CORP_CLIENT_SECRET          | corp-secret                  |
+      | AUTH_CORP_ROLE_MAPPING           | json:["staff"]               |
+      | AUTH_CORP_REQUIRE_VERIFIED_EMAIL | false                        |
     Then it exits with code 1, logging these errors:
       | errors                                                    |
       | - >-                                                      |+
