@@ -20,8 +20,8 @@ export function getAuthProviders({ sessionOnly } = { sessionOnly: false }): Auth
 
 			// only the following 3 drivers require a mode selection
 			if (['oauth2', 'openid', 'saml'].includes(driver)) {
-				const modeName = `AUTH_${provider.toUpperCase()}_MODE` as const;
-				const mode = env[modeName];
+				const authModeEnvVarName = `AUTH_${provider.toUpperCase()}_MODE` as const;
+				const mode = env[authModeEnvVarName];
 				// if mode is not defined it defaults to session
 				return !mode || mode === 'session';
 			}

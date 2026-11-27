@@ -65,7 +65,7 @@ type PgbouncerAdminEnvVarSuffix =
 	| 'ADMIN_USER'
 	| 'ADMIN_PASSWORD';
 
-function envVarName<AdminSuffix extends PgbouncerAdminEnvVarSuffix>(
+function pgbouncerAdminEnvVarName<AdminSuffix extends PgbouncerAdminEnvVarSuffix>(
 	connection: string,
 	adminSuffix: AdminSuffix,
 ): `PGBOUNCER_${string}_${AdminSuffix}` {
@@ -76,7 +76,7 @@ function readStringEnvVar(
 	connection: string,
 	adminSuffix: Exclude<PgbouncerAdminEnvVarSuffix, 'ADMIN_HOSTS'>,
 ): string | null {
-	const value = useEnv()[envVarName(connection, adminSuffix)];
+	const value = useEnv()[pgbouncerAdminEnvVarName(connection, adminSuffix)];
 
 	return typeof value === 'string' && value !== ''
 		? value
@@ -93,7 +93,7 @@ function adminHostsOf(
 	connection: string,
 	config: Record<string, any>,
 ): { host: string; port: number }[] {
-	const configured = useEnv()[envVarName(connection, 'ADMIN_HOSTS')];
+	const configured = useEnv()[pgbouncerAdminEnvVarName(connection, 'ADMIN_HOSTS')];
 
 	if (Array.isArray(configured) === false || configured.length === 0) {
 		return [{
