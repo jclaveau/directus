@@ -109,7 +109,7 @@ describe('the identity list', () => {
 		expect(emailRow.find('.value').text()).toBe('ada@example.com');
 		expect(emailRow.find('.primary').exists()).toBe(true);
 		expect(emailRow.find('.verified').exists()).toBe(true);
-		expect(githubRow.find('.kind').text()).toBe('Github');
+		expect(githubRow.find('.kind').text()).toBe('GitHub');
 		expect(githubRow.find('.value.hidden').text()).toBe('Hidden');
 		expect(githubRow.find('.primary').exists()).toBe(false);
 		expect(githubRow.find('.verified').exists()).toBe(false);
