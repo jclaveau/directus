@@ -22,6 +22,9 @@ import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
 import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
+import {
+	validateAccess,
+} from '../permissions/modules/validate-access/validate-access.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
 import { getSecret } from '../utils/get-secret.js';
@@ -57,6 +60,13 @@ type IdentityKeys = {
 
 // Bounds the bind parameters of one update and the rows one cache snapshot holds.
 const UNLINK_CHUNK_SIZE = 10_000;
+
+const IDENTITY_PAYLOAD_KEYS = [
+	'email',
+	'provider',
+	'external_identifier',
+	'auth_data',
+] as const;
 
 export class UsersService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
@@ -205,7 +215,7 @@ export class UsersService extends ItemsService {
 			authData: data['auth_data'] ?? null,
 		};
 
-		const isWritten = ['email', 'provider', 'external_identifier', 'auth_data']
+		const isWritten = IDENTITY_PAYLOAD_KEYS
 			.some((identityKey) => identityKey in data);
 
 		delete data['email'];
@@ -468,13 +478,28 @@ export class UsersService extends ItemsService {
 
 		const identityWrites: { keys: PrimaryKey[]; identityKeys: IdentityKeys }[] = [];
 
-		for (const { data, keys } of groups) {
-			try {
-				const identityKeys = this.takeIdentityKeys(data, true);
+		// A group left with no column once its identity keys are taken writes no
+		// row, so its refusal and the access check are made here.
+		const emptiedGroupKeys: PrimaryKey[] = [];
 
-				if (identityKeys) {
-					identityWrites.push({ keys, identityKeys });
+		for (const { data, keys } of groups) {
+			const carriesIdentityKeys = IDENTITY_PAYLOAD_KEYS
+				.some((identityKey) => identityKey in data);
+
+			try {
+				if (carriesIdentityKeys && this.accountability) {
+					await validateAccess(
+						{
+							accountability: this.accountability,
+							action: 'update',
+							collection: 'directus_users',
+							primaryKeys: keys,
+						},
+						{ schema: this.schema, knex: this.knex },
+					);
 				}
+
+				const identityKeys = this.takeIdentityKeys(data, true);
 
 				if (identityKeys?.email) {
 					data['email'] = identityKeys.email;
@@ -508,6 +533,10 @@ export class UsersService extends ItemsService {
 					});
 				}
 
+				// Queued once every check of the group passed.
+				if (identityKeys) {
+					identityWrites.push({ keys, identityKeys });
+				}
 			}
 			catch (err: any) {
 				opts.preMutationErrorsByKey ??= new Map();
@@ -518,6 +547,32 @@ export class UsersService extends ItemsService {
 					}
 				}
 			}
+
+			// A refused group still drops the keys no users column holds.
+			for (const identityKey of IDENTITY_PAYLOAD_KEYS) {
+				delete data[identityKey];
+			}
+
+			if (carriesIdentityKeys && isEmpty(data)) {
+				emptiedGroupKeys.push(...keys);
+			}
+		}
+
+		const emptiedGroupErrors = emptiedGroupKeys
+			.map((key) => opts.preMutationErrorsByKey?.get(String(key)))
+			.filter((keyError) => keyError !== undefined);
+
+		if (emptiedGroupErrors.length > 0) {
+			const emptiedGroupError = emptiedGroupErrors.find((keyError) => {
+				return keyError instanceof ForbiddenError;
+			}) ?? emptiedGroupErrors[0];
+
+			if (groups.every(({ data }) => isEmpty(data))) {
+				throw emptiedGroupError;
+			}
+
+			// Thrown once the writing groups passed their own access check.
+			opts.preMutationError ??= emptiedGroupError;
 		}
 
 		const updatedKeys = await super.updateGroups(groups, opts);

@@ -12,6 +12,9 @@ import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
+import {
+	validateAccess,
+} from '../permissions/modules/validate-access/validate-access.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
@@ -51,6 +54,8 @@ vi.mock('@directus/env', () => ({
 }));
 
 vi.mock('../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js');
+
+vi.mock('../permissions/modules/validate-access/validate-access.js');
 
 vi.mock('../cache.js', async (importOriginal) => {
 	return {
@@ -427,13 +432,6 @@ describe('Integration Tests', () => {
 			it('should disallow updating multiple items to same email', async () => {
 				const opts: MutationOptions = {};
 
-				// As ItemsService.updateGroups throws a stored refusal
-				superUpdateGroupsSpy.mockRejectedValueOnce(new RecordNotUniqueError({
-					collection: 'directus_users',
-					field: 'email',
-					value: 'test@example.com',
-				}));
-
 				await expect(service.updateMany(
 					['user-id-10', 'user-id-11'],
 					{ email: 'test@example.com' },
@@ -444,6 +442,7 @@ describe('Integration Tests', () => {
 					value: 'test@example.com',
 				}));
 
+				expect(superUpdateGroupsSpy).not.toHaveBeenCalled();
 				expect(superCreateOneSpy).not.toHaveBeenCalled();
 
 				expect(opts.preMutationErrorsByKey).toStrictEqual(new Map([
@@ -498,19 +497,64 @@ describe('Integration Tests', () => {
 						accountability: { role: 'test', admin: false } as Accountability,
 					});
 
-					it.each(['tfa_secret', 'provider', 'external_identifier'])('%s', async (field) => {
+					it('tfa_secret', async () => {
 						const opts: MutationOptions = {};
 
-						await service.updateMany([1], { [field]: 'test' }, opts);
+						await service.updateMany([1], { tfa_secret: 'test' }, opts);
 
 						expect(superUpdateGroupsSpy).toHaveBeenCalled();
 
 						expect(opts.preMutationErrorsByKey).toStrictEqual(new Map([[
 							'1',
 							new InvalidPayloadError({
-								reason: `You can't change the "${field}" value manually`,
+								reason: `You can't change the "tfa_secret" value manually`,
 							}),
 						]]));
+					});
+
+					it.each(['provider', 'external_identifier'])('%s', async (field) => {
+						await expect(service.updateMany([1], { [field]: 'test' }))
+							.rejects.toStrictEqual(new InvalidPayloadError({
+								reason: `You can't change the "${field}" value manually`,
+							}));
+
+						expect(validateAccess).toHaveBeenCalledWith(
+							{
+								accountability: { role: 'test', admin: false },
+								action: 'update',
+								collection: 'directus_users',
+								primaryKeys: [1],
+							},
+							{ schema, knex: db },
+						);
+
+						expect(superUpdateGroupsSpy).not.toHaveBeenCalled();
+					});
+
+					it('refuses a batch whose other row may not be updated', async () => {
+						const opts: MutationOptions = {};
+
+						vi.mocked(validateAccess).mockRejectedValueOnce(new ForbiddenError());
+
+						await service.updateBatch([
+							{ id: 'user-id-self', first_name: 'renamed' },
+							{ id: 'user-id-other', email: 'self@example.com' },
+						], opts);
+
+						expect(superUpdateGroupsSpy).toHaveBeenCalledWith(
+							[
+								{ data: { first_name: 'renamed' }, keys: ['user-id-self'] },
+								{ data: {}, keys: ['user-id-other'] },
+							],
+							{
+								preMutationErrorsByKey: new Map([
+									['user-id-other', new ForbiddenError()],
+								]),
+								preMutationError: new ForbiddenError(),
+							},
+						);
+
+						expect(superCreateOneSpy).not.toHaveBeenCalled();
 					});
 				});
 
@@ -550,34 +594,20 @@ describe('Integration Tests', () => {
 					});
 
 					it('provider without external_identifier', async () => {
-						const opts: MutationOptions = {};
-
-						await service.updateMany(['user-id-15'], { provider: 'test' }, opts);
-
-						expect(opts.preMutationErrorsByKey).toStrictEqual(new Map([[
-							'user-id-15',
-							new InvalidPayloadError({
+						await expect(service.updateMany(['user-id-15'], { provider: 'test' }))
+							.rejects.toStrictEqual(new InvalidPayloadError({
 								reason: 'The provider "test" needs an "external_identifier"',
-							}),
-						]]));
+							}));
 					});
 
 					it('external_identifier without provider', async () => {
-						const opts: MutationOptions = {};
-
-						await service.updateMany(
+						await expect(service.updateMany(
 							['user-id-17'],
 							{ external_identifier: 'test-id' },
-							opts,
-						);
-
-						expect(opts.preMutationErrorsByKey).toStrictEqual(new Map([[
-							'user-id-17',
-							new InvalidPayloadError({
-								reason: 'An "external_identifier" needs a provider other than'
-									+ ' "default"',
-							}),
-						]]));
+						)).rejects.toStrictEqual(new InvalidPayloadError({
+							reason: 'An "external_identifier" needs a provider other than'
+								+ ' "default"',
+						}));
 					});
 				});
 			});
@@ -651,13 +681,6 @@ describe('Integration Tests', () => {
 
 			it('refuses two rows set to the same email, whatever the casing', async () => {
 				const opts: MutationOptions = {};
-
-				// As ItemsService.updateGroups throws a stored refusal
-				superUpdateGroupsSpy.mockRejectedValueOnce(new RecordNotUniqueError({
-					collection: 'directus_users',
-					field: 'email',
-					value: 'SAME@example.com',
-				}));
 
 				await expect(service.updateBatch([
 					{ id: 'user-id-25', email: 'same@example.com' },
