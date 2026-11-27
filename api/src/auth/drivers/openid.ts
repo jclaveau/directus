@@ -219,10 +219,10 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		return identity.user;
 	}
 
-	override async getIdentity( // bb-out-of-scope: #622 OpenID login
+	override async getIdentity(
 		payload: Record<string, any>,
 		options: IdentityLookupOptions,
-	): Promise<UserIdentity> {
+	): Promise<UserIdentity> { // bb-out-of-scope: #622 OpenID login
 		const logger = useLogger();
 
 		if (!payload['code'] || !payload['codeVerifier'] || !payload['state']) {

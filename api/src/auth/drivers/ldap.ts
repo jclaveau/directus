@@ -238,10 +238,10 @@ export class LDAPAuthDriver extends AuthDriver {
 		return identity.user;
 	}
 
-	override async getIdentity( // bb-out-of-scope: #619 LDAP login
+	override async getIdentity(
 		payload: Record<string, any>,
 		options: IdentityLookupOptions,
-	): Promise<UserIdentity> {
+	): Promise<UserIdentity> { // bb-out-of-scope: #619 LDAP login
 		if (!payload['identifier']) {
 			throw new InvalidCredentialsError();
 		}

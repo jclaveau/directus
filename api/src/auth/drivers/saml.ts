@@ -52,10 +52,10 @@ export class SAMLAuthDriver extends LocalAuthDriver {
 	}
 
 	// OPEN(#772): no linking from a session: the ACS callback carries no session state
-	override async getIdentity( // bb-out-of-scope: #622 SAML login
+	override async getIdentity(
 		payload: Record<string, any>,
 		_options: IdentityLookupOptions,
-	): Promise<UserIdentity> {
+	): Promise<UserIdentity> { // bb-out-of-scope: #622 SAML login
 		const logger = useLogger();
 
 		const { provider, emailKey, identifierKey, givenNameKey, familyNameKey, allowPublicRegistration } = this.config;

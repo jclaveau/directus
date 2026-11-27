@@ -151,10 +151,10 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 		return identity.user;
 	}
 
-	override async getIdentity( // bb-out-of-scope: #622 OAuth2 login
+	override async getIdentity(
 		payload: Record<string, any>,
 		options: IdentityLookupOptions,
-	): Promise<UserIdentity> {
+	): Promise<UserIdentity> { // bb-out-of-scope: #622 OAuth2 login
 		const logger = useLogger();
 
 		if (!payload['code'] || !payload['codeVerifier'] || !payload['state']) {
