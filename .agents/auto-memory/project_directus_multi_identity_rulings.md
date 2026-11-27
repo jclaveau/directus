@@ -25,8 +25,11 @@ logout call the provider that opened the session.
   presets, Flows, SDK/GraphQL, app forms, extensions. Password norm (web): one per
   account (Microsoft, Google, Apple, GitHub, Keycloak, Supabase); per-email only in
   Auth0 linked db identities.
-- **Not explicitly ruled:** old email after a change stays a verified identity the user
-  can remove (recommended, only together with a remove endpoint).
+- **Old email after a provider-side change (jean 2026-11-27, agreed):** when the provider
+  sends a new verified email, the old email stays a verified identity the user can
+  remove, shipped only together with a remove endpoint.
+- **Focus (jean 2026-11-27):** stay on #772 until it merges; do not raise the #749
+  rebase or other PRs meanwhile.
 - **Today, from code (not run):** a password user's SSO login with the same email is a
   403 `InvalidProviderError` via the email unique check, NOT a second account;
   `external_identifier` is unique across providers and looked up without a provider
