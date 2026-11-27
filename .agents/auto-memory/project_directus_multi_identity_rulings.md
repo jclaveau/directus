@@ -28,6 +28,13 @@ logout call the provider that opened the session.
 - **Old email after a provider-side change (jean 2026-11-27, agreed):** when the provider
   sends a new verified email, the old email stays a verified identity the user can
   remove, shipped only together with a remove endpoint.
+- **Points 2-4 (jean 2026-11-27):** 2 = B: an unverified email identity blocks no
+  one; the unique index on `(kind, lower(value))` covers verified rows only. 3 = A: the
+  password login takes any verified email identity of the account. 4 = A: removing an
+  identity ends the sessions it opened (`directus_sessions.identity` FK ON DELETE
+  CASCADE); the account's last identity can't be removed (400). Point 1 (migrated
+  emails verified or not) asked back: Directus keeps no verified flag, only
+  `status: unverified` for a pending registration.
 - **Focus (jean 2026-11-27):** stay on #772 until it merges; do not raise the #749
   rebase or other PRs meanwhile.
 - **Today, from code (not run):** a password user's SSO login with the same email is a
