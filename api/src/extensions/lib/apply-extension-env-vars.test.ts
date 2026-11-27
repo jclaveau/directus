@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { expect, test } from 'vitest';
 import {
 	applyExtensionEnvVars,
@@ -129,6 +132,89 @@ test('refuses a name another extension declares with another default', () => {
 	));
 
 	expect(liveEnv).toEqual({});
+});
+
+test('reads a declared variable from the file its _FILE variable names', () => {
+	const secretDir = mkdtempSync(join(tmpdir(), 'extension-env-file-'));
+	writeFileSync(join(secretDir, 'key'), 'sk_live_abc\n');
+	writeFileSync(join(secretDir, 'days'), '30\n');
+	const liveEnv: Record<string, unknown> = {};
+
+	applyExtensionEnvVars({
+		extensionName: 'subscriptions',
+		extensionEnvVars: [{
+			prefix: 'SUBSCRIPTIONS_',
+			vars: {
+				SUBSCRIPTIONS_KEY: { type: 'string' },
+				SUBSCRIPTIONS_DAYS: { type: 'number', default: 14 },
+			},
+		}],
+		envVarDeclarers: new Map(),
+		rawEnvVarValues: {
+			SUBSCRIPTIONS_KEY_FILE: join(secretDir, 'key'),
+			SUBSCRIPTIONS_DAYS_FILE: join(secretDir, 'days'),
+		},
+		liveEnv,
+	});
+
+	expect(liveEnv).toEqual({
+		SUBSCRIPTIONS_KEY: 'sk_live_abc\n',
+		SUBSCRIPTIONS_DAYS: 30,
+	});
+});
+
+test('refuses a _FILE variable whose file cannot be read', () => {
+	const liveEnv: Record<string, unknown> = {};
+
+	expect(() => {
+		applyExtensionEnvVars({
+			extensionName: 'subscriptions',
+			extensionEnvVars: [{
+				prefix: 'SUBSCRIPTIONS_',
+				vars: { SUBSCRIPTIONS_KEY: { type: 'string' } },
+			}],
+			envVarDeclarers: new Map(),
+			rawEnvVarValues: { SUBSCRIPTIONS_KEY_FILE: '/missing/key' },
+			liveEnv,
+		});
+	}).toThrow(new Error(
+		'Extension "subscriptions": Failed to read value from file'
+		+ ' "/missing/key", defined in environment variable'
+		+ ' "SUBSCRIPTIONS_KEY_FILE".',
+	));
+
+	expect(liveEnv).toEqual({});
+});
+
+test('refuses a secret file value without printing it', () => {
+	const secretDir = mkdtempSync(join(tmpdir(), 'extension-env-file-'));
+	writeFileSync(join(secretDir, 'key'), 'sk_live_abc\n');
+
+	expect(() => {
+		applyExtensionEnvVars({
+			extensionName: 'subscriptions',
+			extensionEnvVars: [{
+				prefix: 'SUBSCRIPTIONS_',
+				vars: { SUBSCRIPTIONS_KEY: { type: 'number' } },
+			}],
+			envVarDeclarers: new Map(),
+			rawEnvVarValues: { SUBSCRIPTIONS_KEY_FILE: join(secretDir, 'key') },
+			liveEnv: {},
+		});
+	}).toThrow(new Error(
+		'Extension "subscriptions": "SUBSCRIPTIONS_KEY" is not a number.',
+	));
+});
+
+test('counts the _FILE variable of a declared name as declared', () => {
+	expect(findUndeclaredEnvVars({
+		rawEnvVarNames: ['SUBSCRIPTIONS_KEY_FILE', 'SUBSCRIPTIONS_KYE_FILE'],
+		envVarDeclarers: new Map([[
+			'SUBSCRIPTIONS_KEY',
+			{ extensionName: 'subscriptions', envVarDeclaration: { type: 'string' } },
+		]]),
+		extensionPrefixes: new Set(['SUBSCRIPTIONS_']),
+	})).toEqual(['SUBSCRIPTIONS_KYE_FILE']);
 });
 
 test('finds the names set under a declared prefix that nobody declares', () => {
