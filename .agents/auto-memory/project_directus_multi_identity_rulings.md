@@ -5,8 +5,9 @@ metadata:
   type: project
 ---
 
-Design round 2026-11-25/26 (no identity code written yet; PR open + autoreview asked
-2026-11-26). Sketch: `directus_user_identities`
+Design round 2026-11-25/27, closed. Build go (jean 2026-11-27: "go, open the pr and
+/pr-autoreview it once done"): #772 exists as a draft, so update its body, mark it
+ready, autoreview once CI is green; merge stays a separate ask. Sketch: `directus_user_identities`
 (user FK ON DELETE CASCADE, kind email|<provider>, value, verified, auth_data moved
 from users, unique(kind, lower(value))); `directus_sessions.identity` FK so refresh /
 logout call the provider that opened the session.
@@ -89,6 +90,8 @@ logout call the provider that opened the session.
   it on a consent page is the consumer's job, not core's. Never in `user_info`:
   accessToken/idToken (refresh token stays in hidden `auth_data`). Flow logs redact it
   like `value`; check in build that the sync write creates no `directus_revisions` row.
+  Why (jean): `scope` is stored so a later, wider scope can be told apart per identity;
+  the provider-side consent screen is not the consumer's GDPR consent.
 - **S3 x 9 A = F (jean 2026-11-27, design round closed):** provider sends a known
   user's new email another account holds (verified or not). The SSO login always
   passes (a refusal lets a squatter lock an SSO user out). No email identity added,
