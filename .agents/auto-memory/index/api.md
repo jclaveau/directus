@@ -2,6 +2,7 @@
 
 Full hooks for this area. The routing keys live in `../MEMORY.md`.
 
+- [Emptied payload skips the access check](../project_directus_emptied_payload_skips_access_check.md) — override diverting keys before ItemsService must validateAccess itself; #772 batch PATCH /users hole (d5dbc439d2)
 - [#679 managed_by on directus_access](../project_directus_pr679_managed_by.md) — guard refuses request grant changes on a managed row; bb select counts +1; rulings; #680 bundle rulings (subscription_events, archive sentence, 404 closes)
 
 - [Bind-limit chunking plan](../project_directus_bind_limit_chunking_plan.md) — fix in knex fork (knex#10 arrayParameterThreshold, -1 = never), not call-site chunk(); #645 post-commit 500; non-PG → #610 pt 9

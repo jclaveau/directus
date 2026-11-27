@@ -4,6 +4,7 @@ description: Blackbox branch audit (PR #769) — how to place bb-unit-only / bb-
 metadata:
   author: Jean Claveau
   type: project
+  repeated_on: [2026-11-27]
 ---
 
 `tests/blackbox/branch-audit/branch-audit.mjs` (split out of #749 into #769, 2026-11-25);
@@ -13,6 +14,9 @@ tag syntax and exit rules are in its header. What the header does not say:
   blackbox runs in full FAILS ("drop the tag"). Push, read the report (or pull the CI
   blackbox + unit coverage), then tag exactly what is unrun.
 - A whole-function tag ends the line holding the body `{` (fnMap `loc` start).
+  Re-wrapping a signature to 85 columns moves that `{`: move the tag with it, e.g.
+  to `): Promise<UserIdentity> {` (#772 `getIdentity` in 4 drivers, the coverage
+  strip step failed, cf7824d925).
 - `// bb-unit-only:` also needs the api unit tests to run every counter it covers.
 - CLI coverage (`dumpCoverageAtExit`): a bb command always runs instrumented with
   `COVERAGE_DIR` set, and `renameSync` runs after the dump read the hit counters, so

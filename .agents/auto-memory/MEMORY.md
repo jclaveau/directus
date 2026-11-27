@@ -62,7 +62,7 @@ line appended below.
 - [knex-mock matches raw SQL](reference_directus_knex_mock_sql_matching.md) — register the narrower handler first
 - [useEnv mock needs vi.hoisted](reference_directus_useenv_mock_hoisted.md) — automock evals the real module first
 
-## api (47) — Directus core internals, env, errors, migrations, DB
+## api (48) — Directus core internals, env, errors, migrations, DB
 `.agents/auto-memory/index/api.md`
 
 - [IMPORTANT: default = raw SQL behaviour](feedback_directus_default_matches_dbms.md) — service queries/mutations behave like the equivalent raw SQL by default; stricter = opt-in option
