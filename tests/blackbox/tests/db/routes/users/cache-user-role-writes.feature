@@ -37,8 +37,11 @@ Feature: A user's role, status and deletion purge the cache as today
       | <first-access>  | <first-role>  | <reader-policy> |
       | <second-access> | <second-role> | <reader-policy> |
     And the rows of directus_users:
-      | id      | email                   | role         | token       |
-      | <mover> | mover-<run>@example.com | <first-role> | mover-<run> |
+      | id      | role         | token       |
+      | <mover> | <first-role> | mover-<run> |
+    And the rows of directus_user_identities:
+      | id            | user    | kind  | value                   |
+      | <mover-email> | <mover> | email | mover-<run>@example.com |
     And the rows of cache_user_rename_notes:
       | label |
       | v1    |
@@ -105,8 +108,11 @@ Feature: A user's role, status and deletion purge the cache as today
       | id             | name          |
       | <invitee-role> | invitee-<run> |
     And the rows of directus_users:
-      | id        | email                     | role           | status  |
-      | <invitee> | invitee-<run>@example.com | <invitee-role> | invited |
+      | id        | role           | status  |
+      | <invitee> | <invitee-role> | invited |
+    And the rows of directus_user_identities:
+      | id              | user      | kind  | value                     |
+      | <invitee-email> | <invitee> | email | invitee-<run>@example.com |
     And the rows of cache_user_activate_notes:
       | label |
       | v1    |
@@ -148,9 +154,13 @@ Feature: A user's role, status and deletion purge the cache as today
       | <inviter-role> | inviter-<run> |
       | <invitee-role> | invitee-<run> |
     And the rows of directus_users:
-      | id        | email                     | role           | status  |
-      | <inviter> | inviter-<run>@example.com | <inviter-role> | active  |
-      | <invitee> | invitee-<run>@example.com | <invitee-role> | invited |
+      | id        | role           | status  |
+      | <inviter> | <inviter-role> | active  |
+      | <invitee> | <invitee-role> | invited |
+    And the rows of directus_user_identities:
+      | id              | user      | kind  | value                     |
+      | <inviter-email> | <inviter> | email | inviter-<run>@example.com |
+      | <invitee-email> | <invitee> | email | invitee-<run>@example.com |
     And the rows of cache_user_delete_notes:
       | label |
       | v1    |
@@ -194,8 +204,11 @@ Feature: A user's role, status and deletion purge the cache as today
       | id             | name          |
       | <invitee-role> | invitee-<run> |
     And the rows of directus_users:
-      | id        | email                       | role           | status  |
-      | <invitee> | accepting-<run>@example.com | <invitee-role> | invited |
+      | id        | role           | status  |
+      | <invitee> | <invitee-role> | invited |
+    And the rows of directus_user_identities:
+      | id              | user      | kind  | value                       |
+      | <invitee-email> | <invitee> | email | accepting-<run>@example.com |
     And the rows of cache_user_accept_notes:
       | label |
       | v1    |
@@ -230,8 +243,11 @@ Feature: A user's role, status and deletion purge the cache as today
       | id          | name       |
       | <same-role> | same-<run> |
     And the rows of directus_users:
-      | id        | email                  | role        | status  |
-      | <invitee> | same-<run>@example.com | <same-role> | invited |
+      | id        | role        | status  |
+      | <invitee> | <same-role> | invited |
+    And the rows of directus_user_identities:
+      | id              | user      | kind  | value                  |
+      | <invitee-email> | <invitee> | email | same-<run>@example.com |
     And the rows of cache_user_reinvite_notes:
       | label |
       | v1    |
@@ -263,8 +279,11 @@ Feature: A user's role, status and deletion purge the cache as today
       | <first-role>  | first-<run>  |
       | <second-role> | second-<run> |
     And the rows of directus_users:
-      | id        | email                    | role         | status  |
-      | <invitee> | second-<run>@example.com | <first-role> | invited |
+      | id        | role         | status  |
+      | <invitee> | <first-role> | invited |
+    And the rows of directus_user_identities:
+      | id              | user      | kind  | value                    |
+      | <invitee-email> | <invitee> | email | second-<run>@example.com |
     And the rows of cache_user_second_notes:
       | label |
       | v1    |

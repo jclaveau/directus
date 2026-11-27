@@ -17,29 +17,29 @@ Feature: A visitor registers and verifies the email address
       | payload:                     |           |
       |   public_registration: false |           |
     Then these requests get these responses:
-      | request                           | response                                |
-      | method: POST                      | code: 400                               |+
-      | path: /users/register             | body:                                   |
-      | headers:                          |   errors:                               |
-      |   X-Forwarded-For: 198.51.100.11  |     - message: >-                       |
-      | payload:                          |         Invalid payload. URL            |
-      |   email: off-<run>@example.com    |         "https://elsewhere.test/verify" |
-      |   password: registered-password   |         can't be used to verify         |
-      |   verification_url: >-            |         registered users.               |
-      |     https://elsewhere.test/verify |                                         |
-      | method: POST                      | code: 403                               |+
-      | path: /users/register             | body:                                   |
-      | headers:                          |   errors:                               |
-      |   X-Forwarded-For: 198.51.100.12  |     - message: >-                       |
-      | payload:                          |         Public registration is disabled |
-      |   email: off-<run>@example.com    |                                         |
-      |   password: registered-password   |                                         |
-      | method: GET                       | code: 200                               |+
-      | path: /users                      | body:                                   |
-      | query:                            |   data: []                              |
-      |   fields: id                      |                                         |
-      |   filter[email][_eq]: >-          |                                         |
-      |     off-<run>@example.com         |                                         |
+      | request                              | response                                |
+      | method: POST                         | code: 400                               |+
+      | path: /users/register                | body:                                   |
+      | headers:                             |   errors:                               |
+      |   X-Forwarded-For: 198.51.100.11     |     - message: >-                       |
+      | payload:                             |         Invalid payload. URL            |
+      |   email: off-<run>@example.com       |         "https://elsewhere.test/verify" |
+      |   password: registered-password      |         can't be used to verify         |
+      |   verification_url: >-               |         registered users.               |
+      |     https://elsewhere.test/verify    |                                         |
+      | method: POST                         | code: 403                               |+
+      | path: /users/register                | body:                                   |
+      | headers:                             |   errors:                               |
+      |   X-Forwarded-For: 198.51.100.12     |     - message: >-                       |
+      | payload:                             |         Public registration is disabled |
+      |   email: off-<run>@example.com       |                                         |
+      |   password: registered-password      |                                         |
+      | method: GET                          | code: 200                               |+
+      | path: /users                         | body:                                   |
+      | query:                               |   data: []                              |
+      |   fields: id                         |                                         |
+      |   filter[identities][value][_eq]: >- |                                         |
+      |     off-<run>@example.com            |                                         |
     And on postgres the requests ran these statements:
       | request | table             | select | insert | update | delete |
       | 1       | directus_access   | 2      | 0      | 0      | 0      |
@@ -88,7 +88,7 @@ Feature: A visitor registers and verifies the email address
       | path: /users                             | body:                              |
       | query:                                   |   data:                            |
       |   fields: status,role                    |     - status: unverified           |
-      |   filter[email][_eq]: >-                 |       role: null                   |
+      |   filter[identities][value][_eq]: >-     |       role: null                   |
       |     new-<run>@allowed.example.com        |                                    |
       | method: GET                              | code: 403                          |+
       | path: /users/register/verify-email       | body:                              |
@@ -132,7 +132,7 @@ Feature: A visitor registers and verifies the email address
       | path: /users                             | body:                              |
       | query:                                   |   data:                            |
       |   fields: status,first_name              |     - status: active               |
-      |   filter[email][_eq]: >-                 |       first_name: registered-<run> |
+      |   filter[identities][value][_eq]: >-     |       first_name: registered-<run> |
       |     new-<run>@allowed.example.com        |                                    |
     And on postgres the requests ran these statements:
       | request | table             | select | insert | update | delete |
@@ -165,19 +165,20 @@ Feature: A visitor registers and verifies the email address
       |   public_registration_role: <registration-role> |           |
       |   public_registration_email_filter: null        |           |
     Then these requests get these responses:
-      | request                                      | response                        |
-      | method: POST                                 | code: 204                       |+
-      | path: /users/register                        |                                 |
-      | headers:                                     |                                 |
-      |   X-Forwarded-For: 198.51.100.40             |                                 |
-      | payload:                                     |                                 |
-      |   email: role-<run>@example.com              |                                 |
-      |   password: registered-password              |                                 |
-      | method: GET                                  | code: 200                       |+
-      | path: /users                                 | body:                           |
-      | query:                                       |   data:                         |
-      |   fields: status,role                        |     - status: active            |
-      |   filter[email][_eq]: role-<run>@example.com |       role: <registration-role> |
+      | request                              | response                        |
+      | method: POST                         | code: 204                       |+
+      | path: /users/register                |                                 |
+      | headers:                             |                                 |
+      |   X-Forwarded-For: 198.51.100.40     |                                 |
+      | payload:                             |                                 |
+      |   email: role-<run>@example.com      |                                 |
+      |   password: registered-password      |                                 |
+      | method: GET                          | code: 200                       |+
+      | path: /users                         | body:                           |
+      | query:                               |   data:                         |
+      |   fields: status,role                |     - status: active            |
+      |   filter[identities][value][_eq]: >- |       role: <registration-role> |
+      |     role-<run>@example.com           |                                 |
     And on postgres the requests ran these statements:
       | request | table             | select | insert | update | delete |
       | 1       | directus_access   | 2      | 0      | 0      | 0      |

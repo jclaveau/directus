@@ -184,7 +184,7 @@ describe('The autoscale configuration is checked before it is stored', () => {
 				.get('/revisions')
 				.query({
 					'filter[collection][_eq]': 'directus_settings',
-					fields: 'delta,activity.action,activity.user.email',
+					fields: 'delta,activity.action,activity.user.primary_identity.value',
 					sort: '-id',
 					limit: 1,
 				})
@@ -195,7 +195,9 @@ describe('The autoscale configuration is checked before it is stored', () => {
 			const latest = revisions.body.data[0];
 
 			expect(latest.activity.action).toBe('update');
-			expect(latest.activity.user.email).toBe(USER.ADMIN.EMAIL);
+
+			expect(latest.activity.user.primary_identity.value)
+				.toBe(USER.ADMIN.EMAIL);
 
 			// The whole document, not the field that moved: what the next reader
 			// gets handed is this, and a delta holding only `maxWorkers` would

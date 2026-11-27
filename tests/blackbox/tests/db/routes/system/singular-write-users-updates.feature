@@ -150,35 +150,49 @@ Feature: Users are updated by query, by themselves and in their sessions
       |   policies:                        |           |
       |     - policy: <limited-policy>     |           |
     Then these requests get these responses:
-      | request                          | response                           |
-      | as: <limited-token>              | code: 400                          |+
-      | method: PATCH                    | body:                              |
-      | path: /users/me                  |   errors:                          |
-      | payload:                         |     - message: >-                  |
-      |   provider: default              |         Invalid payload. You can't |
-      |                                  |         change the "provider"      |
-      |                                  |         value manually.            |
-      | as: <limited-token>              | code: 400                          |+
-      | method: PATCH                    | body:                              |
-      | path: /users/me                  |   errors:                          |
-      | payload:                         |     - message: >-                  |
-      |   external_identifier: ext-<run> |         Invalid payload. You can't |
-      |                                  |         change the                 |
-      |                                  |         "external_identifier"      |
-      |                                  |         value manually.            |
-      | method: PATCH                    | code: 200                          |+
-      | path: /users/<limited-user>      | body:                              |
-      | payload:                         |   data:                            |
-      |   provider: default              |     provider: default              |
-      |   external_identifier: ext-<run> |     external_identifier: ext-<run> |
-      | method: PATCH                    | code: 400                          |+
-      | path: /users                     | body:                              |
-      | payload:                         |   errors:                          |
-      |   keys:                          |     - message: >-                  |
-      |     - <limited-user>             |         Invalid payload. You can't |
-      |     - <limited-user>             |         change the "tfa_secret"    |
-      |   data:                          |         value manually.            |
-      |     tfa_secret: JBSWY3DPEHPK3PXP |                                    |
+      | request                            | response                                 |
+      | as: <limited-token>                | code: 400                                |+
+      | method: PATCH                      | body:                                    |
+      | path: /users/me                    |   errors:                                |
+      | payload:                           |     - message: >-                        |
+      |   provider: default                |         Invalid payload. You can't       |
+      |                                    |         change the "provider"            |
+      |                                    |         value manually.                  |
+      | as: <limited-token>                | code: 400                                |+
+      | method: PATCH                      | body:                                    |
+      | path: /users/me                    |   errors:                                |
+      | payload:                           |     - message: >-                        |
+      |   external_identifier: ext-<run>   |         Invalid payload. You can't       |
+      |                                    |         change the                       |
+      |                                    |         "external_identifier"            |
+      |                                    |         value manually.                  |
+      | method: PATCH                      | code: 200                                |+
+      | path: /users/<limited-user>        | body:                                    |
+      | query:                             |   data:                                  |
+      |   fields:                          |     identities:                          |
+      |     - identities.kind              |       - kind: email                      |
+      |     - identities.value             |         value: limited-<run>@example.com |
+      |   deep:                            |       - kind: sso-<run>                  |
+      |     identities:                    |         value: ext-<run>                 |
+      |       _sort: kind                  |                                          |
+      | payload:                           |                                          |
+      |   provider: sso-<run>              |                                          |
+      |   external_identifier: ext-<run>   |                                          |
+      | method: PATCH                      | code: 400                                |+
+      | path: /users/<limited-user>        | body:                                    |
+      | payload:                           |   errors:                                |
+      |   external_identifier: other-<run> |     - message: >-                        |
+      |                                    |         Invalid payload. An              |
+      |                                    |         "external_identifier" needs a    |
+      |                                    |         provider other than "default".   |
+      | method: PATCH                      | code: 400                                |+
+      | path: /users                       | body:                                    |
+      | payload:                           |   errors:                                |
+      |   keys:                            |     - message: >-                        |
+      |     - <limited-user>               |         Invalid payload. You can't       |
+      |     - <limited-user>               |         change the "tfa_secret"          |
+      |   data:                            |         value manually.                  |
+      |     tfa_secret: JBSWY3DPEHPK3PXP   |                                          |
     And on postgres the requests ran these statements:
       | request | table                | select | insert | update | delete | with |
       | 1       | directus_access      | 3      | 0      | 0      | 0      | 0    |
@@ -199,7 +213,7 @@ Feature: Users are updated by query, by themselves and in their sessions
       | 3       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
       | 3       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
       | 3       | directus_users       | 3      | 0      | 1      | 0      | 0    |
-      | 4       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 5       | directus_users       | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a password change ends every other session of the user
     Given these requests are sent:
@@ -234,35 +248,35 @@ Feature: Users are updated by query, by themselves and in their sessions
       |   mode: session                    |           |
       | remember_session: other-session    |           |
     Then these requests get these responses:
-      | request                     | response                             |
-      | as: <kept-session>          | code: 200                            |+
-      | method: PATCH               |                                      |
-      | path: /users/me             |                                      |
-      | payload:                    |                                      |
-      |   password: second-password |                                      |
-      | as: <other-session>         | code: 401                            |+
-      | method: GET                 | body:                                |
-      | path: /users/me             |   errors:                            |
-      |                             |     - message: >-                    |
-      |                             |         Invalid user credentials.    |
-      | as: <kept-session>          | code: 200                            |+
-      | method: GET                 | body:                                |
-      | path: /users/me             |   data:                              |
-      | query:                      |     email: session-<run>@example.com |
-      |   fields: email             |                                      |
-      | method: PATCH               | code: 200                            |+
-      | path: /users/<session-user> | body:                                |
-      | payload:                    |   data:                              |
-      |   status: suspended         |     status: suspended                |
-      | method: PATCH               | code: 200                            |+
-      | path: /users/<session-user> | body:                                |
-      | payload:                    |   data:                              |
-      |   status: active            |     status: active                   |
-      | as: <kept-session>          | code: 401                            |+
-      | method: GET                 | body:                                |
-      | path: /users/me             |   errors:                            |
-      |                             |     - message: >-                    |
-      |                             |         Invalid user credentials.    |
+      | request                          | response                               |
+      | as: <kept-session>               | code: 200                              |+
+      | method: PATCH                    |                                        |
+      | path: /users/me                  |                                        |
+      | payload:                         |                                        |
+      |   password: second-password      |                                        |
+      | as: <other-session>              | code: 401                              |+
+      | method: GET                      | body:                                  |
+      | path: /users/me                  |   errors:                              |
+      |                                  |     - message: >-                      |
+      |                                  |         Invalid user credentials.      |
+      | as: <kept-session>               | code: 200                              |+
+      | method: GET                      | body:                                  |
+      | path: /users/me                  |   data:                                |
+      | query:                           |     primary_identity:                  |
+      |   fields: primary_identity.value |       value: session-<run>@example.com |
+      | method: PATCH                    | code: 200                              |+
+      | path: /users/<session-user>      | body:                                  |
+      | payload:                         |   data:                                |
+      |   status: suspended              |     status: suspended                  |
+      | method: PATCH                    | code: 200                              |+
+      | path: /users/<session-user>      | body:                                  |
+      | payload:                         |   data:                                |
+      |   status: active                 |     status: active                     |
+      | as: <kept-session>               | code: 401                              |+
+      | method: GET                      | body:                                  |
+      | path: /users/me                  |   errors:                              |
+      |                                  |     - message: >-                      |
+      |                                  |         Invalid user credentials.      |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_access    | 2      | 0      | 0      | 0      |

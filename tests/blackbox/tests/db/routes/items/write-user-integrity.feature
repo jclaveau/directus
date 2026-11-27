@@ -26,7 +26,10 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                  | code: 200            |+
       | path: /users                                 | body:                |
       | query:                                       |   data:              |
-      |   filter[email][_eq]: a2o-create@write.email |     - status: active |
+      |   filter:                                    |     - status: active |
+      |     identities:                              |                      |
+      |       value:                                 |                      |
+      |         _eq: a2o-create@write.email          |                      |
       |   fields: status                             |                      |
     And on postgres the requests ran these statements:
       | request | table                | select | insert | update | delete |
@@ -70,31 +73,31 @@ Feature: A nested write to users, roles or policies hands its user checks up
 
   Scenario: a user's policies given as an empty list delete its access rows
     When these requests get these responses:
-      | request                                                  | response   |
-      | method: POST                                             | code: 200  |+
-      | path: /policies                                          |            |
-      | payload:                                                 |            |
-      |   id: 5e1f0000-0000-4000-8000-000000000002               |            |
-      |   name: write integrity policy                           |            |
-      | method: POST                                             | code: 200  |+
-      | path: /users                                             |            |
-      | payload:                                                 |            |
-      |   id: 5e1f0000-0000-4000-8000-000000000013               |            |
-      |   email: policies-emptied@write.email                    |            |
-      | method: POST                                             | code: 200  |+
-      | path: /access                                            |            |
-      | payload:                                                 |            |
-      |   id: 5e1f0000-0000-4000-8000-000000000021               |            |
-      |   user: 5e1f0000-0000-4000-8000-000000000013             |            |
-      |   policy: 5e1f0000-0000-4000-8000-000000000002           |            |
-      | method: PATCH                                            | code: 200  |+
-      | path: /users/5e1f0000-0000-4000-8000-000000000013        |            |
-      | payload:                                                 |            |
-      |   policies: []                                           |            |
-      | method: GET                                              | code: 200  |+
-      | path: /access                                            | body:      |
-      | query:                                                   |   data: [] |
-      |   filter[user][email][_eq]: policies-emptied@write.email |            |
+      | request                                                   | response   |
+      | method: POST                                              | code: 200  |+
+      | path: /policies                                           |            |
+      | payload:                                                  |            |
+      |   id: 5e1f0000-0000-4000-8000-000000000002                |            |
+      |   name: write integrity policy                            |            |
+      | method: POST                                              | code: 200  |+
+      | path: /users                                              |            |
+      | payload:                                                  |            |
+      |   id: 5e1f0000-0000-4000-8000-000000000013                |            |
+      |   email: policies-emptied@write.email                     |            |
+      | method: POST                                              | code: 200  |+
+      | path: /access                                             |            |
+      | payload:                                                  |            |
+      |   id: 5e1f0000-0000-4000-8000-000000000021                |            |
+      |   user: 5e1f0000-0000-4000-8000-000000000013              |            |
+      |   policy: 5e1f0000-0000-4000-8000-000000000002            |            |
+      | method: PATCH                                             | code: 200  |+
+      | path: /users/5e1f0000-0000-4000-8000-000000000013         |            |
+      | payload:                                                  |            |
+      |   policies: []                                            |            |
+      | method: GET                                               | code: 200  |+
+      | path: /access                                             | body:      |
+      | query:                                                    |   data: [] |
+      |   filter[user][_eq]: 5e1f0000-0000-4000-8000-000000000013 |            |
     And on postgres the requests ran these statements:
       | request | table                | select | insert | update | delete | with |
       | 1       | directus_access      | 2      | 0      | 0      | 0      | 0    |
@@ -127,28 +130,28 @@ Feature: A nested write to users, roles or policies hands its user checks up
 
   Scenario: a user's policies deleting an access row delete it
     When these requests get these responses:
-      | request                                                  | response   |
-      | method: POST                                             | code: 200  |+
-      | path: /users                                             |            |
-      | payload:                                                 |            |
-      |   id: 5e1f0000-0000-4000-8000-000000000014               |            |
-      |   email: policies-deleted@write.email                    |            |
-      | method: POST                                             | code: 200  |+
-      | path: /access                                            |            |
-      | payload:                                                 |            |
-      |   id: 5e1f0000-0000-4000-8000-000000000022               |            |
-      |   user: 5e1f0000-0000-4000-8000-000000000014             |            |
-      |   policy: 5e1f0000-0000-4000-8000-000000000002           |            |
-      | method: PATCH                                            | code: 200  |+
-      | path: /users/5e1f0000-0000-4000-8000-000000000014        |            |
-      | payload:                                                 |            |
-      |   policies:                                              |            |
-      |     delete:                                              |            |
-      |       - 5e1f0000-0000-4000-8000-000000000022             |            |
-      | method: GET                                              | code: 200  |+
-      | path: /access                                            | body:      |
-      | query:                                                   |   data: [] |
-      |   filter[user][email][_eq]: policies-deleted@write.email |            |
+      | request                                                   | response   |
+      | method: POST                                              | code: 200  |+
+      | path: /users                                              |            |
+      | payload:                                                  |            |
+      |   id: 5e1f0000-0000-4000-8000-000000000014                |            |
+      |   email: policies-deleted@write.email                     |            |
+      | method: POST                                              | code: 200  |+
+      | path: /access                                             |            |
+      | payload:                                                  |            |
+      |   id: 5e1f0000-0000-4000-8000-000000000022                |            |
+      |   user: 5e1f0000-0000-4000-8000-000000000014              |            |
+      |   policy: 5e1f0000-0000-4000-8000-000000000002            |            |
+      | method: PATCH                                             | code: 200  |+
+      | path: /users/5e1f0000-0000-4000-8000-000000000014         |            |
+      | payload:                                                  |            |
+      |   policies:                                               |            |
+      |     delete:                                               |            |
+      |       - 5e1f0000-0000-4000-8000-000000000022              |            |
+      | method: GET                                               | code: 200  |+
+      | path: /access                                             | body:      |
+      | query:                                                    |   data: [] |
+      |   filter[user][_eq]: 5e1f0000-0000-4000-8000-000000000014 |            |
     And on postgres the requests ran these statements:
       | request | table                | select | insert | update | delete | with |
       | 1       | directus_access      | 1      | 0      | 0      | 0      | 0    |
@@ -193,7 +196,10 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                       | code: 200        |+
       | path: /users                                      | body:            |
       | query:                                            |   data:          |
-      |   filter[email][_eq]: role-emptied@write.email    |     - role: null |
+      |   filter:                                         |     - role: null |
+      |     identities:                                   |                  |
+      |       value:                                      |                  |
+      |         _eq: role-emptied@write.email             |                  |
       |   fields: role                                    |                  |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
@@ -225,8 +231,11 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                       | code: 200               |+
       | path: /users                                      | body:                   |
       | query:                                            |   data:                 |
-      |   filter[email][_eq]: role-created@write.email    |     - role:             |
-      |   fields: role.name                               |         name: integrity |
+      |   filter:                                         |     - role:             |
+      |     identities:                                   |         name: integrity |
+      |       value:                                      |                         |
+      |         _eq: role-created@write.email             |                         |
+      |   fields: role.name                               |                         |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_access    | 2      | 0      | 0      | 0      |
@@ -254,9 +263,12 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                       | code: 200               |+
       | path: /users                                      | body:                   |
       | query:                                            |   data:                 |
-      |   filter[email][_eq]: role-updated@write.email    |     - status: active    |
-      |   fields:                                         |       role:             |
-      |     - status                                      |         name: integrity |
+      |   filter:                                         |     - status: active    |
+      |     identities:                                   |       role:             |
+      |       value:                                      |         name: integrity |
+      |         _eq: role-updated@write.email             |                         |
+      |   fields:                                         |                         |
+      |     - status                                      |                         |
       |     - role.name                                   |                         |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
@@ -288,7 +300,10 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                       | code: 200        |+
       | path: /users                                      | body:            |
       | query:                                            |   data:          |
-      |   filter[email][_eq]: role-deleted@write.email    |     - role: null |
+      |   filter:                                         |     - role: null |
+      |     identities:                                   |                  |
+      |       value:                                      |                  |
+      |         _eq: role-deleted@write.email             |                  |
       |   fields: role                                    |                  |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |

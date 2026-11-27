@@ -39,24 +39,26 @@ Feature: A batch update of a system collection is checked as a single update is
       | ann | ann        | ann-<run>@example.com |
       | bob | bob        | bob-<run>@example.com |
     Then these requests get these responses:
-      | request                           | response                    |
-      | method: PATCH                     | code: 400                   |+
-      | path: /users                      | body:                       |
-      | payload:                          |   errors:                   |
-      |   - id: <ann>                     |     - extensions:           |
-      |     email: same-<run>@example.com |         code:               |
-      |   - id: <bob>                     |           RECORD_NOT_UNIQUE |
-      |     email: same-<run>@example.com |         field: email        |
-      | method: GET                       | code: 200                   |+
-      | path: /users/<ann>                | body:                       |
-      | query:                            |   data:                     |
-      |   fields: email                   |     email: >-               |
-      |                                   |       ann-<run>@example.com |
-      | method: GET                       | code: 200                   |+
-      | path: /users/<bob>                | body:                       |
-      | query:                            |   data:                     |
-      |   fields: email                   |     email: >-               |
-      |                                   |       bob-<run>@example.com |
+      | request                           | response                      |
+      | method: PATCH                     | code: 400                     |+
+      | path: /users                      | body:                         |
+      | payload:                          |   errors:                     |
+      |   - id: <ann>                     |     - extensions:             |
+      |     email: same-<run>@example.com |         code:                 |
+      |   - id: <bob>                     |           RECORD_NOT_UNIQUE   |
+      |     email: same-<run>@example.com |         field: email          |
+      | method: GET                       | code: 200                     |+
+      | path: /users/<ann>                | body:                         |
+      | query:                            |   data:                       |
+      |   fields: primary_identity.value  |     primary_identity:         |
+      |                                   |       value: >-               |
+      |                                   |         ann-<run>@example.com |
+      | method: GET                       | code: 200                     |+
+      | path: /users/<bob>                | body:                         |
+      | query:                            |   data:                       |
+      |   fields: primary_identity.value  |     primary_identity:         |
+      |                                   |       value: >-               |
+      |                                   |         bob-<run>@example.com |
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
       | 1       | directus_users | 2      | 0      | 0      | 0      |
@@ -68,24 +70,25 @@ Feature: A batch update of a system collection is checked as a single update is
       | other | other      | other-<run>@example.com |
     And a user who may update only their own row, as self
     Then these requests get these responses:
-      | request                            | response                      |
-      | as: self                           | code: 403                     |+
-      | method: PATCH                      | body:                         |
-      | path: /users                       |   errors:                     |
-      | payload:                           |     - extensions:             |
-      |   - id: <self>                     |         code: FORBIDDEN       |
-      |     first_name: renamed            |                               |
-      |   - id: <other>                    |                               |
-      |     email: owner-<run>@example.com |                               |
-      | method: GET                        | code: 200                     |+
-      | path: /users/<self>                | body:                         |
-      | query:                             |   data:                       |
-      |   fields: first_name               |     first_name: self          |
-      | method: GET                        | code: 200                     |+
-      | path: /users/<other>               | body:                         |
-      | query:                             |   data:                       |
-      |   fields: email                    |     email: >-                 |
-      |                                    |       other-<run>@example.com |
+      | request                            | response                        |
+      | as: self                           | code: 403                       |+
+      | method: PATCH                      | body:                           |
+      | path: /users                       |   errors:                       |
+      | payload:                           |     - extensions:               |
+      |   - id: <self>                     |         code: FORBIDDEN         |
+      |     first_name: renamed            |                                 |
+      |   - id: <other>                    |                                 |
+      |     email: owner-<run>@example.com |                                 |
+      | method: GET                        | code: 200                       |+
+      | path: /users/<self>                | body:                           |
+      | query:                             |   data:                         |
+      |   fields: first_name               |     first_name: self            |
+      | method: GET                        | code: 200                       |+
+      | path: /users/<other>               | body:                           |
+      | query:                             |   data:                         |
+      |   fields: primary_identity.value   |     primary_identity:           |
+      |                                    |       value: >-                 |
+      |                                    |         other-<run>@example.com |
     And on postgres the requests ran these statements:
       | request | table                | select | insert | update | delete |
       | 1       | directus_access      | 3      | 0      | 0      | 0      |
@@ -352,24 +355,26 @@ Feature: A batch update of a system collection is checked as a single update is
       | ann | ann        | ann-<run>@example.com |
       | bob | bob        | bob-<run>@example.com |
     Then these requests get these responses:
-      | request                          | response                    |
-      | method: PATCH                    | code: 200                   |+
-      | path: /users                     |                             |
-      | payload:                         |                             |
-      |   - id: <ann>                    |                             |
-      |     email: new-<run>@example.com |                             |
-      |   - id: <bob>                    |                             |
-      |     email: ann-<run>@example.com |                             |
-      | method: GET                      | code: 200                   |+
-      | path: /users/<ann>               | body:                       |
-      | query:                           |   data:                     |
-      |   fields: email                  |     email: >-               |
-      |                                  |       new-<run>@example.com |
-      | method: GET                      | code: 200                   |+
-      | path: /users/<bob>               | body:                       |
-      | query:                           |   data:                     |
-      |   fields: email                  |     email: >-               |
-      |                                  |       ann-<run>@example.com |
+      | request                          | response                      |
+      | method: PATCH                    | code: 200                     |+
+      | path: /users                     |                               |
+      | payload:                         |                               |
+      |   - id: <ann>                    |                               |
+      |     email: new-<run>@example.com |                               |
+      |   - id: <bob>                    |                               |
+      |     email: ann-<run>@example.com |                               |
+      | method: GET                      | code: 200                     |+
+      | path: /users/<ann>               | body:                         |
+      | query:                           |   data:                       |
+      |   fields: primary_identity.value |     primary_identity:         |
+      |                                  |       value: >-               |
+      |                                  |         new-<run>@example.com |
+      | method: GET                      | code: 200                     |+
+      | path: /users/<bob>               | body:                         |
+      | query:                           |   data:                       |
+      |   fields: primary_identity.value |     primary_identity:         |
+      |                                  |       value: >-               |
+      |                                  |         ann-<run>@example.com |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_access    | 2      | 0      | 0      | 0      |
@@ -384,22 +389,22 @@ Feature: A batch update of a system collection is checked as a single update is
       | first | first-<run> | en-US    | one   |
       | other | other-<run> | en-US    | two   |
     Then these requests get these responses:
-      | request                     | response                 |
-      | method: PATCH               | code: 200                |+
-      | path: /translations         |                          |
-      | payload:                    |                          |
-      |   - id: <first>             |                          |
-      |     key: new-<run>          |                          |
-      |   - id: <other>             |                          |
-      |     key: first-<run>        |                          |
-      | method: GET                 | code: 200                |+
-      | path: /translations/<first> | body:                    |
-      | query:                      |   data:                  |
-      |   fields: key               |     key: new-<run>       |
-      | method: GET                 | code: 200                |+
-      | path: /translations/<other> | body:                    |
-      | query:                      |   data:                  |
-      |   fields: key               |     key: first-<run>     |
+      | request                     | response             |
+      | method: PATCH               | code: 200            |+
+      | path: /translations         |                      |
+      | payload:                    |                      |
+      |   - id: <first>             |                      |
+      |     key: new-<run>          |                      |
+      |   - id: <other>             |                      |
+      |     key: first-<run>        |                      |
+      | method: GET                 | code: 200            |+
+      | path: /translations/<first> | body:                |
+      | query:                      |   data:              |
+      |   fields: key               |     key: new-<run>   |
+      | method: GET                 | code: 200            |+
+      | path: /translations/<other> | body:                |
+      | query:                      |   data:              |
+      |   fields: key               |     key: first-<run> |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      |
@@ -416,22 +421,22 @@ Feature: A batch update of a system collection is checked as a single update is
       | draft-a | draft-a | draft-a | test_batch_guards_versioned | "<essay>" |
       | draft-b | draft-b | draft-b | test_batch_guards_versioned | "<essay>" |
     Then these requests get these responses:
-      | request                   | response          |
-      | method: PATCH             | code: 200         |+
-      | path: /versions           |                   |
-      | payload:                  |                   |
-      |   - id: <draft-a>         |                   |
-      |     key: draft-c          |                   |
-      |   - id: <draft-b>         |                   |
-      |     key: draft-a          |                   |
-      | method: GET               | code: 200         |+
-      | path: /versions/<draft-a> | body:             |
-      | query:                    |   data:           |
-      |   fields: key             |     key: draft-c  |
-      | method: GET               | code: 200         |+
-      | path: /versions/<draft-b> | body:             |
-      | query:                    |   data:           |
-      |   fields: key             |     key: draft-a  |
+      | request                   | response         |
+      | method: PATCH             | code: 200        |+
+      | path: /versions           |                  |
+      | payload:                  |                  |
+      |   - id: <draft-a>         |                  |
+      |     key: draft-c          |                  |
+      |   - id: <draft-b>         |                  |
+      |     key: draft-a          |                  |
+      | method: GET               | code: 200        |+
+      | path: /versions/<draft-a> | body:            |
+      | query:                    |   data:          |
+      |   fields: key             |     key: draft-c |
+      | method: GET               | code: 200        |+
+      | path: /versions/<draft-b> | body:            |
+      | query:                    |   data:          |
+      |   fields: key             |     key: draft-a |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_activity  | 0      | 1      | 0      | 0      |
@@ -445,24 +450,24 @@ Feature: A batch update of a system collection is checked as a single update is
       | first | first-<run> | US       | one   |
       | other | other-<run> | en-US    | two   |
     Then these requests get these responses:
-      | request                     | response                 |
-      | method: PATCH               | code: 200                |+
-      | path: /translations         |                          |
-      | payload:                    |                          |
-      |   - id: <first>             |                          |
-      |     key: x-<run>-en         |                          |
-      |   - id: <other>             |                          |
-      |     key: x-<run>            |                          |
-      | method: GET                 | code: 200                |+
-      | path: /translations/<first> | body:                    |
-      | query:                      |   data:                  |
-      |   fields: key,language      |     key: x-<run>-en      |
-      |                             |     language: US         |
-      | method: GET                 | code: 200                |+
-      | path: /translations/<other> | body:                    |
-      | query:                      |   data:                  |
-      |   fields: key,language      |     key: x-<run>         |
-      |                             |     language: en-US      |
+      | request                     | response            |
+      | method: PATCH               | code: 200           |+
+      | path: /translations         |                     |
+      | payload:                    |                     |
+      |   - id: <first>             |                     |
+      |     key: x-<run>-en         |                     |
+      |   - id: <other>             |                     |
+      |     key: x-<run>            |                     |
+      | method: GET                 | code: 200           |+
+      | path: /translations/<first> | body:               |
+      | query:                      |   data:             |
+      |   fields: key,language      |     key: x-<run>-en |
+      |                             |     language: US    |
+      | method: GET                 | code: 200           |+
+      | path: /translations/<other> | body:               |
+      | query:                      |   data:             |
+      |   fields: key,language      |     key: x-<run>    |
+      |                             |     language: en-US |
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      |
