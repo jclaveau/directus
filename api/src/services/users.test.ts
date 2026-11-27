@@ -984,6 +984,29 @@ describe('Integration Tests', () => {
 				await expect(promise).rejects.toThrowError(ForbiddenError);
 				await expect(promise).rejects.toThrowError('Bad user credentials');
 			});
+
+			it('refuses an account without a password (point 10)', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'user@example.com',
+					scope: 'password-reset',
+					hash: 'some-hash',
+				} as any);
+
+				vi.spyOn(UsersService.prototype as any, 'checkPasswordPolicy')
+					.mockResolvedValue(undefined);
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({
+						id: 'user-id-reset-3',
+						status: 'active',
+						password: null,
+					});
+
+				await expect(service.resetPassword('reset-token', 'new-password'))
+					.rejects.toEqual(new ForbiddenError({
+						reason: 'No password is set on this account',
+					}));
+			});
 		});
 
 		describe('requestPasswordReset', () => {
@@ -997,6 +1020,97 @@ describe('Integration Tests', () => {
 
 				await expect(promise).rejects.toThrowError(ForbiddenError);
 				await expect(promise).rejects.toThrowError('Inactive user');
+			});
+
+			it('refuses an account without a password (point 10)', async () => {
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({
+						id: 'user-id-req-2',
+						status: 'active',
+						password: null,
+						email: 'user@example.com',
+					});
+
+				await expect(service.requestPasswordReset('user@example.com', null))
+					.rejects.toEqual(new ForbiddenError({
+						reason: 'No password is set on this account',
+					}));
+			});
+		});
+
+		describe('removeIdentity', () => {
+			it('refuses an identity of another account', async () => {
+				tracker.on.select('directus_user_identities').response([
+					{
+						id: 'identity-email',
+						kind: 'email',
+						verified: true,
+					},
+				]);
+
+				await expect(service.removeIdentity('user-id-1', 'identity-other'))
+					.rejects.toEqual(new ForbiddenError({
+						reason: `The identity "identity-other" isn't one of the account's`,
+					}));
+			});
+
+			it('refuses the account\'s last identity', async () => {
+				tracker.on.select('directus_user_identities').response([
+					{
+						id: 'identity-email',
+						kind: 'email',
+						verified: true,
+					},
+				]);
+
+				await expect(service.removeIdentity('user-id-1', 'identity-email'))
+					.rejects.toEqual(new InvalidPayloadError({
+						reason: `The identity "identity-email" is the account's last identity`,
+					}));
+			});
+
+			it('moves the primary to a verified email, then deletes', async () => {
+				tracker.on.select('directus_user_identities').response([
+					{
+						id: 'identity-github',
+						kind: 'github',
+						verified: true,
+					},
+					{
+						id: 'identity-unverified',
+						kind: 'email',
+						verified: false,
+					},
+					{
+						id: 'identity-verified',
+						kind: 'email',
+						verified: true,
+					},
+					{
+						id: 'identity-removed',
+						kind: 'email',
+						verified: true,
+					},
+				]);
+
+				tracker.on.update('directus_users').response(1);
+
+				const deleteOne = vi.spyOn(ItemsService.prototype, 'deleteOne')
+					.mockResolvedValue('identity-removed');
+
+				onTestFinished(() => {
+					deleteOne.mockRestore();
+				});
+
+				await service.removeIdentity('user-id-1', 'identity-removed');
+
+				expect(tracker.history.update[0]!.bindings).toEqual([
+					'identity-verified',
+					'user-id-1',
+					'identity-removed',
+				]);
+
+				expect(deleteOne).toHaveBeenCalledWith('identity-removed');
 			});
 		});
 
