@@ -94,10 +94,6 @@ const localTypeMap: Record<string, Type | 'unknown'> = {
 	float8: 'float',
 	citext: 'text',
 
-	// Oracle
-	number: 'integer',
-	sdo_geometry: 'geometry',
-
 	// SQLite
 	integerfirst: 'integer',
 };

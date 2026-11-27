@@ -123,7 +123,7 @@ export function applySort(
 
 	if (returnRecords) return { sortRecords, hasJoins, hasMultiRelationalSort };
 
-	// Clears the order if any, eg: from MSSQL offset
+	// Clears the order if any
 	rootQuery.clear('order');
 
 	rootQuery.orderBy(sortRecords);

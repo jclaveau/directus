@@ -1,7 +1,7 @@
 export interface Table {
 	name: string;
 
-	// Not supported in SQLite + comment in mssql
+	// Not supported in SQLite
 	comment?: string | null;
 	schema?: string;
 
@@ -14,7 +14,4 @@ export interface Table {
 
 	// SQLite Only
 	sql?: string;
-
-	//MSSQL only
-	catalog?: string;
 }
