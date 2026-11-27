@@ -2,6 +2,7 @@ import { defineBundleApi } from '@directus/extensions-sdk/scalabus';
 import { subscriptionsCliHook } from './cli/subscriptions-cli-hook.js';
 import { subscriptionsEndpoint } from './endpoint.js';
 import { subscriptionsHook } from './hook.js';
+import { subscriptionsEnv } from './subscriptions-env.js';
 import { addCheckoutColumns } from './migrations/add-checkout-columns.js';
 import { createInvitesTable } from './migrations/create-invites-table.js';
 import {
@@ -17,14 +18,17 @@ import {
 	showSubscriptionCollections,
 } from './migrations/show-subscription-collections.js';
 
-export default defineBundleApi([
-	createSubscriptionTables,
-	createParkedSyncsPreset,
-	showSubscriptionCollections,
-	addCheckoutColumns,
-	createInvitesTable,
-	createInvoicesTable,
-	subscriptionsCliHook,
-	subscriptionsHook,
-	subscriptionsEndpoint,
-]);
+export default defineBundleApi({
+	env: subscriptionsEnv,
+	entries: [
+		createSubscriptionTables,
+		createParkedSyncsPreset,
+		showSubscriptionCollections,
+		addCheckoutColumns,
+		createInvitesTable,
+		createInvoicesTable,
+		subscriptionsCliHook,
+		subscriptionsHook,
+		subscriptionsEndpoint,
+	],
+});

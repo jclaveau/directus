@@ -1,4 +1,4 @@
-import { useEnv } from '@directus/env';
+import { useEnv, useEnvVarRawValues } from '@directus/env';
 import type { Logger } from 'pino';
 import {
 	afterEach,
@@ -618,7 +618,7 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 
 describe('validateSubscriptionsEnv', () => {
 	test('passes with no subscription variable set', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({});
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({});
 
 		validateSubscriptionsEnv();
 
@@ -627,7 +627,7 @@ describe('validateSubscriptionsEnv', () => {
 	});
 
 	test('passes with both stripe variables set', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
 			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_1',
 			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: 'whsec_1',
 		});
@@ -639,7 +639,7 @@ describe('validateSubscriptionsEnv', () => {
 	});
 
 	test('exits on a stripe key without its webhook secret', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
 			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_1',
 		});
 
@@ -654,7 +654,7 @@ describe('validateSubscriptionsEnv', () => {
 	});
 
 	test('exits on a stripe webhook secret without its key', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
 			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: 'whsec_1',
 		});
 
@@ -674,7 +674,7 @@ describe('validateSubscriptionsEnv', () => {
 		['   '],
 		[1],
 	])('exits on variable value %j without logging it', (variableValue) => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
 			SUBSCRIPTIONS_MOLLIE_API_KEY: variableValue,
 		});
 
@@ -700,7 +700,7 @@ describe('validateSubscriptionsEnv', () => {
 			+ ' "SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" is set.',
 		],
 	])('exits on a lone mollie variable in %j', (subscriptionsEnv, errorMessage) => {
-		vi.mocked(useEnv).mockReturnValueOnce(subscriptionsEnv);
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce(subscriptionsEnv);
 
 		validateSubscriptionsEnv();
 
@@ -709,7 +709,7 @@ describe('validateSubscriptionsEnv', () => {
 	});
 
 	test('passes with two Mollie webhook secrets', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
 			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1',
 			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: 'mollie_secret_new, mollie_secret_old',
 		});
@@ -729,7 +729,7 @@ describe('validateSubscriptionsEnv', () => {
 		webhookSecrets,
 		emptyPosition,
 	) => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
 			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1',
 			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: webhookSecrets,
 		});
@@ -745,7 +745,7 @@ describe('validateSubscriptionsEnv', () => {
 	});
 
 	test('passes with a reconcile schedule cron reads', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
 			SUBSCRIPTIONS_RECONCILE_CRON: '*/5 * * * *',
 		});
 
@@ -756,7 +756,7 @@ describe('validateSubscriptionsEnv', () => {
 	});
 
 	test('exits on a reconcile schedule cron cannot read', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
 			SUBSCRIPTIONS_RECONCILE_CRON: 'every 15 minutes',
 		});
 
@@ -771,7 +771,9 @@ describe('validateSubscriptionsEnv', () => {
 	});
 
 	test('exits on an empty variable', () => {
-		vi.mocked(useEnv).mockReturnValueOnce({ SUBSCRIPTIONS_MOLLIE_API_KEY: '' });
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
+			SUBSCRIPTIONS_MOLLIE_API_KEY: '',
+		});
 
 		validateSubscriptionsEnv();
 

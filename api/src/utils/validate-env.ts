@@ -1,4 +1,4 @@
-import { type EnvVarName, useEnv } from '@directus/env';
+import { type EnvVarName, useEnv, useEnvVarRawValues } from '@directus/env';
 import { parse as parseBytesConfiguration } from 'bytes';
 import { validateHeaderName } from 'node:http';
 import { useLogger } from '../logger/index.js';
@@ -397,7 +397,9 @@ export function validateOutOfScopeFeaturesEnv(): void {
  * webhooks would then answer 404 and a paid subscription would never be granted.
  */
 export function validateSubscriptionsEnv(): void {
-	const env = useEnv();
+	// The bundle declares these, so core's `Env` has no key for them: their raw
+	// value is what was set, before any guess cast `123` to a number.
+	const env = useEnvVarRawValues();
 
 	const emptyVariable = SUBSCRIPTIONS_ENV.find((variableName) => {
 		return env[variableName] === '';
