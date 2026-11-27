@@ -32,9 +32,13 @@ const castToType = (
 			return new RegExp(String(value));
 		case 'array':
 		case 'string[]':
-			return toArray(value)
-				.map((item) => String(item))
-				.filter((item) => item !== '');
+			return type === 'array'
+				? toArray(value)
+					.map((item) => cast(item))
+					.filter((item) => item !== '')
+				: toArray(value)
+					.map((item) => String(item))
+					.filter((item) => item !== '');
 		case 'json':
 			return tryJson(value);
 		case 'false | number':
@@ -52,12 +56,7 @@ const castToType = (
 				return Number(value);
 			}
 
-			return castToType(
-				value,
-				guessedType === 'json'
-					? 'string'
-					: guessedType,
-			);
+			return castToType(value, guessedType);
 		}
 	}
 };
@@ -71,10 +70,35 @@ export const stripCastFlag = (value: unknown): unknown => {
 		: value;
 };
 
+/** The declared types an `array:` prefix keeps a list of strings. */
+const STRING_LIST_DECLARED_TYPES: readonly EnvVarDeclaredType[] = [
+	'string[]',
+	'false | string[]',
+	'boolean | number | string | string[]',
+];
+
+/**
+ * The type `castFlag` casts a variable declared `declaredType` to: the prefix
+ * wins, but an `array:` one keeps a declared list of strings one.
+ */
+const readFlagCastType = (
+	castFlag: EnvType,
+	declaredType: EnvVarDeclaredType | null,
+): EnvType | EnvVarDeclaredType => {
+	return castFlag === 'array'
+		&& declaredType !== null
+		&& STRING_LIST_DECLARED_TYPES.includes(declaredType)
+		? 'string[]'
+		: castFlag;
+};
+
 export const cast = (value: unknown, key?: string): unknown => {
 	const castFlag = getCastFlag(value);
+	const declaredType = getDefaultType(key);
 
-	const castType = castFlag ?? getDefaultType(key) ?? guessType(value);
+	const castType = castFlag
+		? readFlagCastType(castFlag, declaredType)
+		: declaredType ?? guessType(value);
 
 	return castToType(stripCastFlag(value), castType);
 };
@@ -87,5 +111,11 @@ export const castDeclaredEnvVarValue = (
 	value: unknown,
 	envVarDeclaration: EnvVarDeclaration,
 ): unknown => {
-	return castToType(stripCastFlag(value), envVarDeclaration.type);
+	const castFlag = getCastFlag(value);
+
+	const castType = castFlag
+		? readFlagCastType(castFlag, envVarDeclaration.type)
+		: envVarDeclaration.type;
+
+	return castToType(stripCastFlag(value), castType);
 };

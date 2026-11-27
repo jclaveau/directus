@@ -41,6 +41,21 @@ const DECLARED_CAST_FLAGS: Record<EnvVarDeclaredType, readonly string[]> = {
 const SECRET_ENV_VAR_NAME_PATTERN =
 	/PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL|SALT|PRIVATE/;
 
+/**
+ * `"NAME" is "value", which is <expected>.`, the value left out for a name
+ * that may hold a credential.
+ */
+const describeValueRefusal = (
+	quotedName: string,
+	refusedValue: unknown,
+	expectedShape: string,
+): string => {
+	return SECRET_ENV_VAR_NAME_PATTERN.test(quotedName)
+		? `${quotedName} is ${expectedShape}.`
+		: `${quotedName} is ${JSON.stringify(refusedValue)},`
+			+ ` which is ${expectedShape}.`;
+};
+
 /** A config file's number or boolean reads as its string, an object does not. */
 const isScalarValue = (bareValue: unknown): boolean => {
 	return ['string', 'number', 'boolean'].includes(typeof bareValue);
@@ -64,31 +79,29 @@ const readTypeRefusal = (
 	bareValue: unknown,
 	envVarDeclaration: EnvVarDeclaration,
 ): string | null => {
-	const quotedValue = JSON.stringify(bareValue);
-
 	const describeShapeRefusal = (expectedShape: string): string => {
-		return SECRET_ENV_VAR_NAME_PATTERN.test(quotedName)
-			? `${quotedName} is ${expectedShape}.`
-			: `${quotedName} is ${quotedValue}, which is ${expectedShape}.`;
+		return describeValueRefusal(quotedName, bareValue, expectedShape);
 	};
 
 	switch (envVarDeclaration.type) {
 		case 'number':
 			return isNumberValue(bareValue)
 				? null
-				: `${quotedName} is ${quotedValue}, which is not a number.`;
+				: describeShapeRefusal('not a number');
 		case 'false | number':
 			return bareValue === false
 				|| bareValue === 'false'
 				|| isNumberValue(bareValue)
 				? null
-				: `${quotedName} is ${quotedValue}, which is neither false`
-					+ ' nor a number.';
+				: describeShapeRefusal('neither false nor a number');
 		case 'boolean':
 			return BOOLEAN_SPELLINGS.includes(readBooleanCase(bareValue))
 				? null
-				: `${quotedName} Environment Variable is ${quotedValue},`
-					+ ' which is not a boolean. Use one of true, false, 1, 0.';
+				: describeValueRefusal(
+					`${quotedName} Environment Variable`,
+					bareValue,
+					'not a boolean. Use one of true, false, 1, 0',
+				);
 
 		case 'regex':
 			try {
@@ -97,7 +110,7 @@ const readTypeRefusal = (
 				return null;
 			}
 			catch {
-				return `${quotedName} is ${quotedValue}, which is not a regex.`;
+				return describeShapeRefusal('not a regex');
 			}
 
 		case 'json':
@@ -132,8 +145,12 @@ const readTypeRefusal = (
 					'neither false, a string nor a list of strings',
 				);
 
-		default:
-			return null;
+		case 'boolean | number | string | string[]':
+			return isScalarValue(bareValue) || isScalarListValue(bareValue)
+				? null
+				: describeShapeRefusal(
+					'neither a boolean, a number, a string nor a list of strings',
+				);
 	}
 };
 
@@ -158,8 +175,7 @@ export const checkDeclaredEnvVarValue = (
 	}
 
 	if (castFlag === 'number' && !isNumberValue(stripCastFlag(envVarValue))) {
-		return `${quotedName} is ${JSON.stringify(envVarValue)},`
-			+ ' which is not a number.';
+		return describeValueRefusal(quotedName, envVarValue, 'not a number');
 	}
 
 	const typeRefusal = readTypeRefusal(
@@ -183,6 +199,9 @@ export const checkDeclaredEnvVarValue = (
 		.map((declaredChoice) => JSON.stringify(declaredChoice))
 		.join(', ');
 
-	return `${quotedName} is ${JSON.stringify(castValue)}, which is not one of`
-		+ ` ${quotedChoices}.`;
+	return describeValueRefusal(
+		quotedName,
+		castValue,
+		`not one of ${quotedChoices}`,
+	);
 };
