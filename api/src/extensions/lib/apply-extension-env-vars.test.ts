@@ -158,7 +158,7 @@ test('reads a declared variable from the file its _FILE variable names', () => {
 	});
 
 	expect(liveEnv).toEqual({
-		SUBSCRIPTIONS_KEY: 'sk_live_abc\n',
+		SUBSCRIPTIONS_KEY: 'sk_live_abc',
 		SUBSCRIPTIONS_DAYS: 30,
 	});
 });

@@ -245,18 +245,25 @@ test('Trims a secret file holding a boolean', () => {
 	});
 });
 
-// A password is its bytes, trailing newline included.
-test('Keeps a secret file holding a string as it is', () => {
+// echo and Kubernetes end a secret with newlines; a password keeps its spaces.
+test.each([
+	[' p4ss\n', ' p4ss'],
+	[' p4ss\n\n', ' p4ss'],
+	['p4ss \n', 'p4ss '],
+])('Strips only the trailing newlines of a string secret file %j', (
+	fileContent,
+	envVarValue,
+) => {
 	vi.mocked(readConfigurationFromProcess).mockReturnValue({
 		DB_PASSWORD_FILE: './file.txt',
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
 	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
-	vi.mocked(readFileSync).mockReturnValueOnce(' p4ss\n');
+	vi.mocked(readFileSync).mockReturnValueOnce(fileContent);
 
 	expect(createEnv()).toEqual({
-		DB_PASSWORD: ' p4ss\n',
+		DB_PASSWORD: envVarValue,
 		DEFAULT: 'test-default',
 		DEFAULT_ARRAY: 'one,two,three',
 	});
