@@ -25,7 +25,6 @@ export const ENV_VAR_DECLARATIONS = {
 		default: ['spatial_ref_sys', 'sysdiagrams'],
 	},
 	DB_BATCH_INSERT_CHUNK_SIZE: { type: 'number' },
-	DB_MSSQL_TRUST_BATCH_RETURNING: { type: 'boolean', default: false },
 
 	DB_CONNECTIONS: { type: 'string[]' },
 	DB_BASE_CONNECTION_NAME: { type: 'string' },
@@ -300,6 +299,8 @@ export const ENV_VAR_DECLARATIONS = {
 
 	MARKETPLACE_ENABLED: { type: 'boolean', default: false },
 	MARKETPLACE_TRUST: { type: 'string', default: 'sandbox' },
+
+	OUT_OF_SCOPE_FEATURES_ALLOWED: { type: 'string[]', default: [] },
 
 	TELEMETRY: { type: 'boolean', default: false },
 	TELEMETRY_URL: { type: 'string', default: 'https://telemetry.directus.io' },
