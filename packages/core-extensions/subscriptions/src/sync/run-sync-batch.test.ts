@@ -1,0 +1,1295 @@
+import type { AbstractService } from '@directus/types';
+import { oneLine } from '@directus/utils';
+import knex, { type Knex } from 'knex';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { MollieApiError } from '@mollie/api-client';
+import {
+	AbandonedCheckoutError,
+	MissingProviderSubscriptionError,
+	PaidCheckoutError,
+} from '../errors.js';
+import { addCheckoutColumns } from '../migrations/add-checkout-columns.js';
+import {
+	createSubscriptionTables,
+} from '../migrations/create-subscription-tables.js';
+import type { SubscriptionProvider } from '../providers/types.js';
+import { copySubscriptionInvoices } from './copy-subscription-invoices.js';
+import { runSyncBatch } from './run-sync-batch.js';
+
+vi.mock('./copy-subscription-invoices.js');
+
+let database: Knex;
+
+beforeEach(async () => {
+	database = knex({
+		client: 'sqlite3',
+		connection: { filename: ':memory:' },
+		useNullAsDefault: true,
+		// One connection, given up fast: a transaction held across a provider
+		// call starves any other query instead of hanging the test.
+		pool: { min: 1, max: 1 },
+		acquireConnectionTimeout: 1000,
+	});
+
+	await database.schema.createTable('directus_access', (table) => {
+		table.uuid('id');
+		table.uuid('user');
+		table.uuid('policy');
+	});
+
+	await createSubscriptionTables.config.up(database);
+	await addCheckoutColumns.config.up(database);
+	vi.useFakeTimers({ now: new Date('2026-11-05T00:00:00Z'), toFake: ['Date'] });
+});
+
+afterEach(async () => {
+	vi.useRealTimers();
+	vi.restoreAllMocks();
+	vi.resetAllMocks();
+	await database.destroy();
+});
+
+describe('runSyncBatch', () => {
+	test('claims nothing from an empty queue', async () => {
+		expect(await runSyncBatch({
+			database,
+			enabledProviders: new Map(),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		})).toBe(0);
+	});
+
+	test('syncs a due row and clears it', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			status: 'pending',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 2,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: 'Stripe is down',
+		});
+
+		const fetchSubscription = vi.fn().mockResolvedValue({
+			subscriptionId: 'sub_1',
+			customerId: 'cus_1',
+			status: 'active',
+			currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+			cancelAtPeriodEnd: false,
+			directusSubscription: 1,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
+		});
+
+		const accessService = { createOne: vi.fn().mockResolvedValue('access-1') };
+		const logger = { warn: vi.fn(), error: vi.fn() };
+		const emitSyncedAction = vi.fn();
+
+		expect(await runSyncBatch({
+			database,
+			enabledProviders: new Map([
+				['stripe', {
+					fetchSubscription,
+					composeResourceId: vi.fn().mockReturnValue('sub_1'),
+				} as unknown as SubscriptionProvider],
+			]),
+			createAccessService: () => accessService as unknown as AbstractService,
+			emitSyncedAction,
+			logger,
+		})).toBe(1);
+
+		expect(emitSyncedAction.mock.calls).toEqual([[{
+			subscription: 1,
+			provider: 'stripe',
+			status: 'active',
+			access: 'granted',
+			granted: ['user-1'],
+			revoked: [],
+		}]]);
+
+		expect(fetchSubscription).toHaveBeenCalledWith('sub_1');
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).not.toHaveBeenCalled();
+
+		expect(vi.mocked(copySubscriptionInvoices).mock.calls).toEqual([[{
+			database,
+			subscriptionProvider: expect.objectContaining({ fetchSubscription }),
+			providerName: 'stripe',
+			resourceId: 'sub_1',
+			subscriptionId: 1,
+			copiedAt: new Date('2026-11-05T00:00:00Z'),
+			logger,
+		}]]);
+
+		expect(await database('subscription_sync_queue')).toEqual([{
+			id: 1,
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: 0,
+			attempts: 0,
+			next_attempt_at: 1_793_837_100_000,
+			last_error: null,
+		}]);
+
+		expect(await database('subscriptions')
+			.select('provider_subscription_id', 'status'))
+			.toEqual([{ provider_subscription_id: 'sub_1', status: 'active' }]);
+
+		expect(await database('subscription_beneficiaries')).toEqual([
+			{ id: 1, subscription: 1, user: 'user-1', access: 'access-1' },
+		]);
+	});
+
+	test('announces no sync a later step rolled back', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			status: 'pending',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 2,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const fetchSubscription = vi.fn().mockResolvedValue({
+			subscriptionId: 'sub_1',
+			customerId: 'cus_1',
+			status: 'active',
+			currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+			cancelAtPeriodEnd: false,
+			directusSubscription: 1,
+			billing: {
+				amountCents: 1000,
+				currency: 'EUR',
+				interval: { months: 1, days: 0 },
+			},
+		});
+
+		const accessService = { createOne: vi.fn().mockResolvedValue('access-1') };
+		const logger = { warn: vi.fn(), error: vi.fn() };
+		const emitSyncedAction = vi.fn();
+
+		expect(await runSyncBatch({
+			database,
+			enabledProviders: new Map([
+				['stripe', {
+					fetchSubscription,
+					composeResourceId: vi.fn().mockImplementation(() => {
+						throw new Error('Unreadable customer');
+					}),
+				} as unknown as SubscriptionProvider],
+			]),
+			createAccessService: () => accessService as unknown as AbstractService,
+			emitSyncedAction,
+			logger,
+		})).toBe(1);
+
+		expect(emitSyncedAction).not.toHaveBeenCalled();
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			'Subscription sync of "stripe" "sub_1" failed, attempt 3:'
+			+ ' "Unreadable customer"',
+		);
+
+		expect(copySubscriptionInvoices).not.toHaveBeenCalled();
+
+		expect(await database('subscriptions').select('status'))
+			.toEqual([{ status: 'pending' }]);
+
+		expect(await database('subscription_beneficiaries')).toEqual([
+			{ id: 1, subscription: 1, user: 'user-1', access: null },
+		]);
+	});
+
+	test('announces a sync that left every access as it was', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			current_period_end: new Date('2026-12-01T00:00:00Z'),
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('directus_access')
+			.insert({ id: 'access-1', user: 'user-1', policy: 'policy-1' });
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-1', access: 'access-1' });
+
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const emitSyncedAction = vi.fn();
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([
+				['stripe', {
+					fetchSubscription: vi.fn().mockResolvedValue({
+						subscriptionId: 'sub_1',
+						customerId: 'cus_1',
+						status: 'active',
+						currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+						cancelAtPeriodEnd: false,
+						directusSubscription: 1,
+						billing: {
+							amountCents: 1000,
+							currency: 'EUR',
+							interval: { months: 1, days: 0 },
+						},
+					}),
+					composeResourceId: vi.fn().mockReturnValue('sub_1'),
+				} as unknown as SubscriptionProvider],
+			]),
+			createAccessService: () => ({}) as AbstractService,
+			emitSyncedAction,
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(emitSyncedAction.mock.calls).toEqual([[{
+			subscription: 1,
+			provider: 'stripe',
+			status: 'active',
+			access: 'unchanged',
+			granted: [],
+			revoked: [],
+		}]]);
+	});
+
+	test('drops the row of a payment id once synced', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'mollie',
+			status: 'pending',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_sync_queue').insert({
+			provider: 'mollie',
+			resource_id: 'tr_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'mollie',
+				{
+					fetchSubscription: vi.fn().mockResolvedValue({
+						subscriptionId: 'sub_1',
+						customerId: 'cst_1',
+						status: 'active',
+						currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+						cancelAtPeriodEnd: false,
+						directusSubscription: 1,
+						billing: {
+							amountCents: 1000,
+							currency: 'EUR',
+							interval: { months: 1, days: 0 },
+						},
+					}),
+					composeResourceId: vi.fn().mockReturnValue('cst_1/sub_1'),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(await database('subscription_sync_queue')).toEqual([]);
+
+		expect(await database('subscriptions')
+			.select('provider_customer_id', 'provider_subscription_id'))
+			.toEqual([{
+				provider_customer_id: 'cst_1',
+				provider_subscription_id: 'sub_1',
+			}]);
+	});
+
+	test('starts the subscription a paid checkout sold, then syncs it', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'mollie',
+			status: 'pending',
+			custom_amount: '14.90',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_managers')
+			.insert({ subscription: 1, user: 'user-1' });
+
+		await database('subscription_sync_queue').insert({
+			provider: 'mollie',
+			resource_id: 'tr_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const fetchSubscription = vi.fn()
+			.mockRejectedValueOnce(new PaidCheckoutError({
+				paymentId: 'tr_1',
+				customerId: 'cst_1',
+				mandateId: 'mdt_1',
+				paidAt: '2026-11-04T10:00:00+00:00',
+				amount: { currency: 'EUR', value: '14.90' },
+				directusSubscription: 1,
+			}))
+			.mockResolvedValueOnce({
+				subscriptionId: 'sub_1',
+				customerId: 'cst_1',
+				status: 'active',
+				currentPeriodEnd: new Date('2026-12-04T00:00:00Z'),
+				cancelAtPeriodEnd: false,
+				directusSubscription: 1,
+				billing: {
+					amountCents: 1490,
+					currency: 'EUR',
+					interval: { months: 1, days: 0 },
+				},
+			});
+
+		const startPaidCheckout = vi.fn().mockResolvedValue('cst_1/sub_1');
+		const logger = { warn: vi.fn(), error: vi.fn() };
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'mollie',
+				{
+					fetchSubscription,
+					startPaidCheckout,
+					composeResourceId: vi.fn().mockReturnValue('cst_1/sub_1'),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger,
+		});
+
+		expect(startPaidCheckout).toHaveBeenCalledWith({
+			paymentId: 'tr_1',
+			customerId: 'cst_1',
+			mandateId: 'mdt_1',
+			paidAt: '2026-11-04T10:00:00+00:00',
+			amount: { currency: 'EUR', value: '14.90' },
+			directusSubscription: 1,
+			interval: { months: 1, days: 0 },
+		});
+
+		expect(fetchSubscription.mock.calls).toEqual([['tr_1'], ['cst_1/sub_1']]);
+		expect(logger.error).not.toHaveBeenCalled();
+		expect(await database('subscription_sync_queue')).toEqual([]);
+
+		expect(await database('subscriptions')
+			.select('status', 'provider_customer_id', 'provider_subscription_id'))
+			.toEqual([{
+				status: 'active',
+				provider_customer_id: 'cst_1',
+				provider_subscription_id: 'sub_1',
+			}]);
+	});
+
+	test('retries a paid checkout whose subscription row is gone', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'mollie',
+			resource_id: 'tr_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const startPaidCheckout = vi.fn();
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'mollie',
+				{
+					fetchSubscription: vi.fn().mockRejectedValue(
+						new PaidCheckoutError({
+							paymentId: 'tr_1',
+							customerId: 'cst_1',
+							mandateId: 'mdt_1',
+							paidAt: '2026-11-04T10:00:00+00:00',
+							amount: { currency: 'EUR', value: '14.90' },
+							directusSubscription: 9,
+						}),
+					),
+					startPaidCheckout,
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(startPaidCheckout).not.toHaveBeenCalled();
+
+		expect(await database('subscription_sync_queue')
+			.select('attempts', 'last_error'))
+			.toEqual([{
+				attempts: 1,
+				last_error: 'The checkout\'s subscription 9 does not exist',
+			}]);
+	});
+
+	test.each([
+		['pending', null, 'expired'],
+		['pending', 'sub_1', 'pending'],
+		['active', null, 'active'],
+	])(oneLine`
+		expires an abandoned checkout of a %s row bound to %j: %s
+	`, async (storedStatus, providerSubscriptionId, expectedStatus) => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			status: storedStatus,
+			provider_subscription_id: providerSubscriptionId,
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'cs_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const emitSyncedAction = vi.fn();
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{
+					fetchSubscription: vi.fn().mockRejectedValue(
+						new AbandonedCheckoutError({
+							checkoutId: 'cs_1',
+							checkoutStatus: 'expired',
+							directusSubscription: 1,
+						}),
+					),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction,
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(emitSyncedAction).not.toHaveBeenCalled();
+		expect(await database('subscription_sync_queue')).toEqual([]);
+
+		expect(await database('subscriptions').select('status'))
+			.toEqual([{ status: expectedStatus }]);
+	});
+
+	test('drops a subscription no pending row awaits, logged', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const logger = { warn: vi.fn(), error: vi.fn() };
+		const emitSyncedAction = vi.fn();
+
+		expect(await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{
+					fetchSubscription: vi.fn().mockResolvedValue({
+						subscriptionId: 'sub_1',
+						customerId: 'cus_1',
+						status: 'active',
+						currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+						cancelAtPeriodEnd: false,
+						directusSubscription: null,
+						billing: null,
+					}),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction,
+			logger,
+		})).toBe(1);
+
+		expect(emitSyncedAction).not.toHaveBeenCalled();
+
+		expect(logger.error).toHaveBeenCalledWith(
+			'Subscription sync of "stripe" "sub_1" dropped: "\\"stripe\\"'
+			+ ' subscription \\"sub_1\\" names no pending subscription: its'
+			+ ' metadata \\"directus_subscription\\" is null"',
+		);
+
+		expect(await database('subscription_sync_queue')).toEqual([]);
+		expect(await database('subscriptions')).toEqual([]);
+	});
+
+	test('retries a resume synced before the row it resumes', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'mollie',
+			resource_id: 'cst_1/sub_2',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const logger = { warn: vi.fn(), error: vi.fn() };
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'mollie',
+				{
+					fetchSubscription: vi.fn().mockResolvedValue({
+						subscriptionId: 'sub_2',
+						customerId: 'cst_1',
+						status: 'active',
+						currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+						cancelAtPeriodEnd: false,
+						directusSubscription: null,
+						billing: null,
+						resumedSubscriptionId: 'sub_1',
+					}),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger,
+		});
+
+		expect(logger.error).not.toHaveBeenCalled();
+
+		expect(await database('subscription_sync_queue')
+			.select('pending', 'attempts', 'last_error'))
+			.toEqual([{
+				pending: 1,
+				attempts: 1,
+				last_error: 'Subscription "sub_2" resumes "sub_1", which is not stored',
+			}]);
+	});
+
+	test('closes a subscription the provider lost, no retry', async () => {
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			provider_customer_id: 'cus_1',
+			provider_subscription_id: 'sub_1',
+			status: 'active',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_beneficiaries')
+			.insert({ subscription: 1, user: 'user-1', access: 'access-1' });
+
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 2,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: 'Stripe is down',
+		});
+
+		const accessService = { deleteOne: vi.fn() };
+		const logger = { warn: vi.fn(), error: vi.fn() };
+		const emitSyncedAction = vi.fn();
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{
+					fetchSubscription: vi.fn().mockRejectedValue(
+						new MissingProviderSubscriptionError({
+							resourceId: 'sub_1',
+							subscriptionId: 'sub_1',
+						}),
+					),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: () => accessService as unknown as AbstractService,
+			emitSyncedAction,
+			logger,
+		});
+
+		expect(emitSyncedAction.mock.calls).toEqual([[{
+			subscription: 1,
+			provider: 'stripe',
+			status: 'canceled',
+			access: 'revoked',
+			granted: [],
+			revoked: ['user-1'],
+		}]]);
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			'Subscription sync of "stripe" "sub_1" closed: the provider has no such'
+			+ ' subscription',
+		);
+
+		expect(accessService.deleteOne).toHaveBeenCalledWith('access-1');
+		expect(await database('subscription_sync_queue')).toEqual([]);
+		expect(copySubscriptionInvoices).not.toHaveBeenCalled();
+
+		expect(await database('subscriptions').select('status'))
+			.toEqual([{ status: 'canceled' }]);
+
+		expect(await database('subscription_beneficiaries')).toEqual([
+			{ id: 1, subscription: 1, user: 'user-1', access: null },
+		]);
+	});
+
+	test('parks a sync at the attempt ceiling and reports it once', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 47,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const logger = { warn: vi.fn(), error: vi.fn() };
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{
+					fetchSubscription: vi.fn()
+						.mockRejectedValue(new Error('Stripe is down')),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger,
+		});
+
+		expect(logger.error).toHaveBeenCalledWith(
+			'Subscription sync of "stripe" "sub_1" failed, attempt 48:'
+			+ ' "Stripe is down". Next try: the daily reconcile of a stored'
+			+ ' subscription, or a webhook',
+		);
+
+		expect(logger.warn).not.toHaveBeenCalled();
+
+		expect(await database('subscription_sync_queue')).toEqual([{
+			id: 1,
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: 0,
+			attempts: 48,
+			next_attempt_at: 1_793_840_400_000,
+			last_error: 'Stripe is down',
+		}]);
+	});
+
+	test('keeps pending a row a webhook set due during its last try', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 47,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{
+					fetchSubscription: vi.fn(async () => {
+						await database('subscription_sync_queue').update({
+							next_attempt_at: new Date('2026-11-05T00:00:30Z'),
+						});
+
+						throw new Error('Stripe is down');
+					}),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(await database('subscription_sync_queue')
+			.select('pending', 'attempts', 'next_attempt_at'))
+			.toEqual([{
+				pending: 1,
+				attempts: 48,
+				next_attempt_at: 1_793_836_830_000,
+			}]);
+	});
+
+	test('keeps the due time a webhook set while the sync was failing', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{
+					fetchSubscription: vi.fn(async () => {
+						await database('subscription_sync_queue').update({
+							next_attempt_at: new Date('2026-11-05T00:00:30Z'),
+						});
+
+						throw new Error('Stripe is down');
+					}),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(await database('subscription_sync_queue')
+			.select('attempts', 'next_attempt_at', 'last_error'))
+			.toEqual([{
+				attempts: 1,
+				next_attempt_at: 1_793_836_830_000,
+				last_error: 'Stripe is down',
+			}]);
+	});
+
+	test('records a failed sync with a doubled retry delay', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 2,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const logger = { warn: vi.fn(), error: vi.fn() };
+		const emitSyncedAction = vi.fn();
+
+		expect(await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{
+					fetchSubscription: vi.fn()
+						.mockRejectedValue(new Error('Stripe is down')),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction,
+			logger,
+		})).toBe(1);
+
+		expect(emitSyncedAction).not.toHaveBeenCalled();
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			'Subscription sync of "stripe" "sub_1" failed, attempt 3:'
+			+ ' "Stripe is down"',
+		);
+
+		expect(await database('subscription_sync_queue')).toEqual([{
+			id: 1,
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: 1,
+			attempts: 3,
+			next_attempt_at: 1_793_837_040_000,
+			last_error: 'Stripe is down',
+		}]);
+	});
+
+	test('caps the retry delay at one hour', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 9,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map(),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(await database('subscription_sync_queue')).toEqual([{
+			id: 1,
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: 1,
+			attempts: 10,
+			next_attempt_at: 1_793_840_400_000,
+			last_error: 'Subscription provider "stripe" is not enabled',
+		}]);
+	});
+
+	test('records a thrown non-error as JSON', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'mollie',
+			resource_id: 'cst_1/sub_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const logger = { warn: vi.fn(), error: vi.fn() };
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'mollie',
+				{
+					fetchSubscription: vi.fn()
+						.mockRejectedValue('Mollie is down'),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger,
+		});
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			'Subscription sync of "mollie" "cst_1/sub_1" failed, attempt 1:'
+			+ ' "\\"Mollie is down\\""',
+		);
+
+		expect(await database('subscription_sync_queue')
+			.select('attempts', 'next_attempt_at', 'last_error'))
+			.toEqual([{
+				attempts: 1,
+				next_attempt_at: 1_793_836_860_000,
+				last_error: '"Mollie is down"',
+			}]);
+	});
+
+	test('records a thrown value JSON cannot hold', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'mollie',
+			resource_id: 'cst_1/sub_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const circularRejection: Record<string, unknown> = {};
+		circularRejection['self'] = circularRejection;
+		const logger = { warn: vi.fn(), error: vi.fn() };
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'mollie',
+				{
+					fetchSubscription: vi.fn()
+						.mockRejectedValue(circularRejection),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger,
+		});
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			'Subscription sync of "mollie" "cst_1/sub_1" failed, attempt 1:'
+			+ ' "[object Object]"',
+		);
+
+		expect(await database('subscription_sync_queue')
+			.select('attempts', 'next_attempt_at', 'last_error'))
+			.toEqual([{
+				attempts: 1,
+				next_attempt_at: 1_793_836_860_000,
+				last_error: '[object Object]',
+			}]);
+	});
+
+	test('fetches holding no connection, the row leased 5 minutes', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const leasedRows: unknown[] = [];
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{
+					fetchSubscription: vi.fn(async () => {
+						leasedRows.push(await database('subscription_sync_queue')
+							.select('next_attempt_at'));
+
+						throw new Error('Stripe is down');
+					}),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(leasedRows).toEqual([[{ next_attempt_at: 1_793_837_100_000 }]]);
+	});
+
+	test('records a Mollie 429 at once, the queue retries it', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'mollie',
+			resource_id: 'cst_1/sub_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		const fetchSubscription = vi.fn()
+			.mockRejectedValue(new MollieApiError('Too many', { statusCode: 429 }));
+
+		await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'mollie',
+				{ fetchSubscription } as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		expect(fetchSubscription.mock.calls).toEqual([['cst_1/sub_1']]);
+
+		expect(await database('subscription_sync_queue')
+			.select('pending', 'attempts', 'next_attempt_at', 'last_error'))
+			.toEqual([{
+				pending: 1,
+				attempts: 1,
+				next_attempt_at: 1_793_836_860_000,
+				last_error: 'Too many',
+			}]);
+	});
+
+	test('retakes a row whose lease ran out, not before', async () => {
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 0,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: null,
+		});
+
+		// Not vi.waitFor: it moves the faked clock, so the lease would end later.
+		let signalFetchStarted = (): void => {};
+
+		const fetchStarted = new Promise<void>((resolve) => {
+			signalFetchStarted = resolve;
+		});
+
+		// A worker that dies mid-call: its fetch never settles.
+		const stalledFetch = vi.fn(() => {
+			signalFetchStarted();
+
+			return new Promise(() => {});
+		});
+
+		void runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{ fetchSubscription: stalledFetch } as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		});
+
+		await fetchStarted;
+
+		const retakingFetch = vi.fn()
+			.mockRejectedValue(new Error('Stripe is down'));
+
+		const retakingContext = {
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{ fetchSubscription: retakingFetch } as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		};
+
+		vi.setSystemTime(new Date('2026-11-05T00:04:59Z'));
+		expect(await runSyncBatch(retakingContext)).toBe(0);
+
+		vi.setSystemTime(new Date('2026-11-05T00:05:00Z'));
+		expect(await runSyncBatch(retakingContext)).toBe(1);
+
+		expect(retakingFetch.mock.calls).toEqual([['sub_1']]);
+
+		expect(await database('subscription_sync_queue')
+			.select('pending', 'attempts', 'next_attempt_at', 'last_error'))
+			.toEqual([{
+				pending: 1,
+				attempts: 1,
+				next_attempt_at: 1_793_837_160_000,
+				last_error: 'Stripe is down',
+			}]);
+	});
+
+	test('applies nothing once another worker took the lease over', async () => {
+		await database('subscription_plans').insert({
+			code: 'monthly',
+			name: 'Monthly',
+			policy: 'policy-1',
+			amount: 10,
+			currency: 'EUR',
+			interval: '{"months":1}',
+		});
+
+		await database('subscriptions').insert({
+			plan: 1,
+			provider: 'stripe',
+			status: 'pending',
+			date_created: new Date('2026-10-01T00:00:00Z'),
+			date_updated: new Date('2026-10-01T00:00:00Z'),
+		});
+
+		await database('subscription_sync_queue').insert({
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: true,
+			attempts: 2,
+			next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+			last_error: 'Stripe is down',
+		});
+
+		const logger = { warn: vi.fn(), error: vi.fn() };
+		const emitSyncedAction = vi.fn();
+
+		expect(await runSyncBatch({
+			database,
+			enabledProviders: new Map([[
+				'stripe',
+				{
+					fetchSubscription: vi.fn(async () => {
+						await database('subscription_sync_queue').update({
+							next_attempt_at: new Date('2026-11-05T00:10:00Z'),
+						});
+
+						return {
+							subscriptionId: 'sub_1',
+							customerId: 'cus_1',
+							status: 'active',
+							currentPeriodEnd: new Date('2026-12-01T00:00:00Z'),
+							cancelAtPeriodEnd: false,
+							directusSubscription: 1,
+							billing: {
+								amountCents: 1000,
+								currency: 'EUR',
+								interval: { months: 1, days: 0 },
+							},
+						};
+					}),
+					composeResourceId: vi.fn().mockReturnValue('sub_1'),
+				} as unknown as SubscriptionProvider,
+			]]),
+			createAccessService: vi.fn(),
+			emitSyncedAction,
+			logger,
+		})).toBe(1);
+
+		expect(emitSyncedAction).not.toHaveBeenCalled();
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).not.toHaveBeenCalled();
+
+		expect(await database('subscriptions')
+			.select('provider_subscription_id', 'status'))
+			.toEqual([{ provider_subscription_id: null, status: 'pending' }]);
+
+		expect(await database('subscription_sync_queue')).toEqual([{
+			id: 1,
+			provider: 'stripe',
+			resource_id: 'sub_1',
+			pending: 1,
+			attempts: 2,
+			next_attempt_at: 1_793_837_400_000,
+			last_error: 'Stripe is down',
+		}]);
+	});
+
+	test('rethrows an error raised before any row was claimed', async () => {
+		vi.spyOn(database, 'transaction')
+			.mockRejectedValue(new Error('connection lost'));
+
+		await expect(runSyncBatch({
+			database,
+			enabledProviders: new Map(),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		})).rejects.toThrow(new Error('connection lost'));
+	});
+
+	test('stops after 50 rows in one batch', async () => {
+		await database('subscription_sync_queue').insert(Array.from(
+			{ length: 51 },
+			(_, rowIndex) => {
+				return {
+					provider: 'stripe',
+					resource_id: `sub_${rowIndex}`,
+					pending: true,
+					attempts: 0,
+					next_attempt_at: new Date('2026-11-04T00:00:00Z'),
+					last_error: null,
+				};
+			},
+		));
+
+		expect(await runSyncBatch({
+			database,
+			enabledProviders: new Map(),
+			createAccessService: vi.fn(),
+			emitSyncedAction: vi.fn(),
+			logger: { warn: vi.fn(), error: vi.fn() },
+		})).toBe(50);
+
+		expect(await database('subscription_sync_queue')
+			.where('attempts', 0)
+			.count({ untouchedCount: '*' }))
+			.toEqual([{ untouchedCount: 1 }]);
+	});
+});

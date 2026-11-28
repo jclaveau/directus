@@ -50,9 +50,9 @@ const REQUEST_CELL_KEYS = [
 
 const RESPONSE_CELL_KEYS = ['code', 'headers', 'body', 'text'] as const;
 
-type Row = { request: string; response: string };
+export type Row = { request: string; response: string };
 
-type ScenarioKeys = {
+export type ScenarioKeys = {
 	run: string;
 	keysByName: Record<string, string>;
 };
@@ -152,9 +152,13 @@ export function defineSingularWriteFeature(
 // `<run>` is unique to the scenario; a `<name>` met for the first time stands
 // for a fresh uuid, or for the key a `remember: name` row stored before.
 // `<name:upper>` spells that same value in upper case.
-function withKeys(cell: string, scenarioKeys: ScenarioKeys) {
+const KEY_PLACEHOLDER = /<([\w-]+)(:upper)?>/g;
+
+const CAPTURE_MARKER = /__capture_([\w-]+?)__/;
+
+export function withKeys(cell: string, scenarioKeys: ScenarioKeys) {
 	return cell.replaceAll(
-		/<([\w-]+)(:upper)?>/g,
+		KEY_PLACEHOLDER,
 		(_placeholder, name: string, upperSuffix?: string) => {
 			const keyValue = name === 'run'
 				? scenarioKeys.run
@@ -382,7 +386,93 @@ async function createReader(
 // One row at a time, so a row can name the key one before it remembered. A
 // response cell states the keys it checks; an array still has to hold as many
 // items as it states.
-async function sendRows(
+// A `<name>` first met in a response takes the value found there: the
+// response cell, its known names filled, holds a marker per unknown one.
+function markUnknownKeys(responseText: string, scenarioKeys: ScenarioKeys) {
+	const unknownNames = [...responseText.matchAll(KEY_PLACEHOLDER)]
+		.map(([_placeholder, keyName]) => keyName!)
+		.filter((keyName) => {
+			return keyName !== 'run' && !(keyName in scenarioKeys.keysByName);
+		});
+
+	if (unknownNames.length === 0) {
+		return undefined;
+	}
+
+	return responseText.replaceAll(
+		KEY_PLACEHOLDER,
+		(keyPlaceholder, keyName: string) => {
+			return unknownNames.includes(keyName)
+				? `__capture_${keyName}__`
+				: withKeys(keyPlaceholder, scenarioKeys);
+		},
+	);
+}
+
+function escapeRegExp(literalText: string) {
+	return literalText.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Walks the marked cell along the response: a name captured earlier in the
+// walk is matched as its value.
+function captureResponseKeys(
+	markedNode: unknown,
+	receivedNode: unknown,
+	scenarioKeys: ScenarioKeys,
+) {
+	if (typeof markedNode === 'string') {
+		const markedParts = markedNode.split(new RegExp(CAPTURE_MARKER, 'g'));
+
+		if (markedParts.length === 1
+			|| !['string', 'number'].includes(typeof receivedNode)) {
+			return;
+		}
+
+		const capturedNames: string[] = [];
+
+		const capturePattern = markedParts.map((markedPart, partIndex) => {
+			if (partIndex % 2 === 0) {
+				return escapeRegExp(markedPart);
+			}
+
+			const knownValue = scenarioKeys.keysByName[markedPart];
+
+			if (knownValue !== undefined) {
+				return escapeRegExp(knownValue);
+			}
+
+			capturedNames.push(markedPart);
+
+			return '(.+?)';
+		});
+
+		const capturedValues = new RegExp(`^${capturePattern.join('')}$`)
+			.exec(String(receivedNode));
+
+		for (const [nameIndex, capturedName] of capturedNames.entries()) {
+			if (capturedValues !== null) {
+				scenarioKeys.keysByName[capturedName] = capturedValues[nameIndex + 1]!;
+			}
+		}
+
+		return;
+	}
+
+	if (markedNode === null || typeof markedNode !== 'object'
+		|| receivedNode === null || typeof receivedNode !== 'object') {
+		return;
+	}
+
+	for (const [childKey, markedChild] of Object.entries(markedNode)) {
+		captureResponseKeys(
+			markedChild,
+			(receivedNode as Record<string, unknown>)[childKey],
+			scenarioKeys,
+		);
+	}
+}
+
+export async function sendRows(
 	{ vendor, instanceUrl, scenarioKeys }: SentTo,
 	table: Row[],
 	allowsBlankResponse: boolean,
@@ -402,17 +492,41 @@ async function sendRows(
 			'singular-write-steps.ts',
 		);
 
-		const expectedResponse = responseCellOf<object>(
-			allowsBlankResponse
-				? loadYaml(withKeys(responseText, scenarioKeys), { schema }) ?? {}
-				: loadYaml(withKeys(responseText, scenarioKeys), { schema }),
-			RESPONSE_CELL_KEYS,
-			'singular-write-steps.ts',
-		);
+		const markedResponse = markUnknownKeys(responseText, scenarioKeys);
+
+		const readExpectedResponse = (receivedResponse?: Response) => {
+			if (markedResponse !== undefined && receivedResponse !== undefined) {
+				captureResponseKeys(
+					loadYaml(markedResponse, { schema }),
+					comparableResponse(receivedResponse),
+					scenarioKeys,
+				);
+			}
+
+			return responseCellOf<object>(
+				allowsBlankResponse
+					? loadYaml(withKeys(responseText, scenarioKeys), { schema }) ?? {}
+					: loadYaml(withKeys(responseText, scenarioKeys), { schema }),
+				RESPONSE_CELL_KEYS,
+				'singular-write-steps.ts',
+			);
+		};
+
+		// Read up front, so a malformed cell fails before its request is sent.
+		const expectedResponse = markedResponse === undefined
+			? readExpectedResponse()
+			: undefined;
 
 		let response!: Response;
 
 		if (requestCell.eventually) {
+			if (expectedResponse === undefined) {
+				throw new Error(
+					`An eventual request learns no key from its response: ${
+						JSON.stringify(responseText)}`,
+				);
+			}
+
 			await expect.poll(async () => {
 				response = await sendRequest(instanceUrl(), requestCell);
 
@@ -424,7 +538,9 @@ async function sendRows(
 		else {
 			response = await sendRequest(instanceUrl(), requestCell);
 
-			expect(comparableResponse(response)).toMatchObject(expectedResponse);
+			expect(comparableResponse(response)).toMatchObject(
+				expectedResponse ?? readExpectedResponse(response),
+			);
 		}
 
 		if (requestCell.remember !== undefined) {

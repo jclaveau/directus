@@ -1,4 +1,4 @@
-import { type EnvVarName, useEnv } from '@directus/env';
+import { type EnvVarName, useEnv, useEnvVarRawValues } from '@directus/env';
 import { parse as parseBytesConfiguration } from 'bytes';
 import { validateHeaderName } from 'node:http';
 import { useLogger } from '../logger/index.js';
@@ -7,6 +7,7 @@ import {
 	allowedOutOfScopeFeatures,
 	OUT_OF_SCOPE_FEATURE_ISSUES,
 } from './out-of-scope-features.js';
+import { validateCron } from './validate-cron.js';
 
 export function validateEnv(requiredKeys: string[]): void {
 	const env = useEnv();
@@ -390,3 +391,98 @@ export function validateOutOfScopeFeaturesEnv(): void {
 
 	process.exit(1);
 }
+
+/**
+ * The subscriptions bundle reads these when it loads, where a failure only logs:
+ * webhooks would then answer 404 and a paid subscription would never be granted.
+ */
+export function validateSubscriptionsEnv(): void {
+	// The bundle declares these, so core's `Env` has no key for them: their raw
+	// value is what was set, before any guess cast `123` to a number.
+	const env = useEnvVarRawValues();
+
+	const emptyVariable = SUBSCRIPTIONS_ENV.find((variableName) => {
+		return env[variableName] === '';
+	});
+
+	if (emptyVariable !== undefined) {
+		useLogger().error(
+			`${JSON.stringify(emptyVariable)} Environment Variable is empty.`,
+		);
+
+		process.exit(1);
+	}
+
+	const malformedVariable = SUBSCRIPTIONS_ENV.find((variableName) => {
+		const variableValue = env[variableName];
+
+		return variableValue !== undefined
+			&& (typeof variableValue !== 'string'
+				|| variableValue !== variableValue.trim());
+	});
+
+	// These are secrets: the message names the variable, never its value.
+	if (malformedVariable !== undefined) {
+		useLogger().error(
+			`${JSON.stringify(malformedVariable)} must be a string without`
+			+ ' surrounding whitespace.',
+		);
+
+		process.exit(1);
+	}
+
+	const mollieSecrets = env['SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS'];
+
+	if (typeof mollieSecrets === 'string') {
+		const emptyIndex = mollieSecrets
+			.split(',')
+			.findIndex((listedSecret) => listedSecret.trim() === '');
+
+		// A secret list names the position of an empty entry, never a secret.
+		if (emptyIndex !== -1) {
+			useLogger().error(
+				'"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" lists an empty secret'
+				+ ` at position ${emptyIndex + 1}.`,
+			);
+
+			process.exit(1);
+		}
+	}
+
+	for (const [setVariable, requiredVariable] of SUBSCRIPTIONS_ENV_PAIRS) {
+		if (env[setVariable] !== undefined && env[requiredVariable] === undefined) {
+			useLogger().error(
+				`${JSON.stringify(requiredVariable)} is required when`
+				+ ` ${JSON.stringify(setVariable)} is set.`,
+			);
+
+			process.exit(1);
+		}
+	}
+
+	const reconcileCron = env['SUBSCRIPTIONS_RECONCILE_CRON'];
+
+	// Directus' schedule skips a cron it cannot read: no reconcile would run.
+	if (typeof reconcileCron === 'string' && !validateCron(reconcileCron)) {
+		useLogger().error(
+			'"SUBSCRIPTIONS_RECONCILE_CRON" is not a cron schedule, got'
+			+ ` ${JSON.stringify(reconcileCron)}.`,
+		);
+
+		process.exit(1);
+	}
+}
+
+const SUBSCRIPTIONS_ENV = [
+	'SUBSCRIPTIONS_STRIPE_SECRET_KEY',
+	'SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET',
+	'SUBSCRIPTIONS_MOLLIE_API_KEY',
+	'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS',
+];
+
+const SUBSCRIPTIONS_ENV_PAIRS = [
+	['SUBSCRIPTIONS_STRIPE_SECRET_KEY', 'SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET'],
+	['SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET', 'SUBSCRIPTIONS_STRIPE_SECRET_KEY'],
+	['SUBSCRIPTIONS_MOLLIE_API_KEY', 'SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS'],
+	['SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS', 'SUBSCRIPTIONS_MOLLIE_API_KEY'],
+] as const;

@@ -1,0 +1,510 @@
+import { ForbiddenError } from '@directus/errors';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import { subscriptionsHook } from './hook.js';
+import {
+	revokeDeletedBeneficiaryAccesses,
+} from './members/revoke-deleted-beneficiary-accesses.js';
+import {
+	refuseBeneficiaryMove,
+	refuseFrozenPlanUpdate,
+	refuseLastManagerDelete,
+	refuseLastManagerMove,
+	refusePlanDelete,
+	refusePlanStatusUpdate,
+	refuseSubscriptionEventWrite,
+	refuseSubscriptionInvoiceWrite,
+	refuseSubscriptionStateUpdate,
+} from './plans/refuse-direct-writes.js';
+import { enqueueReconcile } from './sync/enqueue-reconcile.js';
+import { runSyncBatch } from './sync/run-sync-batch.js';
+import { mountRawBody } from './webhook/mount-raw-body.js';
+
+vi.mock('./members/revoke-deleted-beneficiary-accesses.js');
+vi.mock('./plans/refuse-direct-writes.js');
+vi.mock('./sync/enqueue-reconcile.js');
+vi.mock('./sync/run-sync-batch.js');
+
+vi.mock('./webhook/mount-raw-body.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('./webhook/mount-raw-body.js')>(),
+		mountRawBody: vi.fn(),
+	};
+});
+
+afterEach(() => {
+	vi.restoreAllMocks();
+	vi.resetAllMocks();
+});
+
+describe('subscriptionsHook', () => {
+	test('mounts the raw body parser before the JSON one', () => {
+		const init = vi.fn();
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter: vi.fn(), init, schedule: vi.fn() },
+			{ env: { MAX_PAYLOAD_SIZE: '1mb' }, database: 'database' },
+		);
+
+		expect(init).toHaveBeenCalledWith('middlewares.before', expect.any(Function));
+		init.mock.calls[0]?.[1]({ app: 'app' });
+		expect(mountRawBody).toHaveBeenCalledWith('app', '1mb');
+	});
+
+	test('runs a sync batch every 10 seconds', async () => {
+		const schedule = vi.fn();
+		const logger = { warn: vi.fn() };
+		const AccessService = vi.fn();
+		const emitter = { emitAction: vi.fn().mockResolvedValue(undefined) };
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter: vi.fn(), init: vi.fn(), schedule },
+			{
+				env: { MAX_PAYLOAD_SIZE: '1mb' },
+				database: 'database',
+				services: { AccessService },
+				getSchema: vi.fn().mockResolvedValue('schema'),
+				logger,
+				emitter,
+			},
+		);
+
+		expect(schedule).toHaveBeenCalledWith('*/10 * * * * *', expect.any(Function));
+		await schedule.mock.calls[0]?.[1]();
+
+		expect(runSyncBatch).toHaveBeenCalledWith({
+			database: 'database',
+			enabledProviders: new Map(),
+			logger,
+			createAccessService: expect.any(Function),
+			emitSyncedAction: expect.any(Function),
+		});
+
+		vi.mocked(runSyncBatch).mock.calls[0]?.[0].createAccessService(
+			'trx' as never,
+		);
+
+		expect(AccessService).toHaveBeenCalledWith({ knex: 'trx', schema: 'schema' });
+
+		vi.mocked(runSyncBatch).mock.calls[0]?.[0].emitSyncedAction({
+			subscription: 1,
+			provider: 'mollie',
+			status: 'active',
+			access: 'granted',
+			granted: ['user-1'],
+			revoked: [],
+		});
+
+		expect(emitter.emitAction).toHaveBeenCalledWith(
+			'subscriptions.synced',
+			{
+				subscription: 1,
+				provider: 'mollie',
+				status: 'active',
+				access: 'granted',
+				granted: ['user-1'],
+				revoked: [],
+			},
+			{ database: 'database', schema: 'schema', accountability: null },
+		);
+	});
+
+	test('logs a subscriptions.synced listener that throws', async () => {
+		const schedule = vi.fn();
+		const logger = { warn: vi.fn() };
+
+		const emitter = {
+			emitAction: vi.fn().mockRejectedValue(new Error('Listener broke')),
+		};
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter: vi.fn(), init: vi.fn(), schedule },
+			{
+				env: { MAX_PAYLOAD_SIZE: '1mb' },
+				database: 'database',
+				services: { AccessService: vi.fn() },
+				getSchema: vi.fn().mockResolvedValue('schema'),
+				logger,
+				emitter,
+			},
+		);
+
+		await schedule.mock.calls[0]?.[1]();
+
+		vi.mocked(runSyncBatch).mock.calls[0]?.[0].emitSyncedAction({
+			subscription: 1,
+			provider: 'mollie',
+			status: 'active',
+			access: 'granted',
+			granted: ['user-1'],
+			revoked: [],
+		});
+
+		await vi.waitFor(() => {
+			expect(logger.warn).toHaveBeenCalledWith(
+				'A "subscriptions.synced" listener threw: "Listener broke"',
+			);
+		});
+	});
+
+	test('filters the writes around the plans, managers, history, invoices', () => {
+		const filter = vi.fn();
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter, init: vi.fn(), schedule: vi.fn() },
+			{ env: { MAX_PAYLOAD_SIZE: '1mb' }, database: 'database' },
+		);
+
+		expect(filter.mock.calls).toEqual([
+			['subscription_plans.items.delete', expect.any(Function)],
+			['subscription_plans.items.update', expect.any(Function)],
+			['subscription_managers.items.delete', expect.any(Function)],
+			['subscription_managers.items.update', expect.any(Function)],
+			['subscriptions.items.update', expect.any(Function)],
+			['subscription_events.items.create', expect.any(Function)],
+			['subscription_events.items.update', expect.any(Function)],
+			['subscription_events.items.delete', expect.any(Function)],
+			['subscription_beneficiaries.items.delete', expect.any(Function)],
+			['subscription_beneficiaries.items.update', expect.any(Function)],
+			['subscription_invoices.items.create', expect.any(Function)],
+			['subscription_invoices.items.update', expect.any(Function)],
+			['subscription_invoices.items.delete', expect.any(Function)],
+		]);
+	});
+
+	test('a beneficiary delete checks the access, then revokes', async () => {
+		const filter = vi.fn();
+		const validateAccess = vi.fn();
+		const accessService = { deleteOne: vi.fn() };
+
+		const AccessService = vi.fn(function () {
+			return accessService;
+		});
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter, init: vi.fn(), schedule: vi.fn() },
+			{
+				env: { MAX_PAYLOAD_SIZE: '1mb' },
+				database: 'database',
+				services: { AccessService },
+				validateAccess,
+			},
+		);
+
+		expect(await filter.mock.calls[8]?.[1]([1], {}, {
+			database: 'filter database',
+			schema: 'schema',
+			accountability: { user: 'user-1' },
+		})).toEqual([1]);
+
+		expect(validateAccess).toHaveBeenCalledWith(
+			{
+				action: 'delete',
+				collection: 'subscription_beneficiaries',
+				primaryKeys: [1],
+				accountability: { user: 'user-1' },
+			},
+			{ knex: 'filter database', schema: 'schema' },
+		);
+
+		expect(AccessService).toHaveBeenCalledWith({
+			knex: 'filter database',
+			schema: 'schema',
+		});
+
+		expect(revokeDeletedBeneficiaryAccesses).toHaveBeenCalledWith({
+			trx: 'filter database',
+			accessService,
+			beneficiaryKeys: [1],
+		});
+	});
+
+	test('a beneficiary delete answers 403 before any revoke', async () => {
+		const filter = vi.fn();
+		const validateAccess = vi.fn().mockRejectedValue(new ForbiddenError());
+		const AccessService = vi.fn();
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter, init: vi.fn(), schedule: vi.fn() },
+			{
+				env: { MAX_PAYLOAD_SIZE: '1mb' },
+				database: 'database',
+				services: { AccessService },
+				validateAccess,
+			},
+		);
+
+		await expect(filter.mock.calls[8]?.[1]([1], {}, {
+			database: 'filter database',
+			schema: 'schema',
+			accountability: { user: 'user-1' },
+		})).rejects.toThrow(new ForbiddenError());
+
+		expect(AccessService).not.toHaveBeenCalled();
+		expect(revokeDeletedBeneficiaryAccesses).not.toHaveBeenCalled();
+	});
+
+	const WRITE_FILTERS = [
+		[
+			'subscription_plans.items.delete',
+			0,
+			[1],
+			{ action: 'delete', collection: 'subscription_plans', primaryKeys: [1] },
+			refusePlanDelete,
+			[[1], 'filter database'],
+		],
+		[
+			'subscription_plans.items.update',
+			1,
+			[{ data: { status: 'archived' }, keys: [1] }],
+			{
+				action: 'update',
+				collection: 'subscription_plans',
+				primaryKeys: [1],
+				fields: ['status'],
+			},
+			refusePlanStatusUpdate,
+			[[{ data: { status: 'archived' }, keys: [1] }], 'filter database'],
+		],
+		[
+			'subscription_plans.items.update',
+			1,
+			[{ data: { amount: 12 }, keys: [1] }],
+			{
+				action: 'update',
+				collection: 'subscription_plans',
+				primaryKeys: [1],
+				fields: ['amount'],
+			},
+			refuseFrozenPlanUpdate,
+			[[{ data: { amount: 12 }, keys: [1] }], 'filter database'],
+		],
+		[
+			'subscription_managers.items.delete',
+			2,
+			[1],
+			{
+				action: 'delete',
+				collection: 'subscription_managers',
+				primaryKeys: [1],
+			},
+			refuseLastManagerDelete,
+			[[1], 'filter database'],
+		],
+		[
+			'subscription_managers.items.update',
+			3,
+			[{ data: { subscription: 2 }, keys: [1] }],
+			{
+				action: 'update',
+				collection: 'subscription_managers',
+				primaryKeys: [1],
+				fields: ['subscription'],
+			},
+			refuseLastManagerMove,
+			[[{ data: { subscription: 2 }, keys: [1] }], 'filter database'],
+		],
+		[
+			'subscriptions.items.update',
+			4,
+			[{ data: { status: 'canceled' }, keys: [1] }],
+			{
+				action: 'update',
+				collection: 'subscriptions',
+				primaryKeys: [1],
+				fields: ['status'],
+			},
+			refuseSubscriptionStateUpdate,
+			[[{ data: { status: 'canceled' }, keys: [1] }]],
+		],
+		[
+			'subscription_events.items.create',
+			5,
+			{ source: 'sync' },
+			{ action: 'create', collection: 'subscription_events' },
+			refuseSubscriptionEventWrite,
+			[],
+		],
+		[
+			'subscription_events.items.update',
+			6,
+			[{ data: { source: 'sync' }, keys: [1] }],
+			{ action: 'update', collection: 'subscription_events' },
+			refuseSubscriptionEventWrite,
+			[],
+		],
+		[
+			'subscription_events.items.delete',
+			7,
+			[1],
+			{ action: 'delete', collection: 'subscription_events' },
+			refuseSubscriptionEventWrite,
+			[],
+		],
+		[
+			'subscription_beneficiaries.items.update',
+			9,
+			[{ data: { user: 'user-2' }, keys: [1] }],
+			{
+				action: 'update',
+				collection: 'subscription_beneficiaries',
+				primaryKeys: [1],
+				fields: ['user'],
+			},
+			refuseBeneficiaryMove,
+			[[{ data: { user: 'user-2' }, keys: [1] }], 'filter database'],
+		],
+		[
+			'subscription_invoices.items.create',
+			10,
+			{ status: 'paid' },
+			{ action: 'create', collection: 'subscription_invoices' },
+			refuseSubscriptionInvoiceWrite,
+			[],
+		],
+		[
+			'subscription_invoices.items.update',
+			11,
+			[{ data: { status: 'paid' }, keys: [1] }],
+			{ action: 'update', collection: 'subscription_invoices' },
+			refuseSubscriptionInvoiceWrite,
+			[],
+		],
+		[
+			'subscription_invoices.items.delete',
+			12,
+			[1],
+			{ action: 'delete', collection: 'subscription_invoices' },
+			refuseSubscriptionInvoiceWrite,
+			[],
+		],
+	] as const;
+
+	test.each(WRITE_FILTERS)('%s checks the access, then refuses', async (
+		_eventName,
+		filterIndex,
+		eventPayload,
+		accessCheck,
+		refuseWrite,
+		refuseArguments,
+	) => {
+		const filter = vi.fn();
+		const validateAccess = vi.fn();
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter, init: vi.fn(), schedule: vi.fn() },
+			{ env: { MAX_PAYLOAD_SIZE: '1mb' }, database: 'database', validateAccess },
+		);
+
+		await filter.mock.calls[filterIndex]?.[1](eventPayload, {}, {
+			database: 'filter database',
+			schema: 'schema',
+			accountability: { user: 'user-1' },
+		});
+
+		expect(validateAccess).toHaveBeenCalledWith(
+			{ ...accessCheck, accountability: { user: 'user-1' } },
+			{ knex: 'filter database', schema: 'schema' },
+		);
+
+		expect(refuseWrite).toHaveBeenCalledWith(...refuseArguments);
+	});
+
+	test.each(WRITE_FILTERS)('%s answers 403 before any refusal', async (
+		_eventName,
+		filterIndex,
+		eventPayload,
+		_accessCheck,
+		refuseWrite,
+	) => {
+		const filter = vi.fn();
+		const validateAccess = vi.fn().mockRejectedValue(new ForbiddenError());
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter, init: vi.fn(), schedule: vi.fn() },
+			{ env: { MAX_PAYLOAD_SIZE: '1mb' }, database: 'database', validateAccess },
+		);
+
+		await expect(filter.mock.calls[filterIndex]?.[1](eventPayload, {}, {
+			database: 'filter database',
+			schema: 'schema',
+			accountability: { user: 'user-1' },
+		})).rejects.toThrow(new ForbiddenError());
+
+		expect(refuseWrite).not.toHaveBeenCalled();
+	});
+
+	test.each(WRITE_FILTERS)('%s checks no access for an internal call', async (
+		_eventName,
+		filterIndex,
+		eventPayload,
+		_accessCheck,
+		refuseWrite,
+	) => {
+		const filter = vi.fn();
+		const validateAccess = vi.fn();
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter, init: vi.fn(), schedule: vi.fn() },
+			{ env: { MAX_PAYLOAD_SIZE: '1mb' }, database: 'database', validateAccess },
+		);
+
+		await filter.mock.calls[filterIndex]?.[1](eventPayload, {}, {
+			database: 'filter database',
+			schema: 'schema',
+			accountability: null,
+		});
+
+		expect(validateAccess).not.toHaveBeenCalled();
+		expect(refuseWrite).toHaveBeenCalled();
+	});
+
+	// The CLI loads this hook too, before `subscriptions mollie-setup-webhook`
+	// has made the webhook secret a Mollie key requires.
+	test('reads the provider config at a sync, not at registration', async () => {
+		const schedule = vi.fn();
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter: vi.fn(), init: vi.fn(), schedule },
+			{
+				env: { MAX_PAYLOAD_SIZE: '1mb', SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1' },
+				database: 'database',
+				getSchema: vi.fn().mockResolvedValue('schema'),
+			},
+		);
+
+		await expect(schedule.mock.calls[0]?.[1]()).rejects.toThrow(new Error(
+			'"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" is required when'
+			+ ' "SUBSCRIPTIONS_MOLLIE_API_KEY" is set',
+		));
+	});
+
+	test('queues a reconcile every 15 minutes by default', async () => {
+		const schedule = vi.fn();
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter: vi.fn(), init: vi.fn(), schedule },
+			{ env: { MAX_PAYLOAD_SIZE: '1mb' }, database: 'database' },
+		);
+
+		expect(schedule).toHaveBeenCalledWith('*/15 * * * *', expect.any(Function));
+		await schedule.mock.calls[1]?.[1]();
+		expect(enqueueReconcile).toHaveBeenCalledWith('database', new Map());
+	});
+
+	test('queues a reconcile on the schedule the env sets', () => {
+		const schedule = vi.fn();
+
+		(subscriptionsHook.config as (...args: unknown[]) => void)(
+			{ filter: vi.fn(), init: vi.fn(), schedule },
+			{
+				env: {
+					MAX_PAYLOAD_SIZE: '1mb',
+					SUBSCRIPTIONS_RECONCILE_CRON: '0 * * * *',
+				},
+				database: 'database',
+			},
+		);
+
+		expect(schedule).toHaveBeenCalledWith('0 * * * *', expect.any(Function));
+	});
+});

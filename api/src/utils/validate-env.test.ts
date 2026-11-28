@@ -1,4 +1,4 @@
-import { useEnv } from '@directus/env';
+import { useEnv, useEnvVarRawValues } from '@directus/env';
 import type { Logger } from 'pino';
 import {
 	afterEach,
@@ -21,6 +21,7 @@ import {
 	validateHeaderNameEnv,
 	validateMarketplaceEnabledEnv,
 	validateOutOfScopeFeaturesEnv,
+	validateSubscriptionsEnv,
 	validateUnreadEnv,
 } from './validate-env.js';
 
@@ -611,6 +612,175 @@ describe('validateOutOfScopeFeaturesEnv', () => {
 		]);
 
 		expect(process.exit).toHaveBeenCalledTimes(1);
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+});
+
+describe('validateSubscriptionsEnv', () => {
+	test('passes with no subscription variable set', () => {
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test('passes with both stripe variables set', () => {
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
+			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_1',
+			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: 'whsec_1',
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test('exits on a stripe key without its webhook secret', () => {
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
+			SUBSCRIPTIONS_STRIPE_SECRET_KEY: 'sk_1',
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET" is required when'
+			+ ' "SUBSCRIPTIONS_STRIPE_SECRET_KEY" is set.',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('exits on a stripe webhook secret without its key', () => {
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
+			SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET: 'whsec_1',
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_STRIPE_SECRET_KEY" is required when'
+			+ ' "SUBSCRIPTIONS_STRIPE_WEBHOOK_SECRET" is set.',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test.each([
+		['whsec_1\n'],
+		[' whsec_1'],
+		['   '],
+		[1],
+	])('exits on variable value %j without logging it', (variableValue) => {
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
+			SUBSCRIPTIONS_MOLLIE_API_KEY: variableValue,
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_MOLLIE_API_KEY" must be a string without surrounding'
+			+ ' whitespace.',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test.each([
+		[
+			{ SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1' },
+			'"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" is required when'
+			+ ' "SUBSCRIPTIONS_MOLLIE_API_KEY" is set.',
+		],
+		[
+			{ SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: 'mollie_secret_1' },
+			'"SUBSCRIPTIONS_MOLLIE_API_KEY" is required when'
+			+ ' "SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" is set.',
+		],
+	])('exits on a lone mollie variable in %j', (subscriptionsEnv, errorMessage) => {
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce(subscriptionsEnv);
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(errorMessage);
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('passes with two Mollie webhook secrets', () => {
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
+			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1',
+			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: 'mollie_secret_new, mollie_secret_old',
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test.each([
+		['mollie_secret_new,,mollie_secret_old', 2],
+		['mollie_secret_new, ,mollie_secret_old', 2],
+		['mollie_secret_new,', 2],
+		[',mollie_secret_old', 1],
+	])('exits on Mollie webhook secrets %j, without logging them', (
+		webhookSecrets,
+		emptyPosition,
+	) => {
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
+			SUBSCRIPTIONS_MOLLIE_API_KEY: 'test_1',
+			SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS: webhookSecrets,
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_MOLLIE_WEBHOOK_SECRETS" lists an empty secret'
+			+ ` at position ${emptyPosition}.`,
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('passes with a reconcile schedule cron reads', () => {
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
+			SUBSCRIPTIONS_RECONCILE_CRON: '*/5 * * * *',
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).not.toHaveBeenCalled();
+		expect(process.exit).not.toHaveBeenCalled();
+	});
+
+	test('exits on a reconcile schedule cron cannot read', () => {
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
+			SUBSCRIPTIONS_RECONCILE_CRON: 'every 15 minutes',
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_RECONCILE_CRON" is not a cron schedule, got'
+			+ ' "every 15 minutes".',
+		);
+
+		expect(process.exit).toHaveBeenCalledWith(1);
+	});
+
+	test('exits on an empty variable', () => {
+		vi.mocked(useEnvVarRawValues).mockReturnValueOnce({
+			SUBSCRIPTIONS_MOLLIE_API_KEY: '',
+		});
+
+		validateSubscriptionsEnv();
+
+		expect(mockLogger.error).toHaveBeenCalledWith(
+			'"SUBSCRIPTIONS_MOLLIE_API_KEY" Environment Variable is empty.',
+		);
+
 		expect(process.exit).toHaveBeenCalledWith(1);
 	});
 });
