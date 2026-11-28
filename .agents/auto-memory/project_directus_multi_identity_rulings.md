@@ -159,7 +159,8 @@ logout call the provider that opened the session.
   today, sso-identity.ts:363), 7 (refuse provider/external_identifier like email).
 - **Round 3, jean 2026-11-28:** 15 = A (users service refuses a primary_identity
   of another account) + an account with no primary takes "the first" identity
-  (order asked: lowest id vs a new date_created). 24 = B: the local drivers' kind is
+  = the oldest by a new `date_created` column (default now(); jean 15 B, uuids
+  being random); also picks the replacement of a removed primary (point 9). 24 = B: the local drivers' kind is
   renamed `password` (value = the address), for every local driver whatever its
   name ("password is not an SSO driver"). 18 = B: `email` refused on users create
   too, identities nested. 23 = A, message "A user needs an identity"; legacy users
