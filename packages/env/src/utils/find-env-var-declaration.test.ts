@@ -92,3 +92,11 @@ test('finds the auth name the openid driver reads typed boolean', () => {
 	expect(findEnvVarDeclaration('AUTH_OKTA_REQUIRE_VERIFIED_EMAIL'))
 		.toEqual({ type: 'boolean' });
 });
+
+test.each([
+	['AUTH_OKTA_CLIENT_PRIVATE_KEYS', { type: 'json' }],
+	['AUTH_OKTA_CLIENT_TOKEN_ENDPOINT_AUTH_METHOD', { type: 'string' }],
+	['AUTH_CORP_CLIENT__SOCKET_PATH', {}],
+])('finds %j, which an auth driver reads', (envVarName, envVarDeclaration) => {
+	expect(findEnvVarDeclaration(envVarName)).toEqual(envVarDeclaration);
+});
