@@ -76,20 +76,55 @@ describe('defineEnv', () => {
 		});
 	});
 
-	test('refuses a prefix that does not end with "_"', () => {
-		expect(() => defineEnv({ prefix: 'SUBSCRIPTIONS', vars: {} }))
+	test.each(['DB_VACUUM_', 'SUBSCRIPTIONS_STRIPE_'])(
+		'accepts the prefix %j, of several words',
+		(envVarPrefix) => {
+			const cronVars = {
+				[`${envVarPrefix}CRON_FREQUENCY`]: { type: 'string' },
+			} as const;
+
+			const cronEnv = defineEnv({ prefix: envVarPrefix, vars: cronVars });
+
+			expect({ prefix: cronEnv.prefix, vars: cronEnv.vars })
+				.toEqual({ prefix: envVarPrefix, vars: cronVars });
+		},
+	);
+
+	test.each([
+		'SUBSCRIPTIONS',
+		'subscriptions_',
+		'SUBSCRIPTIONS__',
+		'SUBSCRIPTIONS__STRIPE_',
+		'_SUBSCRIPTIONS_',
+		'',
+	])('refuses the malformed prefix %j', (envVarPrefix) => {
+		expect(() => defineEnv({ prefix: envVarPrefix, vars: {} }))
 			.toThrow(new Error(
-				'Env prefix "SUBSCRIPTIONS" must be upper case, with one "_" at its'
-					+ ' end, like "SUBSCRIPTIONS_"',
+				`Env prefix ${JSON.stringify(envVarPrefix)} must be upper case`
+					+ ' words, each ending in one "_", like "SUBSCRIPTIONS_" or'
+					+ ' "SUBSCRIPTIONS_STRIPE_"',
 			));
 	});
 
-	test('refuses a prefix with an inner "_"', () => {
-		expect(() => defineEnv({ prefix: 'CACHE_ACME_', vars: {} }))
-			.toThrow(new Error(
-				'Env prefix "CACHE_ACME_" must be upper case, with one "_" at its'
-					+ ' end, like "SUBSCRIPTIONS_"',
-			));
+	test.each(['DB_', 'ASSETS_CONTENT_SECURITY_POLICY_'])(
+		'refuses the core prefix %j',
+		(envVarPrefix) => {
+			expect(() => defineEnv({ prefix: envVarPrefix, vars: {} }))
+				.toThrow(new Error(
+					`Env prefix ${JSON.stringify(envVarPrefix)} is core's.`,
+				));
+		},
+	);
+
+	test('refuses a variable outside its prefix of several words', () => {
+		expect(() => {
+			return defineEnv({
+				prefix: 'DB_VACUUM_',
+				vars: { DB_HOTS: { type: 'string' } },
+			});
+		}).toThrow(new Error(
+			'Env variable "DB_HOTS" is not named under its prefix "DB_VACUUM_"',
+		));
 	});
 
 	test('refuses a variable named outside its prefix', () => {
@@ -172,8 +207,8 @@ describe('defineBundleApi with an env', () => {
 				entries: [defineHook('audit', () => {})],
 			});
 		}).toThrow(new Error(
-			'Env prefix "" must be upper case, with one "_" at its end, like'
-				+ ' "SUBSCRIPTIONS_"',
+			'Env prefix "" must be upper case words, each ending in one "_",'
+				+ ' like "SUBSCRIPTIONS_" or "SUBSCRIPTIONS_STRIPE_"',
 		));
 	});
 });
