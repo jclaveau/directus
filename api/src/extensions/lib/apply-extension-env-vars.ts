@@ -103,6 +103,19 @@ export function applyExtensionEnvVars({
 				continue;
 			}
 
+			if (
+				fileEnvVarName in rawEnvVarValues
+				&& typeof fileEnvVarValue !== 'string'
+			) {
+				declarationRefusals.push(
+					`Extension ${quotedExtension}: ${JSON.stringify(fileEnvVarName)}`
+						+ ` is ${JSON.stringify(fileEnvVarValue)},`
+						+ ' which is not a file path.',
+				);
+
+				continue;
+			}
+
 			try {
 				if (typeof fileEnvVarValue === 'string') {
 					declaredValue = readEnvVarFile(

@@ -39,7 +39,7 @@ export const readEnvVarFile = (
 
 	// A secret is written with trailing newlines, which no boolean or number
 	// parses with; a string, a password, keeps its spaces.
-	// A Windows \r\n ends a line as \n does
+	// A Windows \r\n ends a line as \n does.
 	if (fileContentType && fileContentType !== 'string') {
 		return castPrefix + fileContent.trim();
 	}

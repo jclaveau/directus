@@ -694,6 +694,8 @@ export const ENV_VAR_PATTERN_DECLARATIONS = {
 	'DB_CONNECTION_*_KEEP_ALIVE': { type: 'boolean' },
 	'DB_CONNECTION_*_KEEP_ALIVE_INITIAL_DELAY_MILLIS': { type: 'number' },
 	'DB_CONNECTION_*_CONNECTION_TIMEOUT_MILLIS': { type: 'number' },
+	// Ahead of the _OPTIONS glob, which its name also matches.
+	'DB_CONNECTION_*_SSL__SECURE_OPTIONS': { type: 'number' },
 	'DB_CONNECTION_*_OPTIONS': { type: 'string' },
 	'DB_CONNECTION_*_CHARSET': { type: 'string' },
 	'DB_CONNECTION_*_TIMEZONE': { type: 'string' },
@@ -761,7 +763,6 @@ export const ENV_VAR_PATTERN_DECLARATIONS = {
 	'DB_CONNECTION_*_SSL__PFX': { type: 'string' },
 	'DB_CONNECTION_*_SSL__PORT': { type: 'number' },
 	'DB_CONNECTION_*_SSL__TIMEOUT': { type: 'number' },
-	'DB_CONNECTION_*_SSL__SECURE_OPTIONS': { type: 'number' },
 	'DB_CONNECTION_*_SSL__SESSION_TIMEOUT': { type: 'number' },
 	'DB_CONNECTION_*_SSL__ENABLE_TRACE': { type: 'boolean' },
 	'DB_CONNECTION_*_SSL__REQUEST_CERT': { type: 'boolean' },

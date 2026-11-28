@@ -51,7 +51,11 @@ const castToType = (
 				? null
 				: castToType(value, 'string[]');
 		case 'number | string':
-			return /^\d+(\.\d+)?$/.test(String(value))
+			if (typeof value === 'number') {
+				return value;
+			}
+
+			return /^\d+(\.\d+)?$/.test(String(value).trim())
 				? Number(value)
 				: toString(value);
 

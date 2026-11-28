@@ -88,7 +88,7 @@ test('types no DB_HOTS on Env', () => {
 	expectTypeOf<Env>().not.toHaveProperty('DB_HOTS');
 });
 
-test('finds no declaration for the auth name no driver reads', () => {
-	expect(findEnvVarDeclaration('AUTH_OKTA_AUTH_REQUIRE_VERIFIED_EMAIL'))
-		.toBeNull();
+test('finds the auth name the openid driver reads typed boolean', () => {
+	expect(findEnvVarDeclaration('AUTH_OKTA_REQUIRE_VERIFIED_EMAIL'))
+		.toEqual({ type: 'boolean' });
 });
