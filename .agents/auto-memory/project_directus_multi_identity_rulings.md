@@ -137,6 +137,17 @@ logout call the provider that opened the session.
   Awaiting jean, none ruled yet: (1) now / A / B on choices 1-27, 29-30; (2) go on the
   held coarse module/route renames; (3) keep `utils/user-name.ts` literal `'email'`
   (recommended) vs importing `EMAIL_IDENTITY_KIND`.
+- **#772 autoreview choices, jean 2026-11-28 (no build go yet):** 21 A (a linked
+  provider never rewrites the role); 12 A as long as it keeps today's Directus login
+  (email stands in as the SSO value); 8 A (one transaction); 27 = now (an auth.create
+  filter's rewrite is the consumer's job); 16 A (reset_url checked first); 22 A
+  (`prompt=login` on a link); 3 A (SAML link refused) + oos issue #777 (signed
+  RelayState, conflicts view misses SAML claim); 25 A (auth.update on a link); 19 A
+  as the minimum (case-only rewrite stays verified), lowercasing asked; 20 = invites
+  oos, issue #778, rewritten in another PR. Asked back, not ruled: 15 (unique index?),
+  24 (kind by driver), 1 (+ no reconciliation outside a logged-in link?), 18
+  (`email` still writable?), 10 (why ada reads bob's identities), 23 (why nullable).
+  Later: 2, 4-7, 9, 11, 13, 14, 17, 26, 29, 30, renames, user-name.ts literal.
 - **Dropped by that review (reviewer's call, not jean's):** `verifyPassword` skipping
   an unconfigured provider (ends in `InvalidCredentialsError`); misleading log text on
   concurrent email syncs; concurrent first logins of one subject → 403 (predates #772).
