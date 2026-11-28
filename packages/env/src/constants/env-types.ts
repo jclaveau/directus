@@ -18,5 +18,7 @@ export const ENV_VAR_DECLARED_TYPES = [
 	'false | number',
 	'false | string',
 	'false | string[]',
+	'null | string[]',
+	'number | string',
 	'boolean | number | string | string[]',
 ] as const;

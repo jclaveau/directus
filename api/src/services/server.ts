@@ -476,7 +476,7 @@ export class ServerService {
 						componentType: 'objectstore',
 						observedValue: 0,
 						observedUnit: 'ms',
-						threshold: env[envThresholdKey] ? +(env[envThresholdKey] as string) : 750,
+						threshold: env[envThresholdKey] || 750,
 					},
 				];
 

@@ -67,8 +67,8 @@ describe('checkDeclaredEnvVarValue', () => {
 		[
 			'boolean | number | string | string[]',
 			'json:["*"]',
-			'"VARIABLE_NAME" is declared boolean | number | string | string[],'
-				+ ' but its "json:" prefix casts it to json.',
+			'"VARIABLE_NAME" is declared "boolean | number | string | string[]",'
+				+ ' but its "json:" prefix casts it to "json".',
 		],
 		['json', '{"secret":', '"VARIABLE_NAME" is not JSON.'],
 		[
@@ -84,14 +84,14 @@ describe('checkDeclaredEnvVarValue', () => {
 		[
 			'number',
 			'string:5432',
-			'"VARIABLE_NAME" is declared number, but its "string:" prefix'
-				+ ' casts it to string.',
+			'"VARIABLE_NAME" is declared "number", but its "string:" prefix'
+				+ ' casts it to "string".',
 		],
 		[
 			'string[]',
 			'json:["a"]',
-			'"VARIABLE_NAME" is declared string[], but its "json:" prefix'
-				+ ' casts it to json.',
+			'"VARIABLE_NAME" is declared "string[]", but its "json:" prefix'
+				+ ' casts it to "json".',
 		],
 	] as const)('refuses a %s set to %j', (declaredType, rawValue, valueRefusal) => {
 		expect(checkDeclaredEnvVarValue(

@@ -27,16 +27,16 @@ test('finds a literal declaration with its default', () => {
 });
 
 test('finds a guessed declaration by the glob of its name', () => {
-	expect(findEnvVarDeclaration('AUTH_GOOGLE_CLIENT_HTTP_TIMEOUT')).toEqual({});
+	expect(findEnvVarDeclaration('AUTH_GOOGLE_CLIENT_HTTP_HEADERS')).toEqual({});
 });
 
 test('finds nothing for an undeclared name', () => {
 	expect(findEnvVarDeclaration('SUBSCRIPTIONS_TRIAL_DAYS')).toBe(null);
 });
 
-test('finds a login timeout guessed, so 300 is read as 300 seconds', () => {
+test('finds a login timeout typed, so 300 is read as 300 seconds', () => {
 	expect(findEnvVarDeclaration('AUTH_OKTA_LOGIN_TIMEOUT')).toEqual({
-		type: 'boolean | number | string | string[]',
+		type: 'number | string',
 	});
 });
 
@@ -70,13 +70,33 @@ test.each([
 });
 
 test.each([
-	'DB_SSL__REJECT_UNAUTHORIZED',
-	'CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC',
-	'ASSETS_CONTENT_SECURITY_POLICY_DIRECTIVES__IMG_SRC',
-])('finds %j under a pattern a reader forwards', (envVarName) => {
-	expect(findEnvVarDeclaration(envVarName)).toEqual({});
+	['DB_SSL__REJECT_UNAUTHORIZED', { type: 'boolean' }],
+	['DB_SSL__ALPN_PROTOCOLS', {}],
+	['CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC', { type: 'null | string[]' }],
+	[
+		'ASSETS_CONTENT_SECURITY_POLICY_DIRECTIVES__IMG_SRC',
+		{ type: 'null | string[]' },
+	],
+])('finds %j under a pattern a reader forwards', (
+	envVarName,
+	envVarDeclaration,
+) => {
+	expect(findEnvVarDeclaration(envVarName)).toEqual(envVarDeclaration);
 });
 
 test('types no DB_HOTS on Env', () => {
 	expectTypeOf<Env>().not.toHaveProperty('DB_HOTS');
+});
+
+test('finds the auth name the openid driver reads typed boolean', () => {
+	expect(findEnvVarDeclaration('AUTH_OKTA_REQUIRE_VERIFIED_EMAIL'))
+		.toEqual({ type: 'boolean' });
+});
+
+test.each([
+	['AUTH_OKTA_CLIENT_PRIVATE_KEYS', { type: 'json' }],
+	['AUTH_OKTA_CLIENT_TOKEN_ENDPOINT_AUTH_METHOD', { type: 'string' }],
+	['AUTH_CORP_CLIENT__SOCKET_PATH', {}],
+])('finds %j, which an auth driver reads', (envVarName, envVarDeclaration) => {
+	expect(findEnvVarDeclaration(envVarName)).toEqual(envVarDeclaration);
 });

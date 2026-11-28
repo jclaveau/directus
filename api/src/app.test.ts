@@ -127,6 +127,26 @@ describe('createApp', async () => {
 
 			expect(response.headers.has('content-security-policy')).toBe(true);
 		});
+
+		test('replaces a default directive with the one set', async () => {
+			vi.mocked(useEnv, { partial: true }).mockReturnValue({
+				...BASE_ENV,
+				CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC: ["'self'"],
+			});
+
+			const response = await request();
+
+			expect(response.headers.get('content-security-policy')).toBe(
+				"default-src 'self';base-uri 'self';font-src 'self' https: data:;"
+				+ "form-action 'self';frame-ancestors 'self';"
+				+ "img-src 'self' data: blob: https://raw.githubusercontent.com"
+				+ ' https://avatars.githubusercontent.com;'
+				+ "object-src 'none';script-src 'self';script-src-attr 'none';"
+				+ "style-src 'self' https: 'unsafe-inline';worker-src 'self' blob:;"
+				+ "child-src 'self' blob:;media-src 'self';"
+				+ "connect-src 'self' https://* wss://*",
+			);
+		});
 	});
 
 	describe('Root Redirect', () => {

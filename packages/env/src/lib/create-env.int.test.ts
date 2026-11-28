@@ -245,18 +245,28 @@ test('Trims a secret file holding a boolean', () => {
 	});
 });
 
-// A password is its bytes, trailing newline included.
-test('Keeps a secret file holding a string as it is', () => {
+// echo and Kubernetes end a secret with newlines; a password keeps its spaces.
+test.each([
+	[' p4ss\n', ' p4ss'],
+	[' p4ss\n\n', ' p4ss'],
+	['p4ss \n', 'p4ss '],
+	['p4ss\r\n', 'p4ss'],
+	['p4ss\r\n\r\n', 'p4ss'],
+	['p4ss\r', 'p4ss\r'],
+])('Strips only the trailing newlines of a string secret file %j', (
+	fileContent,
+	envVarValue,
+) => {
 	vi.mocked(readConfigurationFromProcess).mockReturnValue({
 		DB_PASSWORD_FILE: './file.txt',
 	});
 
 	vi.mocked(readConfigurationFromFile).mockReturnValue({});
 	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
-	vi.mocked(readFileSync).mockReturnValueOnce(' p4ss\n');
+	vi.mocked(readFileSync).mockReturnValueOnce(fileContent);
 
 	expect(createEnv()).toEqual({
-		DB_PASSWORD: ' p4ss\n',
+		DB_PASSWORD: envVarValue,
 		DEFAULT: 'test-default',
 		DEFAULT_ARRAY: 'one,two,three',
 	});
@@ -413,4 +423,173 @@ test('Refuses an item of an array: value its own prefix does not fit', () => {
 	expect(() => createEnv()).toThrow(
 		new Error('"UNMAPPED_LIST" is "number:abc", which is not a number.'),
 	);
+});
+
+test('Refuses a variable set both directly and through its _FILE variable', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		DB_PASSWORD: 'from-env',
+		DB_PASSWORD_FILE: './file.txt',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+
+	expect(() => createEnv()).toThrow(new Error(
+		'"DB_PASSWORD" and "DB_PASSWORD_FILE" are both set. Set only one.',
+	));
+});
+
+test('Refuses a _FILE variable from the config file that is not a path', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({});
+	vi.mocked(readConfigurationFromFile).mockReturnValue({ DB_PASSWORD_FILE: 123 });
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+
+	expect(() => createEnv()).toThrow(new Error(
+		'"DB_PASSWORD_FILE" is 123, which is not a file path.',
+	));
+});
+
+// A typed variable is cast by its declaration, never by what its value looks like.
+test.each([
+	['HASH_ASSOCIATED_DATA', '123', '123'],
+	['DB_SSL', 'true', true],
+	['DB_SSL__REJECT_UNAUTHORIZED', 'false', false],
+	['DB_SSL__CA', '123456', '123456'],
+	['DB_CONNECTION_REPLICA_SSL__TIMEOUT', '30', 30],
+	['AUTH_X_SP_WANT_MESSAGE_SIGNED', 'true', true],
+	['AUTH_X_IDP_METADATA', '1', '1'],
+	['AUTH_X_CLIENT_HTTP_TIMEOUT', '5000', 5000],
+	['AUTH_X_DEFAULT_ROLE_ID', '42', '42'],
+	['AUTH_X_REDIRECT_ALLOW_LIST', 'https://a.example', ['https://a.example']],
+	['CONTENT_SECURITY_POLICY_DIRECTIVES__IMG_SRC', "'self'", ["'self'"]],
+	['WEBSOCKETS_REST_AUTH_TIMEOUT', '10', 10],
+	['STORAGE_LOCAL_KEY', '0123', '0123'],
+	['CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC', 'null', null],
+	['ASSETS_CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC', 'null', null],
+	['AUTH_X_LOGIN_TIMEOUT', '300', 300],
+	['AUTH_X_LOGIN_TIMEOUT', '5m', '5m'],
+	['AUTH_X_LOGIN_TIMEOUT', ' 300 ', 300],
+	['AUTH_X_LOGIN_TIMEOUT', -5, -5],
+	['AUTH_X_LOGIN_TIMEOUT', '1.5', 1.5],
+	['AUTH_X_LOGIN_TIMEOUT', '-5', -5],
+	['AUTH_X_LOGIN_TIMEOUT', ' 5m ', '5m'],
+	['AUTH_X_LOGIN_TIMEOUT', '5 m', '5 m'],
+	['AUTH_X_LOGIN_TIMEOUT', '-1d', '-1d'],
+	['AUTH_X_LOGIN_TIMEOUT', '0', 0],
+	['AUTH_X_LOGIN_TIMEOUT', '.5', 0.5],
+	['AUTH_X_LOGIN_TIMEOUT', '-.5', -0.5],
+	['AUTH_X_LOGIN_TIMEOUT', '.5h', '.5h'],
+	['CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC', null, null],
+	['DB_CONNECTION_REPLICA_SSL__SECURE_OPTIONS', '524288', 524288],
+	['AUTH_X_REQUIRE_VERIFIED_EMAIL', 'true', true],
+	['AUTH_X_PLAIN_CODE_CHALLENGE', 'false', false],
+	['AUTH_X_GROUP_CLAIM_NAME', '123', '123'],
+	['AUTH_X_ROLE_MAPPING', '{"staff":"5b3e8f0a"}', { staff: '5b3e8f0a' }],
+	['AUTH_X_GIVEN_NAME_KEY', '1', '1'],
+	['AUTH_X_FAMILY_NAME_KEY', '1', '1'],
+])('Casts %s=%j by its declaration', (envVarName, rawValue, envVarValue) => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		[envVarName]: rawValue,
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+
+	expect(createEnv()).toEqual({
+		[envVarName]: envVarValue,
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
+});
+
+// An untyped secret loses its trailing newlines before its value is guessed.
+test.each([
+	['true\n', true],
+	['TLSv1.2\n', 'TLSv1.2'],
+])('Guesses an untyped secret file %j without its newlines', (
+	fileContent,
+	envVarValue,
+) => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		UNMAPPED_SETTING_FILE: './file.txt',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+	vi.mocked(readFileSync).mockReturnValueOnce(fileContent);
+
+	expect(createEnv()).toEqual({
+		UNMAPPED_SETTING: envVarValue,
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
+});
+
+test.each([
+	[
+		'AUTH_X_REQUIRE_VERIFIED_EMAIL',
+		'yes',
+		'"AUTH_X_REQUIRE_VERIFIED_EMAIL" Environment Variable is "yes",'
+			+ ' which is not a boolean. Use one of true, false, 1, 0.',
+	],
+	[
+		'AUTH_X_PLAIN_CODE_CHALLENGE',
+		'yes',
+		'"AUTH_X_PLAIN_CODE_CHALLENGE" Environment Variable is "yes",'
+			+ ' which is not a boolean. Use one of true, false, 1, 0.',
+	],
+	[
+		'AUTH_X_LOGIN_TIMEOUT',
+		'true',
+		'"AUTH_X_LOGIN_TIMEOUT" is "true",'
+			+ ' which is neither a number of seconds nor a duration.',
+	],
+	[
+		'AUTH_X_LOGIN_TIMEOUT',
+		'abc',
+		'"AUTH_X_LOGIN_TIMEOUT" is "abc",'
+			+ ' which is neither a number of seconds nor a duration.',
+	],
+	[
+		'AUTH_X_LOGIN_TIMEOUT',
+		'1e3',
+		'"AUTH_X_LOGIN_TIMEOUT" is "1e3",'
+			+ ' which is neither a number of seconds nor a duration.',
+	],
+	[
+		'AUTH_X_LOGIN_TIMEOUT',
+		'',
+		'"AUTH_X_LOGIN_TIMEOUT" is "",'
+			+ ' which is neither a number of seconds nor a duration.',
+	],
+	[
+		'AUTH_X_LOGIN_TIMEOUT',
+		'number:5m',
+		'"AUTH_X_LOGIN_TIMEOUT" is "number:5m", which is not a number.',
+	],
+	[
+		'AUTH_X_LOGIN_TIMEOUT',
+		'string:300',
+		'"AUTH_X_LOGIN_TIMEOUT" is declared "number | string",'
+			+ ' but its "string:" prefix casts it to "string".',
+	],
+	[
+		'AUTH_X_LOGIN_TIMEOUT',
+		['300'],
+		'"AUTH_X_LOGIN_TIMEOUT" is ["300"],'
+			+ ' which is neither a number of seconds nor a duration.',
+	],
+	[
+		'CONTENT_SECURITY_POLICY_DIRECTIVES__IMG_SRC',
+		{ self: true },
+		'"CONTENT_SECURITY_POLICY_DIRECTIVES__IMG_SRC" is {"self":true},'
+			+ ' which is neither null, a string nor a list of strings.',
+	],
+])('Refuses %s=%j', (envVarName, rawValue, refusalMessage) => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		[envVarName]: rawValue,
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+
+	expect(() => createEnv()).toThrow(new Error(refusalMessage));
 });

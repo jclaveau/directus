@@ -5,6 +5,7 @@ import {
 	type EnvVarDeclaration,
 	getDefaultType,
 	isCoreEnvVarName,
+	readEnvVarFile,
 } from '@directus/env';
 import type { ExtensionEnvVars } from '@directus/extensions/scalabus';
 
@@ -63,9 +64,9 @@ export function applyExtensionEnvVars({
 			) {
 				declarationRefusals.push(
 					`Extension ${quotedExtension} declares ${quotedName}`
-						+ ` ${envVarDeclaration.type}, which extension`
+						+ ` ${JSON.stringify(envVarDeclaration.type)}, which extension`
 						+ ` ${JSON.stringify(otherDeclarer.extensionName)} declares`
-						+ ` ${otherDeclarer.envVarDeclaration.type}.`,
+						+ ` ${JSON.stringify(otherDeclarer.envVarDeclaration.type)}.`,
 				);
 			}
 			else if (
@@ -85,9 +86,58 @@ export function applyExtensionEnvVars({
 				);
 			}
 
-			const declaredValue = envVarName in rawEnvVarValues
-				? rawEnvVarValues[envVarName]
-				: envVarDeclaration.default;
+			const fileEnvVarName = `${envVarName}_FILE`;
+			const fileEnvVarValue = rawEnvVarValues[fileEnvVarName];
+			let declaredValue: unknown;
+
+			if (
+				fileEnvVarName in rawEnvVarValues
+				&& envVarName in rawEnvVarValues
+			) {
+				declarationRefusals.push(
+					`Extension ${quotedExtension}: ${quotedName}`
+						+ ` and ${JSON.stringify(fileEnvVarName)}`
+						+ ' are both set. Set only one.',
+				);
+
+				continue;
+			}
+
+			if (
+				fileEnvVarName in rawEnvVarValues
+				&& typeof fileEnvVarValue !== 'string'
+			) {
+				declarationRefusals.push(
+					`Extension ${quotedExtension}: ${JSON.stringify(fileEnvVarName)}`
+						+ ` is ${JSON.stringify(fileEnvVarValue)},`
+						+ ' which is not a file path.',
+				);
+
+				continue;
+			}
+
+			try {
+				if (typeof fileEnvVarValue === 'string') {
+					declaredValue = readEnvVarFile(
+						fileEnvVarName,
+						fileEnvVarValue,
+						envVarDeclaration.type,
+					);
+				}
+				else {
+					declaredValue = envVarName in rawEnvVarValues
+						? rawEnvVarValues[envVarName]
+						: envVarDeclaration.default;
+				}
+			}
+			catch (fileReadError) {
+				// readEnvVarFile throws only the Error naming the path
+				declarationRefusals.push(
+					`Extension ${quotedExtension}: ${(fileReadError as Error).message}`,
+				);
+
+				continue;
+			}
 
 			const valueRefusal = declaredValue === undefined
 				? null
@@ -164,6 +214,8 @@ export function findUndeclaredEnvVars({
 	return rawEnvVarNames.filter((envVarName) => {
 		return declaredPrefixes.some((prefix) => envVarName.startsWith(prefix))
 			&& !isCoreEnvVarName(envVarName)
-			&& !envVarDeclarers.has(envVarName);
+			&& !envVarDeclarers.has(envVarName)
+			&& !(envVarName.endsWith('_FILE')
+				&& envVarDeclarers.has(envVarName.slice(0, -'_FILE'.length)));
 	});
 }
