@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
-const env: Record<string, any> = {
-	CACHE_STATS_ENABLED: true,
-	CACHE_NAMESPACE: 'scalabus',
-};
+const env = vi.hoisted((): Record<string, any> => {
+	return {
+		CACHE_STATS_ENABLED: true,
+		CACHE_NAMESPACE: 'scalabus',
+	};
+});
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));

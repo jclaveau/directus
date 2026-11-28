@@ -22,7 +22,7 @@ const mockUsersResponse = {
 	language: null,
 	first_name: 'Test',
 	last_name: 'User',
-	email: 'test@example.com',
+	primary_identity: null,
 	last_page: null,
 	tfa_secret: null,
 	avatar: null,

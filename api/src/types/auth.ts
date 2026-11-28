@@ -6,19 +6,35 @@ export interface AuthDriverOptions {
 	schema: SchemaOverview;
 }
 
+export interface UserIdentity {
+	id: string;
+	user: string;
+	/** `email`, or the name of the auth provider that vouches for `value` */
+	kind: string;
+	value: string;
+	verified: boolean;
+	auth_data: string | Record<string, unknown> | null;
+	user_info: string | Record<string, unknown> | null;
+	scope: string | null;
+}
+
 export interface User {
 	id: string;
 	first_name: string | null;
 	last_name: string | null;
-	email: string | null;
 	password: string | null;
 	status: 'active' | 'suspended' | 'invited';
 	role: string | null;
-	provider: string;
-	external_identifier: string | null;
-	auth_data: string | Record<string, unknown> | null;
+	primary_identity: string | null;
+	/** The identity the login, or the session, was made with */
+	identity: UserIdentity | null;
 	app_access: boolean;
 	admin_access: boolean;
+}
+
+export interface IdentityLookupOptions {
+	/** The account a logged-in user links the identity to, from their session */
+	linkUser: string | null;
 }
 
 export type AuthData = Record<string, any> | null;

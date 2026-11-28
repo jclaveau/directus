@@ -11,7 +11,13 @@ import jwt from 'jsonwebtoken';
 import type { Knex } from 'knex';
 import type { StringValue } from 'ms';
 import { performance } from 'node:perf_hooks';
-import { getAuthProvider } from '../auth.js';
+import argon2 from 'argon2';
+import { findAuthProvider, getAuthProvider } from '../auth.js';
+import {
+	EMAIL_IDENTITY_KIND,
+	fetchIdentityById,
+	toProviderName,
+} from '../auth/utils/user-identities.js';
 import { DEFAULT_AUTH_PROVIDER } from '../constants.js';
 import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
@@ -22,7 +28,12 @@ import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { RateLimiterRes, createRateLimiter } from '../rate-limiter.js';
 import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
-import type { DirectusTokenPayload, Session, User } from '../types/index.js';
+import type {
+	DirectusTokenPayload,
+	Session,
+	User,
+	UserIdentity,
+} from '../types/index.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';
 import { clone, cloneDeep } from '../utils/lodash-es-used.js';
@@ -81,6 +92,8 @@ export class AuthenticationService {
 		options?: Partial<{
 			otp: string;
 			session: boolean;
+			/** The account an SSO login made from a session links its identity to */
+			linkUser: string | null;
 		}>,
 	): Promise<LoginResult> {
 		const { nanoid } = await import('nanoid');
@@ -90,22 +103,37 @@ export class AuthenticationService {
 
 		const provider = getAuthProvider(providerName);
 
-		let userId;
+		let loginIdentity: UserIdentity;
 
 		try {
-			userId = await provider.getUserID(cloneDeep(payload));
+			loginIdentity = await provider.getIdentity(cloneDeep(payload), {
+				linkUser: options?.linkUser ?? null,
+			});
 		} catch (err) {
 			await stall(STALL_TIME, timeStart);
 			throw err;
 		}
 
-		const user = await this.knex
+		const userRow = await this.knex
 			.select<
-				User & { tfa_secret: string | null }
-			>('id', 'first_name', 'last_name', 'email', 'password', 'status', 'role', 'tfa_secret', 'provider', 'external_identifier', 'auth_data')
+				Omit<User, 'identity'> & { tfa_secret: string | null }
+			>(
+				'id',
+				'first_name',
+				'last_name',
+				'password',
+				'status',
+				'role',
+				'tfa_secret',
+				'primary_identity',
+			)
 			.from('directus_users')
-			.where('id', userId)
+			.where('id', loginIdentity.user)
 			.first();
+
+		const user = userRow
+? { ...userRow, identity: loginIdentity }
+: undefined;
 
 		const updatedPayload = await emitter.emitFilter(
 			'auth.login',
@@ -139,7 +167,7 @@ export class AuthenticationService {
 			);
 		};
 
-		if (user?.status !== 'active' || user?.provider !== providerName) {
+		if (user?.status !== 'active' || loginIdentity.kind !== provider.identityKind) {
 			emitStatus('fail');
 			await stall(STALL_TIME, timeStart);
 			throw new InvalidCredentialsError();
@@ -258,6 +286,7 @@ export class AuthenticationService {
 		await this.knex('directus_sessions').insert({
 			token: refreshToken,
 			user: user.id,
+			identity: loginIdentity.id,
 			expires: refreshTokenExpiration,
 			ip: this.accountability?.ip,
 			user_agent: this.accountability?.userAgent,
@@ -312,19 +341,24 @@ export class AuthenticationService {
 				user_id: 'u.id',
 				user_first_name: 'u.first_name',
 				user_last_name: 'u.last_name',
-				user_email: 'u.email',
 				user_password: 'u.password',
 				user_status: 'u.status',
-				user_provider: 'u.provider',
-				user_external_identifier: 'u.external_identifier',
-				user_auth_data: 'u.auth_data',
+				user_primary_identity: 'u.primary_identity',
 				user_role: 'u.role',
+				identity_id: 'i.id',
+				identity_kind: 'i.kind',
+				identity_value: 'i.value',
+				identity_verified: 'i.verified',
+				identity_auth_data: 'i.auth_data',
+				identity_user_info: 'i.user_info',
+				identity_scope: 'i.scope',
 				share_id: 'd.id',
 				share_start: 'd.date_start',
 				share_end: 'd.date_end',
 			})
 			.from('directus_sessions AS s')
 			.leftJoin('directus_users AS u', 's.user', 'u.id')
+			.leftJoin('directus_user_identities AS i', 's.identity', 'i.id')
 			.leftJoin('directus_shares AS d', 's.share', 'd.id')
 			.where('s.token', refreshToken)
 			.andWhere('s.expires', '>=', new Date())
@@ -359,19 +393,30 @@ export class AuthenticationService {
 			this.knex,
 		);
 
+		const sessionProvider = toSessionProvider(record.user_id, record.identity_kind);
+
 		if (record.user_id) {
-			const provider = getAuthProvider(record.user_provider);
+			const provider = getAuthProvider(sessionProvider!);
 
 			await provider.refresh({
 				id: record.user_id,
 				first_name: record.user_first_name,
 				last_name: record.user_last_name,
-				email: record.user_email,
 				password: record.user_password,
 				status: record.user_status,
-				provider: record.user_provider,
-				external_identifier: record.user_external_identifier,
-				auth_data: record.user_auth_data,
+				primary_identity: record.user_primary_identity,
+				identity: record.identity_id
+					? {
+						id: record.identity_id,
+						user: record.user_id,
+						kind: record.identity_kind,
+						value: record.identity_value,
+						verified: record.identity_verified,
+						auth_data: record.identity_auth_data,
+						user_info: record.identity_user_info,
+						scope: record.identity_scope,
+					}
+					: null,
 				role: record.user_role,
 				app_access: globalAccess.app,
 				admin_access: globalAccess.admin,
@@ -418,7 +463,7 @@ export class AuthenticationService {
 			{
 				status: 'pending',
 				user: record.user_id,
-				provider: record.user_provider,
+				provider: sessionProvider,
 				type: 'refresh',
 			},
 			{
@@ -504,6 +549,7 @@ export class AuthenticationService {
 		await this.knex('directus_sessions').insert({
 			token: newSessionToken,
 			user: sessionRecord['user_id'],
+			identity: sessionRecord['identity_id'],
 			share: sessionRecord['share_id'],
 			expires: sessionExpiration,
 			ip: this.accountability?.ip,
@@ -517,46 +563,116 @@ export class AuthenticationService {
 	async logout(refreshToken: string): Promise<void> {
 		const record = await this.knex
 			.select<
-				User & Session
-			>('u.id', 'u.first_name', 'u.last_name', 'u.email', 'u.password', 'u.status', 'u.role', 'u.provider', 'u.external_identifier', 'u.auth_data')
+				Omit<User, 'identity'> & Session & { identity_id: string | null }
+			>(
+				'u.id',
+				'u.first_name',
+				'u.last_name',
+				'u.password',
+				'u.status',
+				'u.role',
+				'u.primary_identity',
+				{ identity_id: 's.identity' },
+			)
 			.from('directus_sessions as s')
 			.innerJoin('directus_users as u', 's.user', 'u.id')
 			.where('s.token', refreshToken)
 			.first();
 
 		if (record) {
-			const user = record;
+			const { identity_id: identityId, ...userRow } = record;
 
-			const provider = getAuthProvider(user.provider);
-			await provider.logout(clone(user));
+			const sessionIdentity = identityId
+				? await fetchIdentityById(this.knex, identityId) ?? null
+				: null;
+
+			const provider = getAuthProvider(
+				toSessionProvider(userRow.id, sessionIdentity?.kind ?? null)!,
+			);
+
+			await provider.logout(clone({ ...userRow, identity: sessionIdentity }));
 
 			await this.knex.delete().from('directus_sessions').where('token', refreshToken);
 		}
 	}
 
+	/**
+	 * A password set on the account is checked against it; an account without
+	 * one is checked by each of its SSO identities' providers, LDAP binding.
+	 */
 	async verifyPassword(userID: string, password: string): Promise<void> {
-		const user = await this.knex
-			.select<User>(
+		const userRow = await this.knex
+			.select<Omit<User, 'identity'>>(
 				'id',
 				'first_name',
 				'last_name',
-				'email',
 				'password',
 				'status',
 				'role',
-				'provider',
-				'external_identifier',
-				'auth_data',
+				'primary_identity',
 			)
 			.from('directus_users')
 			.where('id', userID)
 			.first();
 
-		if (!user) {
+		if (!userRow) {
 			throw new InvalidCredentialsError();
 		}
 
-		const provider = getAuthProvider(user.provider);
-		await provider.verify(clone(user), password);
+		if (userRow.password) {
+			if (!(await argon2.verify(userRow.password, password))) {
+				throw new InvalidCredentialsError();
+			}
+
+			return;
+		}
+
+		const ssoIdentities = await this.knex
+			.select<UserIdentity[]>('*')
+			.from('directus_user_identities')
+			.where('user', userID)
+			.andWhereNot('kind', EMAIL_IDENTITY_KIND)
+			.orderBy('id');
+
+		for (const ssoIdentity of ssoIdentities) {
+			const provider = findAuthProvider(toProviderName(ssoIdentity.kind));
+
+			if (!provider) {
+				continue;
+			}
+
+			try {
+				await provider.verify(
+					clone({ ...userRow, identity: ssoIdentity }),
+					password,
+				);
+
+				return;
+			}
+ catch (error) {
+				if (!(error instanceof InvalidCredentialsError)) {
+					throw error;
+				}
+			}
+		}
+
+		throw new InvalidCredentialsError();
 	}
+}
+
+/**
+ * A session opened before identities existed, or by a token, names none: the
+ * default provider refreshes and ends it, as a no-op.
+ */
+function toSessionProvider(
+	userId: string | null,
+	identityKind: string | null,
+): string | null {
+	if (identityKind) {
+		return toProviderName(identityKind);
+	}
+
+	return userId
+? DEFAULT_AUTH_PROVIDER
+: null;
 }

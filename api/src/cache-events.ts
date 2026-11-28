@@ -20,6 +20,7 @@ import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { CACHE_ENTRY_VERIFIED_AT } from './utils/cache-entry-verified-at.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 import { storedScopedCachePin } from './utils/printable-scoped-cache-pins.js';
+import { EMAIL_IDENTITY_KIND } from './auth/utils/user-identities.js';
 
 // The timeseries wire types live in @directus/types so the app chart shares them.
 // Re-exported for consumers; the import above is what binds them in this file.
@@ -1828,6 +1829,11 @@ export async function listCacheEntries(
 		? []
 		: await db('directus_cache_stats_descriptors as d')
 			.leftJoin('directus_users as u', 'u.id', 'd.user_id')
+			.leftJoin('directus_user_identities as ui', (identityJoin) => {
+				identityJoin
+					.on('ui.id', 'u.primary_identity')
+					.andOnVal('ui.kind', EMAIL_IDENTITY_KIND);
+			})
 			.whereIn('d.cache_key', listedKeys)
 			.select(
 				'd.cache_key',
@@ -1837,7 +1843,7 @@ export async function listCacheEntries(
 				'd.path',
 				'd.collection',
 				'd.user_id',
-				'u.email as user_email',
+				'ui.value as user_email',
 				'd.query',
 				'd.bytes',
 				'd.fill_ms',

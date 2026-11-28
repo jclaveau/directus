@@ -1,14 +1,15 @@
-import { InvalidQueryError } from '@directus/errors';
+import { InvalidCredentialsError, InvalidQueryError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const updateOne = vi.fn();
 const readOne = vi.fn();
+const removeIdentity = vi.fn();
 
 vi.mock('../services/users.js', () => {
 	return {
 		UsersService: vi.fn(function () {
-			return { updateOne, readOne };
+			return { updateOne, readOne, removeIdentity };
 		}),
 	};
 });
@@ -140,5 +141,51 @@ describe('users controller PATCH /:pk', () => {
 		}));
 
 		expect(updateOne).not.toHaveBeenCalled();
+	});
+});
+
+describe('users controller DELETE /me/identities/:identity', () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	test('removes the identity from the session account', async () => {
+		const next = vi.fn();
+
+		const layer = router.stack.find((l: any) => {
+			return l.route?.path === '/me/identities/:identity';
+		});
+
+		await layer!.route!.stack[0]!.handle(
+			{
+				accountability: { user: 'u-1' },
+				schema: {},
+				params: { identity: 'identity-2' },
+			} as any,
+			{ locals: {} } as any,
+			next,
+		);
+
+		expect(removeIdentity).toHaveBeenCalledWith('u-1', 'identity-2');
+		expect(next).toHaveBeenCalledWith();
+	});
+
+	test('refuses a request without a session user', async () => {
+		const next = vi.fn();
+
+		const layer = router.stack.find((l: any) => {
+			return l.route?.path === '/me/identities/:identity';
+		});
+
+		await layer!.route!.stack[0]!.handle(
+			{
+				accountability: { user: null },
+				schema: {},
+				params: { identity: 'identity-2' },
+			} as any,
+			{ locals: {} } as any,
+			next,
+		);
+
+		expect(next).toHaveBeenCalledWith(new InvalidCredentialsError());
+		expect(removeIdentity).not.toHaveBeenCalled();
 	});
 });

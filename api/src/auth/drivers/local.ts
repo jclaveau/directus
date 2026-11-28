@@ -9,29 +9,40 @@ import { REFRESH_COOKIE_OPTIONS, SESSION_COOKIE_OPTIONS } from '../../constants.
 import { respond } from '../../middleware/respond.js';
 import { createDefaultAccountability } from '../../permissions/utils/create-default-accountability.js';
 import { AuthenticationService } from '../../services/authentication.js';
-import type { AuthenticationMode, User } from '../../types/index.js';
+import type {
+	AuthenticationMode,
+	IdentityLookupOptions,
+	User,
+	UserIdentity,
+} from '../../types/index.js';
 import asyncHandler from '../../utils/async-handler.js';
 import { getIPFromReq } from '../../utils/get-ip-from-req.js';
 import { stall } from '../../utils/stall.js';
 import { AuthDriver } from '../auth.js';
+import { fetchPasswordLoginIdentity } from '../utils/user-identities.js';
 
 export class LocalAuthDriver extends AuthDriver {
 	async getUserID(payload: Record<string, any>): Promise<string> {
+		const identity = await this.getIdentity(payload, { linkUser: null });
+
+		return identity.user;
+	}
+
+	override async getIdentity(
+		payload: Record<string, any>,
+		_options: IdentityLookupOptions,
+	): Promise<UserIdentity> {
 		if (!payload['email']) {
 			throw new InvalidCredentialsError();
 		}
 
-		const user = await this.knex
-			.select('id')
-			.from('directus_users')
-			.whereRaw('LOWER(??) = ?', ['email', payload['email'].toLowerCase()])
-			.first();
+		const identity = await fetchPasswordLoginIdentity(this.knex, payload['email']);
 
-		if (!user) {
+		if (!identity) {
 			throw new InvalidCredentialsError();
 		}
 
-		return user.id;
+		return identity;
 	}
 
 	async verify(user: User, password?: string): Promise<void> {

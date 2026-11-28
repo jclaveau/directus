@@ -39,15 +39,16 @@ Feature: A single user is checked as it is created
       |   first_name: second-<run>              |     - message: >-                   |
       |   email: TAKEN-<run>@example.com        |         Value                       |
       |                                         |         "[taken-<run>@example.com]" |
-      |                                         |         for field "email" in        |
+      |                                         |         for field "value" in        |
       |                                         |         collection                  |
-      |                                         |         "directus_users" has        |
-      |                                         |         to be unique.               |
+      |                                         |         "directus_user_identities"  |
+      |                                         |         has to be unique.           |
       | method: GET                             | code: 200                           |+
       | path: /users                            | body:                               |
       | query:                                  |   data: []                          |
       |   fields: id                            |                                     |
       |   filter[first_name][_eq]: second-<run> |                                     |
     And on postgres the requests ran these statements:
-      | request | table          | select | insert | update | delete |
-      | 1       | directus_users | 2      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |

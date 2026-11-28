@@ -284,7 +284,13 @@ export class SharesService extends ItemsService {
 		const mailService = new MailService({ schema: this.schema, accountability: this.accountability });
 
 		const userInfo = await usersService.readOne(this.accountability.user, {
-			fields: ['first_name', 'last_name', 'email', 'id'],
+			fields: [
+				'first_name',
+				'last_name',
+				'primary_identity.kind',
+				'primary_identity.value',
+				'id',
+			],
 		});
 
 		const message = `

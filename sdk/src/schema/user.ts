@@ -2,6 +2,7 @@ import type { MergeCoreCollection } from '../index.js';
 import type { DirectusRole } from './role.js';
 import type { DirectusFile } from './file.js';
 import type { DirectusPolicy } from './policy.js';
+import type { DirectusUserIdentity } from './user-identity.js';
 
 /**
  * directus_users type
@@ -13,7 +14,8 @@ export type DirectusUser<Schema = any> = MergeCoreCollection<
 		id: string; // uuid
 		first_name: string | null;
 		last_name: string | null;
-		email: string | null;
+		primary_identity: DirectusUserIdentity<Schema> | string | null;
+		identities: DirectusUserIdentity<Schema>[] | string[];
 		password: string | null; // will just be *s
 		location: string | null;
 		title: string | null;
@@ -28,9 +30,6 @@ export type DirectusUser<Schema = any> = MergeCoreCollection<
 		token: string | null;
 		last_access: 'datetime' | null;
 		last_page: string | null;
-		provider: string;
-		external_identifier: string | null;
-		auth_data: Record<string, any> | null;
 		email_notifications: boolean | null;
 		appearance: string | null;
 		theme_dark: string | null;
@@ -40,3 +39,11 @@ export type DirectusUser<Schema = any> = MergeCoreCollection<
 		policies: string[] | DirectusPolicy<Schema>[];
 	}
 >;
+
+/**
+ * A directus_users create or update body: the api writes `email` as the
+ * user's email identity
+ */
+export type DirectusUserPayload<Schema = any> = Partial<DirectusUser<Schema>> & {
+	email?: string | null;
+};

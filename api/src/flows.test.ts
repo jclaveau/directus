@@ -1089,3 +1089,74 @@ describe('event flows on item creates', () => {
 		]);
 	});
 });
+
+describe('a log operation of a users create', () => {
+	test('redacts the nested primary identity of the payload', async () => {
+		const recordLogOptions = vi.fn();
+
+		getFlowManager().addOperation('log', (options) => {
+			recordLogOptions(options);
+
+			return { status: 'logged' };
+		});
+
+		vi.mocked(FlowsService).mockImplementation(function () {
+			return {
+				readByQuery: async (): Promise<FlowRaw[]> => {
+					return [{
+						id: 'flow-1',
+						trigger: 'event',
+						accountability: null,
+						options: {
+							type: 'filter',
+							scope: ['items.create'],
+							collections: ['directus_users'],
+						},
+						operation: 'op-1',
+						operations: [{
+							id: 'op-1',
+							key: 'log',
+							type: 'log',
+							options: { payload: '{{$trigger.payload}}' },
+							resolve: null,
+							reject: null,
+							flow: 'flow-1',
+						}],
+					} as unknown as FlowRaw];
+				},
+			} as unknown as FlowsService;
+		});
+
+		await (getFlowManager() as any).load();
+
+		await emitter.emitFilter(
+			'users.create',
+			[{
+				data: {
+					first_name: 'Ada',
+					primary_identity: {
+						kind: 'mockoauth',
+						value: 'ada-oauth',
+						auth_data: '{"refreshToken":"r1"}',
+						user_info: { sub: 'ada-oauth' },
+					},
+				},
+			}],
+			{ collection: 'directus_users' },
+		);
+
+		expect(recordLogOptions.mock.calls).toEqual([
+			[{
+				payload: {
+					first_name: 'Ada',
+					primary_identity: {
+						kind: 'mockoauth',
+						value: '--redacted--',
+						auth_data: '--redacted--',
+						user_info: '--redacted--',
+					},
+				},
+			}],
+		]);
+	});
+});

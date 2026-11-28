@@ -76,6 +76,9 @@ data:
     singleton: true
     note: $t:directus_collection.directus_settings
 
+  - collection: directus_user_identities
+    note: $t:directus_collection.directus_user_identities
+
   - collection: directus_users
     archive_field: status
     archive_value: archived

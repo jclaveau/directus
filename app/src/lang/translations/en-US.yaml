@@ -878,6 +878,7 @@ color: Color
 circle: Circle
 empty_item: Empty Item
 log_in_with: 'Log In with {provider}'
+link_identity_with: 'Link {provider}'
 conditional_styles: Conditional Styles
 advanced_settings: Advanced Settings
 advanced_filter: Advanced Filter
@@ -1326,6 +1327,7 @@ directus_collection:
   directus_settings: Project configuration options
   directus_shares: Tracks externally shared items
   directus_users: System users for the platform
+  directus_user_identities: Emails and auth provider accounts users log in with
   directus_webhooks: Configuration for event-based HTTP requests
   directus_translations: Custom translations
   directus_versions: Content Versions for items
@@ -1388,7 +1390,7 @@ fields:
   directus_users:
     first_name: First Name
     last_name: Last Name
-    email: Email
+    primary_identity: Primary Identity
     password: Password
     avatar: Avatar
     location: Location
@@ -1409,8 +1411,7 @@ fields:
     status_archived: Archived
     role: Role
     token: Token
-    provider: Provider
-    external_identifier: External Identifier
+    identities: Identities
     last_page: Last Page
     last_access: Last Access
     email_notifications: Email Notifications
@@ -1479,6 +1480,12 @@ fields:
     public_registration_verify_email_note:
       Sends an email to the registering user asking them to click on a verification link before they can sign in.
     visual_editor_urls: Visual Editor URLs
+  directus_user_identities:
+    user: User
+    kind: Kind
+    value: Value
+    verified: Verified
+    scope: Scope
   directus_shares:
     name: Name
     role: Role

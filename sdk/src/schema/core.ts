@@ -17,6 +17,7 @@ import type { DirectusRole } from './role.js';
 import type { DirectusSettings } from './settings.js';
 import type { DirectusShare } from './share.js';
 import type { DirectusUser } from './user.js';
+import type { DirectusUserIdentity } from './user-identity.js';
 import type { DirectusVersion } from './version.js';
 import type { DirectusWebhook } from './webhook.js';
 
@@ -40,6 +41,7 @@ export interface CoreSchema<Schema = any> {
 	directus_settings: DirectusSettings<Schema>;
 	directus_shares: DirectusShare<Schema>[];
 	directus_users: DirectusUser<Schema>[];
+	directus_user_identities: DirectusUserIdentity<Schema>[];
 	directus_versions: DirectusVersion<Schema>[];
 	directus_webhooks: DirectusWebhook<Schema>[];
 }

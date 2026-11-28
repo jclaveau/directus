@@ -13,5 +13,7 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [useEnv mock needs vi.hoisted, not automock](../reference_directus_useenv_mock_hoisted.md) — automock evals real module first → useEnv() undefined; concurrent mocked replays need dispatch-by-path not FIFO Once
 - [vitest 4 toThrow compares the error class](../reference_directus_vitest4_tothrow_error_class.md) — `new Error(msg)` never matches a RouteNotFoundError; assert the real error class
 - [MockClient dialect:pg nested-trx recursion](../reference_directus_mockclient_pg_dialect_events.md) — shared `_events` loops savepoints forever; delete the dialect prototype's `_events`; a fallback catch hides it
+- [query-audit ms:1 flake](../project_directus_query_audit_ms_flake.md) — api unit run: X-Query-Audit header "ms":1 vs expected 0, seen once on #772, undiagnosed
+- [Mock the module defining the cache switch](../reference_directus_mock_defining_module.md) — vi.mock of scoped-cache/index.js missed a helper's scopedCachePurgeEnabled; import from and mock config.js
 - [v-dialog's focus trap breaks app tests](../reference_directus_vdialog_focus_trap_tests.md) — jsdom reports nothing tabbable, so the hand-back rejects and the job fails with every test passing; mock `@vueuse/integrations/useFocusTrap`
-- [fn dialect test import cycle](../reference_directus_fn_dialect_test_import_cycle.md) — importing dialects/x.ts directly → "Class extends value undefined"; import via helpers/index.js
+- [fn dialect + auth driver test import cycles](../reference_directus_fn_dialect_test_import_cycle.md) — "Class extends value undefined"; dialects: import via helpers/index.js; local driver: mock auth.js + authentication + respond as oauth2.test.ts does

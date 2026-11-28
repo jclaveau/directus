@@ -5,6 +5,7 @@ import { i18n } from '@/lang';
 import { getItemRoute } from '@/utils/get-route';
 import { userName } from '@/utils/user-name';
 import { isSystemCollection } from '@directus/system-data';
+import type { UserIdentity } from '@directus/types';
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
@@ -12,7 +13,7 @@ import { useRouter } from 'vue-router';
 type ActivityRecord = {
 	user: {
 		id: string;
-		email: string;
+		primary_identity: UserIdentity | null;
 		first_name: string;
 		last_name: string;
 	} | null;
@@ -56,7 +57,8 @@ async function loadActivity() {
 			params: {
 				fields: [
 					'user.id',
-					'user.email',
+					'user.primary_identity.kind',
+					'user.primary_identity.value',
 					'user.first_name',
 					'user.last_name',
 					'action',

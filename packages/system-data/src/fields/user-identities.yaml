@@ -1,0 +1,35 @@
+table: directus_user_identities
+
+fields:
+  - field: id
+    special:
+      - uuid
+    hidden: true
+  - field: user
+    special:
+      - m2o
+    width: half
+  - field: kind
+    width: half
+    interface: select-dropdown
+    options:
+      choices:
+        - text: $t:email
+          value: email
+  - field: value
+    width: half
+    interface: input
+  - field: verified
+    width: half
+    special:
+      - cast-boolean
+    interface: boolean
+  - field: auth_data
+    hidden: true
+  - field: user_info
+    special:
+      - cast-json
+    hidden: true
+  - field: scope
+    width: full
+    readonly: true

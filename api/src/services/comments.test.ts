@@ -112,18 +112,23 @@ describe('Services / Comments', () => {
 				id: senderUuid,
 				first_name: 'Sam',
 				last_name: 'Sender',
-				email: 'sam@x.com',
+				primary_identity: { kind: 'email', value: 'sam@x.com' },
 			}, { scopedCacheFingerprints: [] }))
 			.mockResolvedValueOnce(withMeta({
 				id: mentionUuid,
 				first_name: 'Jane',
 				last_name: 'Doe',
-				email: 'jane@x.com',
+				primary_identity: { kind: 'email', value: 'jane@x.com' },
 				role: { id: null },
 			}, { scopedCacheFingerprints: [] }));
 
 		vi.mocked(UsersService.prototype.readByQuery).mockResolvedValue(withMeta([
-			{ id: mentionUuid, first_name: 'Jane', last_name: 'Doe', email: 'jane@x.com' },
+			{
+				id: mentionUuid,
+				first_name: 'Jane',
+				last_name: 'Doe',
+				primary_identity: { kind: 'email', value: 'jane@x.com' },
+			},
 		], { scopedCacheFingerprints: [] }));
 
 		const result = await service.createMany([
@@ -182,13 +187,13 @@ describe('Services / Comments', () => {
 				id: senderUuid,
 				first_name: 'Sam',
 				last_name: 'Sender',
-				email: 'sam@x.com',
+				primary_identity: { kind: 'email', value: 'sam@x.com' },
 			}, { scopedCacheFingerprints: [] }))
 			.mockResolvedValueOnce(withMeta({
 				id: mentionUuid,
 				first_name: 'Jane',
 				last_name: 'Doe',
-				email: 'jane@x.com',
+				primary_identity: { kind: 'email', value: 'jane@x.com' },
 				role: { id: null },
 			}, { scopedCacheFingerprints: [] }));
 
@@ -275,13 +280,13 @@ Sam Sender has mentioned you in a comment:
 				id: senderUuid,
 				first_name: 'Sam',
 				last_name: 'Sender',
-				email: 'sam@x.com',
+				primary_identity: { kind: 'email', value: 'sam@x.com' },
 			}, { scopedCacheFingerprints: [] }))
 			.mockResolvedValueOnce(withMeta({
 				id: mentionUuid,
 				first_name: 'Jane',
 				last_name: 'Doe',
-				email: 'jane@x.com',
+				primary_identity: { kind: 'email', value: 'jane@x.com' },
 				role: { id: null },
 			}, { scopedCacheFingerprints: [] }));
 
@@ -308,11 +313,25 @@ Sam Sender has mentioned you in a comment:
 		expect(result).toEqual(['comment-pk-8']);
 
 		expect(vi.mocked(UsersService.prototype.readOne).mock.calls).toEqual([
-			[senderUuid, { fields: ['id', 'first_name', 'last_name', 'email'] }],
-			[
-				'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-				{ fields: ['id', 'first_name', 'last_name', 'email', 'role.id'] },
-			],
+			[senderUuid, {
+				fields: [
+					'id',
+					'first_name',
+					'last_name',
+					'primary_identity.kind',
+					'primary_identity.value',
+				],
+			}],
+			['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', {
+				fields: [
+					'id',
+					'first_name',
+					'last_name',
+					'primary_identity.kind',
+					'primary_identity.value',
+					'role.id',
+				],
+			}],
 		]);
 
 		expect(vi.mocked(UsersService.prototype.readByQuery).mock.calls).toEqual([
@@ -322,7 +341,13 @@ Sam Sender has mentioned you in a comment:
 				limit: -1,
 			}],
 			[{
-				fields: ['id', 'first_name', 'last_name', 'email'],
+				fields: [
+					'id',
+					'first_name',
+					'last_name',
+					'primary_identity.kind',
+					'primary_identity.value',
+				],
 				filter: { id: { _in: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'] } },
 			}],
 		]);
@@ -357,13 +382,13 @@ Sam Sender has mentioned you in a comment:
 				id: senderUuid,
 				first_name: 'Sam',
 				last_name: 'Sender',
-				email: 'sam@x.com',
+				primary_identity: { kind: 'email', value: 'sam@x.com' },
 			}, { scopedCacheFingerprints: [] }))
 			.mockResolvedValue(withMeta({
 				id: mentionUuid,
 				first_name: 'Jane',
 				last_name: 'Doe',
-				email: 'jane@x.com',
+				primary_identity: { kind: 'email', value: 'jane@x.com' },
 				role: { id: null },
 			}, { scopedCacheFingerprints: [] }));
 
@@ -413,7 +438,13 @@ Sam Sender has mentioned you in a comment:
 				limit: -1,
 			}],
 			[{
-				fields: ['id', 'first_name', 'last_name', 'email'],
+				fields: [
+					'id',
+					'first_name',
+					'last_name',
+					'primary_identity.kind',
+					'primary_identity.value',
+				],
 				filter: { id: { _in: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'] } },
 			}],
 		]);
@@ -444,7 +475,7 @@ Sam Sender has mentioned you in a comment:
 					id: senderUuid,
 					first_name: 'Sam',
 					last_name: 'Sender',
-					email: 'sam@x.com',
+					primary_identity: { kind: 'email', value: 'sam@x.com' },
 				}, { scopedCacheFingerprints: [] }));
 
 			vi.mocked(UsersService.prototype.readByQuery)
@@ -483,7 +514,7 @@ Sam Sender has mentioned you in a comment:
 					id: senderUuid,
 					first_name: 'Sam',
 					last_name: 'Sender',
-					email: 'sam@x.com',
+					primary_identity: { kind: 'email', value: 'sam@x.com' },
 				}, { scopedCacheFingerprints: [] }));
 
 			vi.mocked(UsersService.prototype.readByQuery)
@@ -532,13 +563,13 @@ Sam Sender has mentioned you in a comment:
 					id: senderUuid,
 					first_name: 'Sam',
 					last_name: 'Sender',
-					email: 'sam@x.com',
+					primary_identity: { kind: 'email', value: 'sam@x.com' },
 				}, { scopedCacheFingerprints: [] }))
 				.mockResolvedValueOnce(withMeta({
 					id: mentionUuid,
 					first_name: 'Jane',
 					last_name: 'Doe',
-					email: 'jane@x.com',
+					primary_identity: { kind: 'email', value: 'jane@x.com' },
 					role: { id: null },
 				}, { scopedCacheFingerprints: [] }));
 
@@ -561,7 +592,7 @@ Sam Sender has mentioned you in a comment:
 						id: mentionUuid,
 						first_name: 'Jane',
 						last_name: 'Doe',
-						email: 'jane@x.com',
+						primary_identity: { kind: 'email', value: 'jane@x.com' },
 					},
 				], { scopedCacheFingerprints: [] }));
 

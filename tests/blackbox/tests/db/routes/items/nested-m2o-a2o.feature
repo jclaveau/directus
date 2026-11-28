@@ -373,26 +373,27 @@ Feature: A nested many-to-one or any-to-one object writes its related row
 
   Scenario: a PATCH creating a user through an M2O passes the user checks
     When these requests get these responses:
-      | request                                  | response                          |
-      | method: POST                             | code: 200                         |+
-      | path: /items/test_nested_m2o_task        |                                   |
-      | payload:                                 |                                   |
-      |   id: task-i                             |                                   |
-      | method: PATCH                            | code: 200                         |+
-      | path: /items/test_nested_m2o_task/task-i | body:                             |
-      | query:                                   |   data:                           |
-      |   fields:                                |     assignee:                     |
-      |     - assignee.email                     |       email: m2o-user@example.com |
-      |     - assignee.status                    |       status: active              |
-      | payload:                                 |                                   |
-      |   assignee:                              |                                   |
-      |     email: m2o-user@example.com          |                                   |
+      | request                                  | response                            |
+      | method: POST                             | code: 200                           |+
+      | path: /items/test_nested_m2o_task        |                                     |
+      | payload:                                 |                                     |
+      |   id: task-i                             |                                     |
+      | method: PATCH                            | code: 200                           |+
+      | path: /items/test_nested_m2o_task/task-i | body:                               |
+      | query:                                   |   data:                             |
+      |   fields:                                |     assignee:                       |
+      |     - assignee.primary_identity.value    |       primary_identity:             |
+      |     - assignee.status                    |         value: m2o-user@example.com |
+      | payload:                                 |       status: active                |
+      |   assignee:                              |                                     |
+      |     email: m2o-user@example.com          |                                     |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 2       | directus_activity    | 0      | 2      | 0      | 0      |
-      | 2       | directus_revisions   | 0      | 2      | 1      | 0      |
-      | 2       | directus_users       | 3      | 1      | 0      | 0      |
-      | 2       | test_nested_m2o_task | 2      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 2       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 2       | directus_revisions       | 0      | 2      | 1      | 0      |
+      | 2       | directus_user_identities | 3      | 1      | 0      | 0      |
+      | 2       | directus_users           | 2      | 1      | 1      | 0      |
+      | 2       | test_nested_m2o_task     | 2      | 0      | 1      | 0      |
 
   Scenario: a nested A2O object without its collection field is refused
     When these requests get these responses:

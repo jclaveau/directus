@@ -34,14 +34,16 @@ Feature: A single user's password is checked against the password policy
       |   email: long-<run>@example.com            |                                  |
       |   password: long-enough-to-pass-the-policy |                                  |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_settings  | 1      | 0      | 0      | 0      |
-      | 1       | directus_users     | 2      | 0      | 0      | 0      |
-      | 3       | directus_access    | 1      | 0      | 0      | 0      |
-      | 3       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 3       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 3       | directus_settings  | 1      | 0      | 0      | 0      |
-      | 3       | directus_users     | 3      | 1      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 3       | directus_access          | 1      | 0      | 0      | 0      |
+      | 3       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 3       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 3       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 3       | directus_user_identities | 3      | 1      | 0      | 0      |
+      | 3       | directus_users           | 2      | 1      | 1      | 0      |
 
   Scenario: a batch creating a user with an empty password is checked like a single create
     Given these requests are sent:
@@ -66,9 +68,10 @@ Feature: A single user's password is checked against the password policy
       |   fields: id                           |                                  |
       |   filter[first_name][_eq]: empty-<run> |                                  |
     And on postgres the requests ran these statements:
-      | request | table             | select | insert | update | delete |
-      | 1       | directus_settings | 1      | 0      | 0      | 0      |
-      | 1       | directus_users    | 2      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
 
   Scenario: a reset to a password the policy refuses leaves the token usable
     Given these requests are sent:
@@ -77,10 +80,12 @@ Feature: A single user's password is checked against the password policy
       | path: /settings                  |           |
       | payload:                         |           |
       |   auth_password_policy: ^.{30,}$ |           |
-      | method: POST                     | code: 200 |+
-      | path: /users                     |           |
-      | payload:                         |           |
-      |   email: reset-<run>@example.com |           |
+    And the rows of directus_users:
+      | id     | password                                                              |
+      | <user> | $argon2id$v=19$m=1024,p=1,t=1$BcPsdrIsNpFpkpLtDh95FA$PyzvmEPs65/hmc0s |
+    And the rows of directus_user_identities:
+      | id           | user   | kind  | value                   | verified |
+      | <user-email> | <user> | email | reset-<run>@example.com | true     |
     Then these requests get these responses:
       | request                                    | response                         |
       | method: POST                               | code: 400                        |+
@@ -89,7 +94,7 @@ Feature: A single user's password is checked against the password policy
       |   token: !jwt                              |     - message: >-                |
       |     email: reset-<run>@example.com         |         Validation failed for    |
       |     scope: password-reset                  |         field "password". Value  |
-      |     hash: 33c587                           |         doesn't have the correct |
+      |     hash: 570182ad                         |         doesn't have the correct |
       |   password: too-short                      |         format.                  |
       | method: POST                               | code: 204                        |+
       | path: /auth/password/reset                 |                                  |
@@ -97,16 +102,18 @@ Feature: A single user's password is checked against the password policy
       |   token: !jwt                              |                                  |
       |     email: reset-<run>@example.com         |                                  |
       |     scope: password-reset                  |                                  |
-      |     hash: 33c587                           |                                  |
+      |     hash: 570182ad                         |                                  |
       |   password: long-enough-to-pass-the-policy |                                  |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_settings  | 2      | 0      | 0      | 0      |
-      | 1       | directus_users     | 2      | 0      | 0      | 0      |
-      | 2       | directus_access    | 1      | 0      | 0      | 0      |
-      | 2       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 2       | directus_sessions  | 0      | 0      | 0      | 1      |
-      | 2       | directus_settings  | 2      | 0      | 0      | 0      |
-      | 2       | directus_users     | 3      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_settings        | 2      | 0      | 0      | 0      |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 2      | 0      | 0      | 0      |
+      | 2       | directus_access          | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 2       | directus_sessions        | 0      | 0      | 0      | 1      |
+      | 2       | directus_settings        | 2      | 0      | 0      | 0      |
+      | 2       | directus_user_identities | 2      | 0      | 0      | 0      |
+      | 2       | directus_users           | 3      | 0      | 1      | 0      |
 

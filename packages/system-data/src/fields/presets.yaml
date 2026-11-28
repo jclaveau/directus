@@ -30,7 +30,7 @@ fields:
       - m2o
     display: related-values
     display_options:
-      template: '{{ email }}'
+      template: '{{ primary_identity.value }}'
 
   - field: id
     width: half

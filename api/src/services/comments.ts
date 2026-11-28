@@ -109,7 +109,13 @@ export class CommentsService extends ItemsService {
 			const itemKey = item['item']!;
 
 			const sender = await this.usersService.readOne(this.accountability.user, {
-				fields: ['id', 'first_name', 'last_name', 'email'],
+				fields: [
+					'id',
+					'first_name',
+					'last_name',
+					'primary_identity.kind',
+					'primary_identity.value',
+				],
 			});
 
 			// Two spellings of one uuid mention one user, who is notified once;
@@ -129,7 +135,14 @@ export class CommentsService extends ItemsService {
 				}
 
 				const user = await this.usersService.readOne(userID, {
-					fields: ['id', 'first_name', 'last_name', 'email', 'role.id'],
+					fields: [
+						'id',
+						'first_name',
+						'last_name',
+						'primary_identity.kind',
+						'primary_identity.value',
+						'role.id',
+					],
 				});
 
 				const accountability: Accountability = {
@@ -167,7 +180,13 @@ export class CommentsService extends ItemsService {
 					);
 
 					const templateData = await usersService.readByQuery({
-						fields: ['id', 'first_name', 'last_name', 'email'],
+						fields: [
+							'id',
+							'first_name',
+							'last_name',
+							'primary_identity.kind',
+							'primary_identity.value',
+						],
 						filter: {
 							id: {
 								_in: mentionedUserIds,

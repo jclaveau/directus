@@ -25,6 +25,7 @@ import {
 	SESSION_COOKIE_OPTIONS,
 } from '../../constants.js';
 import emitter from '../../emitter.js';
+import { ItemsService } from '../../services/items.js';
 import { createLDAPAuthRouter, LDAPAuthDriver } from './ldap.js';
 
 const mockedDeps = vi.hoisted(() => {
@@ -38,6 +39,8 @@ const mockedDeps = vi.hoisted(() => {
 		logger: { warn: vi.fn(), error: vi.fn() },
 		updateOne: vi.fn(),
 		createOne: vi.fn(),
+		createIdentity: vi.fn(),
+		updateIdentity: vi.fn(),
 		login: vi.fn(),
 	};
 });
@@ -76,6 +79,24 @@ vi.mock('../../services/users.js', () => {
 		UsersService: vi.fn(function () {
 			return { updateOne: mockedDeps.updateOne, createOne: mockedDeps.createOne };
 		}),
+	};
+});
+
+vi.mock('../../services/items.js', () => {
+	return {
+		ItemsService: vi.fn(function () {
+			return {
+				createOne: mockedDeps.createIdentity,
+				updateOne: mockedDeps.updateIdentity,
+			};
+		}),
+	};
+});
+
+vi.mock('../../utils/transaction.js', async (importOriginal) => {
+	return {
+		...await importOriginal<object>(),
+		transaction: vi.fn((trxKnex, runInTransaction) => runInTransaction(trxKnex)),
 	};
 });
 
@@ -646,7 +667,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 	});
 
 	describe('existing user', () => {
-		test('updates nothing but the hook payload when nothing syncs', async () => {
+		test('updates nothing but the identity when nothing syncs', async () => {
 			const ldapDriver = new LDAPAuthDriver(
 				{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
 				{
@@ -667,12 +688,17 @@ describe('LDAPAuthDriver.getUserID', () => {
 				},
 			}]);
 
-			knexTracker.on.select('directus_users').response({ id: 'user-1' });
+			knexTracker.on.select('directus_user_identities').response({
+				id: 'identity-1',
+				user: 'user-1',
+				kind: 'ldap',
+				value: 'cn=jdoe,ou=users,dc=example',
+			});
 
 			await expect(ldapDriver.getUserID({ identifier: 'jdoe' }))
 				.resolves.toBe('user-1');
 
-			expect(vi.mocked(emitter.emitFilter).mock.calls[0]).toStrictEqual([
+			expect(vi.mocked(emitter.emitFilter).mock.calls).toStrictEqual([[
 				'auth.update',
 				{},
 				{
@@ -687,16 +713,36 @@ describe('LDAPAuthDriver.getUserID', () => {
 					},
 				},
 				{
-					database: 'database-handle',
+					database: mockedKnex,
 					schema: { collections: {}, relations: [] },
 					accountability: null,
 				},
-			]);
+			]]);
 
-			expect(mockedDeps.updateOne.mock.calls).toStrictEqual([['user-1', {}]]);
+			expect(mockedDeps.updateOne).not.toHaveBeenCalled();
 			expect(mockedDeps.createOne).not.toHaveBeenCalled();
 
+			expect(ItemsService).toHaveBeenCalledWith('directus_user_identities', {
+				knex: mockedKnex,
+				schema: { collections: {}, relations: [] },
+				accountability: null,
+			});
+
+			expect(mockedDeps.updateIdentity.mock.calls).toStrictEqual([[
+				'identity-1',
+				{
+					user_info: {
+						dn: 'cn=jdoe,ou=users,dc=example',
+						userAccountControl: 0,
+					},
+					scope: null,
+				},
+			]]);
+
+			expect(mockedDeps.createIdentity).not.toHaveBeenCalled();
+
 			expect(knexTracker.history.select[0]!.bindings).toEqual([
+				'ldap',
 				'cn=jdoe,ou=users,dc=example',
 				1,
 			]);
@@ -720,16 +766,20 @@ describe('LDAPAuthDriver.getUserID', () => {
 				pojo: { objectName: 'CN=JDoe,OU=Users,DC=Example', attributes: [] },
 			}]);
 
-			knexTracker.on.select('directus_users').response({ id: 'user-1' });
+			knexTracker.on.select('directus_user_identities').response({
+				id: 'identity-1',
+				user: 'user-1',
+			});
 
 			await ldapDriver.getUserID({ identifier: 'jdoe' });
 
 			expect(knexTracker.history.select[0]!.sql).toBe(
-				'select "id" from "directus_users" '
-				+ 'where LOWER("external_identifier") = ? limit ?',
+				'select * from "directus_user_identities" '
+				+ 'where "kind" = ? and LOWER("value") = ? limit ?',
 			);
 
 			expect(knexTracker.history.select[0]!.bindings).toEqual([
+				'ldap',
 				'cn=jdoe,ou=users,dc=example',
 				1,
 			]);
@@ -763,16 +813,72 @@ describe('LDAPAuthDriver.getUserID', () => {
 				},
 			}]);
 
-			knexTracker.on.select('directus_users').response({ id: 'user-1' });
+			knexTracker.on.select('directus_user_identities').responseOnce({
+				id: 'identity-1',
+				user: 'user-1',
+			});
+
+			knexTracker.on.select('directus_user_identities').responseOnce(undefined);
+
+			knexTracker.on.select('directus_user_identities').response({
+				id: 'identity-1',
+				user: 'user-1',
+			});
+
+			knexTracker.on.update('directus_users').response(1);
+			mockedDeps.createIdentity.mockResolvedValueOnce('identity-2');
 
 			await expect(ldapDriver.getUserID({ identifier: 'jdoe' }))
 				.resolves.toBe('user-1');
 
-			expect(mockedDeps.updateOne).toHaveBeenCalledWith('user-1', {
+			expect(vi.mocked(emitter.emitFilter).mock.calls[0]![1]).toStrictEqual({
 				first_name: 'John',
 				last_name: 'Doe',
 				email: 'john@example.com',
 			});
+
+			expect(mockedDeps.updateOne.mock.calls).toStrictEqual([[
+				'user-1',
+				{ first_name: 'John', last_name: 'Doe' },
+			]]);
+
+			expect(mockedDeps.updateIdentity.mock.calls).toStrictEqual([[
+				'identity-1',
+				{
+					user_info: {
+						dn: 'cn=jdoe,ou=users,dc=example',
+						userAccountControl: 512,
+						firstName: 'John',
+						lastName: 'Doe',
+						email: 'john@example.com',
+						uid: 'jdoe',
+					},
+					scope: null,
+				},
+			]]);
+
+			expect(knexTracker.history.select[1]!.bindings).toEqual([
+				'email',
+				'john@example.com',
+				1,
+			]);
+
+			expect(mockedDeps.createIdentity.mock.calls).toStrictEqual([[{
+				user: 'user-1',
+				kind: 'email',
+				value: 'john@example.com',
+				verified: false,
+			}]]);
+
+			expect(knexTracker.history.update[0]!.sql).toBe(
+				'update "directus_users" set "primary_identity" = ? '
+				+ 'where "id" = ? and "primary_identity" is null',
+			);
+
+			expect(knexTracker.history.update[0]!.bindings).toEqual([
+				'identity-2',
+				'user-1',
+			]);
 
 			expect(vi.mocked(emitter.emitFilter).mock.calls[0]![2]).toEqual({
 				identifier: 'cn=jdoe,ou=users,dc=example',
@@ -809,7 +915,10 @@ describe('LDAPAuthDriver.getUserID', () => {
 				pojo: { objectName: 'cn=jdoe,ou=users,dc=example', attributes: [] },
 			}]);
 
-			knexTracker.on.select('directus_users').response({ id: 'user-1' });
+			knexTracker.on.select('directus_user_identities').response({
+				id: 'identity-1',
+				user: 'user-1',
+			});
 
 			vi.mocked(emitter.emitFilter).mockResolvedValueOnce({
 				title: 'Engineer',
@@ -817,9 +926,10 @@ describe('LDAPAuthDriver.getUserID', () => {
 
 			await ldapDriver.getUserID({ identifier: 'jdoe' });
 
-			expect(mockedDeps.updateOne).toHaveBeenCalledWith('user-1', {
-				title: 'Engineer',
-			});
+			expect(mockedDeps.updateOne.mock.calls).toStrictEqual([[
+				'user-1',
+				{ title: 'Engineer' },
+			]]);
 		});
 
 		test('syncs the role of the first matching LDAP group', async () => {
@@ -853,7 +963,11 @@ describe('LDAPAuthDriver.getUserID', () => {
 			);
 
 			knexTracker.on.select('directus_roles').response({ id: 'role-editor' });
-			knexTracker.on.select('directus_users').response({ id: 'user-1' });
+
+			knexTracker.on.select('directus_user_identities').response({
+				id: 'identity-1',
+				user: 'user-1',
+			});
 
 			await expect(ldapDriver.getUserID({ identifier: 'jdoe' }))
 				.resolves.toBe('user-1');
@@ -884,9 +998,10 @@ describe('LDAPAuthDriver.getUserID', () => {
 				1,
 			]);
 
-			expect(mockedDeps.updateOne).toHaveBeenCalledWith('user-1', {
-				role: 'role-editor',
-			});
+			expect(mockedDeps.updateOne.mock.calls).toStrictEqual([[
+				'user-1',
+				{ role: 'role-editor' },
+			]]);
 		});
 
 		test('matches groups by uid when groupAttribute is memberUid', async () => {
@@ -915,7 +1030,10 @@ describe('LDAPAuthDriver.getUserID', () => {
 
 			replySearch(['end']);
 
-			knexTracker.on.select('directus_users').response({ id: 'user-1' });
+			knexTracker.on.select('directus_user_identities').response({
+				id: 'identity-1',
+				user: 'user-1',
+			});
 
 			await ldapDriver.getUserID({ identifier: 'jdoe' });
 
@@ -956,7 +1074,10 @@ describe('LDAPAuthDriver.getUserID', () => {
 
 			replySearch(['end']);
 
-			knexTracker.on.select('directus_users').response({ id: 'user-1' });
+			knexTracker.on.select('directus_user_identities').response({
+				id: 'identity-1',
+				user: 'user-1',
+			});
 
 			await ldapDriver.getUserID({ identifier: 'jdoe' });
 
@@ -997,15 +1118,28 @@ describe('LDAPAuthDriver.getUserID', () => {
 
 			replySearch(['end']);
 
-			knexTracker.on.select('directus_users').response({ id: 'user-1' });
+			knexTracker.on.select('directus_user_identities').response({
+				id: 'identity-1',
+				user: 'user-1',
+			});
 
 			await ldapDriver.getUserID({ identifier: 'jdoe' });
 
-			expect(knexTracker.history.select).toHaveLength(1);
+			expect(knexTracker.history.select).toHaveLength(2);
 
-			expect(mockedDeps.updateOne).toHaveBeenCalledWith('user-1', {
-				role: 'role-default',
-			});
+			expect(knexTracker.history.select[0]!.sql).toBe(
+				'select * from "directus_user_identities" '
+				+ 'where "kind" = ? and LOWER("value") = ? limit ?',
+			);
+
+			expect(knexTracker.history.select[1]!.sql).toBe(
+				'select * from "directus_user_identities" where "id" = ? limit ?',
+			);
+
+			expect(mockedDeps.updateOne.mock.calls).toStrictEqual([[
+				'user-1',
+				{ role: 'role-default' },
+			]]);
 		});
 
 		test('clears the role when no group matches and no default exists', async () => {
@@ -1029,11 +1163,17 @@ describe('LDAPAuthDriver.getUserID', () => {
 
 			replySearch(['end']);
 
-			knexTracker.on.select('directus_users').response({ id: 'user-1' });
+			knexTracker.on.select('directus_user_identities').response({
+				id: 'identity-1',
+				user: 'user-1',
+			});
 
 			await ldapDriver.getUserID({ identifier: 'jdoe' });
 
-			expect(mockedDeps.updateOne).toHaveBeenCalledWith('user-1', { role: null });
+			expect(mockedDeps.updateOne.mock.calls).toStrictEqual([[
+				'user-1',
+				{ role: null },
+			]]);
 		});
 
 		test('refuses when the group search is rejected', async () => {
@@ -1110,6 +1250,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 					groupDn: 'ou=groups,dc=example',
 					provider: 'ldap',
 					clientUrl: 'ldap://ldap.example',
+					requireVerifiedEmail: false,
 				},
 			);
 
@@ -1134,14 +1275,23 @@ describe('LDAPAuthDriver.getUserID', () => {
 			);
 
 			knexTracker.on.select('directus_roles').response({ id: 'role-editor' });
+			knexTracker.on.select('directus_user_identities').responseOnce(undefined);
+			knexTracker.on.select('directus_user_identities').responseOnce(undefined);
 
-			knexTracker.on.select('directus_users').responseOnce(undefined);
-			knexTracker.on.select('directus_users').response({ id: 'user-new' });
+			knexTracker.on.select('directus_user_identities').response({
+				id: 'identity-1',
+				user: 'user-new',
+			});
+
+			knexTracker.on.update('directus_users').response(1);
+			mockedDeps.createOne.mockResolvedValueOnce('user-new');
+			mockedDeps.createIdentity.mockResolvedValueOnce('identity-1');
+			mockedDeps.createIdentity.mockResolvedValueOnce('identity-2');
 
 			await expect(ldapDriver.getUserID({ identifier: 'jdoe' }))
 				.resolves.toBe('user-new');
 
-			expect(emitter.emitFilter).toHaveBeenCalledWith(
+			expect(vi.mocked(emitter.emitFilter).mock.calls).toStrictEqual([[
 				'auth.create',
 				{
 					provider: 'ldap',
@@ -1166,22 +1316,89 @@ describe('LDAPAuthDriver.getUserID', () => {
 					},
 				},
 				{
-					database: 'database-handle',
+					database: mockedKnex,
 					schema: { collections: {}, relations: [] },
 					accountability: null,
 				},
-			);
+			]]);
 
-			expect(mockedDeps.createOne).toHaveBeenCalledWith({
-				provider: 'ldap',
+			expect(knexTracker.history.select[2]!.bindings).toEqual([
+				'email',
+				'john@example.com',
+				1,
+			]);
+
+			expect(mockedDeps.createOne.mock.calls).toStrictEqual([[{
 				first_name: 'John',
 				last_name: 'Doe',
-				email: 'john@example.com',
-				external_identifier: 'cn=jdoe,ou=users,dc=example',
 				role: 'role-editor',
-			});
+			}]]);
+
+			expect(mockedDeps.createIdentity.mock.calls).toStrictEqual([
+				[{
+					user: 'user-new',
+					kind: 'ldap',
+					value: 'cn=jdoe,ou=users,dc=example',
+					verified: true,
+					auth_data: null,
+					user_info: {
+						dn: 'cn=jdoe,ou=users,dc=example',
+						userAccountControl: 0,
+						firstName: 'John',
+						lastName: 'Doe',
+						email: 'john@example.com',
+					},
+					scope: null,
+				}],
+				[{
+					user: 'user-new',
+					kind: 'email',
+					value: 'john@example.com',
+					verified: false,
+				}],
+			]);
+
+			expect(knexTracker.history.update[0]!.sql).toBe(
+				'update "directus_users" set "primary_identity" = ? where "id" = ?',
+			);
+
+			expect(knexTracker.history.update[0]!.bindings).toEqual([
+				'identity-2',
+				'user-new',
+			]);
 
 			expect(mockedDeps.updateOne).not.toHaveBeenCalled();
+		});
+
+		test('refuses to create a user while requireVerifiedEmail is on', async () => {
+			const ldapDriver = new LDAPAuthDriver(
+				{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+				{
+					bindDn: 'cn=admin',
+					bindPassword: 'secret',
+					userDn: 'ou=users,dc=example',
+					provider: 'ldap',
+					clientUrl: 'ldap://ldap.example',
+				},
+			);
+
+			replySearch(['searchEntry']);
+
+			replySearch(['searchEntry', {
+				pojo: { objectName: 'cn=jdoe,ou=users,dc=example', attributes: [] },
+			}]);
+
+			knexTracker.on.select('directus_user_identities').response(undefined);
+
+			await expect(ldapDriver.getUserID({ identifier: 'jdoe' }))
+				.rejects.toStrictEqual(new InvalidCredentialsError());
+
+			expect(mockedDeps.logger.warn).toHaveBeenCalledWith(
+				'[LDAP] Unverified email can\'t create a user for provider "ldap"',
+			);
+
+			expect(emitter.emitFilter).not.toHaveBeenCalled();
+			expect(mockedDeps.createOne).not.toHaveBeenCalled();
 		});
 
 		test('creates the user with defaultRoleId when no group matches', async () => {
@@ -1194,6 +1411,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 					defaultRoleId: 'role-default',
 					provider: 'ldap',
 					clientUrl: 'ldap://ldap.example',
+					requireVerifiedEmail: false,
 				},
 			);
 
@@ -1203,12 +1421,21 @@ describe('LDAPAuthDriver.getUserID', () => {
 				pojo: { objectName: 'cn=jdoe,ou=users,dc=example', attributes: [] },
 			}]);
 
-			knexTracker.on.select('directus_users').responseOnce(undefined);
-			knexTracker.on.select('directus_users').response({ id: 'user-new' });
+			knexTracker.on.select('directus_user_identities').responseOnce(undefined);
 
-			await ldapDriver.getUserID({ identifier: 'jdoe' });
+			knexTracker.on.select('directus_user_identities').response({
+				id: 'identity-1',
+				user: 'user-new',
+			});
 
-			expect(mockedDeps.createOne).toHaveBeenCalledWith({
+			knexTracker.on.update('directus_users').response(1);
+			mockedDeps.createOne.mockResolvedValueOnce('user-new');
+			mockedDeps.createIdentity.mockResolvedValueOnce('identity-1');
+
+			await expect(ldapDriver.getUserID({ identifier: 'jdoe' }))
+				.resolves.toBe('user-new');
+
+			expect(vi.mocked(emitter.emitFilter).mock.calls[0]![1]).toStrictEqual({
 				provider: 'ldap',
 				first_name: undefined,
 				last_name: undefined,
@@ -1216,6 +1443,30 @@ describe('LDAPAuthDriver.getUserID', () => {
 				external_identifier: 'cn=jdoe,ou=users,dc=example',
 				role: 'role-default',
 			});
+
+			expect(mockedDeps.createOne.mock.calls).toStrictEqual([[{
+				first_name: undefined,
+				last_name: undefined,
+				role: 'role-default',
+			}]]);
+
+			expect(mockedDeps.createIdentity.mock.calls).toStrictEqual([[{
+				user: 'user-new',
+				kind: 'ldap',
+				value: 'cn=jdoe,ou=users,dc=example',
+				verified: true,
+				auth_data: null,
+				user_info: {
+					dn: 'cn=jdoe,ou=users,dc=example',
+					userAccountControl: 0,
+				},
+				scope: null,
+			}]]);
+
+			expect(knexTracker.history.update[0]!.bindings).toEqual([
+				'identity-1',
+				'user-new',
+			]);
 		});
 
 		test('creates with what the auth.create hook returns', async () => {
@@ -1227,6 +1478,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 					userDn: 'ou=users,dc=example',
 					provider: 'ldap',
 					clientUrl: 'ldap://ldap.example',
+					requireVerifiedEmail: false,
 				},
 			);
 
@@ -1236,20 +1488,81 @@ describe('LDAPAuthDriver.getUserID', () => {
 				pojo: { objectName: 'cn=jdoe,ou=users,dc=example', attributes: [] },
 			}]);
 
-			knexTracker.on.select('directus_users').responseOnce(undefined);
-			knexTracker.on.select('directus_users').response({ id: 'user-new' });
+			knexTracker.on.select('directus_user_identities').responseOnce(undefined);
+
+			knexTracker.on.select('directus_user_identities').response({
+				id: 'identity-1',
+				user: 'user-new',
+			});
+
+			knexTracker.on.update('directus_users').response(1);
+			mockedDeps.createOne.mockResolvedValueOnce('user-new');
+			mockedDeps.createIdentity.mockResolvedValueOnce('identity-1');
 
 			vi.mocked(emitter.emitFilter).mockResolvedValueOnce({
-				external_identifier: 'cn=jdoe,ou=users,dc=example',
+				external_identifier: 'cn=john,ou=users,dc=example',
 				status: 'draft',
 			});
 
 			await ldapDriver.getUserID({ identifier: 'jdoe' });
 
-			expect(mockedDeps.createOne).toHaveBeenCalledWith({
-				external_identifier: 'cn=jdoe,ou=users,dc=example',
+			expect(mockedDeps.createOne.mock.calls).toStrictEqual([[{
 				status: 'draft',
+			}]]);
+
+			expect(mockedDeps.createIdentity.mock.calls).toStrictEqual([[{
+				user: 'user-new',
+				kind: 'ldap',
+				value: 'cn=john,ou=users,dc=example',
+				verified: true,
+				auth_data: null,
+				user_info: {
+					dn: 'cn=jdoe,ou=users,dc=example',
+					userAccountControl: 0,
+				},
+				scope: null,
+			}]]);
+		});
+
+		test('refuses an email held by another account', async () => {
+			const ldapDriver = new LDAPAuthDriver(
+				{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+				{
+					bindDn: 'cn=admin',
+					bindPassword: 'secret',
+					userDn: 'ou=users,dc=example',
+					provider: 'ldap',
+					clientUrl: 'ldap://ldap.example',
+					requireVerifiedEmail: false,
+				},
+			);
+
+			replySearch(['searchEntry']);
+
+			replySearch(['searchEntry', {
+				pojo: {
+					objectName: 'cn=jdoe,ou=users,dc=example',
+					attributes: [{ type: 'mail', values: ['john@example.com'] }],
+				},
+			}]);
+
+			knexTracker.on.select('directus_user_identities').responseOnce(undefined);
+
+			knexTracker.on.select('directus_user_identities').response({
+				id: 'identity-9',
+				user: 'user-other',
 			});
+
+			await expect(ldapDriver.getUserID({ identifier: 'jdoe' }))
+				.rejects.toStrictEqual(new InvalidProviderError());
+
+			expect(mockedDeps.logger.warn).toHaveBeenCalledWith(
+				'[LDAP] Failed to register user. Email held by another user'
+				+ ' for provider "ldap"',
+			);
+
+			expect(mockedDeps.createOne).not.toHaveBeenCalled();
+			expect(mockedDeps.createIdentity).not.toHaveBeenCalled();
 		});
 
 		test('refuses a user that is not unique as an invalid provider', async () => {
@@ -1261,6 +1574,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 					userDn: 'ou=users,dc=example',
 					provider: 'ldap',
 					clientUrl: 'ldap://ldap.example',
+					requireVerifiedEmail: false,
 				},
 			);
 
@@ -1270,15 +1584,16 @@ describe('LDAPAuthDriver.getUserID', () => {
 				pojo: { objectName: 'cn=jdoe,ou=users,dc=example', attributes: [] },
 			}]);
 
-			knexTracker.on.select('directus_users').response(undefined);
+			knexTracker.on.select('directus_user_identities').response(undefined);
 
 			const notUniqueError = new RecordNotUniqueError({
-				collection: 'directus_users',
-				field: 'email',
-				value: 'john@example.com',
+				collection: 'directus_user_identities',
+				field: 'value',
+				value: 'cn=jdoe,ou=users,dc=example',
 			});
 
-			mockedDeps.createOne.mockRejectedValueOnce(notUniqueError);
+			mockedDeps.createOne.mockResolvedValueOnce('user-new');
+			mockedDeps.createIdentity.mockRejectedValueOnce(notUniqueError);
 
 			await expect(ldapDriver.getUserID({ identifier: 'jdoe' }))
 				.rejects.toStrictEqual(new InvalidProviderError());
@@ -1298,6 +1613,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 					userDn: 'ou=users,dc=example',
 					provider: 'ldap',
 					clientUrl: 'ldap://ldap.example',
+					requireVerifiedEmail: false,
 				},
 			);
 
@@ -1307,7 +1623,7 @@ describe('LDAPAuthDriver.getUserID', () => {
 				pojo: { objectName: 'cn=jdoe,ou=users,dc=example', attributes: [] },
 			}]);
 
-			knexTracker.on.select('directus_users').response(undefined);
+			knexTracker.on.select('directus_user_identities').response(undefined);
 
 			mockedDeps.createOne.mockRejectedValueOnce(
 				new InvalidPayloadError({ reason: 'Bad email' }),
@@ -1319,10 +1635,113 @@ describe('LDAPAuthDriver.getUserID', () => {
 				);
 		});
 	});
+
+	describe('linking from a session', () => {
+		test('binds as the user, then links the identity to the session', async () => {
+			const ldapDriver = new LDAPAuthDriver(
+				{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+				{
+					bindDn: 'cn=admin',
+					bindPassword: 'secret',
+					userDn: 'ou=users,dc=example',
+					provider: 'ldap',
+					clientUrl: 'ldap://ldap.example',
+				},
+			);
+
+			replySearch(['searchEntry']);
+
+			replySearch(['searchEntry', {
+				pojo: {
+					objectName: 'cn=jdoe,ou=users,dc=example',
+					attributes: [],
+				},
+			}]);
+
+			mockedDeps.ldapClient.bind.mockImplementationOnce(
+				(_bindDn: string, _bindPassword: string, bindCallback: any) => {
+					bindCallback(null);
+				},
+			);
+
+			knexTracker.on.select('directus_user_identities').responseOnce(undefined);
+			mockedDeps.createIdentity.mockResolvedValueOnce('identity-2');
+
+			knexTracker.on.select('directus_user_identities').responseOnce({
+				id: 'identity-2',
+				user: 'session-user',
+				kind: 'ldap',
+				value: 'cn=jdoe,ou=users,dc=example',
+			});
+
+			await expect(ldapDriver.getIdentity(
+				{ identifier: 'jdoe', password: 'pw' },
+				{ linkUser: 'session-user' },
+			))
+				.resolves.toStrictEqual({
+					id: 'identity-2',
+					user: 'session-user',
+					kind: 'ldap',
+					value: 'cn=jdoe,ou=users,dc=example',
+				});
+
+			expect(mockedDeps.ldapClient.bind).toHaveBeenCalledWith(
+				'cn=jdoe,ou=users,dc=example',
+				'pw',
+				expect.any(Function),
+			);
+
+			expect(mockedDeps.createIdentity.mock.calls).toStrictEqual([[{
+				user: 'session-user',
+				kind: 'ldap',
+				value: 'cn=jdoe,ou=users,dc=example',
+				verified: true,
+				auth_data: null,
+				user_info: {
+					dn: 'cn=jdoe,ou=users,dc=example',
+					userAccountControl: 0,
+				},
+				scope: null,
+			}]]);
+
+			expect(mockedDeps.createOne).not.toHaveBeenCalled();
+		});
+
+		test('refuses a link without password before any identity lookup', async () => {
+			const ldapDriver = new LDAPAuthDriver(
+				{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+				{
+					bindDn: 'cn=admin',
+					bindPassword: 'secret',
+					userDn: 'ou=users,dc=example',
+					provider: 'ldap',
+					clientUrl: 'ldap://ldap.example',
+				},
+			);
+
+			replySearch(['searchEntry']);
+
+			replySearch(['searchEntry', {
+				pojo: {
+					objectName: 'cn=jdoe,ou=users,dc=example',
+					attributes: [],
+				},
+			}]);
+
+			await expect(ldapDriver.getIdentity(
+				{ identifier: 'jdoe' },
+				{ linkUser: 'session-user' },
+			))
+				.rejects.toStrictEqual(new InvalidCredentialsError());
+
+			expect(knexTracker.history.select).toStrictEqual([]);
+			expect(mockedDeps.createIdentity).not.toHaveBeenCalled();
+		});
+	});
 });
 
 describe('LDAPAuthDriver.verify', () => {
-	test('refuses a user without external identifier', async () => {
+	test('refuses a user without identity', async () => {
 		const ldapDriver = new LDAPAuthDriver(
 			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
 			{
@@ -1334,8 +1753,29 @@ describe('LDAPAuthDriver.verify', () => {
 			},
 		);
 
-		await expect(ldapDriver.verify({ external_identifier: null } as any, 'pw'))
+		await expect(ldapDriver.verify({ identity: null } as any, 'pw'))
 			.rejects.toStrictEqual(new InvalidCredentialsError());
+
+		expect(mockedDeps.ldapClient.bind).not.toHaveBeenCalled();
+	});
+
+	test('refuses an identity of another provider', async () => {
+		const ldapDriver = new LDAPAuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				bindDn: 'cn=admin',
+				bindPassword: 'secret',
+				userDn: 'ou=users,dc=example',
+				provider: 'ldap',
+				clientUrl: 'ldap://ldap.example',
+			},
+		);
+
+		await expect(ldapDriver.verify({
+			identity: { kind: 'email', value: 'jdoe@example.com' },
+		} as any, 'pw')).rejects.toStrictEqual(new InvalidCredentialsError());
+
+		expect(mockedDeps.ldapClient.bind).not.toHaveBeenCalled();
 	});
 
 	test('refuses a missing password', async () => {
@@ -1350,7 +1790,9 @@ describe('LDAPAuthDriver.verify', () => {
 			},
 		);
 
-		await expect(ldapDriver.verify({ external_identifier: 'cn=jdoe' } as any))
+		await expect(ldapDriver.verify(
+			{ identity: { kind: 'ldap', value: 'cn=jdoe' } } as any,
+		))
 			.rejects.toStrictEqual(new InvalidCredentialsError());
 	});
 
@@ -1373,7 +1815,10 @@ describe('LDAPAuthDriver.verify', () => {
 			},
 		);
 
-		await expect(ldapDriver.verify({ external_identifier: 'cn=jdoe' } as any, ''))
+		await expect(ldapDriver.verify(
+			{ identity: { kind: 'ldap', value: 'cn=jdoe' } } as any,
+			'',
+		))
 			.rejects.toStrictEqual(new InvalidCredentialsError());
 
 		expect(mockedDeps.ldapClient.bind).not.toHaveBeenCalled();
@@ -1398,7 +1843,10 @@ describe('LDAPAuthDriver.verify', () => {
 			},
 		);
 
-		await expect(ldapDriver.verify({ external_identifier: 'cn=jdoe' } as any, 'pw'))
+		await expect(ldapDriver.verify(
+			{ identity: { kind: 'ldap', value: 'cn=jdoe' } } as any,
+			'pw',
+		))
 			.resolves.toBeUndefined();
 
 		expect(ldap.createClient).toHaveBeenLastCalledWith({
@@ -1435,7 +1883,10 @@ describe('LDAPAuthDriver.verify', () => {
 			},
 		);
 
-		await ldapDriver.verify({ external_identifier: 'cn=jdoe' } as any, 'pw');
+		await ldapDriver.verify(
+			{ identity: { kind: 'ldap', value: 'cn=jdoe' } } as any,
+			'pw',
+		);
 
 		expect(ldap.createClient).toHaveBeenLastCalledWith({
 			url: 'ldap://ldap.example',
@@ -1460,7 +1911,10 @@ describe('LDAPAuthDriver.verify', () => {
 				bindCallback(new ldap.InvalidCredentialsError('bad password')),
 		);
 
-		await expect(ldapDriver.verify({ external_identifier: 'cn=jdoe' } as any, 'pw'))
+		await expect(ldapDriver.verify(
+			{ identity: { kind: 'ldap', value: 'cn=jdoe' } } as any,
+			'pw',
+		))
 			.rejects.toStrictEqual(new InvalidCredentialsError());
 
 		expect(mockedDeps.ldapClient.destroy).toHaveBeenCalledOnce();
@@ -1484,7 +1938,10 @@ describe('LDAPAuthDriver.verify', () => {
 			},
 		);
 
-		await expect(ldapDriver.verify({ external_identifier: 'cn=jdoe' } as any, 'pw'))
+		await expect(ldapDriver.verify(
+			{ identity: { kind: 'ldap', value: 'cn=jdoe' } } as any,
+			'pw',
+		))
 			.rejects.toStrictEqual(new ServiceUnavailableError({
 				service: 'ldap',
 				reason: 'Service returned unexpected error: ECONNREFUSED',
@@ -1509,9 +1966,10 @@ describe('LDAPAuthDriver.verify', () => {
 			},
 		);
 
-		await ldapDriver.login({ external_identifier: 'cn=jdoe' } as any, {
-			password: 'pw',
-		});
+		await ldapDriver.login(
+			{ identity: { kind: 'ldap', value: 'cn=jdoe' } } as any,
+			{ password: 'pw' },
+		);
 
 		expect(mockedDeps.ldapClient.bind).toHaveBeenCalledWith(
 			'cn=jdoe',
@@ -1522,6 +1980,26 @@ describe('LDAPAuthDriver.verify', () => {
 });
 
 describe('LDAPAuthDriver.refresh', () => {
+	test('refuses a user without identity', async () => {
+		const ldapDriver = new LDAPAuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				bindDn: 'cn=admin',
+				bindPassword: 'secret',
+				userDn: 'ou=users,dc=example',
+				provider: 'ldap',
+				clientUrl: 'ldap://ldap.example',
+			},
+		);
+
+		replySearch(['searchEntry']);
+
+		await expect(ldapDriver.refresh({ identity: null } as any))
+			.rejects.toStrictEqual(new InvalidCredentialsError());
+
+		expect(mockedDeps.ldapClient.search).toHaveBeenCalledOnce();
+	});
+
 	test('refuses a disabled account', async () => {
 		const ldapDriver = new LDAPAuthDriver(
 			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
@@ -1544,7 +2022,7 @@ describe('LDAPAuthDriver.refresh', () => {
 		}]);
 
 		await expect(ldapDriver.refresh({
-			external_identifier: 'cn=jdoe,ou=users,dc=example',
+			identity: { kind: 'ldap', value: 'cn=jdoe,ou=users,dc=example' },
 		} as any)).rejects.toStrictEqual(new InvalidCredentialsError());
 
 		expect(mockedDeps.ldapClient.search).toHaveBeenLastCalledWith(
@@ -1580,7 +2058,7 @@ describe('LDAPAuthDriver.refresh', () => {
 		}]);
 
 		await expect(ldapDriver.refresh({
-			external_identifier: 'cn=jdoe,ou=users,dc=example',
+			identity: { kind: 'ldap', value: 'cn=jdoe,ou=users,dc=example' },
 		} as any)).resolves.toBeUndefined();
 	});
 
@@ -1600,7 +2078,7 @@ describe('LDAPAuthDriver.refresh', () => {
 		replySearch(['end']);
 
 		await expect(ldapDriver.refresh({
-			external_identifier: 'cn=jdoe,ou=users,dc=example',
+			identity: { kind: 'ldap', value: 'cn=jdoe,ou=users,dc=example' },
 		} as any)).resolves.toBeUndefined();
 	});
 });
@@ -1660,7 +2138,7 @@ describe('createLDAPAuthRouter', () => {
 		expect(mockedDeps.login).toHaveBeenCalledWith(
 			'ldap',
 			{ identifier: 'jdoe', password: 'pw', otp: '123456' },
-			{ session: false, otp: '123456' },
+			{ session: false, otp: '123456', linkUser: null },
 		);
 
 		expect(httpResponse.locals).toEqual({
@@ -1781,7 +2259,7 @@ describe('createLDAPAuthRouter', () => {
 		expect(mockedDeps.login).toHaveBeenCalledWith(
 			'ldap',
 			{ identifier: 'jdoe', password: 'pw', mode: 'session' },
-			{ session: true, otp: undefined },
+			{ session: true, otp: undefined, linkUser: null },
 		);
 
 		expect(httpResponse.cookie).toHaveBeenCalledWith(

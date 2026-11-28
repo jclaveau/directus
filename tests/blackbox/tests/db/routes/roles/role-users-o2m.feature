@@ -31,70 +31,80 @@ Feature: A role's users list moves users in and takes the others out
       |     email: second-<run>@example.com |           |
       |     role: <first-role>              |           |
     Then these requests get these responses:
-      | request                              | response                              |
-      | method: PATCH                        | code: 200                             |+
-      | path: /roles/<second-role>           |                                       |
-      | payload:                             |                                       |
-      |   users:                             |                                       |
-      |     - id: <first-user>               |                                       |
-      | method: GET                          | code: 200                             |+
-      | path: /users                         | body:                                 |
-      | query:                               |   data:                               |
-      |   fields: email,status,role          |     - email: first-<run>@example.com  |
-      |   sort: email                        |       status: active                  |
-      |   filter[email][_contains]: <run>    |       role: <second-role>             |
-      |                                      |     - email: second-<run>@example.com |
-      |                                      |       status: active                  |
-      |                                      |       role: <first-role>              |
-      | method: PATCH                        | code: 200                             |+
-      | path: /roles/<second-role>           |                                       |
-      | payload:                             |                                       |
-      |   users:                             |                                       |
-      |     - id: <second-user>              |                                       |
-      |     - email: third-<run>@example.com |                                       |
-      | method: GET                          | code: 200                             |+
-      | path: /users                         | body:                                 |
-      | query:                               |   data:                               |
-      |   fields: email,status,role          |     - email: first-<run>@example.com  |
-      |   sort: email                        |       status: active                  |
-      |   filter[email][_contains]: <run>    |       role: null                      |
-      |                                      |     - email: second-<run>@example.com |
-      |                                      |       status: active                  |
-      |                                      |       role: <second-role>             |
-      |                                      |     - email: third-<run>@example.com  |
-      |                                      |       status: active                  |
-      |                                      |       role: <second-role>             |
+      | request                              | response                                |
+      | method: PATCH                        | code: 200                               |+
+      | path: /roles/<second-role>           |                                         |
+      | payload:                             |                                         |
+      |   users:                             |                                         |
+      |     - id: <first-user>               |                                         |
+      | method: GET                          | code: 200                               |+
+      | path: /users                         | body:                                   |
+      | query:                               |   data:                                 |
+      |   fields:                            |     - primary_identity:                 |
+      |     - primary_identity.value         |         value: first-<run>@example.com  |
+      |     - status                         |       status: active                    |
+      |     - role                           |       role: <second-role>               |
+      |   sort: primary_identity.value       |     - primary_identity:                 |
+      |   filter:                            |         value: second-<run>@example.com |
+      |     identities:                      |       status: active                    |
+      |       value:                         |       role: <first-role>                |
+      |         _contains: <run>             |                                         |
+      | method: PATCH                        | code: 200                               |+
+      | path: /roles/<second-role>           |                                         |
+      | payload:                             |                                         |
+      |   users:                             |                                         |
+      |     - id: <second-user>              |                                         |
+      |     - email: third-<run>@example.com |                                         |
+      | method: GET                          | code: 200                               |+
+      | path: /users                         | body:                                   |
+      | query:                               |   data:                                 |
+      |   fields:                            |     - primary_identity:                 |
+      |     - primary_identity.value         |         value: first-<run>@example.com  |
+      |     - status                         |       status: active                    |
+      |     - role                           |       role: null                        |
+      |   sort: primary_identity.value       |     - primary_identity:                 |
+      |   filter:                            |         value: second-<run>@example.com |
+      |     identities:                      |       status: active                    |
+      |       value:                         |       role: <second-role>               |
+      |         _contains: <run>             |     - primary_identity:                 |
+      |                                      |         value: third-<run>@example.com  |
+      |                                      |       status: active                    |
+      |                                      |       role: <second-role>               |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete | with |
-      | 1       | directus_access      | 4      | 0      | 0      | 0      | 0    |
-      | 1       | directus_activity    | 0      | 2      | 0      | 0      | 0    |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_roles       | 6      | 0      | 0      | 0      | 0    |
-      | 1       | directus_users       | 8      | 0      | 1      | 0      | 0    |
-      | 2       | directus_access      | 2      | 0      | 0      | 0      | 0    |
-      | 2       | directus_collections | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_users       | 2      | 0      | 0      | 0      | 0    |
-      | 2       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
-      | 2       | information_schema   | 1      | 0      | 0      | 0      | 0    |
-      | 2       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 2       | pg_index             | 2      | 0      | 0      | 0      | 0    |
-      | 2       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_access      | 5      | 0      | 0      | 0      | 0    |
-      | 3       | directus_activity    | 0      | 4      | 0      | 0      | 0    |
-      | 3       | directus_revisions   | 0      | 3      | 0      | 0      | 0    |
-      | 3       | directus_roles       | 6      | 0      | 0      | 0      | 0    |
-      | 3       | directus_users       | 10     | 1      | 2      | 0      | 0    |
-      | 4       | directus_access      | 2      | 0      | 0      | 0      | 0    |
-      | 4       | directus_collections | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_users       | 2      | 0      | 0      | 0      | 0    |
-      | 4       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
-      | 4       | information_schema   | 1      | 0      | 0      | 0      | 0    |
-      | 4       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 4       | pg_index             | 2      | 0      | 0      | 0      | 0    |
-      | 4       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
+      | request | table                    | select | insert | update | delete | with |
+      | 1       | directus_access          | 4      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity        | 0      | 2      | 0      | 0      | 0    |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_roles           | 6      | 0      | 0      | 0      | 0    |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users           | 8      | 0      | 1      | 0      | 0    |
+      | 2       | directus_access          | 2      | 0      | 0      | 0      | 0    |
+      | 2       | directus_collections     | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_fields          | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_relations       | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_roles           | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_user_identities | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users           | 2      | 0      | 0      | 0      | 0    |
+      | 2       | geometry_columns         | 0      | 0      | 0      | 0      | 1    |
+      | 2       | information_schema       | 1      | 0      | 0      | 0      | 0    |
+      | 2       | pg_constraint            | 1      | 0      | 0      | 0      | 0    |
+      | 2       | pg_index                 | 2      | 0      | 0      | 0      | 0    |
+      | 2       | pg_proc                  | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_access          | 5      | 0      | 0      | 0      | 0    |
+      | 3       | directus_activity        | 0      | 4      | 0      | 0      | 0    |
+      | 3       | directus_revisions       | 0      | 3      | 0      | 0      | 0    |
+      | 3       | directus_roles           | 6      | 0      | 0      | 0      | 0    |
+      | 3       | directus_user_identities | 4      | 1      | 0      | 0      | 0    |
+      | 3       | directus_users           | 9      | 1      | 3      | 0      | 0    |
+      | 4       | directus_access          | 2      | 0      | 0      | 0      | 0    |
+      | 4       | directus_collections     | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_fields          | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_relations       | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_roles           | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_user_identities | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_users           | 2      | 0      | 0      | 0      | 0    |
+      | 4       | geometry_columns         | 0      | 0      | 0      | 0      | 1    |
+      | 4       | information_schema       | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_constraint            | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_index                 | 2      | 0      | 0      | 0      | 0    |
+      | 4       | pg_proc                  | 1      | 0      | 0      | 0      | 0    |

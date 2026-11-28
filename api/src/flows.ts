@@ -735,6 +735,15 @@ class FlowManager {
 						['**', 'payload', 'tfa_secret'],
 						['**', 'payload', 'external_identifier'],
 						['**', 'payload', 'auth_data'],
+						['**', 'payload', 'user_info'],
+						['**', 'identities', '**', 'value'],
+						['**', 'identities', '**', 'user_info'],
+						['**', 'primary_identity', 'value'],
+						['**', 'primary_identity', 'auth_data'],
+						['**', 'primary_identity', 'user_info'],
+						...isIdentityTrigger(keyedData)
+							? [['**', 'payload', 'value']]
+							: [],
 					],
 				},
 				getRedactedString,
@@ -791,4 +800,14 @@ class FlowManager {
 			};
 		}
 	}
+}
+
+/**
+ * An identity's `value` is its email or the provider's identifier: redacted
+ * from a Flow log when the Flow runs on `directus_user_identities`.
+ */
+function isIdentityTrigger(keyedData: Record<string, unknown>): boolean {
+	const triggerData = keyedData[TRIGGER_KEY] as { collection?: unknown } | undefined;
+
+	return triggerData?.collection === 'directus_user_identities';
 }

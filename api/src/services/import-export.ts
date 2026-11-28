@@ -468,7 +468,12 @@ export class ExportService {
 				});
 
 				const user = await usersService.readOne(this.accountability.user, {
-					fields: ['first_name', 'last_name', 'email'],
+					fields: [
+						'first_name',
+						'last_name',
+						'primary_identity.kind',
+						'primary_identity.value',
+					],
 				});
 
 				const href = new Url(env['PUBLIC_URL'])

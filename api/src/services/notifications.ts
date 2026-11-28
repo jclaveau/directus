@@ -15,6 +15,7 @@ import { Url } from '../utils/url.js';
 import { ItemsService } from './items.js';
 import { MailService } from './mail/index.js';
 import { UsersService } from './users.js';
+import { fetchUserEmail } from '../auth/utils/user-identities.js';
 
 const env = useEnv();
 const logger = useLogger();
@@ -31,10 +32,12 @@ export class NotificationsService extends ItemsService<Notification> {
 			// A recipient sent as an M2O object (`{ id }`) reaches here as sent
 			const user = await usersService.readOne(
 				(data.recipient as any).id ?? data.recipient,
-				{ fields: ['id', 'email', 'email_notifications', 'role'] },
+				{ fields: ['id', 'email_notifications', 'role'] },
 			);
 
-			if (user['email'] && user['email_notifications'] === true) {
+			const recipientEmail = await fetchUserEmail(this.knex, user['id']);
+
+			if (recipientEmail && user['email_notifications'] === true) {
 				const manageUserAccountUrl = new Url(env['PUBLIC_URL'])
 					.addPath('admin', 'users', user['id'])
 					.toString();
@@ -63,7 +66,7 @@ export class NotificationsService extends ItemsService<Notification> {
 							name: 'base',
 							data: app_access ? { url: manageUserAccountUrl, html } : { html },
 						},
-						to: user['email'],
+						to: recipientEmail,
 						subject: data.subject,
 					})
 					.catch((error) => {

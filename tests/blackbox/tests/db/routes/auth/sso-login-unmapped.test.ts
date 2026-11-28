@@ -24,6 +24,7 @@ defineSsoFeature(
 			AUTH_MOCKOAUTH_IDENTIFIER_KEY: 'sub',
 			AUTH_MOCKOAUTH_ALLOW_PUBLIC_REGISTRATION: 'true',
 			AUTH_MOCKOAUTH_DEFAULT_ROLE_ID: ROLE.TESTS_FLOW.ID,
+			AUTH_MOCKOAUTH_REQUIRE_VERIFIED_EMAIL: 'false',
 
 			AUTH_MOCKOPENID_DRIVER: 'openid',
 			AUTH_MOCKOPENID_MODE: 'json',
@@ -32,6 +33,7 @@ defineSsoFeature(
 			AUTH_MOCKOPENID_ISSUER_URL: issuerUrlByProvider['mockopenid']!,
 			AUTH_MOCKOPENID_ALLOW_PUBLIC_REGISTRATION: 'true',
 			AUTH_MOCKOPENID_DEFAULT_ROLE_ID: ROLE.TESTS_FLOW.ID,
+			AUTH_MOCKOPENID_REQUIRE_VERIFIED_EMAIL: 'false',
 		};
 	},
 	{
@@ -43,7 +45,7 @@ defineSsoFeature(
 				.query({
 					fields: 'id',
 					filter: JSON.stringify({
-						email: { _ends_with: '@nomap.example.com' },
+						primary_identity: { value: { _ends_with: '@nomap.example.com' } },
 					}),
 				})
 				.set('Authorization', AUTH);

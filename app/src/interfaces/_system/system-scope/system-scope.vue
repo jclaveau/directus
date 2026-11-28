@@ -98,7 +98,13 @@ async function loadItemName() {
 		} else if (endpoint === 'user') {
 			const result = await api.get('/users/' + id, {
 				params: {
-					fields: ['id', 'first_name', 'last_name', 'email'],
+					fields: [
+						'id',
+						'first_name',
+						'last_name',
+						'primary_identity.kind',
+						'primary_identity.value',
+					],
 				},
 			});
 

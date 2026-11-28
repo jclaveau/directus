@@ -52,7 +52,11 @@ watch(
 const saving = ref(false);
 const showMentionDropDown = ref(false);
 
-const searchResult = ref<Pick<User, 'id' | 'email' | 'first_name' | 'last_name' | 'avatar'>[]>([]);
+const searchResult = ref<Pick<
+	User,
+	'id' | 'primary_identity' | 'first_name' | 'last_name' | 'avatar'
+>[]>([]);
+
 const userPreviews = ref<Record<string, string>>({});
 
 watch(
@@ -95,8 +99,10 @@ const loadUsers = throttle(async (name: string): Promise<any> => {
 				},
 			},
 			{
-				email: {
-					_starts_with: name,
+				primary_identity: {
+					value: {
+						_starts_with: name,
+					},
 				},
 			},
 		],
@@ -114,7 +120,14 @@ const loadUsers = throttle(async (name: string): Promise<any> => {
 		const result = await api.get('/users', {
 			params: {
 				filter: name === '' || !name ? undefined : filter,
-				fields: ['first_name', 'last_name', 'email', 'id', 'avatar.id'],
+				fields: [
+					'first_name',
+					'last_name',
+					'primary_identity.kind',
+					'primary_identity.value',
+					'id',
+					'avatar.id',
+				],
 			},
 			cancelToken: cancelToken.token,
 		});

@@ -32,11 +32,12 @@ Feature: Users are updated by query, by themselves and in their sessions
       |   data:                    |                           |
       |     last_name: by-query    |                           |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 2      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_users     | 4      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_user_identities | 2      | 0      | 0      | 0      |
+      | 1       | directus_users           | 4      | 0      | 1      | 0      |
 
   Scenario: users created together with one email twice are refused
     Then these requests get these responses:
@@ -47,10 +48,10 @@ Feature: Users are updated by query, by themselves and in their sessions
       |   - email: Twice-<run>@example.com |     - message: >-                   |
       |   - email: twice-<run>@example.com |         Value                       |
       |                                    |         "[twice-<run>@example.com]" |
-      |                                    |         for field "email" in        |
+      |                                    |         for field "value" in        |
       |                                    |         collection                  |
-      |                                    |         "directus_users" has        |
-      |                                    |         to be unique.               |
+      |                                    |         "directus_user_identities"  |
+      |                                    |         has to be unique.           |
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
       | 1       | directus_users | 1      | 0      | 0      | 0      |
@@ -101,27 +102,30 @@ Feature: Users are updated by query, by themselves and in their sessions
       | query:                               |   data:                      |
       |   fields: tfa_secret                 |     tfa_secret: null         |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete | with |
-      | 1       | directus_access      | 3      | 0      | 0      | 0      | 0    |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_collections | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_users       | 3      | 0      | 1      | 0      | 0    |
-      | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
-      | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_index             | 2      | 0      | 0      | 0      | 0    |
-      | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_access      | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_users       | 3      | 0      | 1      | 0      | 0    |
-      | 4       | directus_access      | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 4       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 4       | directus_users       | 2      | 0      | 1      | 0      | 0    |
+      | request | table                    | select | insert | update | delete | with |
+      | 1       | directus_access          | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users           | 3      | 0      | 1      | 0      | 0    |
+      | 1       | geometry_columns         | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint            | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index                 | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc                  | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_access          | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_user_identities | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users           | 3      | 0      | 1      | 0      | 0    |
+      | 4       | directus_access          | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 4       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 4       | directus_user_identities | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_users           | 2      | 0      | 1      | 0      | 0    |
 
   Scenario: only an admin sets the provider and the external identifier
     Given these requests are sent:
@@ -150,56 +154,69 @@ Feature: Users are updated by query, by themselves and in their sessions
       |   policies:                        |           |
       |     - policy: <limited-policy>     |           |
     Then these requests get these responses:
-      | request                          | response                           |
-      | as: <limited-token>              | code: 400                          |+
-      | method: PATCH                    | body:                              |
-      | path: /users/me                  |   errors:                          |
-      | payload:                         |     - message: >-                  |
-      |   provider: default              |         Invalid payload. You can't |
-      |                                  |         change the "provider"      |
-      |                                  |         value manually.            |
-      | as: <limited-token>              | code: 400                          |+
-      | method: PATCH                    | body:                              |
-      | path: /users/me                  |   errors:                          |
-      | payload:                         |     - message: >-                  |
-      |   external_identifier: ext-<run> |         Invalid payload. You can't |
-      |                                  |         change the                 |
-      |                                  |         "external_identifier"      |
-      |                                  |         value manually.            |
-      | method: PATCH                    | code: 200                          |+
-      | path: /users/<limited-user>      | body:                              |
-      | payload:                         |   data:                            |
-      |   provider: default              |     provider: default              |
-      |   external_identifier: ext-<run> |     external_identifier: ext-<run> |
-      | method: PATCH                    | code: 400                          |+
-      | path: /users                     | body:                              |
-      | payload:                         |   errors:                          |
-      |   keys:                          |     - message: >-                  |
-      |     - <limited-user>             |         Invalid payload. You can't |
-      |     - <limited-user>             |         change the "tfa_secret"    |
-      |   data:                          |         value manually.            |
-      |     tfa_secret: JBSWY3DPEHPK3PXP |                                    |
+      | request                            | response                                 |
+      | as: <limited-token>                | code: 400                                |+
+      | method: PATCH                      | body:                                    |
+      | path: /users/me                    |   errors:                                |
+      | payload:                           |     - message: >-                        |
+      |   provider: default                |         Invalid payload. You can't       |
+      |                                    |         change the "provider"            |
+      |                                    |         value manually.                  |
+      | as: <limited-token>                | code: 400                                |+
+      | method: PATCH                      | body:                                    |
+      | path: /users/me                    |   errors:                                |
+      | payload:                           |     - message: >-                        |
+      |   external_identifier: ext-<run>   |         Invalid payload. You can't       |
+      |                                    |         change the                       |
+      |                                    |         "external_identifier"            |
+      |                                    |         value manually.                  |
+      | method: PATCH                      | code: 200                                |+
+      | path: /users/<limited-user>        | body:                                    |
+      | query:                             |   data:                                  |
+      |   fields:                          |     identities:                          |
+      |     - identities.kind              |       - kind: email                      |
+      |     - identities.value             |         value: limited-<run>@example.com |
+      |   deep:                            |       - kind: sso-<run>                  |
+      |     identities:                    |         value: ext-<run>                 |
+      |       _sort: kind                  |                                          |
+      | payload:                           |                                          |
+      |   provider: sso-<run>              |                                          |
+      |   external_identifier: ext-<run>   |                                          |
+      | method: PATCH                      | code: 400                                |+
+      | path: /users/<limited-user>        | body:                                    |
+      | payload:                           |   errors:                                |
+      |   external_identifier: other-<run> |     - message: >-                        |
+      |                                    |         Invalid payload. An              |
+      |                                    |         "external_identifier" needs a    |
+      |                                    |         provider other than "default".   |
+      | method: PATCH                      | code: 400                                |+
+      | path: /users                       | body:                                    |
+      | payload:                           |   errors:                                |
+      |   keys:                            |     - message: >-                        |
+      |     - <limited-user>               |         Invalid payload. You can't       |
+      |     - <limited-user>               |         change the "tfa_secret"          |
+      |   data:                            |         value manually.                  |
+      |     tfa_secret: JBSWY3DPEHPK3PXP   |                                          |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete | with |
-      | 1       | directus_access      | 3      | 0      | 0      | 0      | 0    |
-      | 1       | directus_collections | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_permissions | 3      | 0      | 0      | 0      | 0    |
-      | 1       | directus_policies    | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_users       | 2      | 0      | 0      | 0      | 0    |
-      | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
-      | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_index             | 2      | 0      | 0      | 0      | 0    |
-      | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_users       | 2      | 0      | 0      | 0      | 0    |
-      | 3       | directus_access      | 4      | 0      | 0      | 0      | 0    |
-      | 3       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 3       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 3       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_users       | 3      | 0      | 1      | 0      | 0    |
-      | 4       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | request | table                    | select | insert | update | delete | with |
+      | 1       | directus_access          | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_collections     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions     | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users           | 2      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns         | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint            | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index                 | 2      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc                  | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users           | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_access          | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_roles           | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_user_identities | 1      | 1      | 0      | 0      | 0    |
+      | 3       | directus_users           | 3      | 0      | 1      | 0      | 0    |
+      | 5       | directus_users           | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a password change ends every other session of the user
     Given these requests are sent:
@@ -234,50 +251,53 @@ Feature: Users are updated by query, by themselves and in their sessions
       |   mode: session                    |           |
       | remember_session: other-session    |           |
     Then these requests get these responses:
-      | request                     | response                             |
-      | as: <kept-session>          | code: 200                            |+
-      | method: PATCH               |                                      |
-      | path: /users/me             |                                      |
-      | payload:                    |                                      |
-      |   password: second-password |                                      |
-      | as: <other-session>         | code: 401                            |+
-      | method: GET                 | body:                                |
-      | path: /users/me             |   errors:                            |
-      |                             |     - message: >-                    |
-      |                             |         Invalid user credentials.    |
-      | as: <kept-session>          | code: 200                            |+
-      | method: GET                 | body:                                |
-      | path: /users/me             |   data:                              |
-      | query:                      |     email: session-<run>@example.com |
-      |   fields: email             |                                      |
-      | method: PATCH               | code: 200                            |+
-      | path: /users/<session-user> | body:                                |
-      | payload:                    |   data:                              |
-      |   status: suspended         |     status: suspended                |
-      | method: PATCH               | code: 200                            |+
-      | path: /users/<session-user> | body:                                |
-      | payload:                    |   data:                              |
-      |   status: active            |     status: active                   |
-      | as: <kept-session>          | code: 401                            |+
-      | method: GET                 | body:                                |
-      | path: /users/me             |   errors:                            |
-      |                             |     - message: >-                    |
-      |                             |         Invalid user credentials.    |
+      | request                          | response                               |
+      | as: <kept-session>               | code: 200                              |+
+      | method: PATCH                    |                                        |
+      | path: /users/me                  |                                        |
+      | payload:                         |                                        |
+      |   password: second-password      |                                        |
+      | as: <other-session>              | code: 401                              |+
+      | method: GET                      | body:                                  |
+      | path: /users/me                  |   errors:                              |
+      |                                  |     - message: >-                      |
+      |                                  |         Invalid user credentials.      |
+      | as: <kept-session>               | code: 200                              |+
+      | method: GET                      | body:                                  |
+      | path: /users/me                  |   data:                                |
+      | query:                           |     primary_identity:                  |
+      |   fields: primary_identity.value |       value: session-<run>@example.com |
+      | method: PATCH                    | code: 200                              |+
+      | path: /users/<session-user>      | body:                                  |
+      | payload:                         |   data:                                |
+      |   status: suspended              |     status: suspended                  |
+      | method: PATCH                    | code: 200                              |+
+      | path: /users/<session-user>      | body:                                  |
+      | payload:                         |   data:                                |
+      |   status: active                 |     status: active                     |
+      | as: <kept-session>               | code: 401                              |+
+      | method: GET                      | body:                                  |
+      | path: /users/me                  |   errors:                              |
+      |                                  |     - message: >-                      |
+      |                                  |         Invalid user credentials.      |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 2      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_sessions  | 1      | 0      | 0      | 1      |
-      | 1       | directus_settings  | 1      | 0      | 0      | 0      |
-      | 1       | directus_users     | 2      | 0      | 1      | 0      |
-      | 4       | directus_access    | 3      | 0      | 0      | 0      |
-      | 4       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 4       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 4       | directus_roles     | 1      | 0      | 0      | 0      |
-      | 4       | directus_sessions  | 0      | 0      | 0      | 1      |
-      | 4       | directus_users     | 4      | 0      | 1      | 0      |
-      | 5       | directus_access    | 2      | 0      | 0      | 0      |
-      | 5       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 5       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 5       | directus_users     | 3      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_sessions        | 1      | 0      | 0      | 1      |
+      | 1       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 1       | directus_user_identities | 2      | 0      | 0      | 0      |
+      | 1       | directus_users           | 2      | 0      | 1      | 0      |
+      | 4       | directus_access          | 3      | 0      | 0      | 0      |
+      | 4       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 4       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 4       | directus_roles           | 1      | 0      | 0      | 0      |
+      | 4       | directus_sessions        | 0      | 0      | 0      | 1      |
+      | 4       | directus_user_identities | 2      | 0      | 0      | 0      |
+      | 4       | directus_users           | 4      | 0      | 1      | 0      |
+      | 5       | directus_access          | 2      | 0      | 0      | 0      |
+      | 5       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 5       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 5       | directus_user_identities | 2      | 0      | 0      | 0      |
+      | 5       | directus_users           | 3      | 0      | 1      | 0      |

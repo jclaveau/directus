@@ -247,8 +247,8 @@ describe('Common', () => {
 				const response = await request(getUrl(vendor))
 					.get(`/users`)
 					.query({
-						filter: { email: { _eq: email } },
-						fields: ['id', 'email', 'token', 'role'],
+						filter: { primary_identity: { value: { _eq: email } } },
+						fields: ['id', 'primary_identity.value', 'token', 'role'],
 					})
 					.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 					.expect('Content-Type', /application\/json/)
@@ -258,7 +258,7 @@ describe('Common', () => {
 				expect(response.body.data).toEqual([
 					{
 						id: expect.any(String),
-						email: email,
+						primary_identity: { value: email },
 						token: expect.any(String),
 						role: expect.any(String),
 					},
@@ -289,8 +289,8 @@ describe('Common', () => {
 				const response = await request(getUrl(vendor))
 					.get(`/users`)
 					.query({
-						filter: { email: { _eq: email } },
-						fields: ['id', 'email', 'token', 'role'],
+						filter: { primary_identity: { value: { _eq: email } } },
+						fields: ['id', 'primary_identity.value', 'token', 'role'],
 					})
 					.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 					.expect('Content-Type', /application\/json/)
@@ -300,7 +300,7 @@ describe('Common', () => {
 				expect(response.body.data).toEqual([
 					{
 						id: expect.any(String),
-						email: email,
+						primary_identity: { value: email },
 						token: expect.any(String),
 						role: expect.any(String),
 					},
@@ -331,8 +331,8 @@ describe('Common', () => {
 				const response = await request(getUrl(vendor))
 					.get(`/users`)
 					.query({
-						filter: { email: { _eq: email } },
-						fields: ['id', 'email', 'token', 'role'],
+						filter: { primary_identity: { value: { _eq: email } } },
+						fields: ['id', 'primary_identity.value', 'token', 'role'],
 					})
 					.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 					.expect('Content-Type', /application\/json/)
@@ -342,7 +342,7 @@ describe('Common', () => {
 				expect(response.body.data).toEqual([
 					{
 						id: expect.any(String),
-						email: email,
+						primary_identity: { value: email },
 						token: expect.any(String),
 						role: expect.any(String),
 					},
@@ -371,8 +371,8 @@ describe('Common', () => {
 				const response = await request(getUrl(vendor))
 					.get(`/users`)
 					.query({
-						filter: { email: { _eq: email } },
-						fields: ['id', 'email', 'token', 'role'],
+						filter: { primary_identity: { value: { _eq: email } } },
+						fields: ['id', 'primary_identity.value', 'token', 'role'],
 					})
 					.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 					.expect('Content-Type', /application\/json/)
@@ -382,7 +382,7 @@ describe('Common', () => {
 				expect(response.body.data).toEqual([
 					{
 						id: expect.any(String),
-						email: email,
+						primary_identity: { value: email },
 						token: expect.any(String),
 						role: null,
 					},

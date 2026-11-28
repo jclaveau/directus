@@ -11,7 +11,10 @@ import { useI18n } from 'vue-i18n';
 const props = defineProps<{
 	comment: Comment & {
 		display: string;
-		user_created: Pick<User, 'id' | 'email' | 'first_name' | 'last_name' | 'avatar'>;
+		user_created: Pick<
+			User,
+			'id' | 'primary_identity' | 'first_name' | 'last_name' | 'avatar'
+		>;
 	};
 	refresh: () => Promise<void>;
 }>();

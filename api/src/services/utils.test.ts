@@ -939,7 +939,9 @@ describe('Services / Utils', () => {
 		// who left shared settings wants the address, and only the table has it.
 		it('names the user behind the id it stamped', async () => {
 			stored({ maxWorkers: 8, setBy: 'writer-id' });
-			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
+			tracker.on.select('directus_user_identities')
+				.response({ value: 'ann@example.com' });
 
 			await expect(service(admin).readAutoscaleConfig()).resolves.toMatchObject({
 				key: 'directus_settings.autoscale_settings',
@@ -964,7 +966,9 @@ describe('Services / Utils', () => {
 		// against whatever was typed there refuses the comparison.
 		it('names nobody where the id matches no user', async () => {
 			stored({ maxWorkers: 8, setBy: 'not-an-id' });
-			tracker.on.select('directus_users').simulateError('invalid input syntax');
+
+			tracker.on.select('directus_user_identities')
+				.simulateError('invalid input syntax');
 
 			await expect(service(admin).readAutoscaleConfig())
 				.resolves
@@ -973,7 +977,9 @@ describe('Services / Utils', () => {
 
 		it('stamps the surface the change came in through', async () => {
 			stored(null);
-			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
+			tracker.on.select('directus_user_identities')
+				.response({ value: 'ann@example.com' });
 
 			await service(admin).updateAutoscaleConfig({ maxWorkers: 8 }, 'mcp');
 
@@ -1051,7 +1057,8 @@ describe('Services / Utils', () => {
 			vi.mocked(readSharedSettings)
 				.mockResolvedValue({ audit_limit: 40, value_max_size: '2mb' });
 
-			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+			tracker.on.select('directus_user_identities')
+				.response({ value: 'ann@example.com' });
 
 			const answer = await service(admin).updateCacheSettings({
 				value_max_size: null,
@@ -1096,7 +1103,9 @@ describe('Services / Utils', () => {
 		// is then asked are who left it, when, and through what.
 		it('stamps a write from the MCP with its surface', async () => {
 			vi.mocked(readSharedSettings).mockResolvedValue(null);
-			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
+			tracker.on.select('directus_user_identities')
+				.response({ value: 'ann@example.com' });
 
 			const answer = await service(admin)
 				.updateCacheSettings({ audit_limit: 40 }, 'mcp');
@@ -1161,7 +1170,8 @@ describe('Services / Utils', () => {
 			vi.mocked(readSharedSettings)
 				.mockResolvedValue({ audit_limit: 40, setBy: 'writer-id' });
 
-			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+			tracker.on.select('directus_user_identities')
+				.response({ value: 'ann@example.com' });
 
 			await expect(service(admin).readCacheSettings()).resolves.toMatchObject({
 				sharedSettings: { audit_limit: 40, setBy: 'writer-id' },
@@ -1400,7 +1410,8 @@ describe('Services / Utils', () => {
 		// Nothing reads these but pm2, when it starts a worker, so the write is
 		// stamped with where it came from exactly as the configuration's is.
 		it('stamps the surface the change came in through', async () => {
-			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+			tracker.on.select('directus_user_identities')
+				.response({ value: 'ann@example.com' });
 
 			await expect(service(admin).updateSupervisorConfig(
 				{ listenTimeout: 20_000 },

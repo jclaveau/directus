@@ -8,6 +8,7 @@ import { useFieldsStore } from '@/stores/fields';
 import { useServerStore } from '@/stores/server';
 import { useUserStore } from '@/stores/user';
 import { getAssetUrl } from '@/utils/get-asset-url';
+import { userEmail } from '@/utils/user-email';
 import { userName } from '@/utils/user-name';
 import CommentsSidebarDetail from '@/views/private/components/comments-sidebar-detail.vue';
 import RevisionsDrawerDetail from '@/views/private/components/revisions-drawer-detail.vue';
@@ -18,6 +19,7 @@ import { computed, ref, toRefs } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import UsersNavigation from '../components/navigation.vue';
+import UserIdentities from '../components/user-identities.vue';
 import UserInfoSidebarDetail from '../components/user-info-sidebar-detail.vue';
 
 const props = defineProps<{
@@ -64,7 +66,13 @@ const {
 	primaryKey,
 	props.primaryKey !== '+'
 		? {
-				fields: ['*', 'role.*'],
+				fields: [
+					'*',
+					'role.*',
+					'primary_identity.id',
+					'primary_identity.kind',
+					'primary_identity.value',
+				],
 			}
 		: undefined,
 );
@@ -74,7 +82,26 @@ const {
 	itemPermissions: { updateAllowed, deleteAllowed, saveAllowed, archiveAllowed, fields },
 } = permissions;
 
-const user = computed(() => ({ ...item.value, role: item.value?.role?.id }));
+const user = computed(() => {
+	const primaryIdentity = item.value?.primary_identity;
+
+	return {
+		...item.value,
+		role: item.value?.role?.id,
+		primary_identity: typeof primaryIdentity === 'object'
+			? primaryIdentity?.id
+			: primaryIdentity,
+	};
+});
+
+const isOwnAccount = computed(() => {
+	const currentUser = userStore.currentUser;
+
+	return !isNew.value
+		&& !!currentUser
+		&& 'id' in currentUser
+		&& currentUser.id === props.primaryKey;
+});
 
 if (props.role) {
 	edits.value = {
@@ -112,9 +139,9 @@ const fieldsDenyList = ['id', 'last_page', 'created_on', 'created_by', 'modified
 
 const fieldsFiltered = computed(() => {
 	return fields.value.filter((field) => {
-		// These fields should only be editable when creating new users or by administrators
-		if (!isNew.value && ['provider', 'external_identifier'].includes(field.field) && !userStore.isAdmin) {
-			field.meta.readonly = true;
+		// The account's own identities are listed above the form
+		if (isOwnAccount.value && field.field === 'identities') {
+			return false;
 		}
 
 		return !fieldsDenyList.includes(field.field);
@@ -402,9 +429,9 @@ function revert(values: Record<string, any>) {
 							{{ userName(item) }}
 							<span v-if="item.title" class="title">, {{ item.title }}</span>
 						</div>
-						<div v-if="item.email" class="email">
+						<div v-if="userEmail(item)" class="email">
 							<v-icon name="alternate_email" small />
-							{{ item.email }}
+							{{ userEmail(item) }}
 						</div>
 						<div v-if="item.location" class="location">
 							<v-icon name="place" small />
@@ -414,6 +441,8 @@ function revert(values: Record<string, any>) {
 					</template>
 				</div>
 			</div>
+
+			<user-identities v-if="isOwnAccount" />
 
 			<v-form
 				ref="form"

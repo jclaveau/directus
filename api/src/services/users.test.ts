@@ -12,6 +12,9 @@ import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
+import {
+	validateAccess,
+} from '../permissions/modules/validate-access/validate-access.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
@@ -50,7 +53,28 @@ vi.mock('@directus/env', () => ({
 	}),
 }));
 
+const scopedCache = vi.hoisted(() => {
+	return { purgeEnabled: false, purgeForMutatedRows: vi.fn() };
+});
+
+vi.mock('../extensions/lib/scoped-cache-handle.js', () => {
+	return {
+		createScopedCacheExtensionHandle: () => {
+			return { purgeForMutatedRows: scopedCache.purgeForMutatedRows };
+		},
+	};
+});
+
+vi.mock('../scoped-cache/config.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../scoped-cache/config.js')>(),
+		scopedCachePurgeEnabled: () => scopedCache.purgeEnabled,
+	};
+});
+
 vi.mock('../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js');
+
+vi.mock('../permissions/modules/validate-access/validate-access.js');
 
 vi.mock('../cache.js', async (importOriginal) => {
 	return {
@@ -76,10 +100,20 @@ const schema = new SchemaBuilder()
 		});
 
 		c.field('first_name').string();
-		c.field('email').string();
 		c.field('password').string();
 		c.field('status').string();
 		c.field('role').uuid();
+		c.field('primary_identity').uuid();
+	})
+	.collection('directus_user_identities', (c) => {
+		c.field('id').uuid()
+			.primary();
+
+		c.field('user').uuid();
+		c.field('kind').string();
+		c.field('value').string();
+		c.field('verified').boolean();
+		c.field('auth_data').json();
 	})
 	.collection('directus_comments', (c) => {
 		c.field('id').uuid()
@@ -141,6 +175,7 @@ describe('Integration Tests', () => {
 
 		afterEach(() => {
 			vi.clearAllMocks();
+			scopedCache.purgeEnabled = false;
 		});
 
 		describe('createMany', () => {
@@ -153,9 +188,22 @@ describe('Integration Tests', () => {
 			});
 
 			it('should checkUniqueEmails once', async () => {
+				tracker.on.select('directus_user_identities').response([]);
+				tracker.on.update('directus_users').response(1);
+
 				await service.createMany([{ email: 'test@example.com' }]);
 
 				expect(checkUniqueEmailsSpy).toBeCalledTimes(1);
+
+				expect(superCreateOneSpy).toHaveBeenCalledWith({
+					user: 1,
+					kind: 'email',
+					value: 'test@example.com',
+					verified: false,
+				});
+
+				expect(tracker.history.update[0]!.bindings)
+					.toStrictEqual(['user-id-1', 1]);
 			});
 
 			it('should not checkPasswordPolicy', async () => {
@@ -182,6 +230,23 @@ describe('Integration Tests', () => {
 				expect(checkPasswordPolicySpy).toHaveBeenCalledWith(['testpassword']);
 			});
 
+			it('refuses a provider from a non-admin', async () => {
+				const opts: MutationOptions = {};
+
+				await new UsersService({
+					knex: db,
+					schema,
+					accountability: { role: 'test', admin: false } as Accountability,
+				}).createMany(
+					[{ provider: 'github', external_identifier: 'octocat' }],
+					opts,
+				);
+
+				expect(opts.preMutationError).toStrictEqual(new InvalidPayloadError({
+					reason: `You can't change the "provider" value manually`,
+				}));
+			});
+
 			it('refuses an empty email', async () => {
 				const opts: MutationOptions = {};
 
@@ -192,6 +257,96 @@ describe('Integration Tests', () => {
 					type: 'email',
 					path: [],
 				}));
+			});
+
+			it('strips the identity keys of every row after a refused one', async () => {
+				const opts: MutationOptions = {};
+
+				await new UsersService({
+					knex: db,
+					schema,
+					accountability: { role: 'test', admin: false } as Accountability,
+				}).createMany(
+					[
+						{ provider: 'github', external_identifier: 'octocat' },
+						{ email: 'ada@example.com', first_name: 'Ada' },
+					],
+					opts,
+				);
+
+				expect(ItemsService.prototype.createMany).toHaveBeenCalledWith(
+					[{}, { first_name: 'Ada' }],
+					expect.anything(),
+				);
+
+				expect(opts.preMutationError).toStrictEqual(new InvalidPayloadError({
+					reason: `You can't change the "provider" value manually`,
+				}));
+			});
+
+			it('fires users.create once the identities are written', async () => {
+				vi.mocked(ItemsService.prototype.createMany)
+					.mockImplementationOnce(async (_data, createOpts) => {
+						const actionEvent = {
+							event: 'users.create',
+							meta: { key: 1 },
+							context: {},
+						} as any;
+
+						if (createOpts?.bypassEmitAction) {
+							createOpts.bypassEmitAction(actionEvent);
+						}
+						else {
+							await emitter.emitAction(
+								actionEvent.event,
+								actionEvent.meta,
+								actionEvent.context,
+							);
+						}
+
+						return [1];
+					});
+
+				const emittedActions: unknown[] = [];
+
+				const emitAction = vi.spyOn(emitter, 'emitAction')
+					.mockImplementation(async (event) => {
+						emittedActions.push([
+							event,
+							tracker.history.transactions.map((trx) => trx.state),
+						]);
+					});
+
+				onTestFinished(() => {
+					emitAction.mockRestore();
+				});
+
+				superCreateOneSpy.mockRejectedValueOnce(new Error('identity write failed'));
+				tracker.on.select('directus_user_identities').response([]);
+
+				await expect(service.createMany([{ email: 'ada@example.com' }]))
+					.rejects.toStrictEqual(new Error('identity write failed'));
+
+				expect(emittedActions).toStrictEqual([]);
+
+				tracker.on.update('directus_users').response(1);
+
+				vi.mocked(ItemsService.prototype.createMany)
+					.mockImplementationOnce(async (_data, createOpts) => {
+						createOpts!.bypassEmitAction!({
+							event: 'users.create',
+							meta: { key: 1 },
+							context: {},
+						} as any);
+
+						return [1];
+					});
+
+				await service.createMany([{ email: 'ada@example.com' }]);
+
+				expect(emittedActions).toStrictEqual([
+					['users.create', ['rolled back', 'committed']],
+				]);
 			});
 
 			it('should request user limits checks', async () => {
@@ -379,6 +534,7 @@ describe('Integration Tests', () => {
 			it('should checkUniqueEmails once', async () => {
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_users').response(1);
+				tracker.on.select('directus_user_identities').response([]);
 
 				await service.updateMany(
 					['8e2b4c10-5d3a-4f6e-9a7b-000000000009'],
@@ -387,31 +543,96 @@ describe('Integration Tests', () => {
 
 				expect(checkUniqueEmailsSpy).toBeCalledTimes(1);
 
+				expect(superCreateOneSpy).toHaveBeenCalledWith({
+					user: '8e2b4c10-5d3a-4f6e-9a7b-000000000009',
+					kind: 'email',
+					value: 'test@example.com',
+					verified: false,
+				});
+
 				expect(clearUserSessionsSpy).toHaveBeenCalledWith(
 					['8e2b4c10-5d3a-4f6e-9a7b-000000000009'],
 					undefined,
 				);
 			});
 
+			it('purges the account whose primary identity the email became', async () => {
+				scopedCache.purgeEnabled = true;
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_users').response(1);
+				tracker.on.select('directus_user_identities').response([]);
+
+				await service.updateMany(
+					['8e2b4c10-5d3a-4f6e-9a7b-000000000052'],
+					{ email: 'test@example.com' },
+				);
+
+				expect(scopedCache.purgeForMutatedRows).toHaveBeenCalledWith(
+					'directus_users',
+					[{ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000052' }],
+				);
+			});
+
+			it('replaces the value of the email identity the account shows', async () => {
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_users').response(1);
+
+				tracker.on.select('directus_user_identities')
+					.responseOnce({ value: 'old@example.com' });
+
+				tracker.on.select('directus_user_identities').responseOnce({
+					id: '8e2b4c10-5d3a-4f6e-9a7b-000000000051',
+					user: '8e2b4c10-5d3a-4f6e-9a7b-000000000050',
+					kind: 'email',
+					value: 'old@example.com',
+				});
+
+				await service.updateMany(
+					['8e2b4c10-5d3a-4f6e-9a7b-000000000050'],
+					{ email: 'new@example.com' },
+				);
+
+				expect(superUpdateGroupsSpy).toHaveBeenCalledWith(
+					[{
+						data: { value: 'new@example.com', verified: false },
+						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000051'],
+					}],
+					expect.anything(),
+				);
+
+				expect(superCreateOneSpy).not.toHaveBeenCalled();
+			});
+
 			it('should disallow updating multiple items to same email', async () => {
 				const opts: MutationOptions = {};
 
-				await service.updateMany(['user-id-10', 'user-id-11'], { email: 'test@example.com' }, opts);
+				await expect(service.updateMany(
+					['user-id-10', 'user-id-11'],
+					{ email: 'test@example.com' },
+					opts,
+				)).rejects.toStrictEqual(new RecordNotUniqueError({
+					collection: 'directus_user_identities',
+					field: 'value',
+					value: 'test@example.com',
+				}));
+
+				expect(superUpdateGroupsSpy).not.toHaveBeenCalled();
+				expect(superCreateOneSpy).not.toHaveBeenCalled();
 
 				expect(opts.preMutationErrorsByKey).toStrictEqual(new Map([
 					[
 						'user-id-10',
 						new RecordNotUniqueError({
-							collection: 'directus_users',
-							field: 'email',
+							collection: 'directus_user_identities',
+							field: 'value',
 							value: 'test@example.com',
 						}),
 					],
 					[
 						'user-id-11',
 						new RecordNotUniqueError({
-							collection: 'directus_users',
-							field: 'email',
+							collection: 'directus_user_identities',
+							field: 'value',
 							value: 'test@example.com',
 						}),
 					],
@@ -450,19 +671,68 @@ describe('Integration Tests', () => {
 						accountability: { role: 'test', admin: false } as Accountability,
 					});
 
-					it.each(['tfa_secret', 'provider', 'external_identifier'])('%s', async (field) => {
+					it('tfa_secret', async () => {
 						const opts: MutationOptions = {};
 
-						await service.updateMany([1], { [field]: 'test' }, opts);
+						await service.updateMany([1], { tfa_secret: 'test' }, opts);
 
 						expect(superUpdateGroupsSpy).toHaveBeenCalled();
 
 						expect(opts.preMutationErrorsByKey).toStrictEqual(new Map([[
 							'1',
 							new InvalidPayloadError({
-								reason: `You can't change the "${field}" value manually`,
+								reason: `You can't change the "tfa_secret" value manually`,
 							}),
 						]]));
+					});
+
+					it.each([
+						'email',
+						'provider',
+						'external_identifier',
+					])('%s', async (field) => {
+						await expect(service.updateMany([1], { [field]: 'test' }))
+							.rejects.toStrictEqual(new InvalidPayloadError({
+								reason: `You can't change the "${field}" value manually`,
+							}));
+
+						expect(validateAccess).toHaveBeenCalledWith(
+							{
+								accountability: { role: 'test', admin: false },
+								action: 'update',
+								collection: 'directus_users',
+								primaryKeys: [1],
+							},
+							{ schema, knex: db },
+						);
+
+						expect(superUpdateGroupsSpy).not.toHaveBeenCalled();
+					});
+
+					it('refuses a batch whose other row may not be updated', async () => {
+						const opts: MutationOptions = {};
+
+						vi.mocked(validateAccess).mockRejectedValueOnce(new ForbiddenError());
+
+						await service.updateBatch([
+							{ id: 'user-id-self', first_name: 'renamed' },
+							{ id: 'user-id-other', email: 'self@example.com' },
+						], opts);
+
+						expect(superUpdateGroupsSpy).toHaveBeenCalledWith(
+							[
+								{ data: { first_name: 'renamed' }, keys: ['user-id-self'] },
+								{ data: {}, keys: ['user-id-other'] },
+							],
+							{
+								preMutationErrorsByKey: new Map([
+									['user-id-other', new ForbiddenError()],
+								]),
+								preMutationError: new ForbiddenError(),
+							},
+						);
+
+						expect(superCreateOneSpy).not.toHaveBeenCalled();
 					});
 				});
 
@@ -476,15 +746,63 @@ describe('Integration Tests', () => {
 						accountability,
 					});
 
-					it.each(['provider', 'external_identifier'])('%s', async (field) => {
-						const promise = service.updateMany(['user-id-14'], { [field]: 'test' });
+					it('provider and external_identifier', async () => {
+						tracker.on.update('directus_users').response(1);
 
-						await expect(promise).resolves.not.toThrow();
+						await service.updateMany(
+							['user-id-14'],
+							{ provider: 'test', external_identifier: 'test-id' },
+						);
 
 						expect(superUpdateGroupsSpy).toHaveBeenCalledWith(
-							[{ data: { [field]: 'test', auth_data: null }, keys: ['user-id-14'] }],
+							[{ data: {}, keys: ['user-id-14'] }],
 							{},
 						);
+
+						expect(superCreateOneSpy).toHaveBeenCalledWith({
+							user: 'user-id-14',
+							kind: 'test',
+							value: 'test-id',
+							verified: true,
+							auth_data: null,
+						});
+
+						expect(tracker.history.update[0]!.bindings)
+							.toStrictEqual(['user-id-1', 'user-id-14']);
+					});
+
+					it('provider without external_identifier', async () => {
+						await expect(service.updateMany(['user-id-15'], { provider: 'test' }))
+							.rejects.toStrictEqual(new InvalidPayloadError({
+								reason: 'The provider "test" needs an "external_identifier"',
+							}));
+					});
+
+					it.each([
+						[{ email: null }, 'The "email" value writes no identity'],
+						[{ provider: null }, 'The "provider" value writes no identity'],
+						[
+							{ external_identifier: null },
+							'The "external_identifier" value writes no identity',
+						],
+						[{ provider: 'default' }, 'The "provider" value writes no identity'],
+						[
+							{ auth_data: '{"refreshToken":"rotated"}' },
+							'The "auth_data" value writes no identity',
+						],
+					])('refuses %j, which writes no identity', async (data, reason) => {
+						await expect(service.updateMany(['user-id-18'], data))
+							.rejects.toStrictEqual(new InvalidPayloadError({ reason }));
+					});
+
+					it('external_identifier without provider', async () => {
+						await expect(service.updateMany(
+							['user-id-17'],
+							{ external_identifier: 'test-id' },
+						)).rejects.toStrictEqual(new InvalidPayloadError({
+							reason: 'An "external_identifier" needs a provider other than'
+								+ ' "default"',
+						}));
 					});
 				});
 			});
@@ -521,10 +839,27 @@ describe('Integration Tests', () => {
 			});
 
 			it('checks emails against the users the batch keeps', async () => {
+				tracker.on.select('directus_user_identities').response([]);
+				tracker.on.update('directus_users').response(1);
+
 				await service.updateBatch([
 					{ id: 'user-id-23', email: 'first@example.com' },
 					{ id: 'user-id-24', email: 'second@example.com' },
 				]);
+
+				expect(superCreateOneSpy).toHaveBeenNthCalledWith(1, {
+					user: 'user-id-23',
+					kind: 'email',
+					value: 'first@example.com',
+					verified: false,
+				});
+
+				expect(superCreateOneSpy).toHaveBeenNthCalledWith(2, {
+					user: 'user-id-24',
+					kind: 'email',
+					value: 'second@example.com',
+					verified: false,
+				});
 
 				expect(checkUniqueEmailsSpy).toHaveBeenNthCalledWith(
 					1,
@@ -542,16 +877,20 @@ describe('Integration Tests', () => {
 			it('refuses two rows set to the same email, whatever the casing', async () => {
 				const opts: MutationOptions = {};
 
-				await service.updateBatch([
+				await expect(service.updateBatch([
 					{ id: 'user-id-25', email: 'same@example.com' },
 					{ id: 'user-id-26', email: 'SAME@example.com' },
-				], opts);
+				], opts)).rejects.toStrictEqual(new RecordNotUniqueError({
+					collection: 'directus_user_identities',
+					field: 'value',
+					value: 'SAME@example.com',
+				}));
 
 				expect(opts.preMutationErrorsByKey).toStrictEqual(new Map([[
 					'user-id-26',
 					new RecordNotUniqueError({
-						collection: 'directus_users',
-						field: 'email',
+						collection: 'directus_user_identities',
+						field: 'value',
 						value: 'SAME@example.com',
 					}),
 				]]));
@@ -560,10 +899,17 @@ describe('Integration Tests', () => {
 			it('keeps each row\'s own error when several rows are refused', async () => {
 				const opts: MutationOptions = {};
 
-				await service.updateBatch([
+				// As ItemsService.updateGroups throws a stored refusal
+				superUpdateGroupsSpy.mockRejectedValueOnce(new InvalidPayloadError({
+					reason: `You can't change the "tfa_secret" value manually`,
+				}));
+
+				await expect(service.updateBatch([
 					{ id: 'user-id-27', tfa_secret: 'secret' },
 					{ id: 'user-id-28', email: 'not-an-email' },
-				], opts);
+				], opts)).rejects.toStrictEqual(new InvalidPayloadError({
+					reason: `You can't change the "tfa_secret" value manually`,
+				}));
 
 				expect(opts.preMutationErrorsByKey).toStrictEqual(new Map<string, Error>([
 					[
@@ -986,6 +1332,29 @@ describe('Integration Tests', () => {
 				await expect(promise).rejects.toThrowError(ForbiddenError);
 				await expect(promise).rejects.toThrowError('Bad user credentials');
 			});
+
+			it('refuses an account without a password (point 10)', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'user@example.com',
+					scope: 'password-reset',
+					hash: 'some-hash',
+				} as any);
+
+				vi.spyOn(UsersService.prototype as any, 'checkPasswordPolicy')
+					.mockResolvedValue(undefined);
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({
+						id: 'user-id-reset-3',
+						status: 'active',
+						password: null,
+					});
+
+				await expect(service.resetPassword('reset-token', 'new-password'))
+					.rejects.toEqual(new ForbiddenError({
+						reason: 'No password is set on this account',
+					}));
+			});
 		});
 
 		describe('requestPasswordReset', () => {
@@ -999,6 +1368,21 @@ describe('Integration Tests', () => {
 
 				await expect(promise).rejects.toThrowError(ForbiddenError);
 				await expect(promise).rejects.toThrowError('Inactive user');
+			});
+
+			it('refuses an account without a password (point 10)', async () => {
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({
+						id: 'user-id-req-2',
+						status: 'active',
+						password: null,
+						email: 'user@example.com',
+					});
+
+				await expect(service.requestPasswordReset('user@example.com', null))
+					.rejects.toEqual(new ForbiddenError({
+						reason: 'No password is set on this account',
+					}));
 			});
 		});
 
@@ -1036,38 +1420,72 @@ describe('Integration Tests', () => {
 				checkUniqueEmailsSpy.mockImplementationOnce(usersCheckUniqueEmails);
 				const opts: MutationOptions = {};
 
-				await service.createMany([
+				// As ItemsService.createMany throws a stored refusal
+				vi.mocked(ItemsService.prototype.createMany)
+					.mockRejectedValueOnce(new RecordNotUniqueError({
+						collection: 'directus_user_identities',
+						field: 'value',
+						value: '[ada@example.com]',
+					}));
+
+				await expect(service.createMany([
 					{ email: 'Ada@example.com' },
 					{ email: 'ada@example.com' },
-				], opts);
+				], opts)).rejects.toStrictEqual(new RecordNotUniqueError({
+					collection: 'directus_user_identities',
+					field: 'value',
+					value: '[ada@example.com]',
+				}));
 
 				expect(opts.preMutationError).toStrictEqual(new RecordNotUniqueError({
-					collection: 'directus_users',
-					field: 'email',
+					collection: 'directus_user_identities',
+					field: 'value',
 					value: '[ada@example.com]',
 				}));
 			});
 
 			it('refuses an email another user holds in any casing', async () => {
 				checkUniqueEmailsSpy.mockImplementationOnce(usersCheckUniqueEmails);
-				tracker.on.select('directus_users').response([{ email: 'ada@example.com' }]);
+
+				tracker.on.select('directus_user_identities')
+					.response([{ value: 'ada@example.com' }]);
+
 				const opts: MutationOptions = {};
 
-				await service.createMany([{ email: 'Ada@Example.com' }], opts);
+				// As ItemsService.createMany throws a stored refusal
+				vi.mocked(ItemsService.prototype.createMany)
+					.mockRejectedValueOnce(new RecordNotUniqueError({
+						collection: 'directus_user_identities',
+						field: 'value',
+						value: '[ada@example.com]',
+					}));
+
+				await expect(service.createMany([{ email: 'Ada@Example.com' }], opts))
+					.rejects.toStrictEqual(new RecordNotUniqueError({
+						collection: 'directus_user_identities',
+						field: 'value',
+						value: '[ada@example.com]',
+					}));
 
 				expect(opts.preMutationError).toStrictEqual(new RecordNotUniqueError({
-					collection: 'directus_users',
-					field: 'email',
+					collection: 'directus_user_identities',
+					field: 'value',
 					value: '[ada@example.com]',
 				}));
 
+				expect(tracker.history.select[0]?.sql).toBe(oneLine`
+					select "value" from "directus_user_identities"
+					where "kind" = ? and LOWER("value") IN (?)
+				`);
+
 				expect(tracker.history.select[0]?.bindings)
-					.toStrictEqual(['ada@example.com']);
+					.toStrictEqual(['email', 'ada@example.com']);
 			});
 
 			it('skips the users the batch rewrites when looking up a holder', async () => {
 				checkUniqueEmailsSpy.mockImplementationOnce(usersCheckUniqueEmails);
-				tracker.on.select('directus_users').response([]);
+				tracker.on.select('directus_user_identities').response([]);
+				tracker.on.update('directus_users').response(1);
 				const opts: MutationOptions = {};
 
 				await service.updateBatch(
@@ -1077,8 +1495,20 @@ describe('Integration Tests', () => {
 
 				expect(opts.preMutationErrorsByKey).toBe(undefined);
 
+				expect(tracker.history.select[0]?.sql).toBe(oneLine`
+					select "value" from "directus_user_identities"
+					where "kind" = ? and LOWER("value") IN (?) and "user" not in (?)
+				`);
+
 				expect(tracker.history.select[0]?.bindings)
-					.toStrictEqual(['new@example.com', 'user-id-40']);
+					.toStrictEqual(['email', 'new@example.com', 'user-id-40']);
+
+				expect(superCreateOneSpy).toHaveBeenCalledWith({
+					user: 'user-id-40',
+					kind: 'email',
+					value: 'new@example.com',
+					verified: false,
+				});
 			});
 		});
 
@@ -1292,12 +1722,38 @@ describe('Integration Tests', () => {
 			});
 		});
 
+		describe('requestPasswordReset by email', () => {
+			it('refuses an identity whose account row is gone', async () => {
+				tracker.on.select('directus_user_identities').response({
+					id: '8e2b4c10-5d3a-4f6e-9a7b-000000000061',
+					user: '8e2b4c10-5d3a-4f6e-9a7b-000000000060',
+					kind: 'email',
+					value: 'gone@example.com',
+				});
+
+				tracker.on.select('directus_users').response(undefined);
+
+				await expect(service.requestPasswordReset('gone@example.com', null))
+					.rejects.toStrictEqual(new ForbiddenError({ reason: 'Inactive user' }));
+
+				expect(tracker.history.select[1]?.bindings)
+					.toStrictEqual(['8e2b4c10-5d3a-4f6e-9a7b-000000000060', 1]);
+			});
+		});
+
 		describe('verifyRegistration by email', () => {
-			it('activates the unverified user the token names', async () => {
+			it('activates the user and verifies the registered email', async () => {
 				vi.mocked(verifyJWT).mockReturnValue({
 					email: 'Ada@Example.com',
 					scope: 'pending-registration',
 				} as any);
+
+				tracker.on.select('directus_user_identities').response({
+					id: '8e2b4c10-5d3a-4f6e-9a7b-000000000043',
+					user: '8e2b4c10-5d3a-4f6e-9a7b-000000000042',
+					kind: 'email',
+					value: 'ada@example.com',
+				});
 
 				tracker.on.select('directus_users').response({
 					id: '8e2b4c10-5d3a-4f6e-9a7b-000000000042',
@@ -1308,15 +1764,65 @@ describe('Integration Tests', () => {
 					.resolves.toBe('8e2b4c10-5d3a-4f6e-9a7b-000000000042');
 
 				expect(tracker.history.select[0]?.bindings)
-					.toStrictEqual(['ada@example.com', 1]);
+					.toStrictEqual(['email', 'ada@example.com', 1]);
 
-				expect(superUpdateGroupsSpy).toHaveBeenCalledWith(
+				expect(tracker.history.select[1]?.bindings)
+					.toStrictEqual(['8e2b4c10-5d3a-4f6e-9a7b-000000000042', 1]);
+
+				expect(superUpdateGroupsSpy).toHaveBeenNthCalledWith(
+					1,
 					[{
 						data: { status: 'active' },
 						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000042'],
 					}],
 					expect.anything(),
 				);
+
+				expect(superUpdateGroupsSpy).toHaveBeenNthCalledWith(
+					2,
+					[{
+						data: { verified: true },
+						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000043'],
+					}],
+					expect.anything(),
+				);
+
+				expect(superUpdateGroupsSpy).toHaveBeenCalledTimes(2);
+			});
+
+			it('verifies the registration in one transaction', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'ada@example.com',
+					scope: 'pending-registration',
+				} as any);
+
+				tracker.on.select('directus_user_identities').response({
+					id: '8e2b4c10-5d3a-4f6e-9a7b-000000000045',
+					user: '8e2b4c10-5d3a-4f6e-9a7b-000000000044',
+					kind: 'email',
+					value: 'ada@example.com',
+				});
+
+				tracker.on.select('directus_users').response({
+					id: '8e2b4c10-5d3a-4f6e-9a7b-000000000044',
+					status: 'unverified',
+				});
+
+				const writtenInTransaction: boolean[] = [];
+
+				superUpdateGroupsSpy.mockImplementation(async function (this: any) {
+					writtenInTransaction.push(this.knex.isTransaction === true);
+
+					return ['8e2b4c10-5d3a-4f6e-9a7b-000000000044'];
+				});
+
+				onTestFinished(() => {
+					superUpdateGroupsSpy.mockResolvedValue(['user-id-2']);
+				});
+
+				await service.verifyRegistration('verify-token');
+
+				expect(writtenInTransaction).toStrictEqual([true, true]);
 			});
 		});
 

@@ -168,6 +168,21 @@ data:
     many_field: share
     one_collection: directus_shares
 
+  - many_collection: directus_sessions
+    many_field: identity
+    one_collection: directus_user_identities
+
+  ### User identities
+  - many_collection: directus_user_identities
+    many_field: user
+    one_collection: directus_users
+    one_field: identities
+    one_deselect_action: delete
+
+  - many_collection: directus_users
+    many_field: primary_identity
+    one_collection: directus_user_identities
+
   ### Dashboards
   - many_collection: directus_dashboards
     many_field: user_created

@@ -94,7 +94,6 @@ describe('notification emails', () => {
 
 		vi.mocked(UsersService.prototype.readOne).mockResolvedValue(withMeta({
 			id: 'user-a',
-			email: 'user-a@example.com',
 			email_notifications: true,
 			role: null,
 		}, { scopedCacheFingerprints: [] }));
@@ -110,6 +109,9 @@ describe('notification emails', () => {
 	`, async () => {
 		tracker.on.insert('directus_notifications').response([1]);
 
+		tracker.on.select('directus_user_identities')
+			.response([{ value: 'user-a@example.com' }]);
+
 		await new NotificationsService({ knex: database, schema })
 			.createMany([{ recipient: 'user-a', subject: 'Hi' }]);
 
@@ -117,6 +119,18 @@ describe('notification emails', () => {
 		expect(vi.mocked(UsersService).mock.calls).toEqual([
 			[{ schema, knex: database }],
 		]);
+
+		expect(tracker.history.select).toMatchObject([{
+			sql: oneLine`
+				select "identity"."value"
+				from "directus_user_identities" as "identity"
+				left join "directus_users" as "owner"
+				on "owner"."primary_identity" = "identity"."id"
+				where "identity"."user" = ? and "identity"."kind" = ?
+				order by "owner"."id" IS NULL, "identity"."id" asc limit ?
+			`,
+			bindings: ['user-a', 'email', 1],
+		}]);
 
 		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
 			template: { name: 'base', data: { html: '' } },
@@ -145,6 +159,9 @@ describe('notification emails', () => {
 	`, async () => {
 		tracker.on.insert('directus_notifications').response([1]);
 
+		tracker.on.select('directus_user_identities')
+			.response([{ value: 'user-a@example.com' }]);
+
 		await transaction(database, async (trx) => {
 			await new NotificationsService({ knex: trx, schema })
 				.createMany([{ recipient: 'user-a', subject: 'Hi' }]);
@@ -165,6 +182,9 @@ describe('notification emails', () => {
 	`, async () => {
 		tracker.on.insert('directus_notifications').response([1]);
 
+		tracker.on.select('directus_user_identities')
+			.response([{ value: 'user-b@example.com' }]);
+
 		const reshapeRows = () => {
 			return [
 				{ data: { recipient: 'user-b', subject: 'A' } },
@@ -178,7 +198,6 @@ describe('notification emails', () => {
 
 		vi.mocked(UsersService.prototype.readOne).mockResolvedValue(withMeta({
 			id: 'user-b',
-			email: 'user-b@example.com',
 			email_notifications: true,
 			role: null,
 		}, { scopedCacheFingerprints: [] }));
@@ -202,7 +221,7 @@ describe('notification emails', () => {
 		}
 
 		expect(vi.mocked(UsersService.prototype.readOne).mock.calls).toEqual([
-			['user-b', { fields: ['id', 'email', 'email_notifications', 'role'] }],
+			['user-b', { fields: ['id', 'email_notifications', 'role'] }],
 		]);
 
 		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
@@ -216,13 +235,16 @@ describe('notification emails', () => {
 		emails the later notifications of a create when an earlier one fails
 	`, async () => {
 		tracker.on.insert('directus_notifications').response([1, 2]);
+
+		tracker.on.select('directus_user_identities')
+			.response([{ value: 'user-b@example.com' }]);
+
 		const readError = new Error('user-a deleted');
 
 		vi.mocked(UsersService.prototype.readOne)
 			.mockRejectedValueOnce(readError)
 			.mockResolvedValueOnce(withMeta({
 				id: 'user-b',
-				email: 'user-b@example.com',
 				email_notifications: true,
 				role: null,
 			}, { scopedCacheFingerprints: [] }));
@@ -232,7 +254,7 @@ describe('notification emails', () => {
 			{ recipient: 'user-b', subject: 'B' },
 		]);
 
-		const userFields = ['id', 'email', 'email_notifications', 'role'];
+		const userFields = ['id', 'email_notifications', 'role'];
 
 		expect(vi.mocked(UsersService.prototype.readOne).mock.calls).toEqual([
 			['user-a', { fields: userFields }],
@@ -255,11 +277,14 @@ describe('notification emails', () => {
 	`, async () => {
 		tracker.on.insert('directus_notifications').response([1]);
 
+		tracker.on.select('directus_user_identities')
+			.response([{ value: 'user-a@example.com' }]);
+
 		await new NotificationsService({ knex: database, schema })
 			.createMany([{ recipient: { id: 'user-a' } as never, subject: 'A' }]);
 
 		expect(vi.mocked(UsersService.prototype.readOne).mock.calls).toEqual([
-			['user-a', { fields: ['id', 'email', 'email_notifications', 'role'] }],
+			['user-a', { fields: ['id', 'email_notifications', 'role'] }],
 		]);
 
 		expect(vi.mocked(MailService.prototype.send).mock.calls).toEqual([[{
@@ -286,6 +311,9 @@ describe('notification emails', () => {
 		emails at once the notifications a created hook is handed outside a
 		transaction
 	`, async () => {
+		tracker.on.select('directus_user_identities')
+			.response([{ value: 'user-a@example.com' }]);
+
 		await emitter.emitWrittenFilter(
 			'notifications.created',
 			[{ id: 1, recipient: 'user-a', subject: 'Hi' }],

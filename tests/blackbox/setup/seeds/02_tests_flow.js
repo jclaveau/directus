@@ -39,11 +39,24 @@ export async function seed(knex) {
 	await knex('directus_users').insert([
 		{
 			id: '3d075128-c073-4f5d-891c-ed2eb2790a1c',
-			email: 'flow@tests.com',
 			password: await generateHash('TestsFlowUserPassword'),
 			status: 'active',
 			role: 'd70c0943-5b55-4c5d-a613-f539a27a57f5',
 			token: 'TestsFlowToken',
 		},
 	]);
+
+	await knex('directus_user_identities').insert([
+		{
+			id: '0c6f3e2a-8d4b-4f1e-9a7c-5b2d1e3f4a60',
+			user: '3d075128-c073-4f5d-891c-ed2eb2790a1c',
+			kind: 'email',
+			value: 'flow@tests.com',
+			verified: false,
+		},
+	]);
+
+	await knex('directus_users')
+		.update({ primary_identity: '0c6f3e2a-8d4b-4f1e-9a7c-5b2d1e3f4a60' })
+		.where('id', '3d075128-c073-4f5d-891c-ed2eb2790a1c');
 }

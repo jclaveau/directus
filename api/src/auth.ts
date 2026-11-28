@@ -1,6 +1,8 @@
 import { useEnv } from '@directus/env';
 import { InvalidProviderConfigError } from '@directus/errors';
 import type { AuthDriver } from './auth/auth.js';
+import { EMAIL_IDENTITY_KIND } from './auth/utils/user-identities.js';
+import { describeUnverifiableEmail } from './auth/utils/verified-email.js';
 import {
 	LDAPAuthDriver,
 	LocalAuthDriver,
@@ -28,6 +30,10 @@ export function getAuthProvider(provider: string): AuthDriver {
 	return providers.get(provider)!;
 }
 
+export function findAuthProvider(provider: string): AuthDriver | undefined {
+	return providers.get(provider);
+}
+
 export async function registerAuthProviders(): Promise<void> {
 	const env = useEnv();
 	const logger = useLogger();
@@ -48,11 +54,30 @@ export async function registerAuthProviders(): Promise<void> {
 			process.exit(1);
 		}
 
+		if (name === EMAIL_IDENTITY_KIND) {
+			logger.error(
+				`Cannot name an auth provider ${JSON.stringify(EMAIL_IDENTITY_KIND)}:`
+				+ ' it is the kind of the identities the default provider logs in with.',
+			);
+
+			process.exit(1);
+		}
+
 		const { driver, ...config } = getConfigFromEnv(`AUTH_${name.toUpperCase()}_`);
 
 		if (!driver) {
 			logger.warn(`Missing driver definition for "${name}" auth provider.`);
 			return;
+		}
+
+		const unverifiableEmail = describeUnverifiableEmail(name, {
+			driver,
+			...config,
+		});
+
+		if (unverifiableEmail !== null) {
+			logger.error(unverifiableEmail);
+			process.exit(1);
 		}
 
 		const provider = getProviderInstance(driver, options, { provider: name, ...config });

@@ -44,14 +44,14 @@ const systemDefaults: Record<string, Partial<Preset>> = {
 		layout: 'cards',
 		layout_query: {
 			cards: {
-				sort: ['email'],
+				sort: ['primary_identity.value'],
 			},
 		},
 		layout_options: {
 			cards: {
 				icon: 'account_circle',
 				title: '{{ first_name }} {{ last_name }}',
-				subtitle: '{{ email }}',
+				subtitle: '{{ primary_identity.value }}',
 				size: 4,
 			},
 		},

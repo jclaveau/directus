@@ -1,4 +1,7 @@
-import type { DirectusUser } from '../../../schema/user.js';
+import type {
+	DirectusUser,
+	DirectusUserPayload,
+} from '../../../schema/user.js';
 import type {
 	ApplyQueryFields,
 	Query,
@@ -22,7 +25,7 @@ export type CreateUserOutput<
  */
 export const createUsers =
 	<Schema, const TQuery extends QueryMutation<Schema, DirectusUser<Schema>>>(
-		items: Partial<DirectusUser<Schema>>[],
+		items: DirectusUserPayload<Schema>[],
 		query?: TQuery,
 	): RestCommand<CreateUserOutput<Schema, TQuery>[], Schema> =>
 	() => ({
@@ -42,7 +45,7 @@ export const createUsers =
  */
 export const createUser =
 	<Schema, const TQuery extends QueryMutation<Schema, DirectusUser<Schema>>>(
-		item: Partial<DirectusUser<Schema>>,
+		item: DirectusUserPayload<Schema>,
 		query?: TQuery,
 	): RestCommand<CreateUserOutput<Schema, TQuery>, Schema> =>
 	() => ({

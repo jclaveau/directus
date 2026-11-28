@@ -26,14 +26,18 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                  | code: 200            |+
       | path: /users                                 | body:                |
       | query:                                       |   data:              |
-      |   filter[email][_eq]: a2o-create@write.email |     - status: active |
+      |   filter:                                    |     - status: active |
+      |     identities:                              |                      |
+      |       value:                                 |                      |
+      |         _eq: a2o-create@write.email          |                      |
       |   fields: status                             |                      |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_activity    | 0      | 2      | 0      | 0      |
-      | 1       | directus_revisions   | 0      | 2      | 1      | 0      |
-      | 1       | directus_users       | 3      | 1      | 0      | 0      |
-      | 1       | test_write_user_link | 1      | 1      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 2      | 1      | 0      |
+      | 1       | directus_user_identities | 2      | 1      | 0      | 0      |
+      | 1       | directus_users           | 2      | 1      | 1      | 0      |
+      | 1       | test_write_user_link     | 1      | 1      | 0      | 0      |
 
   Scenario: an any-to-one field activates the existing user it holds
     When these requests get these responses:
@@ -57,120 +61,126 @@ Feature: A nested write to users, roles or policies hands its user checks up
       |                                                   |   data:            |
       |                                                   |     status: active |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 1      | 0      | 0      | 0      |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
-      | 1       | directus_users       | 3      | 1      | 0      | 0      |
-      | 2       | directus_access      | 1      | 0      | 0      | 0      |
-      | 2       | directus_activity    | 0      | 2      | 0      | 0      |
-      | 2       | directus_revisions   | 0      | 2      | 1      | 0      |
-      | 2       | directus_users       | 3      | 0      | 1      | 0      |
-      | 2       | test_write_user_link | 1      | 1      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 1      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_user_identities | 3      | 1      | 0      | 0      |
+      | 1       | directus_users           | 2      | 1      | 1      | 0      |
+      | 2       | directus_access          | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 2       | directus_revisions       | 0      | 2      | 1      | 0      |
+      | 2       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 3      | 0      | 1      | 0      |
+      | 2       | test_write_user_link     | 1      | 1      | 0      | 0      |
 
   Scenario: a user's policies given as an empty list delete its access rows
     When these requests get these responses:
-      | request                                                  | response   |
-      | method: POST                                             | code: 200  |+
-      | path: /policies                                          |            |
-      | payload:                                                 |            |
-      |   id: 5e1f0000-0000-4000-8000-000000000002               |            |
-      |   name: write integrity policy                           |            |
-      | method: POST                                             | code: 200  |+
-      | path: /users                                             |            |
-      | payload:                                                 |            |
-      |   id: 5e1f0000-0000-4000-8000-000000000013               |            |
-      |   email: policies-emptied@write.email                    |            |
-      | method: POST                                             | code: 200  |+
-      | path: /access                                            |            |
-      | payload:                                                 |            |
-      |   id: 5e1f0000-0000-4000-8000-000000000021               |            |
-      |   user: 5e1f0000-0000-4000-8000-000000000013             |            |
-      |   policy: 5e1f0000-0000-4000-8000-000000000002           |            |
-      | method: PATCH                                            | code: 200  |+
-      | path: /users/5e1f0000-0000-4000-8000-000000000013        |            |
-      | payload:                                                 |            |
-      |   policies: []                                           |            |
-      | method: GET                                              | code: 200  |+
-      | path: /access                                            | body:      |
-      | query:                                                   |   data: [] |
-      |   filter[user][email][_eq]: policies-emptied@write.email |            |
+      | request                                                   | response   |
+      | method: POST                                              | code: 200  |+
+      | path: /policies                                           |            |
+      | payload:                                                  |            |
+      |   id: 5e1f0000-0000-4000-8000-000000000002                |            |
+      |   name: write integrity policy                            |            |
+      | method: POST                                              | code: 200  |+
+      | path: /users                                              |            |
+      | payload:                                                  |            |
+      |   id: 5e1f0000-0000-4000-8000-000000000013                |            |
+      |   email: policies-emptied@write.email                     |            |
+      | method: POST                                              | code: 200  |+
+      | path: /access                                             |            |
+      | payload:                                                  |            |
+      |   id: 5e1f0000-0000-4000-8000-000000000021                |            |
+      |   user: 5e1f0000-0000-4000-8000-000000000013              |            |
+      |   policy: 5e1f0000-0000-4000-8000-000000000002            |            |
+      | method: PATCH                                             | code: 200  |+
+      | path: /users/5e1f0000-0000-4000-8000-000000000013         |            |
+      | payload:                                                  |            |
+      |   policies: []                                            |            |
+      | method: GET                                               | code: 200  |+
+      | path: /access                                             | body:      |
+      | query:                                                    |   data: [] |
+      |   filter[user][_eq]: 5e1f0000-0000-4000-8000-000000000013 |            |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete | with |
-      | 1       | directus_access      | 2      | 0      | 0      | 0      | 0    |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_permissions | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_policies    | 1      | 1      | 0      | 0      | 0    |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_users       | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_access      | 3      | 0      | 0      | 0      | 0    |
-      | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
-      | 2       | directus_users       | 3      | 1      | 0      | 0      | 0    |
-      | 3       | directus_access      | 1      | 1      | 0      | 0      | 0    |
-      | 3       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 3       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 3       | directus_users       | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_access      | 7      | 0      | 0      | 1      | 0    |
-      | 4       | directus_activity    | 0      | 2      | 0      | 0      | 0    |
-      | 4       | directus_collections | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
-      | 4       | directus_roles       | 2      | 0      | 0      | 0      | 0    |
-      | 4       | directus_users       | 5      | 0      | 0      | 0      | 0    |
-      | 4       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
-      | 4       | information_schema   | 1      | 0      | 0      | 0      | 0    |
-      | 4       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 4       | pg_index             | 2      | 0      | 0      | 0      | 0    |
-      | 4       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
+      | request | table                    | select | insert | update | delete | with |
+      | 1       | directus_access          | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_permissions     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies        | 1      | 1      | 0      | 0      | 0    |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_access          | 3      | 0      | 0      | 0      | 0    |
+      | 2       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_roles           | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_user_identities | 3      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users           | 2      | 1      | 1      | 0      | 0    |
+      | 3       | directus_access          | 1      | 1      | 0      | 0      | 0    |
+      | 3       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 3       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 3       | directus_users           | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_access          | 7      | 0      | 0      | 1      | 0    |
+      | 4       | directus_activity        | 0      | 2      | 0      | 0      | 0    |
+      | 4       | directus_collections     | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_fields          | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_relations       | 1      | 0      | 0      | 0      | 0    |
+      | 4       | directus_roles           | 2      | 0      | 0      | 0      | 0    |
+      | 4       | directus_user_identities | 2      | 0      | 0      | 0      | 0    |
+      | 4       | directus_users           | 5      | 0      | 0      | 0      | 0    |
+      | 4       | geometry_columns         | 0      | 0      | 0      | 0      | 1    |
+      | 4       | information_schema       | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_constraint            | 1      | 0      | 0      | 0      | 0    |
+      | 4       | pg_index                 | 2      | 0      | 0      | 0      | 0    |
+      | 4       | pg_proc                  | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a user's policies deleting an access row delete it
     When these requests get these responses:
-      | request                                                  | response   |
-      | method: POST                                             | code: 200  |+
-      | path: /users                                             |            |
-      | payload:                                                 |            |
-      |   id: 5e1f0000-0000-4000-8000-000000000014               |            |
-      |   email: policies-deleted@write.email                    |            |
-      | method: POST                                             | code: 200  |+
-      | path: /access                                            |            |
-      | payload:                                                 |            |
-      |   id: 5e1f0000-0000-4000-8000-000000000022               |            |
-      |   user: 5e1f0000-0000-4000-8000-000000000014             |            |
-      |   policy: 5e1f0000-0000-4000-8000-000000000002           |            |
-      | method: PATCH                                            | code: 200  |+
-      | path: /users/5e1f0000-0000-4000-8000-000000000014        |            |
-      | payload:                                                 |            |
-      |   policies:                                              |            |
-      |     delete:                                              |            |
-      |       - 5e1f0000-0000-4000-8000-000000000022             |            |
-      | method: GET                                              | code: 200  |+
-      | path: /access                                            | body:      |
-      | query:                                                   |   data: [] |
-      |   filter[user][email][_eq]: policies-deleted@write.email |            |
+      | request                                                   | response   |
+      | method: POST                                              | code: 200  |+
+      | path: /users                                              |            |
+      | payload:                                                  |            |
+      |   id: 5e1f0000-0000-4000-8000-000000000014                |            |
+      |   email: policies-deleted@write.email                     |            |
+      | method: POST                                              | code: 200  |+
+      | path: /access                                             |            |
+      | payload:                                                  |            |
+      |   id: 5e1f0000-0000-4000-8000-000000000022                |            |
+      |   user: 5e1f0000-0000-4000-8000-000000000014              |            |
+      |   policy: 5e1f0000-0000-4000-8000-000000000002            |            |
+      | method: PATCH                                             | code: 200  |+
+      | path: /users/5e1f0000-0000-4000-8000-000000000014         |            |
+      | payload:                                                  |            |
+      |   policies:                                               |            |
+      |     delete:                                               |            |
+      |       - 5e1f0000-0000-4000-8000-000000000022              |            |
+      | method: GET                                               | code: 200  |+
+      | path: /access                                             | body:      |
+      | query:                                                    |   data: [] |
+      |   filter[user][_eq]: 5e1f0000-0000-4000-8000-000000000014 |            |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete | with |
-      | 1       | directus_access      | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_users       | 3      | 1      | 0      | 0      | 0    |
-      | 2       | directus_access      | 1      | 1      | 0      | 0      | 0    |
-      | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_users       | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_access      | 7      | 0      | 0      | 1      | 0    |
-      | 3       | directus_activity    | 0      | 2      | 0      | 0      | 0    |
-      | 3       | directus_collections | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_roles       | 2      | 0      | 0      | 0      | 0    |
-      | 3       | directus_users       | 5      | 0      | 0      | 0      | 0    |
-      | 3       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
-      | 3       | information_schema   | 1      | 0      | 0      | 0      | 0    |
-      | 3       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
-      | 3       | pg_index             | 2      | 0      | 0      | 0      | 0    |
-      | 3       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
+      | request | table                    | select | insert | update | delete | with |
+      | 1       | directus_access          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_user_identities | 3      | 1      | 0      | 0      | 0    |
+      | 1       | directus_users           | 2      | 1      | 1      | 0      | 0    |
+      | 2       | directus_access          | 1      | 1      | 0      | 0      | 0    |
+      | 2       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_access          | 7      | 0      | 0      | 1      | 0    |
+      | 3       | directus_activity        | 0      | 2      | 0      | 0      | 0    |
+      | 3       | directus_collections     | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_fields          | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_relations       | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_roles           | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_user_identities | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_users           | 5      | 0      | 0      | 0      | 0    |
+      | 3       | geometry_columns         | 0      | 0      | 0      | 0      | 1    |
+      | 3       | information_schema       | 1      | 0      | 0      | 0      | 0    |
+      | 3       | pg_constraint            | 1      | 0      | 0      | 0      | 0    |
+      | 3       | pg_index                 | 2      | 0      | 0      | 0      | 0    |
+      | 3       | pg_proc                  | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a role's users given as an empty list leave the role
     When these requests get these responses:
@@ -193,24 +203,29 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                       | code: 200        |+
       | path: /users                                      | body:            |
       | query:                                            |   data:          |
-      |   filter[email][_eq]: role-emptied@write.email    |     - role: null |
+      |   filter:                                         |     - role: null |
+      |     identities:                                   |                  |
+      |       value:                                      |                  |
+      |         _eq: role-emptied@write.email             |                  |
       |   fields: role                                    |                  |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 1      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_roles     | 2      | 1      | 0      | 0      |
-      | 1       | directus_users     | 2      | 0      | 0      | 0      |
-      | 2       | directus_access    | 1      | 0      | 0      | 0      |
-      | 2       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 2       | directus_users     | 3      | 1      | 0      | 0      |
-      | 3       | directus_access    | 4      | 0      | 0      | 0      |
-      | 3       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 3       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 3       | directus_roles     | 6      | 0      | 0      | 0      |
-      | 3       | directus_users     | 6      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 1      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_roles           | 2      | 1      | 0      | 0      |
+      | 1       | directus_users           | 2      | 0      | 0      | 0      |
+      | 2       | directus_access          | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 2       | directus_user_identities | 3      | 1      | 0      | 0      |
+      | 2       | directus_users           | 2      | 1      | 1      | 0      |
+      | 3       | directus_access          | 4      | 0      | 0      | 0      |
+      | 3       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 3       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 3       | directus_roles           | 6      | 0      | 0      | 0      |
+      | 3       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 3       | directus_users           | 6      | 0      | 1      | 0      |
 
   Scenario: a role's users creating a user put it in the role
     When these requests get these responses:
@@ -225,15 +240,19 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                       | code: 200               |+
       | path: /users                                      | body:                   |
       | query:                                            |   data:                 |
-      |   filter[email][_eq]: role-created@write.email    |     - role:             |
-      |   fields: role.name                               |         name: integrity |
+      |   filter:                                         |     - role:             |
+      |     identities:                                   |         name: integrity |
+      |       value:                                      |                         |
+      |         _eq: role-created@write.email             |                         |
+      |   fields: role.name                               |                         |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 2      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_roles     | 5      | 0      | 0      | 0      |
-      | 1       | directus_users     | 4      | 1      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_roles           | 5      | 0      | 0      | 0      |
+      | 1       | directus_user_identities | 2      | 1      | 0      | 0      |
+      | 1       | directus_users           | 3      | 1      | 1      | 0      |
 
   Scenario: a role's users updating a user outside it activate it and move it in
     When these requests get these responses:
@@ -254,21 +273,26 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                       | code: 200               |+
       | path: /users                                      | body:                   |
       | query:                                            |   data:                 |
-      |   filter[email][_eq]: role-updated@write.email    |     - status: active    |
-      |   fields:                                         |       role:             |
-      |     - status                                      |         name: integrity |
+      |   filter:                                         |     - status: active    |
+      |     identities:                                   |       role:             |
+      |       value:                                      |         name: integrity |
+      |         _eq: role-updated@write.email             |                         |
+      |   fields:                                         |                         |
+      |     - status                                      |                         |
       |     - role.name                                   |                         |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 1      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_users     | 3      | 1      | 0      | 0      |
-      | 2       | directus_access    | 4      | 0      | 0      | 0      |
-      | 2       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 2       | directus_roles     | 6      | 0      | 0      | 0      |
-      | 2       | directus_users     | 6      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 1      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_user_identities | 3      | 1      | 0      | 0      |
+      | 1       | directus_users           | 2      | 1      | 1      | 0      |
+      | 2       | directus_access          | 4      | 0      | 0      | 0      |
+      | 2       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 2       | directus_roles           | 6      | 0      | 0      | 0      |
+      | 2       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 6      | 0      | 1      | 0      |
 
   Scenario: a role's users deleting a user take it out of the role
     When these requests get these responses:
@@ -288,16 +312,21 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                       | code: 200        |+
       | path: /users                                      | body:            |
       | query:                                            |   data:          |
-      |   filter[email][_eq]: role-deleted@write.email    |     - role: null |
+      |   filter:                                         |     - role: null |
+      |     identities:                                   |                  |
+      |       value:                                      |                  |
+      |         _eq: role-deleted@write.email             |                  |
       |   fields: role                                    |                  |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 1      | 0      | 0      | 0      |
-      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_users     | 3      | 1      | 0      | 0      |
-      | 2       | directus_access    | 4      | 0      | 0      | 0      |
-      | 2       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 2       | directus_roles     | 6      | 0      | 0      | 0      |
-      | 2       | directus_users     | 6      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 1      | 0      | 0      | 0      |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 1       | directus_user_identities | 3      | 1      | 0      | 0      |
+      | 1       | directus_users           | 2      | 1      | 1      | 0      |
+      | 2       | directus_access          | 4      | 0      | 0      | 0      |
+      | 2       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 2       | directus_roles           | 6      | 0      | 0      | 0      |
+      | 2       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 6      | 0      | 1      | 0      |

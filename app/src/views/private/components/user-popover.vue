@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import api from '@/api';
 import { getAssetUrl } from '@/utils/get-asset-url';
+import { userEmail } from '@/utils/user-email';
 import { userName } from '@/utils/user-name';
 import { User } from '@directus/types';
 import { computed, onUnmounted, ref, watch } from 'vue';
@@ -50,7 +51,16 @@ async function fetchUser() {
 	try {
 		const response = await api.get(`/users/${props.user}`, {
 			params: {
-				fields: ['id', 'first_name', 'last_name', 'avatar.id', 'role.name', 'status', 'email'],
+				fields: [
+					'id',
+					'first_name',
+					'last_name',
+					'avatar.id',
+					'role.name',
+					'status',
+					'primary_identity.kind',
+					'primary_identity.value',
+				],
 			},
 		});
 
@@ -95,7 +105,7 @@ function navigateToUser() {
 					{{ t(`fields.directus_users.status_${data.status}`) }}
 				</v-chip>
 				<v-chip v-if="data.role?.name" small>{{ data.role.name }}</v-chip>
-				<div class="email">{{ data.email }}</div>
+				<div class="email">{{ userEmail(data) }}</div>
 			</div>
 		</div>
 	</v-menu>

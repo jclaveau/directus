@@ -203,7 +203,8 @@ Feature: A read runs the statements its query needs, and no more
       | 1       | directus_activity        | 0      | 1      | 0      | 0      |
       | 1       | directus_sessions        | 0      | 1      | 0      | 1      |
       | 1       | directus_settings        | 1      | 0      | 0      | 0      |
-      | 1       | directus_users           | 2      | 0      | 1      | 0      |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 1      | 0      | 1      | 0      |
       | 2       | test_read_counts_article | 1      | 0      | 0      | 0      |
 
   Scenario: a user signs in for a session, reads with it twice and refreshes it
@@ -241,7 +242,8 @@ Feature: A read runs the statements its query needs, and no more
       | 1       | directus_activity        | 0      | 1      | 0      | 0      |
       | 1       | directus_sessions        | 0      | 1      | 0      | 1      |
       | 1       | directus_settings        | 1      | 0      | 0      | 0      |
-      | 1       | directus_users           | 2      | 0      | 1      | 0      |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 1      | 0      | 1      | 0      |
       | 2       | directus_sessions        | 1      | 0      | 0      | 0      |
       | 2       | test_read_counts_article | 1      | 0      | 0      | 0      |
       | 3       | directus_sessions        | 1      | 0      | 0      | 0      |
@@ -345,39 +347,46 @@ Feature: A read runs the statements its query needs, and no more
       | method: GET                | code: 200 |+
       | path: /collections         |           |
       | method: GET                | code: 200 |+
-      | path: /fields              |           |
-      | method: GET                | code: 200 |+
       | path: /relations           |           |
       | method: GET                | code: 200 |+
       | path: /permissions/me      |           |
       | method: GET                | code: 200 |+
       | path: /policies/me/globals |           |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete | show | with |
-      | 1       | directus_access      | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 1       | directus_users       | 2      | 0      | 0      | 0      | 0    | 0    |
-      | 2       | directus_files       | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 2       | directus_settings    | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 2       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 3       | directus_settings    | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 3       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 4       | directus_collections | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 4       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 4       | pg_class             | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 5       | (no table)           | 0      | 0      | 0      | 0      | 1    | 0    |
-      | 5       | directus_fields      | 2      | 0      | 0      | 0      | 0    | 0    |
-      | 5       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 5       | geometry_columns     | 0      | 0      | 0      | 0      | 0    | 1    |
-      | 5       | pg_attribute         | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 5       | pg_depend            | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 5       | pg_proc              | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 6       | directus_relations   | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 6       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 6       | pg_constraint        | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 7       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 8       | directus_access      | 1      | 0      | 0      | 0      | 0    | 0    |
-      | 8       | directus_policies    | 2      | 0      | 0      | 0      | 0    | 0    |
-      | 8       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 1      | 0      | 0      | 0      |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 2      | 0      | 0      | 0      |
+      | 2       | directus_files           | 1      | 0      | 0      | 0      |
+      | 2       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      |
+      | 3       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 3       | directus_users           | 1      | 0      | 0      | 0      |
+      | 4       | directus_collections     | 1      | 0      | 0      | 0      |
+      | 4       | directus_users           | 1      | 0      | 0      | 0      |
+      | 4       | pg_class                 | 1      | 0      | 0      | 0      |
+      | 5       | directus_relations       | 1      | 0      | 0      | 0      |
+      | 5       | directus_users           | 1      | 0      | 0      | 0      |
+      | 5       | pg_constraint            | 1      | 0      | 0      | 0      |
+      | 6       | directus_users           | 1      | 0      | 0      | 0      |
+      | 7       | directus_access          | 1      | 0      | 0      | 0      |
+      | 7       | directus_policies        | 2      | 0      | 0      | 0      |
+      | 7       | directus_users           | 1      | 0      | 0      | 0      |
+
+  Scenario: an admin reads the fields
+    When these requests get these responses:
+      | request       | response  |
+      | method: GET   | code: 200 |+
+      | path: /fields |           |
+    And on postgres the requests ran these statements:
+      | request | table            | select | insert | update | delete | show | with |
+      | 1       | (no table)       | 0      | 0      | 0      | 0      | 1    | 0    |
+      | 1       | directus_fields  | 2      | 0      | 0      | 0      | 0    | 0    |
+      | 1       | directus_users   | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 1       | geometry_columns | 0      | 0      | 0      | 0      | 0    | 1    |
+      | 1       | pg_attribute     | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 1       | pg_depend        | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 1       | pg_proc          | 1      | 0      | 0      | 0      | 0    | 0    |
 
   Scenario: a user whose policy filters the articles opens the app
     When these requests get these responses:
@@ -407,29 +416,30 @@ Feature: A read runs the statements its query needs, and no more
       | path: /policies/me/globals      |           |
       | token: ReadStatementCountsToken |           |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 1       | directus_users       | 2      | 0      | 0      | 0      |
-      | 2       | directus_files       | 1      | 0      | 0      | 0      |
-      | 2       | directus_settings    | 1      | 0      | 0      | 0      |
-      | 2       | directus_users       | 1      | 0      | 0      | 0      |
-      | 3       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 3       | directus_settings    | 1      | 0      | 0      | 0      |
-      | 3       | directus_users       | 1      | 0      | 0      | 0      |
-      | 4       | directus_collections | 1      | 0      | 0      | 0      |
-      | 4       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 4       | directus_users       | 1      | 0      | 0      | 0      |
-      | 4       | pg_class             | 1      | 0      | 0      | 0      |
-      | 5       | directus_fields      | 2      | 0      | 0      | 0      |
-      | 5       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 5       | directus_users       | 1      | 0      | 0      | 0      |
-      | 6       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 6       | directus_relations   | 1      | 0      | 0      | 0      |
-      | 6       | directus_users       | 1      | 0      | 0      | 0      |
-      | 7       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 7       | directus_users       | 1      | 0      | 0      | 0      |
-      | 8       | directus_policies    | 1      | 0      | 0      | 0      |
-      | 8       | directus_users       | 1      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_permissions     | 3      | 0      | 0      | 0      |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 2      | 0      | 0      | 0      |
+      | 2       | directus_files           | 1      | 0      | 0      | 0      |
+      | 2       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      |
+      | 3       | directus_permissions     | 1      | 0      | 0      | 0      |
+      | 3       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 3       | directus_users           | 1      | 0      | 0      | 0      |
+      | 4       | directus_collections     | 1      | 0      | 0      | 0      |
+      | 4       | directus_permissions     | 1      | 0      | 0      | 0      |
+      | 4       | directus_users           | 1      | 0      | 0      | 0      |
+      | 4       | pg_class                 | 1      | 0      | 0      | 0      |
+      | 5       | directus_fields          | 2      | 0      | 0      | 0      |
+      | 5       | directus_permissions     | 1      | 0      | 0      | 0      |
+      | 5       | directus_users           | 1      | 0      | 0      | 0      |
+      | 6       | directus_permissions     | 1      | 0      | 0      | 0      |
+      | 6       | directus_relations       | 1      | 0      | 0      | 0      |
+      | 6       | directus_users           | 1      | 0      | 0      | 0      |
+      | 7       | directus_permissions     | 1      | 0      | 0      | 0      |
+      | 7       | directus_users           | 1      | 0      | 0      | 0      |
+      | 8       | directus_policies        | 1      | 0      | 0      | 0      |
+      | 8       | directus_users           | 1      | 0      | 0      | 0      |
 
   Scenario: an admin and a user whose policy filters the articles count them while listing
     When these requests get these responses:

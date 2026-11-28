@@ -1,5 +1,6 @@
 import { i18n } from '@/lang';
 import { User } from '@directus/types';
+import { userEmail } from '@/utils/user-email';
 
 export function userName(user?: Partial<User>): string {
 	if (!user) {
@@ -14,8 +15,10 @@ export function userName(user?: Partial<User>): string {
 		return user.first_name;
 	}
 
-	if (user.email) {
-		return user.email;
+	const primaryEmail = userEmail(user);
+
+	if (primaryEmail) {
+		return primaryEmail;
 	}
 
 	return i18n.global.t('unknown_user') as string;

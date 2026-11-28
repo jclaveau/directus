@@ -13,8 +13,15 @@ export function userName(user: MaybeWithMeta<Partial<User>>): string {
 		return user.first_name;
 	}
 
-	if (user.email) {
-		return user.email;
+	const primaryIdentity = user.primary_identity;
+
+	// An SSO identity's value is the provider's identifier, never shown
+	if (
+		typeof primaryIdentity === 'object'
+		&& primaryIdentity?.kind === 'email'
+		&& primaryIdentity.value
+	) {
+		return primaryIdentity.value;
 	}
 
 	return 'Unknown User';

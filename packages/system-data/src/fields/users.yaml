@@ -13,10 +13,15 @@ fields:
       iconRight: account_circle
     width: half
 
-  - field: email
-    interface: input
+  - field: primary_identity
+    special:
+      - m2o
+    interface: select-dropdown-m2o
     options:
-      iconRight: email
+      template: '{{value}}'
+    display: related-values
+    display_options:
+      template: '{{value}}'
     width: half
 
   - field: password
@@ -230,19 +235,10 @@ fields:
     display_options:
       relative: true
 
-  - field: provider
-    width: half
-    interface: select-dropdown
+  - field: identities
+    special:
+      - o2m
+    interface: list-o2m
     options:
-      choices:
-        - text: $t:default_provider
-          value: default
-
-  - field: external_identifier
-    width: half
-    options:
-      iconRight: account_circle
-    interface: input
-
-  - field: auth_data
-    hidden: true
+      template: '{{kind}}: {{value}}'
+    width: full

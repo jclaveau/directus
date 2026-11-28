@@ -56,6 +56,16 @@ Declaring a new var `'array'` turns its unset value `""` into `[]`: record it in
 `String(env[...])` only because `String()` rejoins an array with commas. The upstream `_SCHEDULE` family
 (`METRICS_SCHEDULE`, `RETENTION_SCHEDULE`, `TUS_CLEANUP_SCHEDULE`) sat undeclared like that until PR #396.
 
+**An untyped flag reads `FALSE` as true.** `guessType` keeps `"FALSE"` a string, which is truthy. Found
+2026-11-27 after #773: `AUTH_<P>_ALLOW_PUBLIC_REGISTRATION`, `AUTH_<P>_SYNC_USER_INFO`, `EMAIL_SMTP_SECURE`,
+`EMAIL_SMTP_IGNORE_TLS`, `HSTS_ENABLED` (also absent from `directus-variables.ts`),
+`STORAGE_<L>_FORCE_PATH_STYLE`; the `.env` stub lacks the accepted boolean values. Issue #477's remainder is
+handled in #768 (jean), which merges before #772: don't fix it elsewhere.
+
+**`<VAR>_FILE` is silently ignored unless `<VAR>` matches `directus-variables.ts`** (`create-env.ts`,
+`isDirectusVariable`). `TUS_ENABLED` is absent, so a #773 blackbox case using `TUS_ENABLED_FILE` got 404 with
+or without the fix (2026-11-26); it moved to `GRAPHQL_INTROSPECTION`. Check the list before testing a secret.
+
 **Some vars can't be typed at all — leave them out.** `CACHE_VALUE_MAX_SIZE` is dual: `false` (disabled) OR a size
 string like `'8kb'`, and `respond.ts` keys off `!== false`. `'string'` breaks the disabled default (`false`→`'false'`,
 truthy); `'boolean'` breaks the size case (`'8kb'`→`false`). No single `EnvType` fits → keep it on per-value guessType and

@@ -4,7 +4,10 @@ Feature: A user requests a password reset and resets the password
     user it writes, never the mail.
   - `!jwt` signs its claims with the instance's secret, as Directus signs the
     token it mails. A user created without a password holds a reset token
-    whose `hash` is `33c587`, the hash Directus takes of a null password.
+    whose `hash` is `33c587`, the hash Directus takes of a null password,
+    and is refused: a reset needs a password set. The Given of a reset that
+    succeeds writes the argon2 hash of `first-password`, whose `hash` is
+    `570182ad`.
   - A request authenticates as the admin. `<run>` stands for a value unique to
     the scenario. A response cell states the keys it checks.
 
@@ -15,6 +18,7 @@ Feature: A user requests a password reset and resets the password
       | path: /users                          |           |
       | payload:                              |           |
       |   email: requesting-<run>@example.com |           |
+      |   password: requesting-password       |           |
     Then these requests get these responses:
       | request                               | response                               |
       | method: POST                          | code: 204                              |+
@@ -34,11 +38,14 @@ Feature: A user requests a password reset and resets the password
       | payload:                              |                                        |
       |   email: requesting-<run>@example.com |                                        |
     And on postgres the requests ran these statements:
-      | request | table             | select | insert | update | delete |
-      | 1       | directus_users    | 2      | 0      | 0      | 0      |
-      | 2       | directus_users    | 2      | 0      | 0      | 0      |
-      | 3       | directus_settings | 1      | 0      | 0      | 0      |
-      | 3       | directus_users    | 2      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 2       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 2      | 0      | 0      | 0      |
+      | 3       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 3       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 3       | directus_users           | 2      | 0      | 0      | 0      |
 
   Scenario: a reset token is refused for another scope or an inactive user
     Given these requests are sent:
@@ -67,18 +74,19 @@ Feature: A user requests a password reset and resets the password
       |     hash: 33c587                       |                                    |
       |   password: reset-password             |                                    |
     And on postgres the requests ran these statements:
-      | request | table             | select | insert | update | delete |
-      | 1       | directus_users    | 1      | 0      | 0      | 0      |
-      | 2       | directus_settings | 1      | 0      | 0      | 0      |
-      | 2       | directus_users    | 2      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 2       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 2       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 2      | 0      | 0      | 0      |
 
   Scenario: a reset token sets the password once
-    Given these requests are sent:
-      | request                              | response  |
-      | method: POST                         | code: 200 |+
-      | path: /users                         |           |
-      | payload:                             |           |
-      |   email: resetting-<run>@example.com |           |
+    Given the rows of directus_users:
+      | id     | password                                                              |
+      | <user> | $argon2id$v=19$m=1024,p=1,t=1$BcPsdrIsNpFpkpLtDh95FA$PyzvmEPs65/hmc0s |
+    And the rows of directus_user_identities:
+      | id           | user   | kind  | value                       | verified |
+      | <user-email> | <user> | email | resetting-<run>@example.com | true     |
     Then these requests get these responses:
       | request                                | response                            |
       | method: POST                           | code: 403                           |+
@@ -95,7 +103,7 @@ Feature: A user requests a password reset and resets the password
       |   token: !jwt                          |                                     |
       |     email: resetting-<run>@example.com |                                     |
       |     scope: password-reset              |                                     |
-      |     hash: 33c587                       |                                     |
+      |     hash: 570182ad                     |                                     |
       |   password: reset-password             |                                     |
       | method: POST                           | code: 403                           |+
       | path: /auth/password/reset             | body:                               |
@@ -103,7 +111,7 @@ Feature: A user requests a password reset and resets the password
       |   token: !jwt                          |     - message: Bad user credentials |
       |     email: resetting-<run>@example.com |                                     |
       |     scope: password-reset              |                                     |
-      |     hash: 33c587                       |                                     |
+      |     hash: 570182ad                     |                                     |
       |   password: second-password            |                                     |
       | method: POST                           | code: 200                           |+
       | path: /auth/login                      |                                     |
@@ -111,19 +119,45 @@ Feature: A user requests a password reset and resets the password
       |   email: resetting-<run>@example.com   |                                     |
       |   password: reset-password             |                                     |
     And on postgres the requests ran these statements:
-      | request | table              | select | insert | update | delete |
-      | 1       | directus_settings  | 1      | 0      | 0      | 0      |
-      | 1       | directus_users     | 2      | 0      | 0      | 0      |
-      | 2       | directus_access    | 1      | 0      | 0      | 0      |
-      | 2       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 2       | directus_sessions  | 0      | 0      | 0      | 1      |
-      | 2       | directus_settings  | 2      | 0      | 0      | 0      |
-      | 2       | directus_users     | 3      | 0      | 1      | 0      |
-      | 3       | directus_settings  | 1      | 0      | 0      | 0      |
-      | 3       | directus_users     | 2      | 0      | 0      | 0      |
-      | 4       | directus_access    | 2      | 0      | 0      | 0      |
-      | 4       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 4       | directus_sessions  | 0      | 1      | 0      | 1      |
-      | 4       | directus_settings  | 1      | 0      | 0      | 0      |
-      | 4       | directus_users     | 3      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 1       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 2      | 0      | 0      | 0      |
+      | 2       | directus_access          | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      |
+      | 2       | directus_sessions        | 0      | 0      | 0      | 1      |
+      | 2       | directus_settings        | 2      | 0      | 0      | 0      |
+      | 2       | directus_user_identities | 2      | 0      | 0      | 0      |
+      | 2       | directus_users           | 3      | 0      | 1      | 0      |
+      | 3       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 3       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 3       | directus_users           | 2      | 0      | 0      | 0      |
+      | 4       | directus_access          | 2      | 0      | 0      | 0      |
+      | 4       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 4       | directus_sessions        | 0      | 1      | 0      | 1      |
+      | 4       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 4       | directus_user_identities | 1      | 0      | 0      | 0      |
+      | 4       | directus_users           | 2      | 0      | 1      | 0      |
+
+  Scenario: a reset is refused on an account with no password
+    Given these requests are sent:
+      | request                               | response  |
+      | method: POST                          | code: 200 |+
+      | path: /users                          |           |
+      | payload:                              |           |
+      |   email: nopassword-<run>@example.com |           |
+    Then these requests get these responses:
+      | request                                 | response                      |
+      | method: POST                            | code: 403                     |+
+      | path: /auth/password/reset              | body:                         |
+      | payload:                                |   errors:                     |
+      |   token: !jwt                           |     - message: >-             |
+      |     email: nopassword-<run>@example.com |         No password is set on |
+      |     scope: password-reset               |         this account          |
+      |     hash: 33c587                        |                               |
+      |   password: reset-password              |                               |
+      | method: POST                            | code: 204                     |+
+      | path: /auth/password/request            |                               |
+      | payload:                                |                               |
+      |   email: nopassword-<run>@example.com   |                               |
