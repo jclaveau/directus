@@ -186,6 +186,28 @@ test('refuses a _FILE variable whose file cannot be read', () => {
 	expect(liveEnv).toEqual({});
 });
 
+test('refuses a _FILE variable that is not a path', () => {
+	const liveEnv: Record<string, unknown> = {};
+
+	expect(() => {
+		applyExtensionEnvVars({
+			extensionName: 'subscriptions',
+			extensionEnvVars: [{
+				prefix: 'SUBSCRIPTIONS_',
+				vars: { SUBSCRIPTIONS_KEY: { type: 'string', default: 'sk_test' } },
+			}],
+			envVarDeclarers: new Map(),
+			rawEnvVarValues: { SUBSCRIPTIONS_KEY_FILE: 123 },
+			liveEnv,
+		});
+	}).toThrow(new Error(
+		'Extension "subscriptions": "SUBSCRIPTIONS_KEY_FILE" is 123,'
+		+ ' which is not a file path.',
+	));
+
+	expect(liveEnv).toEqual({});
+});
+
 test('refuses a variable set both directly and through its _FILE variable', () => {
 	const liveEnv: Record<string, unknown> = {};
 
