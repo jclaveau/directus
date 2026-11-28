@@ -42,6 +42,8 @@ export type EnvVarValueByType = {
 	'false | number': false | number;
 	'false | string': false | string;
 	'false | string[]': false | string[];
+	'null | string[]': null | string[];
+	'number | string': number | string;
 	'boolean | number | string | string[]': boolean | number | string | string[];
 };
 

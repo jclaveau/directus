@@ -46,6 +46,15 @@ const castToType = (
 				? false
 				: castToType(value, DISABLED_BY_FALSE_TYPES[type]);
 
+		case 'null | string[]':
+			return value === null || value === 'null'
+				? null
+				: castToType(value, 'string[]');
+		case 'number | string':
+			return /^\d+(\.\d+)?$/.test(String(value))
+				? Number(value)
+				: toString(value);
+
 		case 'boolean | number | string | string[]': {
 			const guessedType = guessType(value);
 
@@ -72,6 +81,7 @@ export const stripCastFlag = (value: unknown): unknown => {
 const STRING_LIST_DECLARED_TYPES: readonly EnvVarDeclaredType[] = [
 	'string[]',
 	'false | string[]',
+	'null | string[]',
 	'boolean | number | string | string[]',
 ];
 

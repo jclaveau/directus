@@ -598,7 +598,8 @@ export const ENV_VAR_PATTERN_DECLARATIONS = {
 
 	'AUTH_*_DRIVER': { type: 'string' },
 	'AUTH_*_MODE': { type: 'string' },
-	'AUTH_*_LOGIN_TIMEOUT': { type: 'boolean | number | string | string[]' },
+	// jwt.sign reads a number as seconds, a string as a duration.
+	'AUTH_*_LOGIN_TIMEOUT': { type: 'number | string' },
 	'AUTH_*_CLIENT_ID': { type: 'string' },
 	'AUTH_*_CLIENT_SECRET': { type: 'string' },
 	'AUTH_*_SCOPE': { type: 'string' },
@@ -627,7 +628,12 @@ export const ENV_VAR_PATTERN_DECLARATIONS = {
 	'AUTH_*_CLIENT_HTTP_PFX': { type: 'string' },
 	'AUTH_*_CLIENT_HTTP_TIMEOUT': { type: 'number' },
 	'AUTH_*_CLIENT_HTTP_*': {},
-	'AUTH_*_AUTH_REQUIRE_VERIFIED_EMAIL': {},
+	'AUTH_*_REQUIRE_VERIFIED_EMAIL': { type: 'boolean' },
+	'AUTH_*_PLAIN_CODE_CHALLENGE': { type: 'boolean' },
+	'AUTH_*_GROUP_CLAIM_NAME': { type: 'string' },
+	'AUTH_*_ROLE_MAPPING': { type: 'json' },
+	'AUTH_*_GIVEN_NAME_KEY': { type: 'string' },
+	'AUTH_*_FAMILY_NAME_KEY': { type: 'string' },
 	'AUTH_*_CLIENT_URL': { type: 'string' },
 	'AUTH_*_BIND_DN': { type: 'string' },
 	'AUTH_*_USER_DN': { type: 'string' },
@@ -764,6 +770,9 @@ export const ENV_VAR_PATTERN_DECLARATIONS = {
 	'DB_CONNECTION_*_SSL__HONOR_CIPHER_ORDER': { type: 'boolean' },
 	'DB_SSL__*': {},
 	'DB_CONNECTION_*_SSL__*': {},
-	'CONTENT_SECURITY_POLICY_DIRECTIVES__*': { type: 'string[]' },
-	'ASSETS_CONTENT_SECURITY_POLICY_DIRECTIVES__*': { type: 'string[]' },
+	// helmet drops a directive set to null.
+	'CONTENT_SECURITY_POLICY_DIRECTIVES__*': { type: 'null | string[]' },
+	'ASSETS_CONTENT_SECURITY_POLICY_DIRECTIVES__*': {
+		type: 'null | string[]',
+	},
 } as const satisfies Record<string, CoreEnvVarDeclaration>;

@@ -26,6 +26,8 @@ const DECLARED_CAST_FLAGS: Record<EnvVarDeclaredType, readonly string[]> = {
 	'false | number': ['number'],
 	'false | string': ['string'],
 	'false | string[]': ['array'],
+	'null | string[]': ['array'],
+	'number | string': ['number', 'string'],
 	'boolean | number | string | string[]': [
 		'boolean',
 		'number',
@@ -138,6 +140,21 @@ const readTypeRefusal = (
 			return isScalarValue(bareValue) || isScalarListValue(bareValue)
 				? null
 				: describeShapeRefusal('neither a string nor a list of strings');
+		case 'null | string[]':
+			return isScalarValue(bareValue) || isScalarListValue(bareValue)
+				|| bareValue === null
+				? null
+				: describeShapeRefusal(
+					'neither null, a string nor a list of strings',
+				);
+		case 'number | string':
+			return (typeof bareValue === 'number'
+				|| typeof bareValue === 'string')
+				&& !['true', 'false'].includes(String(readBooleanCase(bareValue)))
+				? null
+				: describeShapeRefusal(
+					'neither a number of seconds nor a duration',
+				);
 		case 'false | string[]':
 			return isScalarValue(bareValue) || isScalarListValue(bareValue)
 				? null

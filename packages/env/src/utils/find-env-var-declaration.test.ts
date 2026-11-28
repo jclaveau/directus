@@ -34,9 +34,9 @@ test('finds nothing for an undeclared name', () => {
 	expect(findEnvVarDeclaration('SUBSCRIPTIONS_TRIAL_DAYS')).toBe(null);
 });
 
-test('finds a login timeout guessed, so 300 is read as 300 seconds', () => {
+test('finds a login timeout typed, so 300 is read as 300 seconds', () => {
 	expect(findEnvVarDeclaration('AUTH_OKTA_LOGIN_TIMEOUT')).toEqual({
-		type: 'boolean | number | string | string[]',
+		type: 'number | string',
 	});
 });
 
@@ -72,8 +72,11 @@ test.each([
 test.each([
 	['DB_SSL__REJECT_UNAUTHORIZED', { type: 'boolean' }],
 	['DB_SSL__ALPN_PROTOCOLS', {}],
-	['CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC', { type: 'string[]' }],
-	['ASSETS_CONTENT_SECURITY_POLICY_DIRECTIVES__IMG_SRC', { type: 'string[]' }],
+	['CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC', { type: 'null | string[]' }],
+	[
+		'ASSETS_CONTENT_SECURITY_POLICY_DIRECTIVES__IMG_SRC',
+		{ type: 'null | string[]' },
+	],
 ])('finds %j under a pattern a reader forwards', (
 	envVarName,
 	envVarDeclaration,
