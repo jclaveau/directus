@@ -1,8 +1,13 @@
 import { parseJSON } from '@directus/utils/values';
+import ms from 'ms';
 import type { EnvVarDeclaration } from '../types/env-var-declaration.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
 import { toNumber } from '../utils/lodash-es-used.js';
-import { castEnvVarValue, stripCastFlag } from './cast.js';
+import {
+	castEnvVarValue,
+	SECONDS_VALUE_PATTERN,
+	stripCastFlag,
+} from './cast.js';
 import type { EnvVarDeclaredType } from '../types/env-type.js';
 
 /** What a boolean is spelled as, in a variable or in a configuration file. */
@@ -27,7 +32,7 @@ const DECLARED_CAST_FLAGS: Record<EnvVarDeclaredType, readonly string[]> = {
 	'false | string': ['string'],
 	'false | string[]': ['array'],
 	'null | string[]': ['array'],
-	'number | string': ['number', 'string'],
+	'number | string': ['number'],
 	'boolean | number | string | string[]': [
 		'boolean',
 		'number',
@@ -65,6 +70,22 @@ const isScalarValue = (bareValue: unknown): boolean => {
 
 const isScalarListValue = (bareValue: unknown): boolean => {
 	return Array.isArray(bareValue) && bareValue.every(isScalarValue);
+};
+
+/** A number, or a string of seconds or of a duration `ms` reads, trimmed. */
+const isSecondsOrDurationValue = (bareValue: unknown): boolean => {
+	if (typeof bareValue === 'number') {
+		return Number.isFinite(bareValue);
+	}
+
+	if (typeof bareValue !== 'string') {
+		return false;
+	}
+
+	const trimmedValue = bareValue.trim();
+
+	return SECONDS_VALUE_PATTERN.test(trimmedValue)
+		|| (trimmedValue !== '' && Number.isFinite(ms(trimmedValue)));
 };
 
 const isNumberValue = (bareValue: unknown): boolean => {
@@ -148,9 +169,7 @@ const readTypeRefusal = (
 					'neither null, a string nor a list of strings',
 				);
 		case 'number | string':
-			return (typeof bareValue === 'number'
-				|| typeof bareValue === 'string')
-				&& !['true', 'false'].includes(String(readBooleanCase(bareValue)))
+			return isSecondsOrDurationValue(bareValue)
 				? null
 				: describeShapeRefusal(
 					'neither a number of seconds nor a duration',
@@ -187,8 +206,9 @@ export const checkDeclaredEnvVarValue = (
 	const declaredFlags = DECLARED_CAST_FLAGS[envVarDeclaration.type];
 
 	if (castFlag !== null && !declaredFlags.includes(castFlag)) {
-		return `${quotedName} is declared ${envVarDeclaration.type}, but its`
-			+ ` ${JSON.stringify(`${castFlag}:`)} prefix casts it to ${castFlag}.`;
+		return `${quotedName} is declared ${JSON.stringify(envVarDeclaration.type)},`
+			+ ` but its ${JSON.stringify(`${castFlag}:`)} prefix casts it to`
+			+ ` ${JSON.stringify(castFlag)}.`;
 	}
 
 	if (castFlag === 'number' && !isNumberValue(stripCastFlag(envVarValue))) {

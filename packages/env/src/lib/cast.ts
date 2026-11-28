@@ -5,6 +5,9 @@ import { getCastFlag } from '../utils/has-cast-prefix.js';
 import { toNumber, toString } from '../utils/lodash-es-used.js';
 import { tryJson } from '../utils/try-json.js';
 
+/** A `number | string` value read as a number of seconds, once trimmed. */
+export const SECONDS_VALUE_PATTERN = /^-?\d+(\.\d+)?$/;
+
 /** The type of the value a `false | <type>` variable takes when not `false`. */
 export const DISABLED_BY_FALSE_TYPES = {
 	'false | number': 'number',
@@ -55,9 +58,9 @@ const castToType = (
 				return value;
 			}
 
-			return /^\d+(\.\d+)?$/.test(String(value).trim())
+			return SECONDS_VALUE_PATTERN.test(toString(value).trim())
 				? Number(value)
-				: toString(value);
+				: toString(value).trim();
 
 		case 'boolean | number | string | string[]': {
 			const guessedType = guessType(value);
