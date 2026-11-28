@@ -157,6 +157,15 @@ logout call the provider that opened the session.
   is Directus's own password store, not posix), 1 (jean: add an identity only from a
   logged-in session; overturns S3 A; an IdP sending an unverified address squats it
   today, sso-identity.ts:363), 7 (refuse provider/external_identifier like email).
+- **Round 3, jean 2026-11-28:** 15 = A (users service refuses a primary_identity
+  of another account) + an account with no primary takes "the first" identity
+  (order asked: lowest id vs a new date_created). 24 = B: the local drivers' kind is
+  renamed `password` (value = the address), for every local driver whatever its
+  name ("password is not an SSO driver"). 18 = B: `email` refused on users create
+  too, identities nested. 23 = A, message "A user needs an identity"; legacy users
+  with no email nor SSO id fail the migration. 7 B (refuse provider/
+  external_identifier) not answered. 1: "even if unverified, it should trigger a
+  duplicate" read as asked (conflicts view vs register refused).
 - **Dropped by that review (reviewer's call, not jean's):** `verifyPassword` skipping
   an unconfigured provider (ends in `InvalidCredentialsError`); misleading log text on
   concurrent email syncs; concurrent first logins of one subject → 403 (predates #772).
