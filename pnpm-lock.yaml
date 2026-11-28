@@ -24486,7 +24486,7 @@ snapshots:
       '@azure/identity': 4.13.1(supports-color@10.2.2)
       '@azure/keyvault-keys': 4.10.2(supports-color@10.2.2)
       '@js-joda/core': 5.7.0
-      '@types/node': 26.0.0
+      '@types/node': 22.20.1
       bl: 6.1.6
       iconv-lite: 0.6.3
       js-md4: 0.3.2

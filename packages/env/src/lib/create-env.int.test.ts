@@ -473,6 +473,9 @@ test.each([
 	['AUTH_X_LOGIN_TIMEOUT', '1.5', 1.5],
 	['AUTH_X_LOGIN_TIMEOUT', '-5', -5],
 	['AUTH_X_LOGIN_TIMEOUT', ' 5m ', '5m'],
+	['AUTH_X_LOGIN_TIMEOUT', '5 m', '5 m'],
+	['AUTH_X_LOGIN_TIMEOUT', '-1d', '-1d'],
+	['AUTH_X_LOGIN_TIMEOUT', '0', 0],
 	['CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC', null, null],
 	['DB_CONNECTION_REPLICA_SSL__SECURE_OPTIONS', '524288', 524288],
 	['AUTH_X_REQUIRE_VERIFIED_EMAIL', 'true', true],
@@ -554,6 +557,11 @@ test.each([
 		'',
 		'"AUTH_X_LOGIN_TIMEOUT" is "",'
 			+ ' which is neither a number of seconds nor a duration.',
+	],
+	[
+		'AUTH_X_LOGIN_TIMEOUT',
+		'number:5m',
+		'"AUTH_X_LOGIN_TIMEOUT" is "number:5m", which is not a number.',
 	],
 	[
 		'AUTH_X_LOGIN_TIMEOUT',
