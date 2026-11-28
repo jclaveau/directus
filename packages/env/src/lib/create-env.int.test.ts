@@ -471,6 +471,8 @@ test.each([
 	['AUTH_X_LOGIN_TIMEOUT', ' 300 ', 300],
 	['AUTH_X_LOGIN_TIMEOUT', -5, -5],
 	['AUTH_X_LOGIN_TIMEOUT', '1.5', 1.5],
+	['AUTH_X_LOGIN_TIMEOUT', '-5', -5],
+	['AUTH_X_LOGIN_TIMEOUT', ' 5m ', '5m'],
 	['CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC', null, null],
 	['DB_CONNECTION_REPLICA_SSL__SECURE_OPTIONS', '524288', 524288],
 	['AUTH_X_REQUIRE_VERIFIED_EMAIL', 'true', true],
@@ -534,6 +536,30 @@ test.each([
 		'true',
 		'"AUTH_X_LOGIN_TIMEOUT" is "true",'
 			+ ' which is neither a number of seconds nor a duration.',
+	],
+	[
+		'AUTH_X_LOGIN_TIMEOUT',
+		'abc',
+		'"AUTH_X_LOGIN_TIMEOUT" is "abc",'
+			+ ' which is neither a number of seconds nor a duration.',
+	],
+	[
+		'AUTH_X_LOGIN_TIMEOUT',
+		'1e3',
+		'"AUTH_X_LOGIN_TIMEOUT" is "1e3",'
+			+ ' which is neither a number of seconds nor a duration.',
+	],
+	[
+		'AUTH_X_LOGIN_TIMEOUT',
+		'',
+		'"AUTH_X_LOGIN_TIMEOUT" is "",'
+			+ ' which is neither a number of seconds nor a duration.',
+	],
+	[
+		'AUTH_X_LOGIN_TIMEOUT',
+		'string:300',
+		'"AUTH_X_LOGIN_TIMEOUT" is declared "number | string",'
+			+ ' but its "string:" prefix casts it to "string".',
 	],
 	[
 		'AUTH_X_LOGIN_TIMEOUT',
