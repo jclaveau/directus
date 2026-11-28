@@ -148,6 +148,15 @@ logout call the provider that opened the session.
   24 (kind by driver), 1 (+ no reconciliation outside a logged-in link?), 18
   (`email` still writable?), 10 (why ada reads bob's identities), 23 (why nullable).
   Later: 2, 4-7, 9, 11, 13, 14, 17, 26, 29, 30, renames, user-name.ts literal.
+- **Round 2, jean 2026-11-28:** 19 = A (kept as typed, matched by lower(value)).
+  18 = A on update: `email` is never PATCHable on users, only an identity's value is;
+  on create asked (18 B). 23: a user with no identity is a bug (overturns 4 A's
+  token-only account); create refusal + migration failure asked. Asked back: 15
+  (jean proposes a `primary` flag on identities with unique(user) where primary,
+  vs composite FK NOT NULL), 24 (jean: kind `email` misleading, `password`?; `local`
+  is Directus's own password store, not posix), 1 (jean: add an identity only from a
+  logged-in session; overturns S3 A; an IdP sending an unverified address squats it
+  today, sso-identity.ts:363), 7 (refuse provider/external_identifier like email).
 - **Dropped by that review (reviewer's call, not jean's):** `verifyPassword` skipping
   an unconfigured provider (ends in `InvalidCredentialsError`); misleading log text on
   concurrent email syncs; concurrent first logins of one subject → 403 (predates #772).
