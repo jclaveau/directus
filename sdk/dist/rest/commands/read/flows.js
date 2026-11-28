@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=e=>()=>({path:`/flows`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/flows/${t}`,params:n??{},method:`GET`});export{n as readFlow,t as readFlows};
+//# sourceMappingURL=flows.js.map

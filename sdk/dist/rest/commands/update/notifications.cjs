@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n,r)=>()=>(e.throwIfEmpty(t,`Keys cannot be empty`),{path:`/notifications`,params:r??{},body:JSON.stringify({keys:t,data:n}),method:`PATCH`}),n=(e,t)=>()=>({path:`/notifications`,params:t??{},body:JSON.stringify(e),method:`PATCH`}),r=(t,n,r)=>()=>(e.throwIfEmpty(t,`Key cannot be empty`),{path:`/notifications/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`});exports.updateNotification=r,exports.updateNotifications=t,exports.updateNotificationsBatch=n;
+//# sourceMappingURL=notifications.cjs.map

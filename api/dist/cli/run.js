@@ -1,0 +1,22 @@
+import { getMilliseconds } from "../utils/get-milliseconds.js";
+import { dumpCoverageAtExit } from "../utils/dump-coverage.js";
+import "../entry-guard.js";
+import { createCli } from "./index.js";
+import { armDeadline } from "./utils/arm-deadline.js";
+import { useEnv } from "@directus/env";
+
+//#region src/cli/run.ts
+const [command, subcommand] = process.argv.slice(2).filter((argument) => argument.startsWith("-") === false);
+if (command === "cache" && subcommand === "flush") armDeadline(getMilliseconds(useEnv()["CACHE_FLUSH_TIMEOUT"]), "the cache flush");
+if (command === "cache" && subcommand === "audit") {
+	useEnv()["CACHE_AUTO_FLUSH_ON_DEPLOY"] = false;
+	useEnv()["PRESSURE_LIMITER_ENABLED"] = false;
+}
+process.on("exit", dumpCoverageAtExit);
+createCli().then((program) => program.parseAsync(process.argv)).catch((err) => {
+	console.error(err);
+	process.exit(1);
+});
+
+//#endregion
+export {  };

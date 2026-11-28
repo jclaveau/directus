@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=(t,n,r)=>()=>(t!==null&&e(t,`Bundle cannot be an empty string`),e(n,`Name cannot be empty`),{path:t?`/extensions/${t}/${n}`:`/extensions/${n}`,params:{},body:JSON.stringify(r),method:`PATCH`});export{t as updateExtension};
+//# sourceMappingURL=extensions.js.map

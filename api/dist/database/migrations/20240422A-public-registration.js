@@ -1,0 +1,18 @@
+//#region src/database/migrations/20240422A-public-registration.ts
+async function up(knex) {
+	await knex.schema.alterTable("directus_settings", (table) => {
+		table.boolean("public_registration").notNullable().defaultTo(false);
+		table.boolean("public_registration_verify_email").notNullable().defaultTo(true);
+		table.uuid("public_registration_role").nullable();
+		table.foreign("public_registration_role").references("directus_roles.id").onDelete("SET NULL");
+		table.json("public_registration_email_filter").nullable();
+	});
+}
+async function down(knex) {
+	await knex.schema.alterTable("directus_settings", (table) => {
+		table.dropColumns("public_registration", "public_registration_verify_email", "public_registration_role", "public_registration_email_filter");
+	});
+}
+
+//#endregion
+export { down, up };

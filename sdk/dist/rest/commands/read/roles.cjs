@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=e=>()=>({path:`/roles`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/roles/${t}`,params:n??{},method:`GET`}),r=e=>()=>({path:`/roles/me`,params:e??{},method:`GET`});exports.readRole=n,exports.readRoles=t,exports.readRolesMe=r;
+//# sourceMappingURL=roles.cjs.map

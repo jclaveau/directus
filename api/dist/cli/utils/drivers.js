@@ -1,0 +1,14 @@
+//#region src/cli/utils/drivers.ts
+const drivers = {
+	pg: "PostgreSQL / Redshift",
+	cockroachdb: "CockroachDB (Beta)",
+	mysql2: "MySQL / MariaDB / Aurora",
+	sqlite3: "SQLite"
+};
+function getDriverForClient(client) {
+	for (const [key, value] of Object.entries(drivers)) if (value === client) return key;
+	return null;
+}
+
+//#endregion
+export { drivers, getDriverForClient };

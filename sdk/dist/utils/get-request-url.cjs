@@ -1,0 +1,2 @@
+const e=require(`../rest/utils/query-to-params.cjs`);require(`../index.cjs`);const t=`/`,n=(e,t)=>(e.endsWith(`/`)&&(e=e.slice(0,-1)),t.startsWith(`/`)||(t=`/`+t),e+t),r=(t,r,i)=>{let a=t.pathname===`/`?r:n(t.pathname,r),o=new globalThis.URL(a,t);if(i)for(let[t,n]of Object.entries(e.queryToParams(i)))if(n&&typeof n==`object`&&!Array.isArray(n))for(let[e,r]of Object.entries(n))o.searchParams.set(`${t}[${e}]`,String(r));else o.searchParams.set(t,n);return o};exports.getRequestUrl=r;
+//# sourceMappingURL=get-request-url.cjs.map

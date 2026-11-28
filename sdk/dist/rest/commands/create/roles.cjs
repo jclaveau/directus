@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/roles`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/roles`,params:t??{},body:JSON.stringify(e),method:`POST`});exports.createRole=t,exports.createRoles=e;
+//# sourceMappingURL=roles.cjs.map
