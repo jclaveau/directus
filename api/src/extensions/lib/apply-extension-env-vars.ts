@@ -64,9 +64,9 @@ export function applyExtensionEnvVars({
 			) {
 				declarationRefusals.push(
 					`Extension ${quotedExtension} declares ${quotedName}`
-						+ ` ${envVarDeclaration.type}, which extension`
+						+ ` ${JSON.stringify(envVarDeclaration.type)}, which extension`
 						+ ` ${JSON.stringify(otherDeclarer.extensionName)} declares`
-						+ ` ${otherDeclarer.envVarDeclaration.type}.`,
+						+ ` ${JSON.stringify(otherDeclarer.envVarDeclaration.type)}.`,
 				);
 			}
 			else if (

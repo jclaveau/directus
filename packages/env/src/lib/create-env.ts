@@ -111,6 +111,15 @@ export const createEnv = (): Env => {
 			continue;
 		}
 
+		if (isCoreFileEnvVarName && typeof value !== 'string') {
+			valueRefusals.push(
+				`${JSON.stringify(key)} is ${JSON.stringify(value)},`
+					+ ' which is not a file path.',
+			);
+
+			continue;
+		}
+
 		if (isCoreFileEnvVarName && typeof value === 'string') {
 			value = readEnvVarFile(
 				key,
