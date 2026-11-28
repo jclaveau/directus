@@ -6,7 +6,7 @@ import { toNumber, toString } from '../utils/lodash-es-used.js';
 import { tryJson } from '../utils/try-json.js';
 
 /** A `number | string` value read as a number of seconds, once trimmed. */
-export const SECONDS_VALUE_PATTERN = /^-?\d+(\.\d+)?$/;
+export const SECONDS_VALUE_PATTERN = /^-?(\d+(\.\d+)?|\.\d+)$/;
 
 /** The type of the value a `false | <type>` variable takes when not `false`. */
 export const DISABLED_BY_FALSE_TYPES = {
