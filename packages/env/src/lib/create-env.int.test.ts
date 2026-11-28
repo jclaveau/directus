@@ -250,6 +250,9 @@ test.each([
 	[' p4ss\n', ' p4ss'],
 	[' p4ss\n\n', ' p4ss'],
 	['p4ss \n', 'p4ss '],
+	['p4ss\r\n', 'p4ss'],
+	['p4ss\r\n\r\n', 'p4ss'],
+	['p4ss\r', 'p4ss\r'],
 ])('Strips only the trailing newlines of a string secret file %j', (
 	fileContent,
 	envVarValue,
@@ -451,6 +454,16 @@ test.each([
 	['CONTENT_SECURITY_POLICY_DIRECTIVES__IMG_SRC', "'self'", ["'self'"]],
 	['WEBSOCKETS_REST_AUTH_TIMEOUT', '10', 10],
 	['STORAGE_LOCAL_KEY', '0123', '0123'],
+	['CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC', 'null', null],
+	['ASSETS_CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC', 'null', null],
+	['AUTH_X_LOGIN_TIMEOUT', '300', 300],
+	['AUTH_X_LOGIN_TIMEOUT', '5m', '5m'],
+	['AUTH_X_REQUIRE_VERIFIED_EMAIL', 'true', true],
+	['AUTH_X_PLAIN_CODE_CHALLENGE', 'false', false],
+	['AUTH_X_GROUP_CLAIM_NAME', '123', '123'],
+	['AUTH_X_ROLE_MAPPING', '{"staff":"5b3e8f0a"}', { staff: '5b3e8f0a' }],
+	['AUTH_X_GIVEN_NAME_KEY', '1', '1'],
+	['AUTH_X_FAMILY_NAME_KEY', '1', '1'],
 ])('Casts %s=%j by its declaration', (envVarName, rawValue, envVarValue) => {
 	vi.mocked(readConfigurationFromProcess).mockReturnValue({
 		[envVarName]: rawValue,
@@ -486,4 +499,33 @@ test.each([
 		DEFAULT: 'test-default',
 		DEFAULT_ARRAY: 'one,two,three',
 	});
+});
+
+test.each([
+	[
+		'AUTH_X_REQUIRE_VERIFIED_EMAIL',
+		'yes',
+		'"AUTH_X_REQUIRE_VERIFIED_EMAIL" Environment Variable is "yes",'
+			+ ' which is not a boolean. Use one of true, false, 1, 0.',
+	],
+	[
+		'AUTH_X_PLAIN_CODE_CHALLENGE',
+		'yes',
+		'"AUTH_X_PLAIN_CODE_CHALLENGE" Environment Variable is "yes",'
+			+ ' which is not a boolean. Use one of true, false, 1, 0.',
+	],
+	[
+		'AUTH_X_LOGIN_TIMEOUT',
+		'true',
+		'"AUTH_X_LOGIN_TIMEOUT" is "true",'
+			+ ' which is neither a number of seconds nor a duration.',
+	],
+])('Refuses %s=%j', (envVarName, rawValue, refusalMessage) => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		[envVarName]: rawValue,
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+
+	expect(() => createEnv()).toThrow(new Error(refusalMessage));
 });

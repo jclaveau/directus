@@ -84,3 +84,8 @@ test.each([
 test('types no DB_HOTS on Env', () => {
 	expectTypeOf<Env>().not.toHaveProperty('DB_HOTS');
 });
+
+test('finds no declaration for the auth name no driver reads', () => {
+	expect(findEnvVarDeclaration('AUTH_OKTA_AUTH_REQUIRE_VERIFIED_EMAIL'))
+		.toBeNull();
+});
