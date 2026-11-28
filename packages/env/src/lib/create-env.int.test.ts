@@ -460,6 +460,8 @@ test.each([
 	['AUTH_X_LOGIN_TIMEOUT', '5m', '5m'],
 	['AUTH_X_LOGIN_TIMEOUT', ' 300 ', 300],
 	['AUTH_X_LOGIN_TIMEOUT', -5, -5],
+	['AUTH_X_LOGIN_TIMEOUT', '1.5', 1.5],
+	['CONTENT_SECURITY_POLICY_DIRECTIVES__SCRIPT_SRC', null, null],
 	['DB_CONNECTION_REPLICA_SSL__SECURE_OPTIONS', '524288', 524288],
 	['AUTH_X_REQUIRE_VERIFIED_EMAIL', 'true', true],
 	['AUTH_X_PLAIN_CODE_CHALLENGE', 'false', false],
@@ -522,6 +524,18 @@ test.each([
 		'true',
 		'"AUTH_X_LOGIN_TIMEOUT" is "true",'
 			+ ' which is neither a number of seconds nor a duration.',
+	],
+	[
+		'AUTH_X_LOGIN_TIMEOUT',
+		['300'],
+		'"AUTH_X_LOGIN_TIMEOUT" is ["300"],'
+			+ ' which is neither a number of seconds nor a duration.',
+	],
+	[
+		'CONTENT_SECURITY_POLICY_DIRECTIVES__IMG_SRC',
+		{ self: true },
+		'"CONTENT_SECURITY_POLICY_DIRECTIVES__IMG_SRC" is {"self":true},'
+			+ ' which is neither null, a string nor a list of strings.',
 	],
 ])('Refuses %s=%j', (envVarName, rawValue, refusalMessage) => {
 	vi.mocked(readConfigurationFromProcess).mockReturnValue({

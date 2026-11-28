@@ -67,3 +67,21 @@ test('every typed passthrough key exists in its library', () => {
 		>
 	>().toEqualTypeOf<never>();
 });
+
+// A prefix that matched no declaration would pass the test above as never
+test('every prefix above has a typed passthrough key', () => {
+	expectTypeOf<'REJECT_UNAUTHORIZED'>()
+		.toExtend<DeclaredPassthroughKeys<'DB_SSL__'>>();
+
+	expectTypeOf<'TIMEOUT'>()
+		.toExtend<DeclaredPassthroughKeys<'DB_CONNECTION_*_SSL__'>>();
+
+	expectTypeOf<'TIMEOUT'>()
+		.toExtend<DeclaredPassthroughKeys<'AUTH_*_CLIENT_HTTP_'>>();
+
+	expectTypeOf<'WANT_MESSAGE_SIGNED'>()
+		.toExtend<DeclaredPassthroughKeys<'AUTH_*_SP_'>>();
+
+	expectTypeOf<'METADATA'>()
+		.toExtend<DeclaredPassthroughKeys<'AUTH_*_IDP_'>>();
+});

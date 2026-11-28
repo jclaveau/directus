@@ -1,7 +1,7 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from 'vitest';
+import { expect, onTestFinished, test } from 'vitest';
 import {
 	applyExtensionEnvVars,
 	type ExtensionEnvVarDeclarers,
@@ -136,6 +136,7 @@ test('refuses a name another extension declares with another default', () => {
 
 test('reads a declared variable from the file its _FILE variable names', () => {
 	const secretDir = mkdtempSync(join(tmpdir(), 'extension-env-file-'));
+	onTestFinished(() => rmSync(secretDir, { recursive: true }));
 	writeFileSync(join(secretDir, 'key'), 'sk_live_abc\n');
 	writeFileSync(join(secretDir, 'days'), '30\n');
 	const liveEnv: Record<string, unknown> = {};
@@ -235,6 +236,7 @@ test('refuses a variable set both directly and through its _FILE variable', () =
 
 test('refuses a secret file value without printing it', () => {
 	const secretDir = mkdtempSync(join(tmpdir(), 'extension-env-file-'));
+	onTestFinished(() => rmSync(secretDir, { recursive: true }));
 	writeFileSync(join(secretDir, 'key'), 'sk_live_abc\n');
 
 	expect(() => {
