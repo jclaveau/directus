@@ -82,6 +82,8 @@ export interface ExtensionEnvVarsHelpers<
  * cast as declared, and get back the entry helpers whose `context.env` knows
  * their types.
  * For bundles only: a standalone extension casts what it reads off `env` itself.
+ * The prefix may hold several words, so sit under a core one (`DB_VACUUM_`),
+ * but never be one of core's (`DB_`).
  *
  * ```ts
  * const subscriptionsEnv = defineEnv({

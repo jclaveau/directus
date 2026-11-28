@@ -1,19 +1,25 @@
+import { CORE_ENV_VAR_PREFIXES } from '@directus/env';
 import type { ExtensionEnvVars } from './define-env.js';
 
-const ENV_VAR_PREFIX_REGEX = /^[A-Z][A-Z0-9]*_$/;
+const ENV_VAR_PREFIX_REGEX = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_$/;
 
 /**
- * Throws when `prefix` is malformed, or a variable ends in "_" or is not
- * named under it.
+ * Throws when `prefix` is malformed or is one of core's, or a variable ends
+ * in "_" or is not named under it.
  */
 export function refuseInvalidExtensionEnvVars(
 	{ prefix, vars }: ExtensionEnvVars,
 ): void {
 	if (!ENV_VAR_PREFIX_REGEX.test(prefix)) {
 		throw new Error(
-			`Env prefix ${JSON.stringify(prefix)} must be upper case, with one "_"`
-				+ ' at its end, like "SUBSCRIPTIONS_"',
+			`Env prefix ${JSON.stringify(prefix)} must be upper case words, each`
+				+ ' ending in one "_", like "SUBSCRIPTIONS_" or'
+				+ ' "SUBSCRIPTIONS_STRIPE_"',
 		);
+	}
+
+	if (CORE_ENV_VAR_PREFIXES.some((corePrefix) => corePrefix === prefix)) {
+		throw new Error(`Env prefix ${JSON.stringify(prefix)} is core's.`);
 	}
 
 	for (const envVarName of Object.keys(vars)) {
