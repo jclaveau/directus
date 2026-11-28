@@ -439,6 +439,16 @@ test('Refuses a variable set both directly and through its _FILE variable', () =
 	));
 });
 
+test('Refuses a _FILE variable from the config file that is not a path', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({});
+	vi.mocked(readConfigurationFromFile).mockReturnValue({ DB_PASSWORD_FILE: 123 });
+	vi.mocked(isCoreEnvVarName).mockReturnValue(true);
+
+	expect(() => createEnv()).toThrow(new Error(
+		'"DB_PASSWORD_FILE" is 123, which is not a file path.',
+	));
+});
+
 // A typed variable is cast by its declaration, never by what its value looks like.
 test.each([
 	['HASH_ASSOCIATED_DATA', '123', '123'],

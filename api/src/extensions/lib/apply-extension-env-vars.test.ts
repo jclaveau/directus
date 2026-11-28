@@ -72,8 +72,8 @@ test('refuses every misfit at once and writes nothing', () => {
 	}).toThrow(new Error([
 		'Extension "subscriptions": "SUBSCRIPTIONS_PORT" is "abc",'
 		+ ' which is not a number.',
-		'Extension "subscriptions" declares "SUBSCRIPTIONS_SHARED" number,'
-		+ ' which extension "billing" declares string.',
+		'Extension "subscriptions" declares "SUBSCRIPTIONS_SHARED" "number",'
+		+ ' which extension "billing" declares "string".',
 		'Extension "subscriptions" declares the prefix "CACHE_", which is core\'s.',
 		'Extension "subscriptions" declares "CACHE_TTL", which core declares.',
 	].join('\n')));
